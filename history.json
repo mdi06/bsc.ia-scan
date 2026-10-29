@@ -1,5 +1,40 @@
 [
   {
+    "block": 130445602,
+    "contract": "0x0f2b7a73873d9f46a5530d679671ce174e1cd2e0",
+    "deployer": "0xf4b44ed777db4f2bec3f0cb5abe0c2ca0ee47381",
+    "tx_hash": "0x7cb867fe9973b0b584c2fbe938a6d3070965831d2c2b36729eb0a571a78e2951",
+    "name": "Pixelox Agent Pass 666",
+    "symbol": "PXAP666",
+    "standard": "ERC-721 (NFT Collection)",
+    "icon": "\ud83c\udfa8",
+    "is_paused": null,
+    "has_free_mint": false,
+    "mint_price_str": "0.0027 BNB",
+    "mint_price_bnb": 0.0027,
+    "mint_value_wei": "2700000000000000",
+    "max_supply": 666,
+    "total_minted": null,
+    "score": 5,
+    "rating": "\u2744\ufe0f COLD / DORMANT",
+    "lp_usd": 0.0,
+    "lp_wbnb": 0.0,
+    "token_symbol": "PXAP666",
+    "token_price_usd": 0.0,
+    "holders": 0,
+    "buys_24h": 0,
+    "buys_1h": 0,
+    "sells_24h": 0,
+    "volume_24h": 0.0,
+    "pair_url": "",
+    "mint_calldata": "0xa0712d680000000000000000000000000000000000000000000000000000000000000001",
+    "signals": [
+      "No DEX LP detected yet",
+      "Active Deployer Nonce (5 txs)"
+    ],
+    "detected_at": "2026-10-29 17:14:10"
+  },
+  {
     "block": 130419200,
     "contract": "0x2ED9E0a6992BA22B48c2fc2def6bB2365301A0D0",
     "deployer": "0x1af1d125cb90dae19247c945eb9bfced5cf8b47f",
@@ -8,20 +43,20 @@
     "symbol": "TREE",
     "standard": "ERC-721 (NFT Collection)",
     "icon": "\ud83c\udfa8",
-    "is_paused": false,
+    "is_paused": null,
     "has_free_mint": true,
     "mint_price_str": "\u2b50 FREE ($1.50)",
     "mint_value_wei": "0",
     "max_supply": 99999,
-    "total_minted": 19711,
+    "total_minted": 19848,
     "score": 60,
     "rating": "\ud83d\udd25 HIGH TRACTION",
     "lp_usd": 0.0,
     "lp_wbnb": 0.0,
     "token_symbol": "TREE",
     "token_price_usd": 0.0,
-    "holders": 19600,
-    "buys_24h": 19600,
+    "holders": 19832,
+    "buys_24h": 19832,
     "buys_1h": 0,
     "sells_24h": 0,
     "volume_24h": 0.0,
@@ -29,12 +64,13 @@
     "mint_calldata": "0xa0712d680000000000000000000000000000000000000000000000000000000000000001",
     "signals": [
       "No DEX LP detected yet",
-      "Early Mints (19.6% claimed)",
-      "Heavy Buy Volume (19,600 purchases / 24h)",
-      "Massive Holder Base (19,600 holders)",
+      "Early Mints (19.8% claimed)",
+      "Heavy Buy Volume (19,832 purchases / 24h)",
+      "Massive Holder Base (19,832 holders)",
       "Active Deployer Nonce (15 txs)"
     ],
-    "detected_at": "2026-10-29 16:32:00"
+    "detected_at": "2026-10-29 16:32:00",
+    "mint_price_bnb": 0.0
   },
   {
     "block": 130439433,
@@ -46,7 +82,7 @@
     "standard": "ERC-721 (NFT Collection)",
     "icon": "\ud83c\udfa8",
     "is_paused": null,
-    "has_free_mint": true,
+    "has_free_mint": false,
     "max_supply": 6000,
     "total_minted": 500,
     "score": 31,
@@ -55,8 +91,8 @@
     "lp_wbnb": 0.0,
     "token_symbol": "AEPOCH",
     "token_price_usd": 0.0,
-    "holders": 449,
-    "buys_24h": 449,
+    "holders": 500,
+    "buys_24h": 500,
     "buys_1h": 0,
     "sells_24h": 0,
     "volume_24h": 0.0,
@@ -64,13 +100,14 @@
     "mint_calldata": "0xa0712d680000000000000000000000000000000000000000000000000000000000000001",
     "signals": [
       "No DEX LP detected yet",
-      "Early Mints (7.5% claimed)",
-      "Active Purchases (449 buys / 24h)",
-      "Growing Holders (449 holders)"
+      "Early Mints (8.3% claimed)",
+      "Active Purchases (500 buys / 24h)",
+      "Growing Holders (500 holders)"
     ],
     "detected_at": "2026-10-29 16:18:19",
-    "mint_price_str": "\u2b50 FREE",
-    "mint_value_wei": "0"
+    "mint_price_str": "TBD",
+    "mint_value_wei": "0",
+    "mint_price_bnb": 0.0
   },
   {
     "block": 130435027,
@@ -101,7 +138,10 @@
     "buys_24h": 0,
     "buys_1h": 0,
     "sells_24h": 0,
-    "volume_24h": 0.0
+    "volume_24h": 0.0,
+    "mint_price_str": "TBD",
+    "mint_price_bnb": 0.0,
+    "mint_value_wei": "0"
   },
   {
     "block": 130432362,
@@ -132,7 +172,10 @@
     "buys_24h": 0,
     "buys_1h": 0,
     "sells_24h": 0,
-    "volume_24h": 0.0
+    "volume_24h": 0.0,
+    "mint_price_str": "TBD",
+    "mint_price_bnb": 0.0,
+    "mint_value_wei": "0"
   },
   {
     "block": 130429632,
@@ -162,7 +205,10 @@
     "buys_24h": 0,
     "buys_1h": 0,
     "sells_24h": 0,
-    "volume_24h": 0.0
+    "volume_24h": 0.0,
+    "mint_price_str": "TBD",
+    "mint_price_bnb": 0.0,
+    "mint_value_wei": "0"
   },
   {
     "block": 130426019,
@@ -179,60 +225,27 @@
     "total_minted": 0,
     "score": 80,
     "rating": "\ud83d\ude80 VIRAL RUSH / SNIPER FRENZY",
-    "lp_usd": 5194.290862284017,
-    "lp_wbnb": 3.4514119741510734,
+    "lp_usd": 5220.528378264102,
+    "lp_wbnb": 3.47038047170769,
     "token_symbol": "MarsCoin",
-    "token_price_usd": 0.06254463035379058,
+    "token_price_usd": 0.0632041956491525,
     "mint_calldata": "0x6ecd23060000000000000000000000000000000000000000000000000000000000000001",
     "detected_at": "2026-10-29 14:38:12",
     "signals": [
-      "Solid Seed Liquidity ($5,194)",
+      "Solid Seed Liquidity ($5,221)",
       "Mint Paused (Pre-launch phase)",
-      "Heavy Buy Volume (1,289 purchases / 24h)",
+      "Heavy Buy Volume (1,324 purchases / 24h)",
       "Massive Holder Base (50,554 holders)",
-      "High 24h Volume ($486,333)"
+      "High 24h Volume ($488,889)"
     ],
     "holders": 50554,
-    "buys_24h": 1289,
-    "buys_1h": 31,
-    "sells_24h": 1184,
-    "volume_24h": 486333.44,
-    "pair_url": "https://dexscreener.com/bsc/0x14ca9d552ed2cf0d5dfd1f89bc6793a464e2ed16"
-  },
-  {
-    "block": 130445602,
-    "contract": "0x0f2b7a73873d9f46a5530d679671ce174e1cd2e0",
-    "deployer": "0xf4b44ed777db4f2bec3f0cb5abe0c2ca0ee47381",
-    "tx_hash": "0x7cb867fe9973b0b584c2fbe938a6d3070965831d2c2b36729eb0a571a78e2951",
-    "name": "Pixelox Agent Pass 666",
-    "symbol": "PXAP666",
-    "standard": "ERC-721 (NFT Collection)",
-    "icon": "\ud83c\udfa8",
-    "is_paused": false,
-    "has_free_mint": false,
-    "mint_price_str": "0.0027 BNB",
-    "mint_price_bnb": 0.0027,
-    "mint_value_wei": "2700000000000000",
-    "max_supply": 666,
-    "total_minted": 0,
-    "score": 10,
-    "rating": "\u2744\ufe0f COLD / DORMANT",
-    "lp_usd": 0.0,
-    "lp_wbnb": 0.0,
-    "token_symbol": "PXAP666",
-    "token_price_usd": 0.0,
-    "holders": 0,
-    "buys_24h": 0,
-    "buys_1h": 0,
-    "sells_24h": 0,
-    "volume_24h": 0.0,
-    "pair_url": "",
-    "mint_calldata": "0xa0712d680000000000000000000000000000000000000000000000000000000000000001",
-    "signals": [
-      "Brand New Deployment (Block 130445602)",
-      "No DEX LP detected yet",
-      "Direct Integration with .ai Agent ID Registry"
-    ],
-    "detected_at": "2026-10-29 17:02:55"
+    "buys_24h": 1324,
+    "buys_1h": 54,
+    "sells_24h": 1174,
+    "volume_24h": 488888.67,
+    "pair_url": "https://dexscreener.com/bsc/0x14ca9d552ed2cf0d5dfd1f89bc6793a464e2ed16",
+    "mint_price_str": "\u2b50 FREE",
+    "mint_price_bnb": 0.0,
+    "mint_value_wei": "0"
   }
 ]

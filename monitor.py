@@ -1488,7 +1488,7 @@ def run_live_monitor(rpc: BscRpcClient, wallet: str, plain: bool = False):
     latest_tx_count = [0]
 
     def background_listener():
-        nonlocal history
+        nonlocal history, status_msg, status_timer
         processed_txs = set()
         refresh_counter = 0
 
@@ -1583,6 +1583,9 @@ def run_live_monitor(rpc: BscRpcClient, wallet: str, plain: bool = False):
                                 history = [h for h in history if h.get("contract", "").lower() != dep_addr.lower()]
                                 history.insert(0, new_entry)
                                 save_history(history)
+                                p_title = det.get("name") or "New Project"
+                                status_msg = f"🔔 NEW DROP DETECTED: {p_title} added to table!"
+                                status_timer = time.time()
                                 notify_alert()
 
                     if refresh_counter >= 20:
