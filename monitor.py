@@ -781,6 +781,42 @@ def notify_alert():
 
 KNOWN_PROJECTS = [
     {
+        "block": 130445602,
+        "contract": "0x0f2b7a73873d9f46a5530d679671ce174e1cd2e0",
+        "deployer": "0xf4b44ed777db4f2bec3f0cb5abe0c2ca0ee47381",
+        "tx_hash": "0x7cb867fe9973b0b584c2fbe938a6d3070965831d2c2b36729eb0a571a78e2951",
+        "name": "Pixelox Agent Pass 666",
+        "symbol": "PXAP666",
+        "standard": "ERC-721 (NFT Collection)",
+        "icon": "🎨",
+        "is_paused": False,
+        "has_free_mint": False,
+        "mint_price_str": "0.0027 BNB",
+        "mint_price_bnb": 0.0027,
+        "mint_value_wei": "2700000000000000",
+        "max_supply": 666,
+        "total_minted": 0,
+        "score": 10,
+        "rating": "❄️ COLD / DORMANT",
+        "lp_usd": 0.0,
+        "lp_wbnb": 0.0,
+        "token_symbol": "PXAP666",
+        "token_price_usd": 0.0,
+        "holders": 0,
+        "buys_24h": 0,
+        "buys_1h": 0,
+        "sells_24h": 0,
+        "volume_24h": 0.0,
+        "pair_url": "",
+        "mint_calldata": "0xa0712d680000000000000000000000000000000000000000000000000000000000000001",
+        "signals": [
+            "Brand New Deployment (Block 130445602)",
+            "No DEX LP detected yet",
+            "Direct Integration with .ai Agent ID Registry"
+        ],
+        "detected_at": "2026-10-29 17:02:55"
+    },
+    {
         "block": 130419200,
         "contract": "0x2ED9E0a6992BA22B48c2fc2def6bB2365301A0D0",
         "deployer": "0x1af1d125cb90dae19247c945eb9bfced5cf8b47f",
@@ -881,6 +917,7 @@ def load_history() -> List[Dict[str, Any]]:
                 ex["mint_value_wei"] = kp["mint_value_wei"]
                 if kp.get("mint_calldata"):
                     ex["mint_calldata"] = kp["mint_calldata"]
+    items.sort(key=lambda x: x.get("block", 0) or 0, reverse=True)
     return items
 
 
@@ -1363,8 +1400,12 @@ def run_live_monitor(rpc: BscRpcClient, wallet: str, plain: bool = False):
             try:
                 curr_block = rpc.get_block_number()
                 if curr_block <= last_block:
-                    time.sleep(1.5)
+                    time.sleep(1.0)
                     continue
+
+                # Auto-sync catchup if behind by >25 blocks
+                if curr_block - last_block > 25:
+                    last_block = curr_block - 5
 
                 for block_num in range(last_block + 1, curr_block + 1):
                     block = rpc.get_block(block_num, full_tx=True)
@@ -1378,24 +1419,26 @@ def run_live_monitor(rpc: BscRpcClient, wallet: str, plain: bool = False):
                             continue
                         processed_txs.add(tx_hash)
 
-                        to_addr = tx.get("to")
                         input_data = (tx.get("input") or "").lower()
+                        # Fast in-memory check: ignores 99.999% of non-registry transactions instantly
+                        if AGENT_ID_BYTES not in input_data:
+                            continue
 
-                        is_deployment = to_addr is None
-                        matches_registry = AGENT_ID_BYTES in input_data
+                        rcpt = rpc.get_receipt(tx_hash)
+                        if not rcpt or int(rcpt.get("status", "0"), 16) != 1:
+                            continue
 
-                        if is_deployment or matches_registry:
-                            rcpt = rpc.get_receipt(tx_hash)
-                            if not rcpt or int(rcpt.get("status", "0"), 16) != 1:
-                                continue
+                        deployed_addr = rcpt.get("contractAddress")
+                        if not deployed_addr:
+                            for log in rcpt.get("logs", []):
+                                log_addr = log.get("address")
+                                if log_addr:
+                                    code = rpc.get_code(log_addr)
+                                    if AGENT_ID_BYTES in (code or "").lower():
+                                        deployed_addr = log_addr
+                                        break
 
-                            deployed_addr = rcpt.get("contractAddress")
-                            if deployed_addr:
-                                code = rpc.get_code(deployed_addr)
-                                if AGENT_ID_BYTES in code:
-                                    matches_registry = True
-
-                            if matches_registry and deployed_addr:
+                        if deployed_addr:
                                 details = analyze_contract(rpc, deployed_addr, wallet)
                                 cls = details["classification"]
                                 mkt = analyze_market_interest(rpc, deployed_addr, tx.get('from'), details)
@@ -1453,8 +1496,12 @@ def run_live_monitor(rpc: BscRpcClient, wallet: str, plain: bool = False):
             try:
                 curr_b = rpc.get_block_number()
                 if curr_b <= latest_block[0]:
-                    time.sleep(1.5)
+                    time.sleep(1.0)
                     continue
+
+                # Auto-sync catchup if behind by >25 blocks
+                if curr_b - latest_block[0] > 25:
+                    latest_block[0] = curr_b - 5
 
                 for b in range(latest_block[0] + 1, curr_b + 1):
                     block = rpc.get_block(b, full_tx=True)
@@ -1469,22 +1516,25 @@ def run_live_monitor(rpc: BscRpcClient, wallet: str, plain: bool = False):
                             continue
                         processed_txs.add(tx_h)
 
-                        to_a = tx.get("to")
                         inp = (tx.get("input") or "").lower()
-                        is_dep = to_a is None
-                        matches = AGENT_ID_BYTES in inp
+                        # Fast in-memory check: ignores 99.999% of non-registry transactions instantly
+                        if AGENT_ID_BYTES not in inp:
+                            continue
 
-                        if is_dep or matches:
-                            rcpt = rpc.get_receipt(tx_h)
-                            if not rcpt or int(rcpt.get("status", "0"), 16) != 1:
-                                continue
-                            dep_addr = rcpt.get("contractAddress")
-                            if dep_addr:
-                                code = rpc.get_code(dep_addr)
-                                if AGENT_ID_BYTES in code:
-                                    matches = True
+                        rcpt = rpc.get_receipt(tx_h)
+                        if not rcpt or int(rcpt.get("status", "0"), 16) != 1:
+                            continue
+                        dep_addr = rcpt.get("contractAddress")
+                        if not dep_addr:
+                            for log in rcpt.get("logs", []):
+                                log_addr = log.get("address")
+                                if log_addr:
+                                    code = rpc.get_code(log_addr)
+                                    if AGENT_ID_BYTES in (code or "").lower():
+                                        dep_addr = log_addr
+                                        break
 
-                            if matches and dep_addr:
+                        if dep_addr:
                                 try:
                                     det = analyze_contract(rpc, dep_addr, wallet)
                                 except Exception:
