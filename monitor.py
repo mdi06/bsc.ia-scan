@@ -1192,30 +1192,52 @@ def build_interactive_dashboard(
 
     table = Table(box=box.ROUNDED, expand=True, header_style="bold cyan")
     table.add_column(" ", width=2, justify="center", no_wrap=True)
-    table.add_column("Block", justify="right", style="cyan", width=9, no_wrap=True)
+    table.add_column("Block", justify="right", style="cyan", width=8, no_wrap=True)
     table.add_column("Project", style="bold white", min_width=14, no_wrap=True)
-    table.add_column("Type", style="magenta", width=12, no_wrap=True)
-    table.add_column("Interest", style="yellow", width=15, no_wrap=True)
-    table.add_column("Holders / Buys", style="cyan", width=14, justify="center", no_wrap=True)
-    table.add_column("DEX LP", style="green", width=11, no_wrap=True)
-    table.add_column("Status", style="white", width=13, no_wrap=True)
-    table.add_column("Mint Price", width=15, justify="center", no_wrap=True)
+    table.add_column("Type", style="magenta", width=10, no_wrap=True)
+    table.add_column("Interest", style="yellow", width=12, no_wrap=True)
+    table.add_column("Holders / Buys", style="cyan", min_width=14, justify="center", no_wrap=True)
+    table.add_column("DEX LP", style="green", width=9, no_wrap=True)
+    table.add_column("Mint Progress", style="white", min_width=16, justify="center", no_wrap=True)
+    table.add_column("Mint Price", min_width=15, justify="center", no_wrap=True)
 
     for i, item in enumerate(history):
         is_sel = (i == selected_idx)
         sel_marker = "[bold yellow]▶[/bold yellow]" if is_sel else " "
         row_style = "bold on grey23" if is_sel else ""
 
-        p_status = "[red]🔴 Paused[/red]" if item.get("is_paused") else "[green]🟢 Active[/green]"
-        if item.get("max_supply"):
-            tm = item.get("total_minted")
-            tm_str = format_supply(tm) if tm is not None else "0"
-            ms_str = format_supply(item["max_supply"])
-            p_status += f" ({tm_str}/{ms_str})"
+        # Compact Mint Status & Progress
+        if item.get("is_paused"):
+            if item.get("max_supply"):
+                ms_str = format_supply(item["max_supply"])
+                tm = item.get("total_minted")
+                if tm and tm > 0:
+                    tm_str = format_supply(tm)
+                    p_status = f"[red]🔴 Paused[/red] [dim]({tm_str}/{ms_str})[/dim]"
+                else:
+                    p_status = f"[red]🔴 Paused[/red] [dim]({ms_str})[/dim]"
+            else:
+                p_status = "[red]🔴 Paused[/red]"
+        else:
+            if item.get("max_supply"):
+                tm = item.get("total_minted")
+                tm_str = format_supply(tm) if tm is not None else "0"
+                ms_str = format_supply(item["max_supply"])
+                p_status = f"[green]🟢[/green] [bold white]{tm_str}[/bold white][dim]/{ms_str}[/dim]"
+            else:
+                p_status = "[green]🟢 Live[/green]"
 
         score = item.get("score", 0)
         score_style = "bold green" if score >= 50 else ("bold yellow" if score >= 25 else "cyan")
-        r_str = item.get("rating", "N/A").split("/")[0].strip()
+        r_raw = item.get("rating", "N/A")
+        if "VIRAL" in r_raw:
+            r_str = "🚀 Viral"
+        elif "HIGH" in r_raw:
+            r_str = "🔥 High"
+        elif "WARM" in r_raw:
+            r_str = "🌱 Warm"
+        else:
+            r_str = "❄️ Cold"
         interest_str = f"[{score_style}]{r_str} ({score})[/{score_style}]"
 
         hld = item.get("holders", 0)
@@ -1228,13 +1250,13 @@ def build_interactive_dashboard(
         if hld > 0 or buys > 0:
             h_str = format_count(hld)
             b_str = format_count(buys)
-            hb_str = f"[bold green]{h_str}[/bold green] [dim]/[/dim] [cyan]{b_str}b[/cyan]"
+            hb_str = f"[bold green]{h_str}[/bold green] [dim]/[/dim] [cyan]{b_str}[/cyan]"
         else:
             hb_str = "[dim]0 / 0[/dim]"
 
         lp_usd = item.get("lp_usd", 0)
         lp_wbnb = item.get("lp_wbnb", 0)
-        lp_str = f"${lp_usd:,.0f} ({lp_wbnb:.1f}B)" if lp_usd > 0 else "[dim]None[/dim]"
+        lp_str = f"${lp_usd:,.0f}" if lp_usd > 0 else "[dim]None[/dim]"
         
         price_val = item.get("mint_price_str") or ("⭐ FREE" if item.get("has_free_mint") else "TBD")
         if "FREE" in price_val:
@@ -1257,9 +1279,11 @@ def build_interactive_dashboard(
         else:
             p_std = "Custom"
 
+        blk_str = f"#{str(item.get('block', ''))[-6:]}" if item.get('block') else ""
+
         table.add_row(
             sel_marker,
-            str(item.get("block", "")),
+            blk_str,
             f"{p_name} ({p_sym})",
             f"{p_icon} {p_std}",
             interest_str,
