@@ -27,7 +27,7 @@ import tty
 import termios
 import threading
 import webbrowser
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Tuple
 
 try:
     from rich.console import Console, Group
@@ -317,7 +317,52 @@ def analyze_contract(rpc: BscRpcClient, contract_addr: str, wallet_addr: str) ->
     code = rpc.get_code(contract_addr)
     param_wallet = wallet_addr[2:].lower().zfill(64)
 
-    # Pattern A: Worldygg / Hark style mint(uint256) -> selector 0xa0712d68
+    # If pure BEP-20 token with no public minting functions, price is DEX-driven
+    if classification.get("category") == "TOKEN" and not any(m in code for m in ["1249c58b", "a0712d68", "836a1040", "6ecd2306"]):
+        info["has_mint"] = False
+        info["mint_price_str"] = "DEX Traded"
+        info["mint_value_wei"] = "0"
+        return info
+
+    def check_universal_price_getters() -> Tuple[int, float, Optional[str]]:
+        """Queries dynamic bonding curves, constants, and function quotes to find on-chain mint price."""
+        PRICE_GETTERS = [
+            ("currentPrice()", "0x9d1b464a"),
+            ("PRICE()", "0x8d859f3e"),
+            ("MINT_PRICE()", "0xc002d23d"),
+            ("mintPrice()", "0x6817c76c"),
+            ("price()", "0xa035b1fe"),
+            ("fixedPriceWei()", "0xd4f456a1"),
+            ("cost()", "0x13faede6"),
+            ("cost(legacy)", "0x7856860a"),
+            ("getPrice()", "0x98d5fdca"),
+            ("getMintPrice()", "0xa7f93ebd"),
+            ("bnbQuote(1)", "0x68bce8cd" + "1".zfill(64)),
+            ("costOf(1)", "0xfd326592" + "1".zfill(64)),
+            ("price(1)", "0x26a49e37" + "1".zfill(64)),
+            ("cost(1)", "0x9097548d" + "1".zfill(64)),
+            ("mintPrice(1)", "0xe6a72acf" + "1".zfill(64)),
+            ("getPrice(1)", "0xe7572230" + "1".zfill(64)),
+            ("mintFee()", "0x13966db5"),
+            ("fee()", "0xddca3f43"),
+            ("rate()", "0x2c4e722e"),
+        ]
+        for gname, calldata in PRICE_GETTERS:
+            p_res = rpc.call_contract(contract_addr, calldata)
+            if p_res and len(p_res) >= 66 and p_res != "0x" + "0"*64:
+                val = int(p_res[:66], 16)
+                if 0 < val < 10**22: # reasonable wei bound
+                    bnb = val / 1e18
+                    if bnb >= 0.0001:
+                        p_str = f"{bnb:.4f} BNB"
+                    elif bnb >= 0.000001:
+                        p_str = f"{bnb:.6f} BNB"
+                    else:
+                        p_str = f"{val} wei"
+                    return val, bnb, p_str
+        return 0, 0.0, None
+
+    # Pattern A: Worldygg / Hark / AI Frenzy style mint(uint256) -> selector 0xa0712d68
     if "a0712d68" in code:
         info["has_mint"] = True
         info["mint_calldata"] = "0xa0712d680000000000000000000000000000000000000000000000000000000000000001"
@@ -373,6 +418,14 @@ def analyze_contract(rpc: BscRpcClient, contract_addr: str, wallet_addr: str) ->
                 else:
                     info["mint_price_str"] = f"${usd_val:.2f}"
 
+        # If price still unresolved, check universal price getters (PRICE(), currentPrice(), etc.)
+        if info["mint_price_str"] == "TBD" and not info["has_free_mint"]:
+            val, bnb, p_str = check_universal_price_getters()
+            if p_str:
+                info["mint_price_bnb"] = bnb
+                info["mint_price_str"] = p_str
+                info["mint_value_wei"] = str(val)
+
     # Pattern B: Tiered Agent ID mint(uint8) -> selector 0x6ecd2306 (e.g. Mars Nexus)
     elif "6ecd2306" in code:
         info["has_mint"] = True
@@ -408,7 +461,32 @@ def analyze_contract(rpc: BscRpcClient, contract_addr: str, wallet_addr: str) ->
             except Exception:
                 pass
 
-    # Pattern C: Standard Fair Mint / ERC-721 mint() -> selector 0x1249c58b
+    # Pattern C: Fair-Mint Token Dispenser mint(uint256,address,uint256) -> selector 0x836a1040 (e.g. BNAGENT, BIBIAI)
+    elif "836a1040" in code:
+        info["has_mint"] = True
+        quote_res = rpc.call_contract(contract_addr, "0x68bce8cd" + "1".zfill(64))
+        quote_val = int(quote_res, 16) if quote_res and len(quote_res) >= 66 else 0
+        if quote_val == 0:
+            c_res = rpc.call_contract(contract_addr, "0xfd326592" + "1".zfill(64))
+            quote_val = int(c_res, 16) if c_res and len(c_res) >= 66 else 0
+
+        cents_res = rpc.call_contract(contract_addr, "0x30c951eb" + "1".zfill(64))
+        cents = int(cents_res, 16) if cents_res and len(cents_res) >= 66 else 0
+
+        if quote_val > 0:
+            bnb = quote_val / 1e18
+            info["mint_price_bnb"] = bnb
+            info["mint_value_wei"] = str(quote_val)
+            if cents > 0:
+                info["mint_price_str"] = f"{bnb:.4f} BNB (${cents/100:.2f})"
+            else:
+                info["mint_price_str"] = f"{bnb:.4f} BNB"
+
+        max_cost = quote_val * 11 // 10 if quote_val > 0 else 0
+        info["mint_calldata"] = "0x836a1040" + "1".zfill(64) + param_wallet + hex(max_cost)[2:].zfill(64)
+        info["mint_note"] = "mint(1, recipient, maxCost)"
+
+    # Pattern D: Standard Fair Mint / ERC-721 mint() -> selector 0x1249c58b (e.g. Pup Pals, Mempalace, Quackle)
     else:
         info["mint_calldata"] = "0x1249c58b"
         free_sel = keccak_selector("freeAvailable(address)")
@@ -447,15 +525,11 @@ def analyze_contract(rpc: BscRpcClient, contract_addr: str, wallet_addr: str) ->
                     info["mint_price_str"] = f"${usd_val:.2f}"
 
             if info["mint_price_str"] == "TBD":
-                for sig in ("0x6817c76c", "0xa035b1fe", "0xd4f456a1", "0x7856860a"): # mintPrice, price, fixedPriceWei, cost
-                    p_res = rpc.call_contract(contract_addr, sig)
-                    if p_res and len(p_res) >= 66:
-                        p_val = int(p_res, 16)
-                        if p_val > 0:
-                            info["mint_price_bnb"] = p_val / 1e18
-                            info["mint_price_str"] = f"{p_val / 1e18:.4f} BNB"
-                            info["mint_value_wei"] = str(p_val)
-                            break
+                val, bnb, p_str = check_universal_price_getters()
+                if p_str:
+                    info["mint_price_bnb"] = bnb
+                    info["mint_price_str"] = p_str
+                    info["mint_value_wei"] = str(val)
 
     return info
 
@@ -1065,14 +1139,13 @@ def format_count(val: Any) -> str:
         return "0"
 
 
-def refresh_project_metrics(rpc: BscRpcClient, item: Dict[str, Any], wallet: str):
+def refresh_project_metrics(rpc: BscRpcClient, item: Dict[str, Any], wallet: str, fast: bool = False):
     addr = item.get("contract")
     if not addr:
         return
     try:
         details = analyze_contract(rpc, addr, wallet)
-        mkt = analyze_market_interest(rpc, addr, item.get("deployer"), details)
-
+        
         # Update metadata if newly available
         if details.get("name") and (not item.get("name") or item.get("name") == "Unknown"):
             item["name"] = details["name"]
@@ -1083,7 +1156,7 @@ def refresh_project_metrics(rpc: BscRpcClient, item: Dict[str, Any], wallet: str
         if details.get("mint_calldata"):
             item["mint_calldata"] = details["mint_calldata"]
 
-        # Live on-chain status
+        # Live on-chain status & price
         item["is_paused"] = details.get("is_paused")
         item["has_free_mint"] = details.get("has_free_mint")
         item["mint_price_str"] = details.get("mint_price_str", "TBD")
@@ -1091,31 +1164,33 @@ def refresh_project_metrics(rpc: BscRpcClient, item: Dict[str, Any], wallet: str
         item["mint_value_wei"] = details.get("mint_value_wei", "0")
         item["total_minted"] = details.get("total_minted", item.get("total_minted", 0))
 
-        # Live DEX, Holders & Purchase metrics
-        item["holders"] = mkt.get("holders", item.get("holders", 0))
-        item["buys_24h"] = mkt.get("buys_24h", item.get("buys_24h", 0))
-        item["buys_1h"] = mkt.get("buys_1h", item.get("buys_1h", 0))
-        item["sells_24h"] = mkt.get("sells_24h", item.get("sells_24h", 0))
-        item["volume_24h"] = mkt.get("volume_24h", item.get("volume_24h", 0.0))
-        if mkt.get("pair_url"):
-            item["pair_url"] = mkt["pair_url"]
+        if not fast:
+            mkt = analyze_market_interest(rpc, addr, item.get("deployer"), details)
+            # Live DEX, Holders & Purchase metrics
+            item["holders"] = mkt.get("holders", item.get("holders", 0))
+            item["buys_24h"] = mkt.get("buys_24h", item.get("buys_24h", 0))
+            item["buys_1h"] = mkt.get("buys_1h", item.get("buys_1h", 0))
+            item["sells_24h"] = mkt.get("sells_24h", item.get("sells_24h", 0))
+            item["volume_24h"] = mkt.get("volume_24h", item.get("volume_24h", 0.0))
+            if mkt.get("pair_url"):
+                item["pair_url"] = mkt["pair_url"]
 
-        item["score"] = mkt.get("score", item.get("score", 0))
-        item["rating"] = mkt.get("rating", item.get("rating", "N/A"))
-        item["lp_usd"] = mkt.get("lp_usd", item.get("lp_usd", 0.0))
-        item["lp_wbnb"] = mkt.get("lp_wbnb", item.get("lp_wbnb", 0.0))
-        item["token_price_usd"] = mkt.get("token_price_usd", item.get("token_price_usd", 0.0))
-        if mkt.get("token_symbol"):
-            item["token_symbol"] = mkt["token_symbol"]
-        if mkt.get("signals"):
-            item["signals"] = mkt["signals"]
+            item["score"] = mkt.get("score", item.get("score", 0))
+            item["rating"] = mkt.get("rating", item.get("rating", "N/A"))
+            item["lp_usd"] = mkt.get("lp_usd", item.get("lp_usd", 0.0))
+            item["lp_wbnb"] = mkt.get("lp_wbnb", item.get("lp_wbnb", 0.0))
+            item["token_price_usd"] = mkt.get("token_price_usd", item.get("token_price_usd", 0.0))
+            if mkt.get("token_symbol"):
+                item["token_symbol"] = mkt["token_symbol"]
+            if mkt.get("signals"):
+                item["signals"] = mkt["signals"]
     except Exception:
         pass
 
 
-def refresh_all_metrics(rpc: BscRpcClient, history: List[Dict[str, Any]], wallet: str):
+def refresh_all_metrics(rpc: BscRpcClient, history: List[Dict[str, Any]], wallet: str, fast: bool = False):
     for item in history:
-        refresh_project_metrics(rpc, item, wallet)
+        refresh_project_metrics(rpc, item, wallet, fast=fast)
     save_history(history)
 
 
@@ -1298,6 +1373,8 @@ def build_interactive_dashboard(
         price_val = item.get("mint_price_str") or ("⭐ FREE" if item.get("has_free_mint") else "TBD")
         if "FREE" in price_val:
             price_formatted = f"[bold green]{price_val}[/bold green]"
+        elif "DEX" in price_val:
+            price_formatted = f"[cyan]{price_val}[/cyan]"
         elif price_val != "TBD":
             price_formatted = f"[bold yellow]{price_val}[/bold yellow]"
         else:
