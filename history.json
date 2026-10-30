@@ -27,7 +27,7 @@
     "mint_calldata": "0x1249c58b",
     "signals": [
       "No DEX LP detected yet",
-      "Active Deployer Nonce (22 txs)"
+      "Active Deployer Nonce (29 txs)"
     ],
     "detected_at": "2026-10-30 12:29:53",
     "mint_price_str": "TBD",
@@ -62,12 +62,14 @@
     "mint_calldata": "0x1249c58b",
     "signals": [
       "No DEX LP detected yet",
-      "Active Deployer Nonce (16 txs)"
+      "Active Deployer Nonce (22 txs)"
     ],
     "detected_at": "2026-10-30 12:28:00",
     "mint_price_str": "TBD",
     "mint_price_bnb": 0.0,
-    "mint_value_wei": "0"
+    "mint_value_wei": "0",
+    "website": "https://bscququ.xyz",
+    "market_url": "https://element.market/assets/bsc/0xf15c668e1375d54fa0519b744c2c5acd07d6dbd8"
   },
   {
     "block": 130600983,
@@ -97,12 +99,14 @@
     "mint_calldata": "0x1249c58b",
     "signals": [
       "No DEX LP detected yet",
-      "Active Deployer Nonce (11 txs)"
+      "Active Deployer Nonce (22 txs)"
     ],
     "detected_at": "2026-10-30 12:27:46",
     "mint_price_str": "DEX Traded",
     "mint_price_bnb": 0.0,
-    "mint_value_wei": "0"
+    "mint_value_wei": "0",
+    "website": "https://bscququ.xyz",
+    "market_url": "https://pancakeswap.finance/swap?outputCurrency=0xabe96928aa021d1022073b8282394b8bbe2f8eb0"
   },
   {
     "block": 130517070,
@@ -135,9 +139,10 @@
       "Active Deployer Nonce (32 txs)"
     ],
     "detected_at": "2026-10-30 01:58:09",
-    "mint_price_str": "TBD",
-    "mint_price_bnb": 0.0,
-    "mint_value_wei": "0"
+    "mint_price_str": "0.0011 BNB",
+    "mint_price_bnb": 0.0011,
+    "mint_value_wei": "1100000000000000",
+    "market_url": "https://element.market/assets/bsc/0x22a15f6e3f82e3085e5abf5eea5c4264eb61500c"
   },
   {
     "block": 130514568,
@@ -164,7 +169,7 @@
     "sells_24h": 0,
     "volume_24h": 0.0,
     "pair_url": "",
-    "mint_calldata": "0x1249c58b",
+    "mint_calldata": "0x836a10400000000000000000000000000000000000000000000000000000000000000001000000000000000000000000a3fbe3664db8478c094dd36b2bb306d72cbcb37a0000000000000000000000000000000000000000000000000005802fbf374cfd",
     "signals": [
       "No DEX LP detected yet",
       "Mint Paused (Pre-launch phase)",
@@ -173,9 +178,9 @@
       "Active Deployer Nonce (10 txs)"
     ],
     "detected_at": "2026-10-30 01:39:30",
-    "mint_price_str": "TBD",
-    "mint_price_bnb": 0.0,
-    "mint_value_wei": "0"
+    "mint_price_str": "0.0014 BNB ($1.00)",
+    "mint_price_bnb": 0.001407561312221787,
+    "mint_value_wei": "1407561312221787"
   },
   {
     "block": 130514157,
@@ -190,26 +195,29 @@
     "has_free_mint": false,
     "max_supply": null,
     "total_minted": null,
-    "score": 25,
+    "score": 31,
     "rating": "\ud83c\udf31 WARMING UP / SEEDED",
-    "lp_usd": 14364.3753699462,
+    "lp_usd": 14401.807489218667,
     "lp_wbnb": 10.0,
     "token_symbol": "BNBS",
-    "token_price_usd": 7.1821876849731e-05,
-    "holders": 24,
+    "token_price_usd": 7.2e-05,
+    "holders": 59,
     "buys_24h": 0,
     "buys_1h": 0,
     "sells_24h": 0,
     "volume_24h": 0.0,
-    "pair_url": "",
+    "pair_url": "https://dexscreener.com/bsc/0x8a6cada512ae6de6a8865267c56fc84bbe1283ff",
     "mint_calldata": "0x1249c58b",
     "signals": [
-      "Solid Seed Liquidity ($14,364)"
+      "Solid Seed Liquidity ($14,402)",
+      "Growing Holders (59 holders)"
     ],
     "detected_at": "2026-10-30 01:36:20",
-    "mint_price_str": "TBD",
+    "mint_price_str": "DEX Traded",
     "mint_price_bnb": 0.0,
-    "mint_value_wei": "0"
+    "mint_value_wei": "0",
+    "market_url": "https://dexscreener.com/bsc/0x8a6cada512ae6de6a8865267c56fc84bbe1283ff",
+    "token_price_bnb": 1e-07
   },
   {
     "block": 130512525,
@@ -280,9 +288,11 @@
       "Active Deployer Nonce (337 txs)"
     ],
     "detected_at": "2026-10-30 01:18:26",
-    "mint_price_str": "TBD",
-    "mint_price_bnb": 0.0,
-    "mint_value_wei": "0"
+    "mint_price_str": "0.000037 BNB",
+    "mint_price_bnb": 3.689724022664e-05,
+    "mint_value_wei": "36897240226640",
+    "website": "https://nintendogs.fun",
+    "market_url": "https://element.market/assets/bsc/0xc1d813692f62f6f31a4fe216aaa2ed2979becd77"
   },
   {
     "block": 130508960,
@@ -318,9 +328,10 @@
       "Active Deployer Nonce (337 txs)"
     ],
     "detected_at": "2026-10-30 00:57:14",
-    "mint_price_str": "TBD",
-    "mint_price_bnb": 0.0,
-    "mint_value_wei": "0"
+    "mint_price_str": "0.000059 BNB",
+    "mint_price_bnb": 5.8760832467651e-05,
+    "mint_value_wei": "58760832467651",
+    "market_url": "https://element.market/assets/bsc/0x2a7911e447d4fbbad293ac23d8b585c18303bf3a"
   },
   {
     "block": 130506913,
@@ -355,7 +366,8 @@
     "detected_at": "2026-10-30 00:41:57",
     "mint_price_str": "\u2b50 FREE",
     "mint_price_bnb": 0.0,
-    "mint_value_wei": "0"
+    "mint_value_wei": "0",
+    "market_url": "https://element.market/assets/bsc/0x8b0f47f0df327d1457ab996db7d0299ae87de885"
   },
   {
     "block": 130502880,
@@ -389,7 +401,8 @@
     "detected_at": "2026-10-30 00:11:44",
     "mint_price_str": "0.0015 BNB",
     "mint_price_bnb": 0.0015,
-    "mint_value_wei": "1500000000000000"
+    "mint_value_wei": "1500000000000000",
+    "market_url": "https://element.market/assets/bsc/0x03267ad31931782d2814be7ce85bf799cf31218e"
   },
   {
     "block": 130502798,
@@ -423,7 +436,8 @@
     "detected_at": "2026-10-30 00:11:08",
     "mint_price_str": "0.0010 BNB",
     "mint_price_bnb": 0.001,
-    "mint_value_wei": "1000000000000000"
+    "mint_value_wei": "1000000000000000",
+    "market_url": "https://element.market/assets/bsc/0x09f43441deed070d3fbf921b3d551ae0ac123037"
   },
   {
     "block": 130499841,
@@ -458,7 +472,8 @@
     "detected_at": "2026-10-29 23:48:55",
     "mint_price_str": "\u2b50 FREE",
     "mint_price_bnb": 0.0,
-    "mint_value_wei": "0"
+    "mint_value_wei": "0",
+    "market_url": "https://element.market/assets/bsc/0x28826f929fc9d39667a4cbca1cef1a918e41e92f"
   },
   {
     "block": 130499133,
@@ -493,7 +508,8 @@
     "detected_at": "2026-10-29 23:43:35",
     "mint_price_str": "\u2b50 FREE",
     "mint_price_bnb": 0.0,
-    "mint_value_wei": "0"
+    "mint_value_wei": "0",
+    "market_url": "https://element.market/assets/bsc/0x539225c4f8141fd16e512dc50b2376352b9b011b"
   },
   {
     "block": 130498902,
@@ -528,7 +544,8 @@
     "detected_at": "2026-10-29 23:41:55",
     "mint_price_str": "\u2b50 FREE",
     "mint_price_bnb": 0.0,
-    "mint_value_wei": "0"
+    "mint_value_wei": "0",
+    "market_url": "https://element.market/assets/bsc/0xd0dbacdb6965f963997a31672b8ceb8c3ef1c83c"
   },
   {
     "block": 130498670,
@@ -563,7 +580,8 @@
     "detected_at": "2026-10-29 23:40:08",
     "mint_price_str": "\u2b50 FREE",
     "mint_price_bnb": 0.0,
-    "mint_value_wei": "0"
+    "mint_value_wei": "0",
+    "market_url": "https://element.market/assets/bsc/0xc698186ce921ebc8d3b27e9f2e890ba785659a3b"
   },
   {
     "block": 130498557,
@@ -598,7 +616,8 @@
     "detected_at": "2026-10-29 23:39:20",
     "mint_price_str": "\u2b50 FREE",
     "mint_price_bnb": 0.0,
-    "mint_value_wei": "0"
+    "mint_value_wei": "0",
+    "market_url": "https://element.market/assets/bsc/0x13f218c5ad5cd25b7e10e0e914a9d5a0bfcaf7a6"
   },
   {
     "block": 130497459,
@@ -633,7 +652,8 @@
     "detected_at": "2026-10-29 23:31:01",
     "mint_price_str": "\u2b50 FREE",
     "mint_price_bnb": 0.0,
-    "mint_value_wei": "0"
+    "mint_value_wei": "0",
+    "market_url": "https://element.market/assets/bsc/0x68ba346ee007652ea0c67af214012dd3d402348e"
   },
   {
     "block": 130497210,
@@ -668,7 +688,8 @@
     "detected_at": "2026-10-29 23:29:07",
     "mint_price_str": "\u2b50 FREE",
     "mint_price_bnb": 0.0,
-    "mint_value_wei": "0"
+    "mint_value_wei": "0",
+    "market_url": "https://element.market/assets/bsc/0x90f3585039607282e6184599ab34181697650e13"
   },
   {
     "block": 130497102,
@@ -703,7 +724,8 @@
     "detected_at": "2026-10-29 23:28:17",
     "mint_price_str": "\u2b50 FREE",
     "mint_price_bnb": 0.0,
-    "mint_value_wei": "0"
+    "mint_value_wei": "0",
+    "market_url": "https://element.market/assets/bsc/0xe4e3ab598074993f49db6739e67270f7b6c669ec"
   },
   {
     "block": 130496668,
@@ -738,7 +760,8 @@
     "detected_at": "2026-10-29 23:25:06",
     "mint_price_str": "\u2b50 FREE",
     "mint_price_bnb": 0.0,
-    "mint_value_wei": "0"
+    "mint_value_wei": "0",
+    "market_url": "https://element.market/assets/bsc/0xa340ba0feacbbd17cbb1622c4d33ed32720e1f83"
   },
   {
     "block": 130496377,
@@ -773,7 +796,8 @@
     "detected_at": "2026-10-29 23:22:59",
     "mint_price_str": "\u2b50 FREE",
     "mint_price_bnb": 0.0,
-    "mint_value_wei": "0"
+    "mint_value_wei": "0",
+    "market_url": "https://element.market/assets/bsc/0xad824d6b4852d9ee98a5d3ec46ae743a4f08beb7"
   },
   {
     "block": 130496239,
@@ -787,15 +811,15 @@
     "is_paused": null,
     "has_free_mint": true,
     "max_supply": 200000,
-    "total_minted": 358,
+    "total_minted": 752,
     "score": 36,
     "rating": "\ud83c\udf31 WARMING UP / SEEDED",
     "lp_usd": 0.0,
     "lp_wbnb": 0.0,
     "token_symbol": "BTGs",
     "token_price_usd": 0.0,
-    "holders": 358,
-    "buys_24h": 358,
+    "holders": 752,
+    "buys_24h": 752,
     "buys_1h": 0,
     "sells_24h": 0,
     "volume_24h": 0.0,
@@ -803,15 +827,16 @@
     "mint_calldata": "0xa0712d680000000000000000000000000000000000000000000000000000000000000001",
     "signals": [
       "No DEX LP detected yet",
-      "Early Mints (0.2% claimed)",
-      "Active Purchases (358 buys / 24h)",
-      "Growing Holders (358 holders)",
+      "Early Mints (0.4% claimed)",
+      "Active Purchases (752 buys / 24h)",
+      "Growing Holders (752 holders)",
       "Active Deployer Nonce (145 txs)"
     ],
     "detected_at": "2026-10-29 23:21:46",
     "mint_price_str": "\u2b50 FREE",
     "mint_price_bnb": 0.0,
-    "mint_value_wei": "0"
+    "mint_value_wei": "0",
+    "market_url": "https://element.market/assets/bsc/0xc989e63a7493ca79d288f1e70cf04aa07b075917"
   },
   {
     "block": 130495954,
@@ -846,7 +871,8 @@
     "detected_at": "2026-10-29 23:19:44",
     "mint_price_str": "\u2b50 FREE",
     "mint_price_bnb": 0.0,
-    "mint_value_wei": "0"
+    "mint_value_wei": "0",
+    "market_url": "https://element.market/assets/bsc/0x6f0bbf213593244f2904bbd89d3405ed5b3acf9f"
   },
   {
     "block": 130495733,
@@ -881,7 +907,8 @@
     "detected_at": "2026-10-29 23:18:09",
     "mint_price_str": "\u2b50 FREE",
     "mint_price_bnb": 0.0,
-    "mint_value_wei": "0"
+    "mint_value_wei": "0",
+    "market_url": "https://element.market/assets/bsc/0x2e48f276dcade310113424172b1bd15a53776baf"
   },
   {
     "block": 130495276,
@@ -916,7 +943,8 @@
     "detected_at": "2026-10-29 23:14:35",
     "mint_price_str": "\u2b50 FREE",
     "mint_price_bnb": 0.0,
-    "mint_value_wei": "0"
+    "mint_value_wei": "0",
+    "market_url": "https://element.market/assets/bsc/0xb451a88354be2119ab8f9dfde92ccf43019f3622"
   },
   {
     "block": 130495036,
@@ -951,7 +979,8 @@
     "detected_at": "2026-10-29 23:13:02",
     "mint_price_str": "\u2b50 FREE",
     "mint_price_bnb": 0.0,
-    "mint_value_wei": "0"
+    "mint_value_wei": "0",
+    "market_url": "https://element.market/assets/bsc/0x1c0d898ebc3b2a8d8a39550765475ba1a0379839"
   },
   {
     "block": 130494889,
@@ -986,7 +1015,8 @@
     "detected_at": "2026-10-29 23:11:44",
     "mint_price_str": "\u2b50 FREE",
     "mint_price_bnb": 0.0,
-    "mint_value_wei": "0"
+    "mint_value_wei": "0",
+    "market_url": "https://element.market/assets/bsc/0x27e956cf52222c9bb8eb2f46f320730b2005b7b2"
   },
   {
     "block": 130494584,
@@ -1021,7 +1051,8 @@
     "detected_at": "2026-10-29 23:09:28",
     "mint_price_str": "\u2b50 FREE",
     "mint_price_bnb": 0.0,
-    "mint_value_wei": "0"
+    "mint_value_wei": "0",
+    "market_url": "https://element.market/assets/bsc/0xa3a28cf631502fadf7ab94c2f0c335fa9aca4f31"
   },
   {
     "block": 130493670,
@@ -1055,7 +1086,8 @@
     "detected_at": "2026-10-29 23:02:40",
     "mint_price_str": "0.0001 BNB",
     "mint_price_bnb": 0.0001,
-    "mint_value_wei": "100000000000000"
+    "mint_value_wei": "100000000000000",
+    "market_url": "https://element.market/assets/bsc/0x56baaadde3bb7d758b1ea86519be0a02adb6f889"
   },
   {
     "block": 130493579,
@@ -1085,12 +1117,13 @@
     "mint_calldata": "0xa0712d680000000000000000000000000000000000000000000000000000000000000001",
     "signals": [
       "No DEX LP detected yet",
-      "Active Deployer Nonce (151 txs)"
+      "Active Deployer Nonce (152 txs)"
     ],
     "detected_at": "2026-10-29 23:01:50",
     "mint_price_str": "TBD",
     "mint_price_bnb": 0.0,
-    "mint_value_wei": "0"
+    "mint_value_wei": "0",
+    "market_url": "https://element.market/assets/bsc/0xea404392be487b90f45b8436a52623bc7dbd8515"
   },
   {
     "block": 130483931,
@@ -1125,7 +1158,8 @@
     "detected_at": "2026-10-29 21:49:27",
     "mint_price_str": "\u2b50 FREE",
     "mint_price_bnb": 0.0,
-    "mint_value_wei": "0"
+    "mint_value_wei": "0",
+    "market_url": "https://element.market/assets/bsc/0x2c9091f510742ce1e03dbf539fffe3603fb05ab3"
   },
   {
     "block": 130483510,
@@ -1160,7 +1194,8 @@
     "detected_at": "2026-10-29 21:46:28",
     "mint_price_str": "\u2b50 FREE",
     "mint_price_bnb": 0.0,
-    "mint_value_wei": "0"
+    "mint_value_wei": "0",
+    "market_url": "https://element.market/assets/bsc/0x9587c2eba26edd93bbbfb32e1b52dc21d12b207f"
   },
   {
     "block": 130483207,
@@ -1195,7 +1230,8 @@
     "detected_at": "2026-10-29 21:44:20",
     "mint_price_str": "\u2b50 FREE",
     "mint_price_bnb": 0.0,
-    "mint_value_wei": "0"
+    "mint_value_wei": "0",
+    "market_url": "https://element.market/assets/bsc/0x4c895e2ec1fb615d6bd28584644f5e778f64bc36"
   },
   {
     "block": 130470849,
@@ -1230,7 +1266,8 @@
     "detected_at": "2026-10-29 20:26:10",
     "mint_price_str": "\u2b50 FREE",
     "mint_price_bnb": 0.0,
-    "mint_value_wei": "0"
+    "mint_value_wei": "0",
+    "market_url": "https://element.market/assets/bsc/0x99379aa511853e540473147322fefdaba7dae35e"
   },
   {
     "block": 130458275,
@@ -1300,9 +1337,10 @@
       "Growing Holders (89 holders)"
     ],
     "detected_at": "2026-10-29 17:58:11",
-    "mint_price_str": "TBD",
-    "mint_price_bnb": 0.0,
-    "mint_value_wei": "0"
+    "mint_price_str": "0.0010 BNB",
+    "mint_price_bnb": 0.001,
+    "mint_value_wei": "1000000000000000",
+    "market_url": "https://element.market/assets/bsc/0x6ec68097d6c7a040bdfd516b9dbd3cb8b7cb4470"
   },
   {
     "block": 130453105,
@@ -1373,7 +1411,8 @@
       "No DEX LP detected yet",
       "Active Deployer Nonce (7 txs)"
     ],
-    "detected_at": "2026-10-29 17:14:10"
+    "detected_at": "2026-10-29 17:14:10",
+    "market_url": "https://element.market/assets/bsc/0x0f2b7a73873d9f46a5530d679671ce174e1cd2e0"
   },
   {
     "block": 130439433,
@@ -1385,7 +1424,7 @@
     "standard": "ERC-721 (NFT Collection)",
     "icon": "\ud83c\udfa8",
     "is_paused": null,
-    "has_free_mint": true,
+    "has_free_mint": false,
     "max_supply": 6000,
     "total_minted": 500,
     "score": 31,
@@ -1408,9 +1447,10 @@
       "Growing Holders (500 holders)"
     ],
     "detected_at": "2026-10-29 16:18:19",
-    "mint_price_str": "\u2b50 FREE",
-    "mint_value_wei": "0",
-    "mint_price_bnb": 0.0
+    "mint_price_str": "0.0003 BNB",
+    "mint_value_wei": "266000000000000",
+    "mint_price_bnb": 0.000266,
+    "market_url": "https://element.market/assets/bsc/0xb04c4b42475660c2ae7f4915b5c00535651e9cfe"
   },
   {
     "block": 130435027,
@@ -1465,11 +1505,11 @@
     "lp_wbnb": 0.0,
     "token_symbol": "BIBIAI",
     "token_price_usd": 0.0,
-    "mint_calldata": "0x1249c58b",
+    "mint_calldata": "0x836a10400000000000000000000000000000000000000000000000000000000000000001000000000000000000000000a3fbe3664db8478c094dd36b2bb306d72cbcb37a0000000000000000000000000000000000000000000000000007d0e36a818000",
     "signals": [
       "No DEX LP detected yet",
       "Mint Paused (Pre-launch phase)",
-      "Active Deployer Nonce (8 txs)"
+      "Active Deployer Nonce (9 txs)"
     ],
     "detected_at": "2026-10-29 15:23:48",
     "holders": 0,
@@ -1477,9 +1517,9 @@
     "buys_1h": 0,
     "sells_24h": 0,
     "volume_24h": 0.0,
-    "mint_price_str": "TBD",
-    "mint_price_bnb": 0.0,
-    "mint_value_wei": "0"
+    "mint_price_str": "0.0020 BNB",
+    "mint_price_bnb": 0.002,
+    "mint_value_wei": "2000000000000000"
   },
   {
     "block": 130429632,
@@ -1529,30 +1569,31 @@
     "total_minted": 378,
     "score": 85,
     "rating": "\ud83d\ude80 VIRAL RUSH / SNIPER FRENZY",
-    "lp_usd": 4686.923821230548,
-    "lp_wbnb": 3.2598860932997353,
+    "lp_usd": 4725.197136632624,
+    "lp_wbnb": 3.2797882897562314,
     "token_symbol": "MarsCoin",
-    "token_price_usd": 0.05279205867046867,
+    "token_price_usd": 0.05350686861065797,
     "mint_calldata": "0x6ecd23060000000000000000000000000000000000000000000000000000000000000001",
     "detected_at": "2026-10-29 14:38:12",
     "signals": [
-      "Active Seed Pool ($4,687)",
+      "Active Seed Pool ($4,725)",
       "Mint Paused (Pre-launch phase)",
       "Early Mints (3.8% claimed)",
-      "Heavy Buy Volume (3,756 purchases / 24h)",
-      "Massive Holder Base (50,518 holders)",
-      "High 24h Volume ($1,530,174)",
+      "Heavy Buy Volume (3,643 purchases / 24h)",
+      "Massive Holder Base (50,524 holders)",
+      "High 24h Volume ($1,509,549)",
       "Active Deployer Nonce (21 txs)"
     ],
-    "holders": 50518,
-    "buys_24h": 3756,
-    "buys_1h": 49,
-    "sells_24h": 3250,
-    "volume_24h": 1530174.01,
+    "holders": 50524,
+    "buys_24h": 3643,
+    "buys_1h": 40,
+    "sells_24h": 3262,
+    "volume_24h": 1509548.65,
     "pair_url": "https://dexscreener.com/bsc/0x14ca9d552ed2cf0d5dfd1f89bc6793a464e2ed16",
     "mint_price_str": "\u2b50 FREE",
     "mint_price_bnb": 0.0,
-    "mint_value_wei": "0"
+    "mint_value_wei": "0",
+    "market_url": "https://element.market/assets/bsc/0x163a94c3523c404f3f58d400a3ad605f71fa09ec"
   },
   {
     "block": 130419200,
@@ -1568,15 +1609,15 @@
     "mint_price_str": "\u2b50 FREE ($1.50)",
     "mint_value_wei": "0",
     "max_supply": 99999,
-    "total_minted": 21215,
+    "total_minted": 21255,
     "score": 60,
     "rating": "\ud83d\udd25 HIGH TRACTION",
     "lp_usd": 0.0,
     "lp_wbnb": 0.0,
     "token_symbol": "TREE",
     "token_price_usd": 0.0,
-    "holders": 21215,
-    "buys_24h": 21215,
+    "holders": 21255,
+    "buys_24h": 21255,
     "buys_1h": 0,
     "sells_24h": 0,
     "volume_24h": 0.0,
@@ -1584,12 +1625,13 @@
     "mint_calldata": "0xa0712d680000000000000000000000000000000000000000000000000000000000000001",
     "signals": [
       "No DEX LP detected yet",
-      "Early Mints (21.2% claimed)",
-      "Heavy Buy Volume (21,215 purchases / 24h)",
-      "Massive Holder Base (21,215 holders)",
+      "Early Mints (21.3% claimed)",
+      "Heavy Buy Volume (21,255 purchases / 24h)",
+      "Massive Holder Base (21,255 holders)",
       "Active Deployer Nonce (24 txs)"
     ],
     "detected_at": "2026-10-29 16:32:00",
-    "mint_price_bnb": 0.0
+    "mint_price_bnb": 0.0,
+    "market_url": "https://element.market/assets/bsc/0x2ed9e0a6992ba22b48c2fc2def6bb2365301a0d0"
   }
 ]

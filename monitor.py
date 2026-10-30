@@ -282,7 +282,10 @@ def analyze_contract(rpc: BscRpcClient, contract_addr: str, wallet_addr: str) ->
         "max_supply": None,
         "total_minted": None,
         "mint_calldata": "0x1249c58b",
-        "mint_note": ""
+        "mint_note": "",
+        "website": "",
+        "twitter": "",
+        "market_url": ""
     }
 
     # Retrieve Name & Symbol
@@ -316,6 +319,43 @@ def analyze_contract(rpc: BscRpcClient, contract_addr: str, wallet_addr: str) ->
 
     code = rpc.get_code(contract_addr)
     param_wallet = wallet_addr[2:].lower().zfill(64)
+
+    # Resolve marketplace URL
+    if classification.get("category") == "NFT":
+        info["market_url"] = f"https://element.market/assets/bsc/{contract_addr}"
+    elif classification.get("category") == "TOKEN":
+        info["market_url"] = f"https://pancakeswap.finance/swap?outputCurrency={contract_addr}"
+
+    # Extract on-chain metadata URLs (contractURI / tokenURI)
+    try:
+        curi_res = rpc.call_contract(contract_addr, keccak_selector("contractURI()"))
+        if curi_res:
+            u = decode_string(curi_res)
+            if u and u.startswith("http"):
+                try:
+                    req = urllib.request.Request(u, headers={"User-Agent": "Mozilla/5.0"})
+                    with urllib.request.urlopen(req, timeout=1.5) as r:
+                        meta = json.loads(r.read().decode("utf-8"))
+                        info["website"] = meta.get("external_link") or meta.get("external_url") or meta.get("website") or ""
+                        info["twitter"] = meta.get("twitter") or meta.get("twitter_username") or ""
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
+    if not info.get("website"):
+        for tid in [1, 0]:
+            try:
+                turi_res = rpc.call_contract(contract_addr, keccak_selector("tokenURI(uint256)") + hex(tid)[2:].zfill(64))
+                if turi_res:
+                    u = decode_string(turi_res)
+                    if u and u.startswith("http"):
+                        m = re.match(r"(https?://[^/]+)", u)
+                        if m and "ipfs" not in m.group(1):
+                            info["website"] = m.group(1)
+                        break
+            except Exception:
+                pass
 
     # If pure BEP-20 token with no public minting functions, price is DEX-driven
     if classification.get("category") == "TOKEN" and not any(m in code for m in ["1249c58b", "a0712d68", "836a1040", "6ecd2306"]):
@@ -567,7 +607,11 @@ def fetch_token_market_data(token_addr: str) -> Dict[str, Any]:
         "buys_1h": 0,
         "sells_24h": 0,
         "volume_24h": 0.0,
-        "pair_url": ""
+        "pair_url": "",
+        "market_price_usd": 0.0,
+        "market_price_bnb": 0.0,
+        "website": "",
+        "twitter": ""
     }
     if not token_addr or token_addr.lower() == "0x" + "0"*40:
         return res
@@ -601,6 +645,16 @@ def fetch_token_market_data(token_addr: str) -> Dict[str, Any]:
                 res["sells_24h"] = txns.get("h24", {}).get("sells", 0)
                 res["volume_24h"] = float(p.get("volume", {}).get("h24", 0.0) or 0.0)
                 res["pair_url"] = p.get("url", "")
+                res["market_price_usd"] = float(p.get("priceUsd") or 0.0)
+                res["market_price_bnb"] = float(p.get("priceNative") or 0.0)
+                p_info = p.get("info") or {}
+                ws = p_info.get("websites") or []
+                if ws:
+                    res["website"] = ws[0].get("url", "")
+                soc = p_info.get("socials") or []
+                tw = [s.get("url") for s in soc if s.get("type") in ("twitter", "x")]
+                if tw:
+                    res["twitter"] = tw[0]
     except Exception:
         pass
 
@@ -617,7 +671,11 @@ def analyze_market_interest(rpc: BscRpcClient, contract_addr: str, deployer_addr
         "lp_wbnb": 0.0,
         "lp_usd": 0.0,
         "token_price_usd": 0.0,
+        "token_price_bnb": 0.0,
         "token_symbol": "",
+        "website": "",
+        "twitter": "",
+        "market_url": "",
         "holders": 0,
         "buys_24h": 0,
         "buys_1h": 0,
@@ -671,6 +729,14 @@ def analyze_market_interest(rpc: BscRpcClient, contract_addr: str, deployer_addr
         stats["sells_24h"] = mkt_data.get("sells_24h", 0)
         stats["volume_24h"] = mkt_data.get("volume_24h", 0.0)
         stats["pair_url"] = mkt_data.get("pair_url", "")
+        if mkt_data.get("market_price_usd"):
+            stats["token_price_usd"] = mkt_data["market_price_usd"]
+        if mkt_data.get("market_price_bnb"):
+            stats["token_price_bnb"] = mkt_data["market_price_bnb"]
+        if mkt_data.get("website"):
+            stats["website"] = mkt_data["website"]
+        if mkt_data.get("twitter"):
+            stats["twitter"] = mkt_data["twitter"]
 
     # For direct NFT/token mints without DEX pair yet
     if stats["holders"] == 0 and details.get("total_minted"):
@@ -704,6 +770,9 @@ def analyze_market_interest(rpc: BscRpcClient, contract_addr: str, deployer_addr
                         stats["lp_usd"] = wbnb_r * bnb_price * 2
                         if token_r > 0:
                             stats["token_price_usd"] = (wbnb_r * bnb_price) / token_r
+                            stats["token_price_bnb"] = wbnb_r / token_r
+                            if not stats.get("pair_url"):
+                                stats["pair_url"] = f"https://dexscreener.com/bsc/{lp_addr}"
         except Exception:
             pass
 
@@ -1170,6 +1239,12 @@ def refresh_project_metrics(rpc: BscRpcClient, item: Dict[str, Any], wallet: str
         item["mint_price_bnb"] = details.get("mint_price_bnb", 0.0)
         item["mint_value_wei"] = details.get("mint_value_wei", "0")
         item["total_minted"] = details.get("total_minted", item.get("total_minted", 0))
+        if details.get("website"):
+            item["website"] = details["website"]
+        if details.get("twitter"):
+            item["twitter"] = details["twitter"]
+        if details.get("market_url"):
+            item["market_url"] = details["market_url"]
 
         if not fast:
             mkt = analyze_market_interest(rpc, addr, item.get("deployer"), details)
@@ -1181,6 +1256,14 @@ def refresh_project_metrics(rpc: BscRpcClient, item: Dict[str, Any], wallet: str
             item["volume_24h"] = mkt.get("volume_24h", item.get("volume_24h", 0.0))
             if mkt.get("pair_url"):
                 item["pair_url"] = mkt["pair_url"]
+            if mkt.get("website"):
+                item["website"] = mkt["website"]
+            if mkt.get("twitter"):
+                item["twitter"] = mkt["twitter"]
+            if mkt.get("market_url"):
+                item["market_url"] = mkt["market_url"]
+            if mkt.get("token_price_bnb"):
+                item["token_price_bnb"] = mkt["token_price_bnb"]
 
             item["score"] = mkt.get("score", item.get("score", 0))
             item["rating"] = mkt.get("rating", item.get("rating", "N/A"))
@@ -1257,6 +1340,33 @@ def build_interactive_dashboard(
         m_text.append(f"• Mint Price:       {price_str} (Required Value: {val_wei} wei)\n", style="bold green" if "FREE" in price_str else "bold yellow")
         m_text.append(f"• Free Mint (Agent): {'⭐ YES (Available for nimus.ai)' if free else 'No'}\n")
         
+        website = item.get("website", "")
+        twitter = item.get("twitter", "")
+        mkt_url = item.get("market_url") or item.get("pair_url", "")
+        if not mkt_url and "NFT" in std:
+            mkt_url = f"https://element.market/assets/bsc/{c_addr}"
+        elif not mkt_url and ("BEP-20" in std or "Token" in std):
+            mkt_url = f"https://pancakeswap.finance/swap?outputCurrency={c_addr}"
+
+        t_price = item.get("token_price_usd", 0.0)
+        t_price_bnb = item.get("token_price_bnb", 0.0)
+
+        if website or twitter or mkt_url:
+            m_text.append("\n• Official Links & Social Media:\n", style="bold white")
+            if website:
+                m_text.append(f"   ▫ 🌐 Website:     {website} (Press 'w' to open)\n", style="cyan")
+            if twitter:
+                m_text.append(f"   ▫ 🐦 X (Twitter): {twitter} (Press 'x' to open)\n", style="cyan")
+            if mkt_url:
+                m_label = "DexScreener" if "dexscreener" in mkt_url else ("Element NFT" if "element" in mkt_url else "Marketplace")
+                m_text.append(f"   ▫ 🛒 {m_label}:   {mkt_url} (Press 'm' to open)\n", style="cyan")
+
+        if t_price > 0:
+            m_text.append(f"\n• Secondary Market Price: ${t_price:.6f} USD", style="bold green")
+            if t_price_bnb > 0:
+                m_text.append(f" ({t_price_bnb:.8f} BNB)", style="bold green")
+            m_text.append("\n")
+
         m_text.append(f"• Interest Score:   {score}/100 ({rating})\n", style="bold yellow")
         if lp_usd > 0:
             m_text.append(f"• PancakeSwap LP:   ${lp_usd:,.2f} ({lp_wbnb:.2f} WBNB)\n", style="bold green")
@@ -1300,7 +1410,7 @@ def build_interactive_dashboard(
             border_style="magenta",
             expand=True
         )
-        footer = Text("⌨️  Press [Enter] or [ESC] to return to Radar Table  |  [b] Open BscScan in Browser", style="bold white on blue")
+        footer = Text("⌨️  [Enter/ESC] Close Modal  |  [w] Website  |  [x] Twitter/X  |  [m] Market  |  [b] BscScan", style="bold white on blue")
         return Group(modal_panel, footer)
 
     # Standard Interactive Table View
@@ -1448,10 +1558,37 @@ def build_interactive_dashboard(
         else:
             d_text.append("• Traction: 0 holders  |  0 buys (Pre-launch / No DEX trades yet)\n", style="dim")
 
-        if lp_usd > 0:
-            d_text.append(f"• DEX LP: ${lp_usd:,.2f} ({lp_wbnb:.2f} WBNB)  |  Token Implied: ${t_price:.4f}\n", style="green")
+        website = sel_item.get("website", "")
+        twitter = sel_item.get("twitter", "")
+        mkt_url = sel_item.get("market_url") or sel_item.get("pair_url", "")
+        if not mkt_url and "NFT" in s_std:
+            mkt_url = f"https://element.market/assets/bsc/{c_addr}"
+        elif not mkt_url and ("BEP-20" in s_std or "Token" in s_std):
+            mkt_url = f"https://pancakeswap.finance/swap?outputCurrency={c_addr}"
+
+        t_price_bnb = sel_item.get("token_price_bnb", 0.0)
+
+        if t_price > 0:
+            if t_price_bnb > 0:
+                d_text.append(f"• Market Price: ${t_price:.6f} USD ({t_price_bnb:.8f} BNB)  |  DEX Pool: ${lp_usd:,.0f}\n", style="bold green")
+            else:
+                d_text.append(f"• Market Price: ${t_price:.4f} USD  |  DEX Pool: ${lp_usd:,.0f}\n", style="bold green")
+        elif lp_usd > 0:
+            d_text.append(f"• DEX LP: ${lp_usd:,.2f} ({lp_wbnb:.2f} WBNB)\n", style="green")
         else:
-            d_text.append("• DEX LP: No liquidity pool detected yet\n", style="dim")
+            d_text.append("• Secondary Market: No DEX pool active yet\n", style="dim")
+
+        links_parts = []
+        if website:
+            links_parts.append(f"🌐 [w] {website}")
+        if twitter:
+            links_parts.append(f"🐦 [x] {twitter}")
+        if mkt_url:
+            m_label = "DexScreener" if "dexscreener" in mkt_url else ("Element NFT" if "element" in mkt_url else "Market")
+            links_parts.append(f"🛒 [m] {m_label}")
+        
+        if links_parts:
+            d_text.append("• Links: " + "  |  ".join(links_parts) + "\n", style="cyan")
         
         cmd = f"baw contract-call preview --binanceChainId 56 --from {wallet} --to {c_addr} --value {val_wei} --inputData {calldata} --json"
         d_text.append(f"• Quick Snipe Command:\n  {cmd}", style="yellow")
@@ -1461,7 +1598,7 @@ def build_interactive_dashboard(
         deep_panel = Panel("Waiting for .ai Agent ID contract deployments on BSC...", border_style="dim", padding=(0, 1))
 
     msg = f" | {status_msg}" if status_msg else ""
-    nav_bar = Text("⌨️  [↑/↓ or j/k or w/s or 1-9] Navigate  |  [Enter] Full Modal  |  [r] Refresh  |  [b] BscScan  |  [q] Quit", style="bold white on blue")
+    nav_bar = Text("⌨️  [↑/↓ or 1-9] Navigate  |  [Enter] Modal  |  [w] Website  |  [x] Twitter/X  |  [m] Market  |  [b] BscScan  |  [r] Refresh  |  [q] Quit", style="bold white on blue")
     status_bar = Text(f"📡 BSC Block {curr_block} | {tx_count} txs | Tracked: {len(history)}{msg}", style="dim green")
 
     return Group(h_panel, table, deep_panel, nav_bar, status_bar)
@@ -1809,6 +1946,42 @@ def run_live_monitor(rpc: BscRpcClient, wallet: str, plain: bool = False):
                         url = f"https://bscscan.com/address/{c_addr}"
                         subprocess.Popen(["open", url])
                         status_msg = f"🌐 Opened BscScan in browser!"
+                        status_timer = time.time()
+                        needs_update = True
+                elif key in ('w', 'W'):
+                    if history and 0 <= selected_idx < len(history):
+                        w_url = history[selected_idx].get("website")
+                        if w_url:
+                            subprocess.Popen(["open", w_url])
+                            status_msg = f"🌐 Opened Website in browser: {w_url}"
+                        else:
+                            status_msg = "⚠️ No official website link found for this project."
+                        status_timer = time.time()
+                        needs_update = True
+                elif key in ('x', 'X'):
+                    if history and 0 <= selected_idx < len(history):
+                        x_url = history[selected_idx].get("twitter")
+                        if x_url:
+                            subprocess.Popen(["open", x_url])
+                            status_msg = f"🐦 Opened X / Twitter in browser: {x_url}"
+                        else:
+                            status_msg = "⚠️ No X / Twitter account found for this project."
+                        status_timer = time.time()
+                        needs_update = True
+                elif key in ('m', 'M'):
+                    if history and 0 <= selected_idx < len(history):
+                        m_url = history[selected_idx].get("market_url") or history[selected_idx].get("pair_url")
+                        c_addr = history[selected_idx].get("contract", "")
+                        std = history[selected_idx].get("standard", "")
+                        if not m_url and "NFT" in std:
+                            m_url = f"https://element.market/assets/bsc/{c_addr}"
+                        elif not m_url and ("BEP-20" in std or "Token" in std):
+                            m_url = f"https://pancakeswap.finance/swap?outputCurrency={c_addr}"
+                        if m_url:
+                            subprocess.Popen(["open", m_url])
+                            status_msg = f"🛒 Opened Marketplace in browser!"
+                        else:
+                            status_msg = "⚠️ No secondary marketplace link available."
                         status_timer = time.time()
                         needs_update = True
 
