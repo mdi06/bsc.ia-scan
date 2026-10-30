@@ -1385,7 +1385,7 @@
     "standard": "ERC-721 (NFT Collection)",
     "icon": "\ud83c\udfa8",
     "is_paused": null,
-    "has_free_mint": false,
+    "has_free_mint": true,
     "max_supply": 6000,
     "total_minted": 500,
     "score": 31,
@@ -1408,7 +1408,7 @@
       "Growing Holders (500 holders)"
     ],
     "detected_at": "2026-10-29 16:18:19",
-    "mint_price_str": "TBD",
+    "mint_price_str": "\u2b50 FREE",
     "mint_value_wei": "0",
     "mint_price_bnb": 0.0
   },

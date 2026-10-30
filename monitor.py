@@ -1015,6 +1015,13 @@ def save_history(history: List[Dict[str, Any]]):
             c = item.get("contract", "").lower()
             if c:
                 if c in merged_map:
+                    # Guard: Never overwrite a previously resolved price with 'TBD' or empty
+                    if merged_map[c].get("mint_price_str") not in (None, "", "TBD") and item.get("mint_price_str") in (None, "", "TBD"):
+                        item["mint_price_str"] = merged_map[c]["mint_price_str"]
+                        item["mint_price_bnb"] = merged_map[c].get("mint_price_bnb", 0.0)
+                        item["mint_value_wei"] = merged_map[c].get("mint_value_wei", "0")
+                        if merged_map[c].get("has_free_mint") is not None:
+                            item["has_free_mint"] = merged_map[c]["has_free_mint"]
                     merged_map[c].update(item)
                 else:
                     merged_map[c] = item
@@ -1639,6 +1646,9 @@ def run_live_monitor(rpc: BscRpcClient, wallet: str, plain: bool = False):
                                     "icon": cls.get("icon", ""),
                                     "is_paused": det.get("is_paused"),
                                     "has_free_mint": det.get("has_free_mint"),
+                                    "mint_price_str": det.get("mint_price_str", "TBD"),
+                                    "mint_price_bnb": det.get("mint_price_bnb", 0.0),
+                                    "mint_value_wei": det.get("mint_value_wei", "0"),
                                     "max_supply": det.get("max_supply"),
                                     "total_minted": det.get("total_minted", 0),
                                     "score": mkt.get("score", 0),
@@ -1667,7 +1677,7 @@ def run_live_monitor(rpc: BscRpcClient, wallet: str, plain: bool = False):
 
                     if refresh_counter >= 20:
                         refresh_counter = 0
-                        for item in history[:3]:
+                        for item in history[:5]:
                             try:
                                 c = item.get("contract")
                                 if c:
@@ -1679,6 +1689,26 @@ def run_live_monitor(rpc: BscRpcClient, wallet: str, plain: bool = False):
                                         item["total_minted"] = int(m_res, 16)
                             except Exception:
                                 pass
+
+                        # Auto-resolve prices for any TBD items on-chain
+                        for item in history:
+                            if item.get("mint_price_str") in (None, "", "TBD"):
+                                try:
+                                    c = item.get("contract")
+                                    if c:
+                                        det = analyze_contract(rpc, c, wallet)
+                                        p_str = det.get("mint_price_str")
+                                        if p_str and p_str != "TBD":
+                                            item["mint_price_str"] = p_str
+                                            item["mint_price_bnb"] = det.get("mint_price_bnb", 0.0)
+                                            item["mint_value_wei"] = det.get("mint_value_wei", "0")
+                                            if det.get("has_free_mint") is not None:
+                                                item["has_free_mint"] = det["has_free_mint"]
+                                            if det.get("mint_calldata"):
+                                                item["mint_calldata"] = det["mint_calldata"]
+                                            needs_update = True
+                                except Exception:
+                                    pass
                         save_history(history)
 
                 time.sleep(2)
@@ -1687,6 +1717,37 @@ def run_live_monitor(rpc: BscRpcClient, wallet: str, plain: bool = False):
 
     listener_thread = threading.Thread(target=background_listener, daemon=True)
     listener_thread.start()
+
+    # Immediate background resolver thread for existing projects with TBD prices
+    def auto_resolve_tbd_prices():
+        nonlocal history, needs_update
+        changed = False
+        for item in list(history):
+            if stop_event.is_set():
+                break
+            if item.get("mint_price_str") in (None, "", "TBD"):
+                try:
+                    c = item.get("contract")
+                    if c:
+                        det = analyze_contract(rpc, c, wallet)
+                        p_str = det.get("mint_price_str")
+                        if p_str and p_str != "TBD":
+                            item["mint_price_str"] = p_str
+                            item["mint_price_bnb"] = det.get("mint_price_bnb", 0.0)
+                            item["mint_value_wei"] = det.get("mint_value_wei", "0")
+                            if det.get("has_free_mint") is not None:
+                                item["has_free_mint"] = det["has_free_mint"]
+                            if det.get("mint_calldata"):
+                                item["mint_calldata"] = det["mint_calldata"]
+                            changed = True
+                            needs_update = True
+                except Exception:
+                    pass
+        if changed:
+            save_history(history)
+
+    resolver_thread = threading.Thread(target=auto_resolve_tbd_prices, daemon=True)
+    resolver_thread.start()
 
     last_rendered_block = -1
     last_render_time = time.time()
