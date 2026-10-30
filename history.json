@@ -1572,7 +1572,7 @@
     "lp_usd": 4725.197136632624,
     "lp_wbnb": 3.2797882897562314,
     "token_symbol": "MarsCoin",
-    "token_price_usd": 0.05350686861065797,
+    "token_price_usd": 0.0527,
     "mint_calldata": "0x6ecd23060000000000000000000000000000000000000000000000000000000000000001",
     "detected_at": "2026-10-29 14:38:12",
     "signals": [
@@ -1593,7 +1593,10 @@
     "mint_price_str": "\u2b50 FREE",
     "mint_price_bnb": 0.0,
     "mint_value_wei": "0",
-    "market_url": "https://element.market/assets/bsc/0x163a94c3523c404f3f58d400a3ad605f71fa09ec"
+    "market_url": "https://element.market/assets/bsc/0x163a94c3523c404f3f58d400a3ad605f71fa09ec",
+    "website": "https://www.marscoinbnb.com/",
+    "twitter": "https://x.com/bnbMarsCoin",
+    "token_price_bnb": 0.0527
   },
   {
     "block": 130419200,
