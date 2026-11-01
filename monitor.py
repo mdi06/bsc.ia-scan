@@ -53,7 +53,8 @@ RPC_ENDPOINTS = [
     "https://bsc-dataseed1.ninicoin.io"
 ]
 
-DEFAULT_WALLET = "0xA3FbE3664dB8478c094dD36b2BB306d72CBCb37A"
+DEFAULT_WALLET = os.environ.get("AGENT_WALLET", "0xA3FbE3664dB8478c094dD36b2BB306d72CBCb37A")
+DONATION_WALLET = "0xa15BB4AEdC1b3426159C3cACf8548Cf09506A20a"
 
 # On-Chain DEX & Infrastructure Addresses
 PANCAKE_FACTORY_V2 = "0xcA143Ce32Fe78f1f7019d7d551a6402fC5350c73"
@@ -1908,14 +1909,73 @@ def refresh_portfolio(rpc: BscRpcClient, history: List[Dict[str, Any]], wallet: 
     save_history(history)
 
 
+def sync_cloud_history() -> List[Dict[str, Any]]:
+    """Pulls latest discoveries from 24/7 Fly.io cloud scanner and merges into local cache."""
+    try:
+        req = urllib.request.Request(
+            f"https://agent-id-monitor.fly.dev/history.json?_t={int(time.time())}",
+            headers={"User-Agent": "Mozilla/5.0"}
+        )
+        with urllib.request.urlopen(req, timeout=3.0) as resp:
+            if resp.status == 200:
+                cloud_data = json.loads(resp.read().decode("utf-8"))
+                if isinstance(cloud_data, list) and len(cloud_data) > 0:
+                    local_data = []
+                    if os.path.exists(HISTORY_FILE):
+                        try:
+                            with open(HISTORY_FILE, "r") as f:
+                                local_data = json.load(f)
+                        except Exception:
+                            local_data = []
+                    
+                    merged = {x.get("contract", "").lower(): x for x in local_data if x.get("contract")}
+                    for item in cloud_data:
+                        c = (item.get("contract") or "").lower()
+                        if not c:
+                            continue
+                        if c not in merged:
+                            merged[c] = item
+                        else:
+                            sw = list(set((merged[c].get("smart_wallets") or []) + (item.get("smart_wallets") or [])))
+                            merged[c].update(item)
+                            merged[c]["smart_wallets"] = sw
+                            merged[c]["smart_minters"] = sw
+                    
+                    res_list = [x for x in merged.values() if not is_system_infra(x)]
+                    res_list.sort(key=lambda x: x.get("block", 0) or 0, reverse=True)
+                    save_history(res_list)
+
+                    # Push local discoveries and owned tokens to Cloud Engine
+                    if len(res_list) > len(cloud_data) or any(x.get("user_balance", 0) > 0 for x in res_list):
+                        try:
+                            sync_req = urllib.request.Request(
+                                "https://agent-id-monitor.fly.dev/api/sync",
+                                data=json.dumps(res_list).encode("utf-8"),
+                                headers={"Content-Type": "application/json", "User-Agent": "Mozilla/5.0"},
+                                method="POST"
+                            )
+                            urllib.request.urlopen(sync_req, timeout=4.0)
+                        except Exception:
+                            pass
+
+                    return res_list
+    except Exception:
+        pass
+    return []
+
+
 def load_history() -> List[Dict[str, Any]]:
-    items = []
-    if os.path.exists(HISTORY_FILE):
+    cloud_items = sync_cloud_history()
+    if cloud_items:
+        items = cloud_items
+    elif os.path.exists(HISTORY_FILE):
         try:
             with open(HISTORY_FILE, "r") as f:
                 items = json.load(f)
         except Exception:
             items = []
+    else:
+        items = []
     
     # Filter out pure system/infrastructure contracts
     items = [x for x in items if not is_system_infra(x)]
@@ -1959,8 +2019,10 @@ def save_history(history: List[Dict[str, Any]]):
                 seen.add(c)
                 final_list.append(item)
 
-        with open(HISTORY_FILE, "w") as f:
+        tmp_file = HISTORY_FILE + ".tmp"
+        with open(tmp_file, "w") as f:
             json.dump(final_list, f, indent=2)
+        os.replace(tmp_file, HISTORY_FILE)
     except Exception:
         pass
 
@@ -2608,6 +2670,7 @@ def build_interactive_dashboard(
         m_text.append("\n[1-Click Sniper Execution]\n", style="bold yellow")
         m_text.append("• ⚡ Instant Buy: Press [s] to simulate & buy with 1-click confirmation!\n", style="bold green")
         m_text.append(f"  Manual CLI: baw contract-call preview --binanceChainId 56 --from {wallet} --to {c_addr} --value {val_wei} --inputData {calldata} --json\n", style="dim")
+        m_text.append(f"\n• 💎 Tip Dev / Donate (BNB/EVM): {DONATION_WALLET}\n", style="bold yellow")
 
         modal_panel = Panel(
             m_text,
@@ -2897,8 +2960,8 @@ def build_interactive_dashboard(
             s_deep_panel = Panel("No smart money activity detected yet.", border_style="dim", padding=(0, 1))
 
         msg = f" | {status_msg}" if status_msg else ""
-        nav_bar = Text("⌨️  [TAB / 1 / 2 / 3] Tabs  |  [↑/↓] Row  |  [PgUp/PgDn / [/]] Page  |  [Home/End] Jump  |  [s] Snipe  |  [Enter] Modal  |  [q] Quit", style="bold white on magenta")
-        status_bar = Text(f"📡 BSC Block {curr_block} | Drop {smart_selected_idx + 1}/{total_smart} (Showing {s_start + 1}–{s_end}) | 🛡️ Auto-Mints DISABLED{msg}", style="dim magenta")
+        nav_bar = Text("⌨️  [TAB / 1 / 2] Tabs  |  [s] Snipe  |  [Enter] Modal  |  [q] Quit", style="bold white on magenta")
+        status_bar = Text(f"📡 BSC Block {curr_block} | Drop {smart_selected_idx + 1}/{total_smart} | 💎 Donate: {DONATION_WALLET}{msg}", style="dim magenta")
         return Group(h_panel, s_table, s_deep_panel, nav_bar, status_bar)
 
     # Standard Interactive Radar Table View
@@ -3090,7 +3153,7 @@ def build_interactive_dashboard(
 
     msg = f" | {status_msg}" if status_msg else ""
     nav_bar = Text(f"⌨️  [TAB / 1 / 2 / 3] Tabs  |  [↑/↓] Row  |  [PgUp/PgDn / [/]] Page  |  [Home/End] Jump  |  [s] Snipe/Buy  |  [Enter] Modal  |  [f] Free  |  [g] Smart  |  [l] LP  |  [a] Active  |  [c] All  |  [o] Sort: {sort_mode}  |  [w] Web  |  [x] X  |  [m] Mkt  |  [b] BscScan  |  [q] Quit", style="bold white on blue")
-    status_bar = Text(f"📡 BSC Block {curr_block} | Row {selected_idx + 1}/{total_radar} (Slice {r_start + 1}–{r_end}) | Filter: [{active_filter}] | Sort: [{sort_mode}]{msg}", style="dim green")
+    status_bar = Text(f"📡 BSC Block {curr_block} | Row {selected_idx + 1}/{total_radar} | 💎 Donate: {DONATION_WALLET}{msg}", style="dim green")
 
     return Group(h_panel, table, deep_panel, nav_bar, status_bar)
 
@@ -3219,9 +3282,23 @@ def run_live_monitor(rpc: BscRpcClient, wallet: str, plain: bool = False):
         nonlocal history, status_msg, status_timer
         processed_txs = set()
         refresh_counter = 0
+        last_cloud_sync = 0
 
         while not stop_event.is_set():
             try:
+                # Periodic 24/7 Cloud Sync from Fly.io every 20s
+                if time.time() - last_cloud_sync > 20:
+                    last_cloud_sync = time.time()
+                    try:
+                        cloud_res = sync_cloud_history()
+                        if cloud_res and len(cloud_res) > len(history):
+                            diff = len(cloud_res) - len(history)
+                            history = cloud_res
+                            status_msg = f"☁️ Synced +{diff} new drops from Fly.io Cloud!"
+                            status_timer = time.time()
+                    except Exception:
+                        pass
+
                 curr_b = rpc.get_block_number()
                 if curr_b <= latest_block[0]:
                     time.sleep(1.0)

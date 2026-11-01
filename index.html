@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BNB Chain .ai Agent ID Suite | 24/7 Live Radar & Alpha Tracker</title>
+  <meta name="title" content="BNB Chain .ai Agent ID Suite | 24/7 Live Radar & Alpha Tracker">
+  <meta name="description" content="24/7 Autonomous Scanner for Binance .ai Agent ID drops, real-time smart wallet inflow (5,000 tracked wallets), instant honeypot/anti-rug audits, and fair-mint tracker on BNB Chain.">
+  <meta name="theme-color" content="#03080c">
+
+  <!-- Open Graph / Facebook -->
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://agent-id-monitor.vercel.app">
+  <meta property="og:title" content="BNB Chain .ai Agent ID Suite | 24/7 Live Radar & Alpha Tracker">
+  <meta property="og:description" content="Real-time autonomous discovery engine tracking 5,000 smart wallets, instant honeypot audits, and new .ai agent deployments on BNB Chain.">
+  <meta property="og:image" content="https://agent-id-monitor.vercel.app/og-preview.png">
+
+  <!-- Twitter / X -->
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:url" content="https://agent-id-monitor.vercel.app">
+  <meta name="twitter:title" content="BNB Chain .ai Agent ID Suite | 24/7 Live Radar & Alpha Tracker">
+  <meta name="twitter:description" content="Real-time autonomous discovery engine tracking 5,000 smart wallets, instant honeypot audits, and new .ai agent deployments on BNB Chain.">
+  <meta name="twitter:image" content="https://agent-id-monitor.vercel.app/og-preview.png">
+
+  <link rel="stylesheet" href="style.css">
+  <link rel="icon" type="image/svg+xml" href="icon.svg">
+
+  <!-- Vercel Web Analytics & Speed Insights -->
+  <script>
+    window.va = window.va || function () { (window.vaq = window.vaq || []).push(arguments); };
+  </script>
+  <script defer src="/_vercel/insights/script.js"></script>
+  <script>
+    window.si = window.si || function () { (window.siq = window.siq || []).push(arguments); };
+  </script>
+  <script defer src="/_vercel/speed-insights/script.js"></script>
+</head>
+<body>
+  <div class="terminal-container">
+    <!-- Top Suite Banner -->
+    <header class="suite-header">
+      <div class="suite-title-row">
+        <div class="suite-title">
+          <span class="suite-logo" aria-hidden="true">
+            <svg class="agent-logo-svg" width="22" height="22" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <polygon points="14,2 25,8 25,20 14,26 3,20 3,8" stroke="url(#logoGrad)" stroke-width="1.8" fill="#081824" stroke-linejoin="round"/>
+              <circle cx="14" cy="14" r="7.2" stroke="#00f0ff" stroke-width="1.2" stroke-dasharray="2 2" opacity="0.8"/>
+              <line x1="14" y1="2" x2="14" y2="26" stroke="#00f0ff" stroke-width="0.8" opacity="0.35"/>
+              <line x1="3" y1="14" x2="25" y2="14" stroke="#00f0ff" stroke-width="0.8" opacity="0.35"/>
+              <circle cx="14" cy="14" r="3.2" fill="#00ff88"/>
+              <circle cx="14" cy="14" r="5.2" stroke="#00ff88" stroke-width="0.8" opacity="0.5"/>
+              <defs>
+                <linearGradient id="logoGrad" x1="3" y1="2" x2="25" y2="26" gradientUnits="userSpaceOnUse">
+                  <stop offset="0%" stop-color="#f0b90b"/>
+                  <stop offset="50%" stop-color="#00f0ff"/>
+                  <stop offset="100%" stop-color="#ff0077"/>
+                </linearGradient>
+              </defs>
+            </svg>
+          </span>
+          <strong>BNB CHAIN .AI AGENT ID SUITE</strong>
+        </div>
+        <div class="suite-meta">
+          <span class="meta-item registry-meta"><span class="dim">Registry:</span> <code>0x60B9...022F</code></span>
+          <span class="meta-sep">│</span>
+          <span class="meta-item"><span class="dim">Cloud Engine:</span> <code id="engineStatus" style="color: var(--color-green);"><span class="pulse-dot"></span>Fly.io 24/7</code></span>
+          <span class="meta-sep">│</span>
+          <span class="meta-item live-pill" id="liveBlockBadge">📡 BSC Block: <span id="latestBlock">Loading...</span></span>
+          <span class="meta-sep">│</span>
+          <span class="meta-item" style="color: var(--color-cyan); font-size: 11px;" id="syncTime">Synced just now</span>
+          <span class="meta-sep">│</span>
+          <button id="soundToggle" class="sound-toggle-btn active" aria-label="Toggle Sound Alerts" title="Click to test or toggle audio alerts for new markets">
+            <span class="sound-icon">🔊</span>
+            <span class="sound-label">SOUND ON</span>
+          </button>
+          <span class="meta-sep">│</span>
+          <button id="donateHeaderBtn" class="donate-btn" aria-label="Copy Donation Address" title="Support the 24/7 Cloud Scanner (BNB/EVM): 0xa15BB4AEdC1b3426159C3cACf8548Cf09506A20a">
+            <span class="donate-icon">💎</span>
+            <span class="donate-label">Tip Dev:</span>
+            <code class="donate-addr">0xa15B...A20a</code>
+            <span class="donate-copy-badge">📋</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Navigation & Tabs -->
+      <div class="nav-row">
+        <div class="tabs" role="tablist">
+          <button class="tab-btn active" id="tabRadar" data-tab="RADAR" role="tab" aria-selected="true">
+            1: 📡 Live Radar (<span id="radarCount">0</span>)
+          </button>
+          <button class="tab-btn" id="tabSmart" data-tab="SMART" role="tab" aria-selected="false">
+            2: 🧠 Smart Alpha (<span id="smartCount">0</span>)
+          </button>
+        </div>
+
+        <div class="controls-row">
+          <div class="filter-pills" role="toolbar" aria-label="Filter Drops">
+            <button class="pill active" data-filter="ALL">ALL</button>
+            <button class="pill" data-filter="FAVORITES" id="pillFavorites">⭐ FAVORITES (<span id="favCount">0</span>)</button>
+            <button class="pill" data-filter="FREE">★ FREE MINTS</button>
+            <button class="pill" data-filter="SMART">🧠 SMART ALPHA</button>
+            <button class="pill" data-filter="LP">💧 DEX LP</button>
+            <button class="pill" data-filter="ACTIVE">⚡ ACTIVE MINTS</button>
+          </div>
+
+          <div class="search-box">
+            <span class="search-icon">🔍</span>
+            <input type="text" id="searchInput" placeholder="Search name, symbol, 0x..." aria-label="Search Drops">
+          </div>
+
+          <div class="sort-box">
+            <span class="dim">Sort:</span>
+            <div class="custom-select-wrapper" id="customSortWrapper">
+              <button type="button" class="custom-select-trigger" id="customSortTrigger" aria-haspopup="listbox" aria-expanded="false" aria-label="Sort options">
+                <span id="customSortLabel">Block (Newest)</span>
+                <span class="custom-select-arrow">▾</span>
+              </button>
+              <ul class="custom-select-options" id="customSortOptions" role="listbox" tabindex="-1">
+                <li class="custom-option selected" data-value="NEWEST" role="option" aria-selected="true">
+                  <span>Block (Newest)</span>
+                  <span class="opt-check">✓</span>
+                </li>
+                <li class="custom-option" data-value="INTEREST" role="option" aria-selected="false">
+                  <span>Interest Score</span>
+                  <span class="opt-check">✓</span>
+                </li>
+                <li class="custom-option" data-value="HOLDERS" role="option" aria-selected="false">
+                  <span>Holders Count</span>
+                  <span class="opt-check">✓</span>
+                </li>
+                <li class="custom-option" data-value="PROGRESS" role="option" aria-selected="false">
+                  <span>Mint Progress %</span>
+                  <span class="opt-check">✓</span>
+                </li>
+                <li class="custom-option" data-value="LP" role="option" aria-selected="false">
+                  <span>LP Depth ($)</span>
+                  <span class="opt-check">✓</span>
+                </li>
+              </ul>
+              <!-- Hidden native select for fallback & state management -->
+              <select id="sortSelect" class="visually-hidden" aria-hidden="true" tabindex="-1">
+                <option value="NEWEST" selected>Block (Newest)</option>
+                <option value="INTEREST">Interest Score</option>
+                <option value="HOLDERS">Holders Count</option>
+                <option value="PROGRESS">Mint Progress %</option>
+                <option value="LP">LP Depth ($)</option>
+              </select>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Macro Key Stats Banner -->
+      <div class="stats-banner" id="statsBanner">
+        <div class="stat-card">
+          <span class="stat-label">📊 MINT CAP FILL RATE:</span>
+          <span class="badge badge-green" id="fillRatePct">15.3%</span>
+          <span class="stat-sub" id="fillRateRatio">(11 / 72 Sold Out)</span>
+        </div>
+        <div class="stat-sep">│</div>
+        <div class="stat-card">
+          <span class="stat-label">🔥 NEAR CAP (≥80%):</span>
+          <span class="badge badge-dim" id="nearCapCount">0</span>
+        </div>
+        <div class="stat-sep">│</div>
+        <div class="stat-card">
+          <span class="stat-label">⚡ MOMENTUM (≥50%):</span>
+          <span class="badge badge-yellow" id="momentumCount">2 ACTIVE</span>
+          <span class="stat-highlight" id="momentumNames">[Hallowed 60%, SOLVED 60%]</span>
+        </div>
+        <div class="stat-sep">│</div>
+        <div class="stat-card gainer-card">
+          <span class="stat-label gold">🏆 TOP POST-MINT PROFIT:</span>
+          <span class="badge badge-cyan" id="topGainerName">Hash21 (HASH)</span>
+          <span class="stat-text" id="topGainerDetails">Mint: FREE ➔ Secondary: $0.0148</span>
+          <span class="badge badge-green" id="topGainerNet">Net: +$0.0148 / token</span>
+          <span class="stat-runner" id="runnerUpDetails">│ 🥈 Runner-Up: Ptah (PTAH) [$0.0017]</span>
+        </div>
+      </div>
+    </header>
+
+    <!-- Main Table Viewport -->
+    <main class="table-container">
+      <div tabindex="0" role="region" aria-label="Agent ID Launches" class="table-wrapper">
+        <table id="dropsTable">
+          <thead>
+            <tr>
+              <th class="col-fav" title="Favorites">⭐</th>
+              <th class="col-num">#</th>
+              <th class="col-block">BLOCK</th>
+              <th class="col-sm">🧠</th>
+              <th class="col-project">PROJECT</th>
+              <th class="col-type">TYPE</th>
+              <th class="col-safety">SAFETY</th>
+              <th class="col-interest">INTEREST</th>
+              <th class="col-holders">HOLDERS / BUYS</th>
+              <th class="col-lp">LP / VOL</th>
+              <th class="col-progress">MINT PROGRESS</th>
+              <th class="col-price">MINT PRICE</th>
+              <th class="col-floor">FLOOR / TRADE</th>
+              <th class="col-action">INSPECT</th>
+            </tr>
+          </thead>
+          <tbody id="tableBody">
+            <!-- Dynamic Rows Injected by app.js -->
+          </tbody>
+        </table>
+      </div>
+    </main>
+
+    <!-- Pinned Footer Status Bar -->
+    <footer class="terminal-footer">
+      <div class="footer-left">
+        <span class="status-indicator">🟢 SYSTEM ONLINE</span>
+        <span class="footer-sep">│</span>
+        <span id="footerCount">Showing 75 of 75 collections</span>
+        <span class="footer-sep">│</span>
+        <span class="dim">Space ID .ai Registry: <code>0x60B9...022F</code></span>
+      </div>
+      <div class="footer-right">
+        <button id="footerDonate" class="footer-donate-btn" title="Click to copy donation wallet (BNB/EVM): 0xa15BB4AEdC1b3426159C3cACf8548Cf09506A20a">
+          💎 Tip Dev: <code>0xa15B...A20a</code> 📋
+        </button>
+        <span class="footer-sep">│</span>
+        <span class="footer-key">Auto-Mints: <strong class="badge-red">DISABLED</strong> (Safety Enforced)</span>
+        <span class="footer-sep">│</span>
+        <a href="https://github.com/OGlamozda" target="_blank" rel="noopener" class="footer-link">Smart Wallets (5k)</a>
+        <span class="footer-sep">│</span>
+        <a href="https://element.market" target="_blank" rel="noopener" class="footer-link">Element Market</a>
+      </div>
+    </footer>
+  </div>
+
+  <!-- Full Project Inspection Modal (<dialog>) -->
+  <dialog id="inspectModal" class="project-modal">
+    <div class="modal-content" id="modalContent">
+      <!-- Injected by app.js -->
+    </div>
+  </dialog>
+
+  <!-- Toast Notifications for New Drops (ARIA live region) -->
+  <div id="toastContainer" class="toast-container" aria-live="polite" aria-atomic="true"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
+
