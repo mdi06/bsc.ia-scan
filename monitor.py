@@ -48,9 +48,11 @@ AGENT_ID_BYTES = "60b9262456de011f7d15a54cdd8c48baaa8b022f"
 
 # Default BSC RPC Endpoints (with fallback)
 RPC_ENDPOINTS = [
+    "https://bsc-rpc.publicnode.com",
     "https://bsc-dataseed.bnbchain.org",
     "https://bsc-dataseed1.defibit.io",
-    "https://bsc-dataseed1.ninicoin.io"
+    "https://bsc-dataseed1.ninicoin.io",
+    "https://bsc.publicnode.com"
 ]
 
 DEFAULT_WALLET = os.environ.get("AGENT_WALLET", "0xA3FbE3664dB8478c094dD36b2BB306d72CBCb37A")
@@ -58,11 +60,32 @@ DONATION_WALLET = "0xa15BB4AEdC1b3426159C3cACf8548Cf09506A20a"
 
 # On-Chain DEX & Infrastructure Addresses
 PANCAKE_FACTORY_V2 = "0xcA143Ce32Fe78f1f7019d7d551a6402fC5350c73"
+PANCAKE_ROUTER_V2 = "0x10ED43C718714eb63d5aA57B78B54704E256024E"
 WBNB_ADDRESS = "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c"
 USDT_ADDRESS = "0x55d398326f99059fF775485246999027B3197955"
 USD1_ADDRESS = "0x8d0D000ee44948FC98c9B98A4FA4921476f08B0D"
 BNCB_ADDRESS = "0x4902C5ebc598265ED2212b559b042de8a5eeec3f"
 USDC_ADDRESS = "0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d"
+
+# Element Market BSC Router & Event Signatures (Option D: nftVolWatch)
+ELEMENT_EX = "0xb3e3dfcb2d9f3dde16d78b9e6eb3538eb32b5ae1"
+T_721_FILLED = "0x9c248aa1a265aa616f707b979d57f4529bb63a4fc34dc7fc61fdddc18410f74e"
+T_TRANSFER = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
+
+# Stealth Factory & EIP-1167 / EIP-1967 Proxy Signatures (Option E)
+EIP1967_IMPL_SLOT = "0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc"
+EIP1967_BEACON_SLOT = "0xa3f0ad74e5423aebfd80d3ef4346578335a9a72aeaee59ff6cb3582b35133d50"
+BEACON_IMPL_SELECTOR = "0x5c60da1b"  # implementation()
+
+# Recognized Launchpad & Vault Factories
+VAULT_FACTORIES = [
+    "0x90497450f2a706f1951b5bdda52b4e5d16f34c06"  # Flap Vault Factory (AIDROP, etc.)
+]
+T_BEACON_UP = "0x1cf3b03a6cf19fa2baba4df148e9dcabedea7f8a5c07840e207e5c089be95d3e"   # BeaconUpgraded(address)
+T_UPGRADED = "0xbc7cd75a20ee27fd9adebab32041f755214dbc6bffa90cc0225b39da2e5c2d3b"    # Upgraded(address)
+T_VAULT_CREATED = "0x1a9fe01bcb4855c926d7757a81014e36cae596a0e3047d297d2cf88ca298a77d"
+
+FACTORY_SELECTORS = ["27cca59f", "7d38bb0d", "1737a4bd"]
 
 # Top BSC quote pairs for PancakeSwap V2 secondary liquidity resolution
 QUOTE_TOKENS = [
@@ -446,6 +469,94 @@ def get_element_market_url(name: str, contract_addr: str) -> str:
     return f"https://element.market/collections/{contract_addr}"
 
 
+def resolve_full_bytecode(rpc: BscRpcClient, contract_addr: str, code: str) -> Tuple[str, Optional[str], Optional[str]]:
+    """
+    Option E: Stealth Factory & EIP-1167 / EIP-1967 / Beacon Proxy Clone Resolver.
+    Unwraps:
+    1. EIP-1167 Minimal Proxy Clones (e.g. 45-byte clones used by launchpad factories).
+    2. EIP-1967 Transparent & UUPS Implementation Proxies (slot 0x360894a1...).
+    3. EIP-1967 Beacon Proxies (slot 0xa3f0ad74... -> implementation()).
+    Returns (full_code_hex, proxy_type, master_implementation_address).
+    """
+    c_clean = (code or "").lower()
+    if c_clean.startswith("0x"):
+        c_clean = c_clean[2:]
+
+    # 1. EIP-1167 Minimal Proxy Clone (Opcode pattern: 363d3d373d3d3d363d73<20-byte target>5af4...)
+    if "363d3d373d3d3d363d73" in c_clean and len(c_clean) <= 120:
+        idx = c_clean.find("363d3d373d3d3d363d73") + 20
+        target_hex = c_clean[idx:idx + 40]
+        if len(target_hex) == 40 and target_hex != "0" * 40:
+            target_addr = "0x" + target_hex
+            try:
+                target_code = rpc.get_code(target_addr)
+                if target_code and len(target_code) > 10:
+                    return target_code.lower(), "EIP-1167 Clone", target_addr
+            except Exception:
+                pass
+            return c_clean, "EIP-1167 Clone", target_addr
+
+    # 2. EIP-1967 Implementation Slot (UUPS / Transparent Proxy)
+    try:
+        impl_slot = rpc.get_storage_at(contract_addr, EIP1967_IMPL_SLOT)
+        if impl_slot and len(impl_slot) >= 66:
+            clean_val = impl_slot[2:] if impl_slot.startswith("0x") else impl_slot
+            target_hex = clean_val[-40:].lower()
+            if target_hex != "0" * 40:
+                target_addr = "0x" + target_hex
+                target_code = rpc.get_code(target_addr)
+                if target_code and len(target_code) > 10:
+                    return target_code.lower(), "EIP-1967 Proxy", target_addr
+                return c_clean, "EIP-1967 Proxy", target_addr
+    except Exception:
+        pass
+
+    # 3. EIP-1967 Beacon Proxy Slot (reads beacon address -> implementation())
+    try:
+        beacon_slot = rpc.get_storage_at(contract_addr, EIP1967_BEACON_SLOT)
+        if beacon_slot and len(beacon_slot) >= 66:
+            clean_b = beacon_slot[2:] if beacon_slot.startswith("0x") else beacon_slot
+            beacon_hex = clean_b[-40:].lower()
+            if beacon_hex != "0" * 40:
+                beacon_addr = "0x" + beacon_hex
+                impl_res = rpc.call_contract(beacon_addr, BEACON_IMPL_SELECTOR)
+                if impl_res and len(impl_res) >= 66:
+                    clean_impl = impl_res[2:] if impl_res.startswith("0x") else impl_res
+                    target_hex = clean_impl[-40:].lower()
+                    if target_hex != "0" * 40:
+                        target_addr = "0x" + target_hex
+                        target_code = rpc.get_code(target_addr)
+                        if target_code and len(target_code) > 10:
+                            return target_code.lower(), "Beacon Proxy", target_addr
+                        return c_clean, "Beacon Proxy", target_addr
+    except Exception:
+        pass
+
+    return c_clean, None, None
+
+
+def is_launchpad_factory(code: str, contract_addr: str = "") -> Tuple[bool, Optional[str]]:
+    """
+    Identifies launchpad factories (Flap, ToshX, Four.meme, etc.)
+    that deploy proxy clones for fair-mint tokens/NFTs.
+    """
+    if contract_addr and contract_addr.lower() in [f.lower() for f in VAULT_FACTORIES]:
+        return True, "Flap Vault Factory"
+
+    c = (code or "").lower()
+    if not c:
+        return False, None
+
+    if "27cca59f" in c:
+        return True, "Flap / ToshX Vault Factory"
+    if "7d38bb0d" in c or "1737a4bd" in c:
+        return True, "Launchpad Factory"
+    if any(sel in c for sel in FACTORY_SELECTORS):
+        return True, "Proxy Factory"
+
+    return False, None
+
+
 def analyze_contract(rpc: BscRpcClient, contract_addr: str, wallet_addr: str) -> Dict[str, Any]:
     classification = classify_asset_type(rpc, contract_addr)
 
@@ -469,7 +580,12 @@ def analyze_contract(rpc: BscRpcClient, contract_addr: str, wallet_addr: str) ->
         "twitter": "",
         "market_url": "",
         "has_refund": False,
-        "refund_methods": []
+        "refund_methods": [],
+        "is_proxy_clone": False,
+        "proxy_type": None,
+        "master_implementation": None,
+        "is_factory": False,
+        "factory_badge": None
     }
 
     # Retrieve Name & Symbol
@@ -509,6 +625,9 @@ def analyze_contract(rpc: BscRpcClient, contract_addr: str, wallet_addr: str) ->
                 if s_res and len(s_res) >= 66:
                     try:
                         raw_s = int(s_res[:66], 16)
+                        if raw_s >= 2**128 or raw_s == (2**256 - 1) or raw_s >= 10**30:
+                            info["max_supply"] = None
+                            break
                         if classification.get("category") == "TOKEN":
                             dec = classification.get("decimals", 18) or 18
                             info["max_supply"] = raw_s / (10 ** dec)
@@ -529,8 +648,8 @@ def analyze_contract(rpc: BscRpcClient, contract_addr: str, wallet_addr: str) ->
                         if classification.get("category") == "TOKEN":
                             dec = classification.get("decimals", 18) or 18
                             info["total_minted"] = raw_m / (10 ** dec)
-                            if info["max_supply"] is None:
-                                info["max_supply"] = info["total_minted"]
+                            # Note: Do not set max_supply = total_minted for standard BEP-20 tokens;
+                            # ERC-20 supply is pre-minted, so mint progress requires a bonding curve/cap getter.
                         else:
                             info["total_minted"] = raw_m
                         break
@@ -551,6 +670,16 @@ def analyze_contract(rpc: BscRpcClient, contract_addr: str, wallet_addr: str) ->
         info["total_minted"] = 0
 
     code = rpc.get_code(contract_addr)
+    full_code, proxy_type, impl_addr = resolve_full_bytecode(rpc, contract_addr, code)
+    is_fac, fac_badge = is_launchpad_factory(full_code, contract_addr)
+
+    info["is_proxy_clone"] = proxy_type is not None
+    info["proxy_type"] = proxy_type
+    info["master_implementation"] = impl_addr
+    info["is_factory"] = is_fac
+    info["factory_badge"] = fac_badge
+    if full_code and len(full_code) > len(code or ""):
+        code = full_code
     param_wallet = wallet_addr[2:].lower().zfill(64)
 
     # Resolve marketplace URL
@@ -804,19 +933,8 @@ def analyze_contract(rpc: BscRpcClient, contract_addr: str, wallet_addr: str) ->
                     info["mint_price_str"] = p_str
                     info["mint_value_wei"] = str(val)
 
-    # Check for Bytecode Refund Signatures (supports direct and EIP-1967 proxy unwrap)
+    # Check for Bytecode Refund Signatures (supports direct, EIP-1167, and Beacon proxies)
     try:
-        code_hex = (rpc.get_code(contract_addr) or "").lower()
-        impl_code_hex = ""
-        try:
-            eip1967_impl = rpc.get_storage_at(contract_addr, "0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc")
-            if eip1967_impl and len(eip1967_impl) >= 66 and eip1967_impl[-40:] != "0"*40:
-                impl_addr = "0x" + eip1967_impl[-40:].lower()
-                impl_code_hex = (rpc.get_code(impl_addr) or "").lower()
-        except Exception:
-            pass
-
-        full_code = code_hex + impl_code_hex
         matched_refund = [name for sel, name in REFUND_SELECTORS.items() if sel in full_code]
         info["has_refund"] = len(matched_refund) > 0
         info["refund_methods"] = matched_refund
@@ -1131,6 +1249,8 @@ def is_system_infra(item: Dict[str, Any]) -> bool:
     Detects pure infrastructure / utility adapter contracts (like resolver helpers)
     that have no tokens, no supply, and no minting capability.
     """
+    if item.get("is_proxy_clone"):
+        return False
     std = str(item.get("standard") or "")
     cat = item.get("classification", {}).get("category") if isinstance(item.get("classification"), dict) else None
     name = str(item.get("name") or "")
@@ -1169,6 +1289,8 @@ def format_floor_trade_price(item: Dict[str, Any], bnb_price: float = 705.0) -> 
     if floor_bnb is not None and float(floor_bnb) > 0:
         f_bnb = float(floor_bnb)
         usd_val = float(floor_usd) if floor_usd else (f_bnb * bnb_price)
+        if item.get("is_nft_surge"):
+            return f"[bold magenta]{f_bnb:.4f} BNB[/bold magenta]"
         return f"[bold cyan]{f_bnb:g} BNB[/bold cyan] [dim](${usd_val:.2f})[/dim]"
     elif floor_usd is not None and float(floor_usd) > 0:
         return f"[bold cyan]${float(floor_usd):.2f}[/bold cyan]"
@@ -1209,6 +1331,12 @@ def format_lp_or_volume(item: Dict[str, Any], bnb_price: float = 705.0) -> str:
     is_nft = ("NFT" in std_full or "ERC-721" in std_full or "ERC-1155" in std_full or cat == "NFT" or (item.get("classification") and item["classification"].get("is_nft", False)))
 
     if is_nft:
+        sec_vol = item.get("secondary_vol_bnb")
+        if sec_vol and float(sec_vol) > 0:
+            if item.get("is_nft_surge"):
+                return f"[bold magenta]{float(sec_vol):.3f} BNB 🦋[/bold magenta]"
+            return f"[bold cyan]{float(sec_vol):.3f} BNB[/bold cyan]"
+
         vol_bnb = item.get("volume_bnb") or item.get("nft_volume_bnb")
         if not vol_bnb and item.get("total_volume_bnb"):
             vol_bnb = item.get("total_volume_bnb")
@@ -1228,6 +1356,118 @@ def format_lp_or_volume(item: Dict[str, Any], bnb_price: float = 705.0) -> str:
         return "[dim]None[/dim]"
 
 
+def evaluate_sniper_ready(item: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Evaluates whether an asset qualifies for high-conviction assisted sniper entry:
+    1. Standard-specific Progress (>=60% or >=100 agent wallets)
+    2. Bytecode Refund Guarantee (mandatory if paid drop)
+    3. DEX Pre-Check (for tokens: if PancakeSwap pool is already open, trade on DEX instead)
+    4. Anti-Rug & Anti-Spam (not serial dev >=3 drops, wallet not fresh <8h, no capital drain)
+    5. Simulation Safety (mint not paused, no honeypot)
+    """
+    std = str(item.get("standard") or "")
+    cls = item.get("classification") or {}
+    is_nft = "NFT" in std or "721" in std or "1155" in std or bool(cls.get("is_nft"))
+    is_token = "BEP-20" in std or "Fair-Mint" in std or cls.get("category") in ("TOKEN", "TOKEN_FAIR_MINT")
+
+    ms = item.get("max_supply")
+    tm = item.get("total_minted") or 0
+    lp = float(item.get("lp_usd", 0) or 0)
+    has_ref = bool(item.get("has_refund") or (item.get("security") or {}).get("has_refund"))
+    risk = item.get("risk_level", "SAFE")
+    sec = item.get("security") or {}
+    is_serial = bool(item.get("is_serial_dev") or sec.get("is_serial_dev"))
+    is_drained = bool(item.get("is_fund_drain") or sec.get("is_fund_drain"))
+    is_fresh = bool(item.get("is_fresh_dev") or sec.get("is_fresh_dev"))
+    is_paused = item.get("is_paused") is True
+
+    val_wei = int(item.get("mint_value_wei", "0") or 0)
+    price_bnb = float(item.get("mint_price_bnb", 0.0) or 0.0)
+    is_paid = price_bnb > 0.001 or val_wei > 0
+
+    checklist = []
+
+    # 1. Progress calculation
+    if is_token and not is_nft:
+        if ms and tm and ms == tm and not item.get("sold_sel") and not item.get("cap"):
+            prog = 0.0
+        else:
+            prog = (tm / ms) if (ms and ms > 0) else 0.0
+    else:
+        prog = (tm / ms) if (ms and ms > 0) else 0.0
+
+    agents = int(item.get("holders", 0) or item.get("unique_minters", 0) or 0)
+
+    # Progress check
+    is_sold_out = (prog >= 0.999) or (is_nft and bool(ms) and bool(tm) and tm >= ms)
+    prog_pass = (0.60 <= prog < 0.999) or (prog == 0.0 and agents >= 100)
+    if is_sold_out:
+        checklist.append("▫ [red]✖[/red] Progress: 100% Sold Out / Completed")
+    elif prog >= 0.60:
+        checklist.append(f"▫ [green]✔[/green] Progress: {prog*100:.1f}% (≥60% conviction threshold passed)")
+    elif prog == 0.0 and agents >= 100:
+        checklist.append(f"▫ [green]✔[/green] Progress: Crowd Surge ({agents} active agent wallets)")
+    else:
+        p_pct_str = f"{prog*100:.1f}%" if prog > 0 else "0%"
+        checklist.append(f"▫ [yellow]⏳[/yellow] Progress: {p_pct_str} (<60% threshold, tracking)")
+
+    # Deployer check
+    if is_serial:
+        s_cnt = sec.get("serial_count") or item.get("serial_count") or 3
+        checklist.append(f"▫ [red]✖[/red] Deployer: 🚨 Serial Dev ({s_cnt} contracts deployed in 24h)")
+    elif is_fresh:
+        checklist.append("▫ [yellow]⚠️[/yellow] Deployer: Fresh wallet (<8h, low nonce)")
+    else:
+        checklist.append("▫ [green]✔[/green] Deployer: Clean reputation (No spam deployment)")
+
+    # Capital drain check
+    if risk == "RUG" or is_drained:
+        checklist.append("▫ [red]✖[/red] Capital Drain: 🚨 Empty contract with no DEX LP (Funds pocketed)")
+    else:
+        checklist.append("▫ [green]✔[/green] Capital Safety: No fund drain detected")
+
+    # Bytecode refund guarantee check
+    if is_paid:
+        if has_ref:
+            ref_m = sec.get("refund_methods") or item.get("refund_methods") or ["refund()"]
+            checklist.append(f"▫ [green]✔[/green] Refund Guarantee: Bytecode refund verified ({ref_m[0]})")
+        else:
+            checklist.append("▫ [red]✖[/red] Refund Guarantee: ⚠️ No refund method (Capital trapped if unfilled)")
+    else:
+        checklist.append("▫ [dim]▫ Refund Guarantee: N/A (Free Mint / Gas Only)[/dim]")
+
+    # Secondary DEX pre-check (Tokens only)
+    if is_token:
+        if lp >= 500:
+            checklist.append(f"▫ [yellow]✖[/yellow] Secondary Market: DEX LP already active (${lp:,.0f}) -> Trade on DEX instead of minting")
+        else:
+            checklist.append("▫ [green]✔[/green] Secondary Market: Primary bonding phase (No DEX LP yet)")
+
+    # Final verdict
+    if is_paused:
+        return {"is_ready": False, "status": "PAUSED", "badge": "⏸️ Paused", "prog": prog, "checklist": checklist}
+    if risk == "RUG" or is_drained:
+        return {"is_ready": False, "status": "RUG_RISK", "badge": "🚨 Rug Risk", "prog": prog, "checklist": checklist}
+    if is_serial:
+        return {"is_ready": False, "status": "SERIAL_DEV", "badge": "🚨 Serial Dev", "prog": prog, "checklist": checklist}
+    if is_token and lp >= 500:
+        return {"is_ready": False, "status": "GRADUATED_TO_DEX", "badge": "📈 On DEX", "prog": prog, "checklist": checklist}
+    if is_paid and not has_ref:
+        return {"is_ready": False, "status": "NO_REFUND", "badge": "⚠️ No Refund", "prog": prog, "checklist": checklist}
+    if is_sold_out:
+        return {"is_ready": False, "status": "SOLD_OUT", "badge": "🛑 Sold Out", "prog": prog, "checklist": checklist}
+    if prog_pass:
+        return {"is_ready": True, "status": "SNIPER_READY", "badge": "🎯 Snipe Ready", "prog": prog, "checklist": checklist}
+
+    return {
+        "is_ready": False,
+        "status": "TRACKING",
+        "badge": f"⏳ Track ({prog*100:.0f}%)" if prog > 0 else "⏳ Tracking",
+        "prog": prog,
+        "checklist": checklist
+    }
+
+
 def filter_and_sort_projects(history: List[Dict[str, Any]], active_filter: str, sort_mode: str) -> List[Dict[str, Any]]:
     """
     Applies real-time active filters and sorting rules across tracked projects.
@@ -1235,7 +1475,17 @@ def filter_and_sort_projects(history: List[Dict[str, Any]], active_filter: str, 
     clean_history = [x for x in history if not is_system_infra(x)]
     filtered = []
     for item in clean_history:
-        if active_filter == "FREE":
+        if active_filter in ("SNIPER_READY", "READY"):
+            s_res = evaluate_sniper_ready(item)
+            if not s_res["is_ready"]:
+                continue
+        elif active_filter in ("NFT_SURGE", "SURGE"):
+            if not item.get("is_nft_surge"):
+                continue
+        elif active_filter in ("PROXY", "CLONE"):
+            if not item.get("is_proxy_clone"):
+                continue
+        elif active_filter == "FREE":
             p_str = str(item.get("mint_price_str", "")).upper()
             if not (item.get("has_free_mint") or "FREE" in p_str):
                 continue
@@ -1261,6 +1511,14 @@ def filter_and_sort_projects(history: List[Dict[str, Any]], active_filter: str, 
 
     if sort_mode == "HEAT":
         filtered.sort(key=lambda x: x.get("score", 0), reverse=True)
+    elif sort_mode == "PROFIT":
+        def get_profit_val(x):
+            ath_p = float(x.get("ath_profit_usd") or 0.0)
+            cur_p = float(x.get("current_profit_usd") or 0.0)
+            sec = float(x.get("secondary_price_usd") or 0.0)
+            mint = float(x.get("mint_cost_usd") or 0.0)
+            return max(ath_p, cur_p, (sec - mint) if sec > 0 else 0.0)
+        filtered.sort(key=get_profit_val, reverse=True)
     elif sort_mode == "SMART":
         filtered.sort(key=lambda x: len(x.get("smart_wallets") or x.get("smart_minters") or []), reverse=True)
     elif sort_mode == "VELOCITY":
@@ -1280,6 +1538,89 @@ def filter_and_sort_projects(history: List[Dict[str, Any]], active_filter: str, 
     return filtered
 
 
+def update_post_mint_profit_metrics(item: Dict[str, Any], bnb_price: float = 705.0) -> Dict[str, Any]:
+    """
+    Computes and updates post-mint profit and ATH metrics on an item.
+    Tracks persistent high-water mark (ATH price, ATH net profit, and ATH multiple).
+    Filters out pegged crypto assets (BTCB, WBNB, USDT, USDC, BUSD) and system infra.
+    """
+    c = (item.get("contract") or "").lower()
+    sym = (item.get("symbol") or "").upper()
+    is_pegged = (
+        c in ("0x7130d2a12b9bcbfae4f2634d864a1ee1ce3ead9c", "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c", "0x55d398326f99059ff775485246999027b3197955")
+        or sym in ("BTCB", "WBNB", "USDT", "USDC", "BUSD")
+    )
+    if is_pegged or is_system_infra(item):
+        return {
+            "sec_usd": 0.0,
+            "mint_usd": 0.0,
+            "profit": 0.0,
+            "ath_price_usd": 0.0,
+            "ath_profit_usd": 0.0,
+            "ath_multiplier": 0.0,
+            "is_sold": False,
+            "is_free": False
+        }
+
+    fl_usd = float(item.get("floor_price_usd") or 0.0)
+    fl_bnb = float(item.get("floor_price_bnb") or 0.0)
+    tk_usd = float(item.get("token_price_usd") or item.get("market_price_usd") or 0.0)
+    sec_usd = fl_usd if fl_usd > 0 else (fl_bnb * bnb_price if fl_bnb > 0 else tk_usd)
+
+    p_str = str(item.get("mint_price_str") or "").upper()
+    v_wei = int(item.get("mint_value_wei") or 0)
+    is_free = bool(item.get("has_free_mint") or "FREE" in p_str or (v_wei == 0 and float(item.get("mint_price_bnb") or 0) == 0.0 and "PAID" not in p_str and "DEX" not in p_str))
+    mint_usd = 0.0 if is_free else ((v_wei / 1e18 * bnb_price) if v_wei > 0 else (float(item.get("mint_price_bnb") or 0) * bnb_price))
+    profit = (sec_usd - mint_usd) if sec_usd > 0 else 0.0
+
+    raw_ms = item.get("max_supply")
+    if raw_ms is not None:
+        try:
+            if float(raw_ms) >= 2**128 or float(raw_ms) >= 1e20:
+                raw_ms = None
+        except Exception:
+            pass
+    tm = item.get("total_minted") or 0
+    is_sold = bool(raw_ms and float(raw_ms) > 0 and tm and float(tm) >= float(raw_ms))
+
+    # Multiplier
+    if mint_usd > 0 and sec_usd > 0:
+        multiplier = round(sec_usd / mint_usd, 2)
+    elif is_free and sec_usd > 0:
+        multiplier = None  # Free mint (pure net alpha)
+    else:
+        multiplier = 0.0
+
+    # High-water mark (ATH) persistence
+    cur_ath = float(item.get("ath_price_usd") or 0.0)
+    if sec_usd > cur_ath and sec_usd > 0:
+        item["ath_price_usd"] = round(sec_usd, 6)
+        item["ath_profit_usd"] = round(profit, 6)
+        item["ath_multiplier"] = multiplier
+        item["ath_timestamp"] = int(time.time())
+    elif not item.get("ath_price_usd") and sec_usd > 0:
+        item["ath_price_usd"] = round(sec_usd, 6)
+        item["ath_profit_usd"] = round(profit, 6)
+        item["ath_multiplier"] = multiplier
+        item["ath_timestamp"] = int(time.time())
+
+    item["current_profit_usd"] = round(profit, 6)
+    item["current_multiplier"] = multiplier
+    item["mint_cost_usd"] = round(mint_usd, 4)
+    item["secondary_price_usd"] = round(sec_usd, 6)
+
+    return {
+        "sec_usd": sec_usd,
+        "mint_usd": mint_usd,
+        "profit": profit,
+        "ath_price_usd": float(item.get("ath_price_usd") or sec_usd),
+        "ath_profit_usd": float(item.get("ath_profit_usd") or profit),
+        "ath_multiplier": item.get("ath_multiplier"),
+        "is_sold": is_sold,
+        "is_free": is_free
+    }
+
+
 def compute_market_cap_stats(history: List[Dict[str, Any]], bnb_price: float = 705.0) -> Dict[str, Any]:
     """
     Computes overall mint statistics:
@@ -1287,6 +1628,7 @@ def compute_market_cap_stats(history: List[Dict[str, Any]], bnb_price: float = 7
     - Collections nearing cap completion (>=80%)
     - Collections past halfway (>=50%)
     - Top post-mint gainer (highest profit / ROI after mint is over)
+    - All-time top gainers leaderboard list
     """
     capped_total = 0
     sold_out_cnt = 0
@@ -1299,7 +1641,7 @@ def compute_market_cap_stats(history: List[Dict[str, Any]], bnb_price: float = 7
             continue
         ms = it.get("max_supply")
         tm = it.get("total_minted") or 0
-        if ms and float(ms) > 0:
+        if ms and float(ms) > 0 and float(ms) < 2**128 and float(ms) < 1e25:
             capped_total += 1
             pct = (float(tm) / float(ms)) * 100.0
             if pct >= 99.9 or float(tm) >= float(ms):
@@ -1309,32 +1651,29 @@ def compute_market_cap_stats(history: List[Dict[str, Any]], bnb_price: float = 7
             elif pct >= 50.0:
                 warm_cap_cnt += 1
 
-        fl_usd = float(it.get("floor_price_usd") or 0.0)
-        fl_bnb = float(it.get("floor_price_bnb") or 0.0)
-        tk_usd = float(it.get("token_price_usd") or it.get("market_price_usd") or 0.0)
-        sec_usd = fl_usd if fl_usd > 0 else (fl_bnb * bnb_price if fl_bnb > 0 else tk_usd)
+        prof_info = update_post_mint_profit_metrics(it, bnb_price)
+        sec_usd = prof_info["sec_usd"]
+        ath_profit = prof_info["ath_profit_usd"]
 
-        if sec_usd > 0:
-            p_str = str(it.get("mint_price_str") or "").upper()
-            v_wei = int(it.get("mint_value_wei") or 0)
-            is_free = (it.get("has_free_mint") or "FREE" in p_str or (v_wei == 0 and float(it.get("mint_price_bnb") or 0) == 0.0 and "PAID" not in p_str and "DEX" not in p_str))
-            mint_usd = (v_wei / 1e18 * bnb_price) if v_wei > 0 else (float(it.get("mint_price_bnb") or 0) * bnb_price if not is_free else 0.0)
-            profit = sec_usd - mint_usd
-            is_sold = bool(ms and float(ms) > 0 and tm and float(tm) >= float(ms))
+        if sec_usd > 0 or ath_profit > 0:
             gainers.append({
                 "item": it,
+                "contract": it.get("contract", ""),
                 "name": it.get("name", "Unknown"),
                 "symbol": it.get("symbol", ""),
                 "sec_usd": sec_usd,
-                "mint_usd": mint_usd,
-                "profit": profit,
-                "is_sold": is_sold,
-                "is_free": is_free
+                "mint_usd": prof_info["mint_usd"],
+                "profit": prof_info["profit"],
+                "ath_price_usd": prof_info["ath_price_usd"],
+                "ath_profit_usd": ath_profit,
+                "ath_multiplier": prof_info["ath_multiplier"],
+                "is_sold": prof_info["is_sold"],
+                "is_free": prof_info["is_free"]
             })
 
     fill_rate_pct = (sold_out_cnt / capped_total * 100.0) if capped_total else 0.0
-    sold_gainers = sorted([g for g in gainers if g["is_sold"]], key=lambda x: x["profit"], reverse=True)
-    all_gainers = sorted(gainers, key=lambda x: x["profit"], reverse=True)
+    sold_gainers = sorted([g for g in gainers if g["is_sold"]], key=lambda x: max(x["ath_profit_usd"], x["profit"]), reverse=True)
+    all_gainers = sorted(gainers, key=lambda x: max(x["ath_profit_usd"], x["profit"]), reverse=True)
 
     top_gainer = sold_gainers[0] if sold_gainers else (all_gainers[0] if all_gainers else None)
     runner_up = sold_gainers[1] if len(sold_gainers) > 1 else (all_gainers[1] if len(all_gainers) > 1 else None)
@@ -1346,7 +1685,9 @@ def compute_market_cap_stats(history: List[Dict[str, Any]], bnb_price: float = 7
         "near_cap_cnt": near_cap_cnt,
         "warm_cap_cnt": warm_cap_cnt,
         "top_gainer": top_gainer,
-        "runner_up": runner_up
+        "runner_up": runner_up,
+        "all_gainers": all_gainers,
+        "sold_gainers": sold_gainers
     }
 
 
@@ -1746,6 +2087,19 @@ def analyze_market_interest(
     else:
         stats["rating"] = "❄️ COLD / DORMANT"
 
+    # 7. Evaluate Assisted Sniper Readiness
+    proxy_item = dict(details)
+    proxy_item.update(stats)
+    proxy_item["contract"] = contract_addr
+    proxy_item["deployer"] = deployer_addr
+    s_eval = evaluate_sniper_ready(proxy_item)
+    stats["sniper_ready"] = s_eval["is_ready"]
+    stats["sniper_status"] = s_eval["status"]
+    stats["sniper_badge"] = s_eval["badge"]
+    stats["sniper_checklist"] = s_eval["checklist"]
+    if s_eval["is_ready"]:
+        signals.insert(0, "🎯 High-Conviction Sniper Ready (Passed 60% & Anti-Rug)")
+
     return stats
 
 
@@ -2090,6 +2444,476 @@ def check_holdings(rpc: BscRpcClient, wallet: str):
     print()
 
 
+def build_pancakeswap_sell_calldata(
+    token_addr: str,
+    amount_wei: int,
+    recipient_wallet: str,
+    min_out_wei: int = 0,
+    deadline: int = 0xffffffff
+) -> str:
+    """
+    Constructs PancakeSwap V2 Router ABI calldata for:
+    swapExactTokensForETHSupportingFeeOnTransferTokens(
+        uint256 amountIn,
+        uint256 amountOutMin,
+        address[] path,
+        address to,
+        uint256 deadline
+    )
+    Selector: 0x791ac947
+    Payload length: 522 hex chars (228 bytes standard ABI encoding).
+    """
+    def _pad32(val) -> str:
+        if isinstance(val, int):
+            return f"{val:064x}"
+        if isinstance(val, str):
+            v = val[2:] if val.startswith("0x") else val
+            return v.lower().zfill(64)
+        return "0" * 64
+
+    selector = "791ac947"
+    part0 = _pad32(amount_wei)
+    part1 = _pad32(min_out_wei)
+    part2 = _pad32(0xa0)  # offset to path array (160 bytes)
+    part3 = _pad32(recipient_wallet)
+    part4 = _pad32(deadline)
+    part5 = _pad32(2)     # path length: [token_addr, WBNB]
+    part6 = _pad32(token_addr)
+    part7 = _pad32(WBNB_ADDRESS)
+
+    return f"0x{selector}{part0}{part1}{part2}{part3}{part4}{part5}{part6}{part7}"
+
+
+def parse_element_trade_log(log: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """
+    Decodes an ERC721SellOrderFilled event log from Element Exchanger router:
+    Contract: 0xb3e3dfcb2d9f3dde16d78b9e6eb3538eb32b5ae1
+    Topic: 0x9c248aa1a265aa616f707b979d57f4529bb63a4fc34dc7fc61fdddc18410f74e
+    Data words:
+      w[0]: orderHash
+      w[1]: seller
+      w[2]: buyer
+      w[3]: fee
+      w[4]: paymentToken (0xeeee... or WBNB)
+      w[5]: price in wei
+      w[6]: tokenId
+      w[7]: collection
+    """
+    if not isinstance(log, dict):
+        return None
+    data = log.get("data", "")
+    if not data or not isinstance(data, str) or len(data) < 2 + 64 * 8:
+        return None
+    raw = data[2:] if data.startswith("0x") else data
+    if len(raw) < 512:
+        return None
+    words = [raw[i:i+64] for i in range(0, len(raw), 64)]
+    if len(words) < 8:
+        return None
+    try:
+        col = "0x" + words[7][24:].lower()
+        pay_tok = "0x" + words[4][24:].lower()
+        is_bnb = (
+            pay_tok.endswith("eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee") or
+            pay_tok.endswith(WBNB_ADDRESS[2:].lower())
+        )
+        price_wei = int(words[5], 16)
+        price_bnb = price_wei / 1e18 if is_bnb else 0.0
+        token_id = int(words[6], 16)
+        seller = "0x" + words[1][24:].lower()
+        buyer = "0x" + words[2][24:].lower()
+        tx_hash = log.get("transactionHash", "")
+        block_num = int(log.get("blockNumber", "0"), 16) if isinstance(log.get("blockNumber"), str) else int(log.get("blockNumber") or 0)
+        return {
+            "collection": col,
+            "token_id": token_id,
+            "price_wei": str(price_wei),
+            "price_bnb": price_bnb,
+            "is_bnb": is_bnb,
+            "payment_token": pay_tok,
+            "seller": seller,
+            "buyer": buyer,
+            "tx_hash": tx_hash,
+            "block": block_num
+        }
+    except Exception:
+        return None
+
+
+def evaluate_nft_surge(
+    item: Dict[str, Any],
+    fill_prices: List[float],
+    secondary_moves: int = 0,
+    user_held: int = 0,
+    prev_stats: Optional[Dict[str, Any]] = None
+) -> Dict[str, Any]:
+    """
+    Option D: Evaluates NFT Volume Surge conviction adapted from watch.mjs nftVolWatch():
+    - Calculates sales count, total volume in BNB, floor price, and high price from Element trades.
+    - Considers real paid trades.
+    - Checks secondary transfers (from != 0x0...0).
+    - Detects volume spike:
+      * Held in wallet (user_held > 0): sales >= 3 AND vol > 0 (or 2x spike vs previous check).
+      * Monitored collections: sales >= 5 OR vol >= 0.5 BNB (or 2x spike with >= 5 sales).
+    - Returns standardized evaluation dictionary.
+    """
+    std = str(item.get("standard") or "")
+    is_nft = "721" in std or "NFT" in std or "1155" in std or bool((item.get("classification") or {}).get("is_nft"))
+    
+    px = [p for p in fill_prices if p is not None and isinstance(p, (int, float)) and p >= 0]
+    sales_cnt = len(px)
+    vol_bnb = sum(px)
+    floor_bnb = min(px) if px else 0.0
+    high_bnb = max(px) if px else 0.0
+    
+    if not is_nft:
+        return {
+            "is_nft_surge": False,
+            "sales_count": 0,
+            "vol_bnb": 0.0,
+            "floor_price_bnb": 0.0,
+            "high_price_bnb": 0.0,
+            "secondary_transfers": 0,
+            "badge": "",
+            "badge_plain": "",
+            "summary": "Non-NFT Asset"
+        }
+
+    prev_f = int(prev_stats.get("sales_count", 0)) if prev_stats else int(item.get("secondary_sales_count", 0) or 0)
+    
+    is_hot = False
+    if user_held > 0:
+        is_hot = (sales_cnt >= 3 and vol_bnb > 0) or (prev_f > 0 and sales_cnt >= 2 * prev_f)
+    else:
+        is_hot = (sales_cnt >= 5) or (vol_bnb >= 0.5) or (prev_f > 0 and sales_cnt >= 5 and sales_cnt >= 2 * prev_f)
+
+    badge = f"[bold magenta]🦋 SURGE ({sales_cnt} sales)[/bold magenta]" if is_hot else ""
+    badge_plain = f"🦋 SURGE ({sales_cnt} sales)" if is_hot else ""
+    summary = f"{sales_cnt} Element sales, {vol_bnb:.4f} BNB vol, floor {floor_bnb:.4f} BNB, {secondary_moves} secondary transfers"
+
+    return {
+        "is_nft_surge": is_hot,
+        "sales_count": sales_cnt,
+        "vol_bnb": vol_bnb,
+        "floor_price_bnb": floor_bnb,
+        "high_price_bnb": high_bnb,
+        "secondary_transfers": secondary_moves,
+        "badge": badge,
+        "badge_plain": badge_plain,
+        "summary": summary
+    }
+
+
+def scan_element_nft_volume(
+    rpc: BscRpcClient,
+    nft_items: List[Dict[str, Any]],
+    lookback_blocks: int = 15000,
+    wallet_addr: Optional[str] = None
+) -> Dict[str, Dict[str, Any]]:
+    """
+    Scans Element Exchanger contract for ERC721SellOrderFilled events over the recent block window.
+    Correlates fills with tracked collections and evaluates volume surge signals.
+    Updates items in-place with secondary_sales_count, secondary_vol_bnb, floor_price_bnb,
+    high_price_bnb, secondary_transfers, is_nft_surge, and nft_surge_badge.
+    Returns mapping: {collection_address_lower: eval_dict}.
+    """
+    wallet = wallet_addr or DEFAULT_WALLET
+    target_map = {x.get("contract", "").lower(): x for x in nft_items if x.get("contract")}
+
+    try:
+        head = rpc.get_block_number()
+    except Exception:
+        return {}
+
+    from_b = max(0, head - lookback_blocks)
+    fills: Dict[str, List[float]] = {}
+    trade_logs: List[Dict[str, Any]] = []
+
+    # Pull Element logs in chunks of up to 10,000 blocks
+    for b in range(from_b, head + 1, 10000):
+        to_b = min(b + 9999, head)
+        params = {
+            "address": ELEMENT_EX,
+            "topics": [T_721_FILLED],
+            "fromBlock": hex(b),
+            "toBlock": hex(to_b)
+        }
+        try:
+            logs = rpc.get_logs(params)
+            for l in logs:
+                parsed = parse_element_trade_log(l)
+                if parsed:
+                    c = parsed["collection"]
+                    if c not in fills:
+                        fills[c] = []
+                    fills[c].append(parsed["price_bnb"])
+                    trade_logs.append(parsed)
+        except Exception:
+            pass
+
+    results: Dict[str, Dict[str, Any]] = {}
+
+    for c, it in target_map.items():
+        std = str(it.get("standard") or "")
+        is_nft = "721" in std or "NFT" in std or "1155" in std or bool((it.get("classification") or {}).get("is_nft"))
+        if not is_nft:
+            continue
+
+        c_fills = fills.get(c, [])
+        user_held = int(it.get("user_balance") or 0)
+
+        # Only query on-chain balance / transfers if trades occurred on Element or user already held tokens
+        if c_fills or user_held > 0:
+            if not user_held and wallet:
+                try:
+                    bal_call = "0x70a08231" + wallet[2:].lower().zfill(64)
+                    res = rpc.call_contract(c, bal_call)
+                    if res and len(res) >= 66:
+                        user_held = int(res[:66], 16)
+                        it["user_balance"] = user_held
+                except Exception:
+                    pass
+
+            moves = int(it.get("secondary_transfers", 0) or 0)
+            try:
+                t_from = max(from_b, head - 5000)
+                t_params = {
+                    "address": c,
+                    "topics": [T_TRANSFER],
+                    "fromBlock": hex(t_from),
+                    "toBlock": hex(head)
+                }
+                t_logs = rpc.get_logs(t_params)
+                sec_count = 0
+                for tl in t_logs:
+                    topics = tl.get("topics", [])
+                    if len(topics) == 4 and int(topics[1], 16) != 0:
+                        sec_count += 1
+                moves = sec_count
+            except Exception:
+                pass
+        else:
+            moves = int(it.get("secondary_transfers", 0) or 0)
+
+        eval_res = evaluate_nft_surge(it, c_fills, secondary_moves=moves, user_held=user_held)
+        it["secondary_sales_count"] = eval_res["sales_count"]
+        it["secondary_vol_bnb"] = eval_res["vol_bnb"]
+        it["floor_price_bnb"] = eval_res["floor_price_bnb"]
+        it["high_price_bnb"] = eval_res["high_price_bnb"]
+        it["secondary_transfers"] = eval_res["secondary_transfers"]
+        it["is_nft_surge"] = eval_res["is_nft_surge"]
+        it["nft_surge_badge"] = eval_res["badge"]
+
+        results[c] = eval_res
+
+    return results
+
+
+def evaluate_portfolio_exit(item: Dict[str, Any], bnb_price: float = 705.0) -> Dict[str, Any]:
+    """
+    Evaluates take-profit and stop-loss conviction signals for an asset held in portfolio:
+    - Native Gas (BNB): Operational Gas reserve.
+    - NFT (ERC-721): Direct to Element Market listing or Volume Surge alert.
+    - BEP-20 / Fungible Token:
+      * 🚀 10x MOON: Return multiple >= 10.0x (or Free Claim with >= $20 value)
+      * 🚀 5x MOON: Return multiple >= 5.0x (or Free Claim with >= $10 value)
+      * 🟢 2x RECOUP: Return multiple >= 2.0x (or Free Claim with >= $2 value) -> Recoup principal / play with house money
+      * ⚠️ -40% CRASH: Trailing stop triggered when valuation drops >= 40% from ATH
+      * 🔻 STOP LOSS: Position dropped >= 30% below entry cost
+      * ⏳ HODL: Within normal volatility bounds
+    """
+    contract = (item.get("contract") or "").lower()
+    is_nft = bool(item.get("is_nft"))
+    std = str(item.get("standard") or "")
+    if "721" in std or "nft" in std.lower():
+        is_nft = True
+
+    if contract == "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee" or item.get("symbol") == "BNB":
+        return {
+            "signal": "⛽ GAS RESERVE",
+            "badge": "[bold cyan]⛽ GAS RESERVE[/bold cyan]",
+            "badge_plain": "⛽ GAS RESERVE",
+            "action": "KEEP",
+            "action_label": "Gas Reserve",
+            "multiple": 1.0,
+            "pnl_usd": 0.0,
+            "pnl_pct": 0.0,
+            "peak_usd": item.get("value_usd", 0.0),
+            "recommendation": "Binance Agentic Wallet operational gas reserve. Keep funded for transaction fees.",
+            "can_swap": False
+        }
+
+    raw_item = item.get("raw_item") or {}
+    if is_nft:
+        is_surge = bool(item.get("is_nft_surge") or (raw_item and raw_item.get("is_nft_surge")))
+        sales_cnt = int(item.get("secondary_sales_count") or (raw_item and raw_item.get("secondary_sales_count")) or 0)
+        flr = float(item.get("floor_price_bnb") or (raw_item and raw_item.get("floor_price_bnb")) or 0.0)
+
+        if is_surge:
+            return {
+                "signal": "🦋 ELEMENT SURGE",
+                "badge": f"[bold magenta]🦋 SURGE ({sales_cnt} sales)[/bold magenta]",
+                "badge_plain": f"🦋 SURGE ({sales_cnt} sales)",
+                "action": "LIST_ELEMENT",
+                "action_label": "Element Surge",
+                "multiple": 1.0,
+                "pnl_usd": 0.0,
+                "pnl_pct": 0.0,
+                "peak_usd": item.get("value_usd", 0.0),
+                "recommendation": f"Element volume spike! {sales_cnt} secondary sales (Floor: {flr:.4f} BNB). List or sell manually on Element.",
+                "can_swap": False
+            }
+
+        return {
+            "signal": "🎨 LIST ON ELEMENT",
+            "badge": "[bold magenta]🎨 LIST ON ELEMENT[/bold magenta]",
+            "badge_plain": "🎨 LIST ON ELEMENT",
+            "action": "LIST_ELEMENT",
+            "action_label": "List on Element",
+            "multiple": 1.0,
+            "pnl_usd": 0.0,
+            "pnl_pct": 0.0,
+            "peak_usd": item.get("value_usd", 0.0),
+            "recommendation": "NFTs trade on Element Market. AMMs like PancakeSwap do not support ERC-721.",
+            "can_swap": False
+        }
+
+    # Fungible BEP-20 Token
+    raw_item = item.get("raw_item") or {}
+    bal = float(item.get("balance") or 0.0)
+    cur_val = float(item.get("value_usd") or 0.0)
+    cur_price = float(item.get("price_usd") or raw_item.get("token_price_usd") or 0.0)
+    if cur_val <= 0.0 and cur_price > 0.0 and bal > 0.0:
+        cur_val = bal * cur_price
+
+    mint_price_bnb = float(raw_item.get("mint_price_bnb") or item.get("mint_price_bnb") or 0.0)
+    cost_usd = mint_price_bnb * bnb_price
+
+    # ATH / Peak Tracking
+    peak_price = float(raw_item.get("peak_price_usd") or item.get("peak_price_usd") or 0.0)
+    if cur_price > peak_price:
+        peak_price = cur_price
+        item["peak_price_usd"] = peak_price
+        if raw_item:
+            raw_item["peak_price_usd"] = peak_price
+
+    peak_val = float(raw_item.get("peak_val_usd") or item.get("peak_val_usd") or 0.0)
+    if cur_val > peak_val:
+        peak_val = cur_val
+        item["peak_val_usd"] = peak_val
+        if raw_item:
+            raw_item["peak_val_usd"] = peak_val
+
+    # Trailing Stop: -40% crash from peak
+    is_crash = False
+    drawdown_pct = 0.0
+    if peak_val > 0.0 and cur_val > 0.0 and cur_val < peak_val:
+        drawdown_pct = (peak_val - cur_val) / peak_val
+        if drawdown_pct >= 0.40:
+            is_crash = True
+    elif peak_price > 0.0 and cur_price > 0.0 and cur_price < peak_price:
+        drawdown_pct = (peak_price - cur_price) / peak_price
+        if drawdown_pct >= 0.40:
+            is_crash = True
+
+    if is_crash:
+        return {
+            "signal": "⚠️ -40% CRASH",
+            "badge": "[bold red]⚠️ -40% CRASH[/bold red]",
+            "badge_plain": "⚠️ -40% CRASH",
+            "action": "SELL_PANCAKE",
+            "action_label": "Exit on PancakeSwap",
+            "multiple": (cur_val / cost_usd) if cost_usd > 0 else 1.0,
+            "pnl_usd": cur_val - cost_usd,
+            "pnl_pct": -drawdown_pct * 100.0,
+            "peak_usd": peak_val,
+            "recommendation": f"Trailing Crash Stop: Dropped {drawdown_pct*100.0:.1f}% from peak (${peak_val:.2f}). Exit to preserve capital!",
+            "can_swap": True
+        }
+
+    # Return multiple evaluation
+    if cost_usd > 0.0:
+        mult = cur_val / cost_usd
+        pnl_usd = cur_val - cost_usd
+        pnl_pct = ((cur_val - cost_usd) / cost_usd) * 100.0
+    else:
+        # Free mint or 0-cost
+        mult = 1.0
+        pnl_usd = cur_val
+        pnl_pct = 0.0
+
+    if mult >= 10.0 or (cost_usd == 0.0 and cur_val >= 20.0):
+        return {
+            "signal": "🚀 10x MOON",
+            "badge": "[bold bright_green]🚀 10x MOON[/bold bright_green]",
+            "badge_plain": "🚀 10x MOON",
+            "action": "SELL_PANCAKE",
+            "action_label": "Lock 80% Profit",
+            "multiple": mult,
+            "pnl_usd": pnl_usd,
+            "pnl_pct": pnl_pct,
+            "peak_usd": peak_val,
+            "recommendation": f"Moonshot Target Reached ({mult:.1f}x)! Lock in 80% profit on PancakeSwap V2.",
+            "can_swap": True
+        }
+    elif mult >= 5.0 or (cost_usd == 0.0 and cur_val >= 10.0):
+        return {
+            "signal": "🚀 5x MOON",
+            "badge": "[bold bright_green]🚀 5x MOON[/bold bright_green]",
+            "badge_plain": "🚀 5x MOON",
+            "action": "SELL_PANCAKE",
+            "action_label": "Scale Out 50%",
+            "multiple": mult,
+            "pnl_usd": pnl_usd,
+            "pnl_pct": pnl_pct,
+            "peak_usd": peak_val,
+            "recommendation": f"Major Profit Target Reached ({mult:.1f}x)! Scale out 50–70% into BNB.",
+            "can_swap": True
+        }
+    elif mult >= 2.0 or (cost_usd == 0.0 and cur_val >= 2.0):
+        return {
+            "signal": "🟢 2x RECOUP",
+            "badge": "[bold green]🟢 2x RECOUP[/bold green]",
+            "badge_plain": "🟢 2x RECOUP",
+            "action": "SELL_PANCAKE",
+            "action_label": "Recoup Principal",
+            "multiple": mult,
+            "pnl_usd": pnl_usd,
+            "pnl_pct": pnl_pct,
+            "peak_usd": peak_val,
+            "recommendation": f"Recoup initial principal ({mult:.1f}x return)! Sell 50% to play risk-free with house money.",
+            "can_swap": True
+        }
+    elif cost_usd > 0.0 and pnl_pct <= -30.0:
+        return {
+            "signal": "🔻 STOP LOSS",
+            "badge": "[bold yellow]🔻 STOP LOSS[/bold yellow]",
+            "badge_plain": "🔻 STOP LOSS",
+            "action": "SELL_PANCAKE",
+            "action_label": "Cut Loss",
+            "multiple": mult,
+            "pnl_usd": pnl_usd,
+            "pnl_pct": pnl_pct,
+            "peak_usd": peak_val,
+            "recommendation": f"Position down {abs(pnl_pct):.1f}% from entry cost. Consider stop loss on PancakeSwap.",
+            "can_swap": True
+        }
+    else:
+        return {
+            "signal": "⏳ HODL",
+            "badge": "[dim cyan]⏳ HODL[/dim cyan]",
+            "badge_plain": "⏳ HODL",
+            "action": "HOLD",
+            "action_label": "Holding",
+            "multiple": mult,
+            "pnl_usd": pnl_usd,
+            "pnl_pct": pnl_pct,
+            "peak_usd": peak_val,
+            "recommendation": "Valuation within normal volatility threshold. Continue monitoring market progress.",
+            "can_swap": True
+        }
+
+
 def build_portfolio_data(rpc: BscRpcClient, wallet: str, history: List[Dict[str, Any]]) -> Dict[str, Any]:
     """
     Assembles real-time on-chain portfolio holdings: Native BNB + tracked NFTs & tokens.
@@ -2111,12 +2935,13 @@ def build_portfolio_data(rpc: BscRpcClient, wallet: str, history: List[Dict[str,
     items = []
     
     # Always include Native Gas Asset (BNB)
-    items.append({
+    native_gas_entry = {
         "name": "Binance Coin",
         "symbol": "BNB",
         "standard": "Native Gas",
         "contract": "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
         "balance": bnb_bal,
+        "raw_balance": int(bnb_bal * 1e18),
         "balance_str": f"{bnb_bal:.6f} BNB",
         "price_usd": bnb_price,
         "price_str": f"${bnb_price:,.2f}",
@@ -2127,7 +2952,9 @@ def build_portfolio_data(rpc: BscRpcClient, wallet: str, history: List[Dict[str,
         "bscscan_url": f"https://bscscan.com/address/{wallet}",
         "is_nft": False,
         "raw_item": None,
-    })
+    }
+    native_gas_entry["exit_eval"] = evaluate_portfolio_exit(native_gas_entry, bnb_price)
+    items.append(native_gas_entry)
 
     # 2. Check tracked projects in history
     for it in history:
@@ -2175,12 +3002,13 @@ def build_portfolio_data(rpc: BscRpcClient, wallet: str, history: List[Dict[str,
             elif "butterfli" in name.lower():
                 acq_status = "⚡ Minted (Free Agent Claim)"
 
-            items.append({
+            item_entry = {
                 "name": name,
                 "symbol": sym,
                 "standard": std,
                 "contract": c,
                 "balance": bal,
+                "raw_balance": bal,
                 "balance_str": bal_str,
                 "price_usd": p_usd,
                 "price_str": price_str,
@@ -2191,7 +3019,9 @@ def build_portfolio_data(rpc: BscRpcClient, wallet: str, history: List[Dict[str,
                 "bscscan_url": bsc_url,
                 "is_nft": is_nft,
                 "raw_item": it,
-            })
+            }
+            item_entry["exit_eval"] = evaluate_portfolio_exit(item_entry, bnb_price)
+            items.append(item_entry)
 
     total_usd = sum(x.get("value_usd", 0.0) for x in items)
 
@@ -2489,6 +3319,8 @@ def format_supply(val: Any) -> str:
         return "N/A"
     try:
         n = float(val)
+        if n >= 2**128 or n >= 1e25:
+            return "∞"
         # If it looks like raw 18-decimal token supply (> 1e15)
         if n >= 1e24:
             n = n / 1e18
@@ -2521,10 +3353,15 @@ def format_count(val: Any) -> str:
         return "0"
 
 
-def format_structured_type(std: Any) -> str:
+def format_structured_type(std: Any, item: Optional[Dict[str, Any]] = None) -> str:
     """
     Standardizes contract standard badge with consistent text and color styling.
+    Highlights NFT Volume Surges (Option D) and Proxy Clones (Option E).
     """
+    if item and item.get("is_nft_surge"):
+        return "[bold magenta]🦋 SURGE[/bold magenta]"
+    if item and item.get("is_proxy_clone"):
+        return "[bold bright_cyan]🧩 PROXY[/bold bright_cyan]"
     s = str(std or "")
     if "NFT" in s or "ERC-721" in s:
         return "[magenta]ERC-721[/magenta]"
@@ -2545,6 +3382,13 @@ def format_structured_safety(item: Dict[str, Any]) -> str:
     """
     r_lvl = str(item.get("risk_level", "SAFE")).upper()
     r_bdg = str(item.get("risk_badge") or "").upper()
+    s_ready = item.get("sniper_ready")
+    if s_ready is None:
+        try:
+            s_ready = evaluate_sniper_ready(item)["is_ready"]
+        except Exception:
+            s_ready = False
+
     if "SERIAL" in r_bdg:
         return "[bold red]🚨 SerialDev[/bold red]"
     elif "DRAIN" in r_bdg:
@@ -2555,6 +3399,8 @@ def format_structured_safety(item: Dict[str, Any]) -> str:
         return "[bold yellow]🔴 HighRisk [/bold yellow]"
     elif "MED" in r_bdg or r_lvl == "MED":
         return "[yellow]🟡 Med Risk [/yellow]"
+    elif s_ready:
+        return "[bold bright_green]🎯 READY    [/bold bright_green]"
     else:
         return "[bold green]🟢 Clean    [/bold green]"
 
@@ -2634,7 +3480,7 @@ def format_tiered_mint_progress(item: Dict[str, Any]) -> str:
         s_val = f"{format_supply(tm)}/{format_supply(ms)}" if ms else format_supply(tm)
         return f"[bold red]HALT PAUSE [─────] {s_val:>10s}[/bold red]"
 
-    if ms and float(ms) > 0:
+    if ms and float(ms) > 0 and float(ms) < 2**128 and float(ms) < 1e25:
         pct = (float(tm) / float(ms)) * 100.0
         filled = max(0, min(5, int(round((pct / 100.0) * 5))))
         bar = "█" * filled + "░" * (5 - filled)
@@ -2755,7 +3601,8 @@ def build_interactive_dashboard(
     active_tab: str = "RADAR",
     portfolio_data: Optional[Dict[str, Any]] = None,
     port_selected_idx: int = 0,
-    smart_selected_idx: int = 0
+    smart_selected_idx: int = 0,
+    sell_confirm: Optional[Dict[str, Any]] = None
 ):
     history = [x for x in history if not is_system_infra(x)]
     # Filter and sort projects
@@ -2768,6 +3615,48 @@ def build_interactive_dashboard(
     smart_history = [x for x in history if not is_system_infra(x) and (x.get("smart_wallets") or x.get("smart_minters"))]
     smart_history.sort(key=lambda x: len(x.get("smart_wallets") or x.get("smart_minters") or []), reverse=True)
     smart_cnt = len(smart_history)
+
+    # 1-Click Take-Profit / Stop-Loss Sell Confirmation Dialog View
+    if sell_confirm:
+        asset = sell_confirm.get("asset", {})
+        a_name = asset.get("name", "Asset")
+        a_sym = asset.get("symbol", "")
+        c_addr = asset.get("contract", "")
+        bal_str = asset.get("balance_str", "0")
+        val_str = asset.get("value_str", "$0.00")
+        exit_eval = asset.get("exit_eval", {})
+        sig_badge = exit_eval.get("badge", "🟢 Take-Profit Exit")
+        recom = exit_eval.get("recommendation", "Swap tokens for BNB on PancakeSwap V2 Router")
+        mult_str = f"{exit_eval.get('multiple', 1.0):.2f}x" if exit_eval.get("multiple") else "N/A"
+        calldata = sell_confirm.get("calldata", "")
+
+        c_text = Text()
+        c_text.append("⚡ 1-CLICK PANCAKESWAP V2 TAKE-PROFIT / STOP-LOSS EXIT GATE\n\n", style="bold yellow")
+        c_text.append("• Target Asset:     ", style="bold white")
+        c_text.append(f"{a_name} ({a_sym})\n", style="bold cyan")
+        c_text.append("• Holdings to Exit: ", style="bold white")
+        c_text.append(f"{bal_str} (100% of wallet balance)\n", style="bold green")
+        c_text.append("• Token Address:    ", style="bold white")
+        c_text.append(f"{c_addr}\n", style="cyan")
+        c_text.append("• Router Contract:  ", style="bold white")
+        c_text.append(f"{PANCAKE_ROUTER_V2} (PancakeSwap V2 Router)\n", style="bold magenta")
+        c_text.append("• Current Value:    ", style="bold white")
+        c_text.append(f"{val_str} USD\n", style="bold yellow")
+        c_text.append("• Exit Trigger:     ", style="bold white")
+        c_text.append(f"{sig_badge} (ROI Multiple: {mult_str})\n", style="bold green")
+        c_text.append("• Strategy:         ", style="bold white")
+        c_text.append(f"{recom}\n", style="bright_white")
+        c_text.append("• Calldata (ABI):   ", style="bold white")
+        c_text.append(f"{calldata[:18]}...{calldata[-10:]} (swapExactTokensForETHSupportingFeeOnTransferTokens)\n", style="dim")
+        c_text.append("• Recipient:        ", style="bold white")
+        c_text.append(f"{wallet} (BNB credited directly)\n\n", style="bold green")
+        c_text.append("━" * 72 + "\n", style="dim")
+        c_text.append("  👉 Press [Y] or [ENTER] to CONFIRM & BROADCAST EXIT VIA BINANCE AGENTIC WALLET\n", style="bold white on dark_green")
+        c_text.append("  👉 Press [N] or [ESC] to CANCEL\n", style="bold white on dark_red")
+
+        conf_panel = Panel(c_text, title="🎯 1-CLICK TAKE-PROFIT EXIT CONFIRMATION", border_style="bold green", padding=(1, 2))
+        conf_nav = Text("⌨️  [Y / ENTER] Confirm & Swap to BNB  |  [N / ESC] Cancel Exit", style="bold white on green")
+        return Group(conf_panel, conf_nav)
 
     # 1-Click Sniper Confirmation Dialog View
     if snipe_confirm:
@@ -2868,6 +3757,21 @@ def build_interactive_dashboard(
             else:
                 m_text.append(f"• Your Holdings:     0 {sym} (Not Owned)\n", style="dim")
         
+        # Option E: Proxy & Clone Architecture
+        is_proxy = item.get("is_proxy_clone")
+        proxy_type = item.get("proxy_type")
+        master_impl = item.get("master_implementation")
+        is_factory = item.get("is_factory")
+        factory_badge = item.get("factory_badge")
+        if is_proxy or is_factory:
+            m_text.append("\n• 🧩 Proxy & Clone Architecture (Option E):\n", style="bold cyan")
+            if is_proxy:
+                m_text.append(f"   ▫ Proxy Pattern:     🧩 {proxy_type or 'EIP-1167 / EIP-1967'}\n", style="bold cyan")
+                if master_impl:
+                    m_text.append(f"   ▫ Implementation:   {master_impl} (Master Codebase)\n", style="cyan")
+            if is_factory:
+                m_text.append(f"   ▫ Factory Type:      🏭 {factory_badge or 'Launchpad Factory'}\n", style="bold yellow")
+
         # 1. Security & Anti-Rug Audit Section
         sec = item.get("security") or {}
         r_lvl = item.get("risk_level", "SAFE")
@@ -2917,6 +3821,17 @@ def build_interactive_dashboard(
 
         if item.get("risk_flags"):
             m_text.append("   ▫ Audit Flags:       " + "  |  ".join(item["risk_flags"]) + "\n", style="yellow")
+
+        # Sniper Ready Conviction Evaluation (60% Rule & Anti-Rug)
+        s_eval = evaluate_sniper_ready(item)
+        if s_eval["is_ready"]:
+            m_text.append("\n• 🎯 Assisted Conviction Audit: ", style="bold white")
+            m_text.append("PASSED - SNIPER READY\n", style="bold bright_green")
+        else:
+            m_text.append(f"\n• 🎯 Assisted Conviction Audit: ", style="bold white")
+            m_text.append(f"{s_eval['badge']}\n", style="bold yellow")
+        for r_line in s_eval.get("checklist", []):
+            m_text.append_text(Text.from_markup(f"   {r_line}\n"))
 
         # 2. Mint Momentum & Minters Distribution Section
         vel_str, org_str = update_momentum_metrics(item)
@@ -2987,6 +3902,23 @@ def build_interactive_dashboard(
                 m_text.append("• Collection Vol:   No secondary volume yet\n", style="dim")
             else:
                 m_text.append("• PancakeSwap LP:   No DEX Pool detected yet\n", style="dim")
+
+        if is_nft or item.get("secondary_sales_count"):
+            m_text.append("\n• 🦋 Element Market Secondary Trading Activity:\n", style="bold magenta")
+            s_cnt = item.get("secondary_sales_count", 0)
+            s_vol = float(item.get("secondary_vol_bnb", 0.0) or 0.0)
+            s_flr = float(item.get("floor_price_bnb", 0.0) or 0.0)
+            s_mov = item.get("secondary_transfers", 0)
+            surge_str = f" [bold magenta]🦋 SURGE DETECTED ({s_cnt} sales)[/bold magenta]" if item.get("is_nft_surge") else ""
+            m_text.append(f"   ▫ Secondary Sales:   {s_cnt} sales{surge_str}\n", style="bold magenta" if s_cnt >= 3 else "dim")
+            m_text.append(f"   ▫ Element Volume:    {s_vol:.4f} BNB\n", style="bold cyan" if s_vol > 0 else "dim")
+            if s_flr > 0:
+                m_text.append(f"   ▫ Floor Price:       {s_flr:.4f} BNB\n", style="bold green")
+            m_text.append(f"   ▫ Transfer Moves:    {s_mov} secondary transfers\n", style="white" if s_mov else "dim")
+            clean_name = re.sub(r"\([^)]*\)", "", name).strip()
+            slug = re.sub(r"[^a-z0-9]+", "-", clean_name.lower()).strip("-")
+            e_url = f"https://element.market/collections/{slug}" if slug else f"https://element.market/collections/{c_addr}"
+            m_text.append(f"   ▫ Marketplace Link:  {e_url} (Press 'm' to open)\n", style="dim cyan")
 
         if item.get("signals"):
             m_text.append("\n• Key Reverse-Engineering Signals:\n", style="bold white")
@@ -3072,7 +4004,7 @@ def build_interactive_dashboard(
         radar_tab_style = "bold black on bright_cyan"
         smart_tab_style = "dim magenta on grey19"
         port_tab_style = "dim green on grey19"
-        filt_style = "bold yellow on blue" if active_filter != "ALL" else "bold yellow"
+        filt_style = "bold bright_green on dark_green" if active_filter in ("SNIPER_READY", "READY") else ("bold yellow on blue" if active_filter != "ALL" else "bold yellow")
         h_text.append(f"{radar_pill}", style=radar_tab_style)
         h_text.append(f" {smart_pill}", style=smart_tab_style)
         h_text.append(f" {port_pill}", style=port_tab_style)
@@ -3134,9 +4066,9 @@ def build_interactive_dashboard(
         p_table.add_column("YOUR HOLDINGS", style="bold bright_green", min_width=14, justify="right", no_wrap=True)
         p_table.add_column("UNIT PRICE", style="bold yellow", min_width=15, justify="right", no_wrap=True)
         p_table.add_column("TOTAL VALUE", style="bold bright_green", min_width=14, justify="right", no_wrap=True)
-        p_table.add_column("ACQUISITION STATUS", style="bold cyan", min_width=24, no_wrap=True)
+        p_table.add_column("EXIT / PROFIT SIGNAL", style="bold cyan", min_width=22, no_wrap=True)
         p_table.add_column("CONTRACT ADDRESS", style="dim", min_width=18, no_wrap=True)
-        p_table.add_column("ACTIONS", style="bold blue", min_width=15, no_wrap=True)
+        p_table.add_column("ACTIONS", style="bold blue", min_width=18, no_wrap=True)
 
         if not p_items:
             p_table.add_row(" ", "-", "No assets found in wallet yet", "-", "-", "-", "Press [Tab / 1] to return to Radar and snipe mints!", "-", "-", style="dim")
@@ -3160,10 +4092,18 @@ def build_interactive_dashboard(
                 p_bal = f"[bold green]{p_it.get('balance_str', '0')}[/bold green]"
                 p_u_price = p_it.get("price_str", "$0.00")
                 p_val = f"[bold green]{p_it.get('value_str', '$0.00')}[/bold green]"
-                p_acq = p_it.get("acquired", "")
+                
+                exit_eval = p_it.get("exit_eval") or evaluate_portfolio_exit(p_it)
+                p_sig = exit_eval.get("badge") or p_it.get("acquired", "")
                 c_addr = p_it.get("contract", "")
                 c_fmt = f"{c_addr[:8]}...{c_addr[-6:]}" if len(c_addr) > 20 else c_addr
-                act = "🛒 [m] Element" if p_it.get("is_nft") else "🥞 [m] Pancake"
+                
+                if p_it.get("is_nft"):
+                    act = "🛒 [m] Element"
+                elif c_addr == "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee":
+                    act = "⛽ Gas Reserve"
+                else:
+                    act = "⚡ [x] Exit  |  🥞 [m] DEX"
 
                 p_table.add_row(
                     sel_marker,
@@ -3172,7 +4112,7 @@ def build_interactive_dashboard(
                     p_bal,
                     p_u_price,
                     p_val,
-                    p_acq,
+                    p_sig,
                     c_fmt,
                     act,
                     style=row_style
@@ -3180,12 +4120,17 @@ def build_interactive_dashboard(
 
         if p_items and 0 <= port_selected_idx < len(p_items):
             sel_p = p_items[port_selected_idx]
+            sel_eval = sel_p.get("exit_eval") or evaluate_portfolio_exit(sel_p)
             pd_text = Text()
             pd_text.append(f"• Asset: {sel_p['name']} ({sel_p['symbol']})  |  Standard: {sel_p['standard']}  |  Contract: {sel_p['contract']}\n", style="bold white")
             pd_text.append(f"• Verified Balance: {sel_p['balance_str']} in {wallet[:8]}... (nimus.ai)  |  Valuation: {sel_p['value_str']} USD ({sel_p['price_str']})\n", style="bold green")
-            pd_text.append(f"• Acquisition: {sel_p['acquired']}\n", style="cyan")
+            
+            sig_style = "bold red" if "CRASH" in sel_eval.get('signal', '') else ("bold yellow" if "STOP" in sel_eval.get('signal', '') else "bold green")
+            pd_text.append(f"• Exit Signal: {sel_eval.get('badge', '⏳ HODL')}  |  Action: {sel_eval.get('action_label', 'Holding')}  |  Strategy: {sel_eval.get('recommendation', '')}\n", style=sig_style)
             
             p_links = []
+            if not sel_p.get("is_nft") and sel_p.get("contract") != "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee":
+                p_links.append("⚡ [x] 1-Click Exit Sell")
             if sel_p.get("market_url"):
                 m_txt = "Element NFT Collection" if sel_p.get("is_nft") else "PancakeSwap"
                 p_links.append(f"🛒 [m] {m_txt}")
@@ -3198,7 +4143,7 @@ def build_interactive_dashboard(
             p_deep_panel = Panel("Your portfolio is empty. Press [Tab / 1] to switch to Live Radar and snipe new fair mints!", border_style="dim", padding=(0, 1))
 
         msg = f" | {status_msg}" if status_msg else ""
-        nav_bar = Text("⌨️  [TAB / 1 / 2 / 3] Tabs  |  [↑/↓] Row  |  [PgUp/PgDn / [/]] Page  |  [Home/End] Jump  |  [r] Refresh  |  [m] Market  |  [b] BscScan  |  [q] Quit", style="bold white on green")
+        nav_bar = Text("⌨️  [TAB / 1 / 2 / 3] Tabs  |  [↑/↓] Row  |  [PgUp/PgDn / [/]] Page  |  [Home/End] Jump  |  [x] 1-Click Exit Sell  |  [m] Market  |  [r] Refresh  |  [b] BscScan  |  [q] Quit", style="bold white on green")
         status_bar = Text(f"📡 BSC Block {curr_block} | Asset {port_selected_idx + 1}/{total_p} | Balance: ${p_sum.get('total_usd', 0.0):.2f} USD ({p_sum.get('native_bnb', 0.0):.6f} BNB){msg}", style="dim green")
         return Group(h_panel, p_table, p_deep_panel, nav_bar, status_bar)
 
@@ -3247,7 +4192,7 @@ def build_interactive_dashboard(
                 row_style = "bold white on navy_blue" if is_sel else ""
 
                 s_name = f"{s_it.get('name', 'Unknown')[:14]} ({s_it.get('symbol', '')[:6]})"
-                s_type = format_structured_type(s_it.get("standard"))
+                s_type = format_structured_type(s_it.get("standard"), item=s_it)
 
                 p_str = str(s_it.get("mint_price_str", "")).upper()
                 v_wei = int(s_it.get("mint_value_wei", 0) or 0)
@@ -3360,9 +4305,23 @@ def build_interactive_dashboard(
             # Block #
             blk_str = f"#{str(item.get('block', ''))[-6:]}" if item.get('block') else ""
 
-            # Smart money badge in dedicated column
+            # Smart money badge & Sniper Ready indicator in dedicated column
             is_sm = bool(item.get("smart_wallets") or item.get("smart_minters"))
-            sm_badge = "[bold magenta]🧠[/bold magenta]" if is_sm else " "
+            s_ready = item.get("sniper_ready")
+            if s_ready is None:
+                try:
+                    s_ready = evaluate_sniper_ready(item)["is_ready"]
+                except Exception:
+                    s_ready = False
+
+            if is_sm and s_ready:
+                sm_badge = "[bold magenta]🧠[/bold magenta]"
+            elif s_ready:
+                sm_badge = "[bold bright_green]🎯[/bold bright_green]"
+            elif is_sm:
+                sm_badge = "[bold magenta]🧠[/bold magenta]"
+            else:
+                sm_badge = " "
 
             # Project name without leading emojis for 100% straight margin
             p_name = item.get("name", "Unknown")[:14]
@@ -3370,7 +4329,7 @@ def build_interactive_dashboard(
             p_display = f"{p_name} ({p_sym})"
 
             # Structured column values
-            type_formatted = format_structured_type(item.get("standard"))
+            type_formatted = format_structured_type(item.get("standard"), item=item)
             safety_formatted = format_structured_safety(item)
             interest_str = format_structured_interest(item)
 
@@ -3452,6 +4411,15 @@ def build_interactive_dashboard(
             sec_parts.append("🚨 HONEYPOT")
         d_text.append(f"• Mint Price: {price_val} ({val_wei} wei)  |  Safety: {' | '.join(sec_parts)}\n", style="yellow")
 
+        # Sniper Conviction line (60% Rule & Anti-Rug)
+        s_eval = evaluate_sniper_ready(sel_item)
+        if s_eval["is_ready"]:
+            chk_first = s_eval['checklist'][0].replace('▫ ', '') if s_eval.get('checklist') else 'Threshold Passed'
+            d_text.append_text(Text.from_markup(f"• 🎯 Conviction: [bold bright_green]PASS (SNIPER READY)[/bold bright_green]  |  {chk_first}\n"))
+        else:
+            chk_first = s_eval['checklist'][0].replace('▫ ', '') if s_eval.get('checklist') else 'Tracking'
+            d_text.append_text(Text.from_markup(f"• 🎯 Conviction: [bold yellow]{s_eval['badge']}[/bold yellow]  |  {chk_first}\n"))
+
         # Line 3: Minters, Velocity, Traction
         vel_str, org_str = update_momentum_metrics(sel_item)
         trac_str = f"Holders: {hld:,}  |  24h Buys: {buys:,} ({buys_1h} in 1h)" if (hld > 0 or buys > 0) else "0 holders (Pre-launch)"
@@ -3502,7 +4470,7 @@ def build_interactive_dashboard(
         deep_panel = Panel("Waiting for .ai Agent ID contract deployments on BSC...", border_style="dim", padding=(0, 1))
 
     msg = f" | {status_msg}" if status_msg else ""
-    nav_bar = Text(f"⌨️  [TAB / 1 / 2 / 3] Tabs  |  [↑/↓] Row  |  [PgUp/PgDn / [/]] Page  |  [Home/End] Jump  |  [s] Snipe/Buy  |  [Enter] Modal  |  [f] Free  |  [g] Smart  |  [l] LP  |  [a] Active  |  [c] All  |  [o] Sort: {sort_mode}  |  [w] Web  |  [x] X  |  [m] Mkt  |  [b] BscScan  |  [q] Quit", style="bold white on blue")
+    nav_bar = Text(f"⌨️  [TAB / 1 / 2 / 3] Tabs  |  [↑/↓] Row  |  [s] Snipe/Buy  |  [Enter] Modal  |  [k] 🎯 Ready  |  [u] 🦋 Surge  |  [p] 🧩 Proxy  |  [f] Free  |  [g] Smart  |  [l] LP  |  [a] Active  |  [c] All  |  [o] Sort: {sort_mode}  |  [w] Web  |  [x] X  |  [m] Mkt  |  [b] BscScan  |  [q] Quit", style="bold white on blue")
     status_bar = Text(f"📡 BSC Block {curr_block} | Row {selected_idx + 1}/{total_radar} | 💎 Donate: {DONATION_WALLET}{msg}", style="dim green")
 
     return Group(h_panel, table, deep_panel, nav_bar, status_bar)
@@ -3559,7 +4527,8 @@ def run_live_monitor(rpc: BscRpcClient, wallet: str, plain: bool = False):
                                 log_addr = log.get("address")
                                 if log_addr:
                                     code = rpc.get_code(log_addr)
-                                    if AGENT_ID_BYTES in (code or "").lower():
+                                    full_c, _, _ = resolve_full_bytecode(rpc, log_addr, code)
+                                    if AGENT_ID_BYTES in (full_c or code or "").lower():
                                         deployed_addr = log_addr
                                         break
 
@@ -3771,7 +4740,8 @@ def run_live_monitor(rpc: BscRpcClient, wallet: str, plain: bool = False):
                                 log_addr = log.get("address")
                                 if log_addr:
                                     code = rpc.get_code(log_addr)
-                                    if AGENT_ID_BYTES in (code or "").lower():
+                                    full_c, _, _ = resolve_full_bytecode(rpc, log_addr, code)
+                                    if AGENT_ID_BYTES in (full_c or code or "").lower():
                                         dep_addr = log_addr
                                         break
 
@@ -3833,7 +4803,12 @@ def run_live_monitor(rpc: BscRpcClient, wallet: str, plain: bool = False):
                                     "pair_url": mkt.get("pair_url", ""),
                                     "mint_calldata": det.get("mint_calldata", "0x1249c58b"),
                                     "signals": mkt.get("signals", []),
-                                    "detected_at": time.strftime("%Y-%m-%d %H:%M:%S")
+                                    "detected_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+                                    "is_proxy_clone": det.get("is_proxy_clone", False),
+                                    "proxy_type": det.get("proxy_type"),
+                                    "master_implementation": det.get("master_implementation"),
+                                    "is_factory": det.get("is_factory", False),
+                                    "factory_badge": det.get("factory_badge")
                                 }
                                 history = [h for h in history if h.get("contract", "").lower() != dep_addr.lower()]
                                 history.insert(0, new_entry)
@@ -3921,10 +4896,11 @@ def run_live_monitor(rpc: BscRpcClient, wallet: str, plain: bool = False):
     last_render_time = time.time()
     needs_update = True
     snipe_confirm = None
+    sell_confirm = None
 
     try:
         with Live(
-            build_interactive_dashboard(history, selected_idx, latest_block[0], latest_tx_count[0], wallet, status_msg, show_modal, active_filter=active_filter, sort_mode=sort_mode, snipe_confirm=snipe_confirm, active_tab=active_tab, portfolio_data=portfolio_data, port_selected_idx=port_selected_idx, smart_selected_idx=smart_selected_idx),
+            build_interactive_dashboard(history, selected_idx, latest_block[0], latest_tx_count[0], wallet, status_msg, show_modal, active_filter=active_filter, sort_mode=sort_mode, snipe_confirm=snipe_confirm, active_tab=active_tab, portfolio_data=portfolio_data, port_selected_idx=port_selected_idx, smart_selected_idx=smart_selected_idx, sell_confirm=sell_confirm),
             refresh_per_second=6,
             screen=True
         ) as live:
@@ -3934,11 +4910,41 @@ def run_live_monitor(rpc: BscRpcClient, wallet: str, plain: bool = False):
                 smart_history = [x for x in history if not is_system_infra(x) and (x.get("smart_wallets") or x.get("smart_minters"))]
                 smart_history.sort(key=lambda x: len(x.get("smart_wallets") or x.get("smart_minters") or []), reverse=True)
 
+                # Active Exit / Take-Profit Sell Confirmation Gate
+                if sell_confirm:
+                    if key in ('y', 'Y', 'ENTER', '\r', '\n'):
+                        status_msg = "⏳ Broadcasting Take-Profit Sell on BNB Chain via Binance Agentic Wallet..."
+                        live.update(build_interactive_dashboard(history, selected_idx, latest_block[0], latest_tx_count[0], wallet, status_msg, show_modal, active_filter=active_filter, sort_mode=sort_mode, snipe_confirm=snipe_confirm, active_tab=active_tab, portfolio_data=portfolio_data, port_selected_idx=port_selected_idx, smart_selected_idx=smart_selected_idx, sell_confirm=sell_confirm))
+                        req_id = sell_confirm.get("requestId")
+                        if req_id:
+                            res = execute_snipe_call(req_id)
+                        else:
+                            res = {"success": False, "error": {"message": "Missing requestId"}}
+                        if res.get("success"):
+                            tx_h = res.get("data", {}).get("txHash", "")
+                            status_msg = f"🎉 TAKE-PROFIT SUCCESSFUL! Tx: {tx_h[:10]}...{tx_h[-8:]} Swapped to BNB!"
+                            refresh_portfolio(rpc, history, wallet)
+                            portfolio_data = build_portfolio_data(rpc, wallet, history)
+                            notify_alert()
+                        else:
+                            err = res.get("error", {}).get("message", "Execution failed")
+                            status_msg = f"❌ Sell Failed: {err[:60]}"
+                        sell_confirm = None
+                        status_timer = time.time()
+                        needs_update = True
+                        continue
+                    elif key in ('n', 'N', 'ESC', 'q', 'Q'):
+                        sell_confirm = None
+                        status_msg = "🚫 Exit sell cancelled by user."
+                        status_timer = time.time()
+                        needs_update = True
+                        continue
+
                 # Active Sniper Confirmation Gate
                 if snipe_confirm:
                     if key in ('y', 'Y', 'ENTER', '\r', '\n'):
                         status_msg = "⏳ Broadcasting snipe transaction on BNB Chain..."
-                        live.update(build_interactive_dashboard(history, selected_idx, latest_block[0], latest_tx_count[0], wallet, status_msg, show_modal, active_filter=active_filter, sort_mode=sort_mode, snipe_confirm=snipe_confirm, active_tab=active_tab, portfolio_data=portfolio_data, port_selected_idx=port_selected_idx, smart_selected_idx=smart_selected_idx))
+                        live.update(build_interactive_dashboard(history, selected_idx, latest_block[0], latest_tx_count[0], wallet, status_msg, show_modal, active_filter=active_filter, sort_mode=sort_mode, snipe_confirm=snipe_confirm, active_tab=active_tab, portfolio_data=portfolio_data, port_selected_idx=port_selected_idx, smart_selected_idx=smart_selected_idx, sell_confirm=sell_confirm))
                         req_id = snipe_confirm.get("requestId")
                         res = execute_snipe_call(req_id)
                         if res.get("success"):
@@ -3976,7 +4982,7 @@ def run_live_monitor(rpc: BscRpcClient, wallet: str, plain: bool = False):
                     if show_modal:
                         show_modal = False
                         needs_update = True
-                elif key in ('TAB', 'p', 'P'):
+                elif key == 'TAB':
                     if not show_modal:
                         tabs = ["RADAR", "SMART", "PORTFOLIO"]
                         cur_tab_idx = tabs.index(active_tab) if active_tab in tabs else 0
@@ -3984,6 +4990,13 @@ def run_live_monitor(rpc: BscRpcClient, wallet: str, plain: bool = False):
                         tab_names = {"RADAR": "📡 Live Radar", "SMART": "🧠 Smart Money Alpha", "PORTFOLIO": "🎒 My Portfolio"}
                         status_msg = f"Switched to {tab_names.get(active_tab, active_tab)}"
                         status_timer = time.time()
+                        needs_update = True
+                elif key in ('p', 'P'):
+                    if active_tab == "RADAR":
+                        active_filter = "ALL" if active_filter in ("PROXY", "CLONE") else "PROXY"
+                        status_msg = f"🔍 Filter: {'🧩 PROXY CLONES ONLY' if active_filter == 'PROXY' else 'ALL PROJECTS'}"
+                        status_timer = time.time()
+                        selected_idx = 0
                         needs_update = True
                 elif key in ('s', 'S'):
                     if active_tab == "PORTFOLIO":
@@ -4050,6 +5063,20 @@ def run_live_monitor(rpc: BscRpcClient, wallet: str, plain: bool = False):
                             status_msg = f"⚠️ Snipe simulation failed: {err[:60]}"
                             status_timer = time.time()
                             needs_update = True
+                elif key in ('k', 'K', 'v', 'V'):
+                    if active_tab == "RADAR":
+                        active_filter = "ALL" if active_filter == "SNIPER_READY" else "SNIPER_READY"
+                        status_msg = f"🔍 Filter: {'🎯 SNIPER READY (60%+ & ANTI-RUG)' if active_filter == 'SNIPER_READY' else 'ALL PROJECTS'}"
+                        status_timer = time.time()
+                        selected_idx = 0
+                        needs_update = True
+                elif key in ('u', 'U', 'e', 'E'):
+                    if active_tab == "RADAR":
+                        active_filter = "ALL" if active_filter == "NFT_SURGE" else "NFT_SURGE"
+                        status_msg = f"🔍 Filter: {'🦋 NFT SURGE (Element Spike)' if active_filter == 'NFT_SURGE' else 'ALL PROJECTS'}"
+                        status_timer = time.time()
+                        selected_idx = 0
+                        needs_update = True
                 elif key in ('f', 'F'):
                     if active_tab == "RADAR":
                         active_filter = "ALL" if active_filter == "FREE" else "FREE"
@@ -4087,7 +5114,7 @@ def run_live_monitor(rpc: BscRpcClient, wallet: str, plain: bool = False):
                         needs_update = True
                 elif key in ('o', 'O'):
                     if active_tab == "RADAR":
-                        modes = ["NEWEST", "SMART", "HEAT", "VELOCITY", "PROGRESS", "SAFETY"]
+                        modes = ["NEWEST", "PROFIT", "SMART", "HEAT", "VELOCITY", "PROGRESS", "SAFETY"]
                         cur_i = modes.index(sort_mode) if sort_mode in modes else 0
                         sort_mode = modes[(cur_i + 1) % len(modes)]
                         status_msg = f"🔀 Sorting by: {sort_mode}"
@@ -4265,16 +5292,61 @@ def run_live_monitor(rpc: BscRpcClient, wallet: str, plain: bool = False):
                         status_timer = time.time()
                         needs_update = True
                 elif key in ('x', 'X'):
-                    cur_proj = smart_history[smart_selected_idx] if (active_tab == "SMART" and smart_history and 0 <= smart_selected_idx < len(smart_history)) else (disp_history[selected_idx] if (disp_history and 0 <= selected_idx < len(disp_history)) else None)
-                    if cur_proj:
-                        x_url = cur_proj.get("twitter")
-                        if x_url:
-                            subprocess.Popen(["open", x_url])
-                            status_msg = f"🐦 Opened X / Twitter in browser: {x_url}"
-                        else:
-                            status_msg = "⚠️ No X / Twitter account found for this project."
-                        status_timer = time.time()
-                        needs_update = True
+                    if active_tab == "PORTFOLIO":
+                        p_items = portfolio_data.get("items", []) if portfolio_data else []
+                        if p_items and 0 <= port_selected_idx < len(p_items):
+                            sel_p = p_items[port_selected_idx]
+                            c_addr = sel_p.get("contract", "")
+                            if c_addr == "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee":
+                                status_msg = "⛽ BNB is your operational gas reserve. Keep it for transaction fees."
+                            elif sel_p.get("is_nft"):
+                                m_url = sel_p.get("market_url") or get_element_market_url(sel_p.get("name", ""), c_addr)
+                                subprocess.Popen(["open", m_url])
+                                status_msg = "🛒 Opened Element Market collection to list NFT!"
+                            elif sel_p.get("balance", 0) <= 0:
+                                status_msg = "⚠️ Zero balance to exit."
+                            else:
+                                raw_bal = int(sel_p.get("raw_balance") or sel_p.get("balance") or 1)
+                                calldata = build_pancakeswap_sell_calldata(c_addr, raw_bal, wallet)
+                                status_msg = f"🔍 Simulating PancakeSwap V2 sell for {sel_p.get('name')}..."
+                                live.update(build_interactive_dashboard(history, selected_idx, latest_block[0], latest_tx_count[0], wallet, status_msg, show_modal, active_filter=active_filter, sort_mode=sort_mode, snipe_confirm=snipe_confirm, active_tab=active_tab, portfolio_data=portfolio_data, port_selected_idx=port_selected_idx, smart_selected_idx=smart_selected_idx, sell_confirm=None))
+                                prev = preview_snipe_call(wallet, PANCAKE_ROUTER_V2, "0", calldata)
+                                if prev.get("success"):
+                                    data = prev.get("data", {})
+                                    req_id = data.get("requestId")
+                                    sell_confirm = {
+                                        "asset": sel_p,
+                                        "requestId": req_id,
+                                        "calldata": calldata,
+                                        "preview_data": data
+                                    }
+                                    status_msg = "🎯 Review sell confirmation below. Press [Y] to confirm or [N] to cancel."
+                                else:
+                                    err = prev.get("error", {}).get("message", "Simulation failed")
+                                    req_id = prev.get("data", {}).get("requestId") if prev.get("data") else None
+                                    if req_id:
+                                        sell_confirm = {
+                                            "asset": sel_p,
+                                            "requestId": req_id,
+                                            "calldata": calldata,
+                                            "preview_data": prev.get("data", {})
+                                        }
+                                        status_msg = "🎯 Review sell confirmation below. Press [Y] to confirm or [N] to cancel."
+                                    else:
+                                        status_msg = f"❌ Sell Preview Failed: {err[:60]}"
+                            status_timer = time.time()
+                            needs_update = True
+                    else:
+                        cur_proj = smart_history[smart_selected_idx] if (active_tab == "SMART" and smart_history and 0 <= smart_selected_idx < len(smart_history)) else (disp_history[selected_idx] if (disp_history and 0 <= selected_idx < len(disp_history)) else None)
+                        if cur_proj:
+                            x_url = cur_proj.get("twitter")
+                            if x_url:
+                                subprocess.Popen(["open", x_url])
+                                status_msg = f"🐦 Opened X / Twitter in browser: {x_url}"
+                            else:
+                                status_msg = "⚠️ No X / Twitter account found for this project."
+                            status_timer = time.time()
+                            needs_update = True
                 elif key in ('m', 'M'):
                     if active_tab == "PORTFOLIO":
                         p_items = portfolio_data.get("items", [])
@@ -4317,7 +5389,7 @@ def run_live_monitor(rpc: BscRpcClient, wallet: str, plain: bool = False):
                     needs_update = True
 
                 if needs_update or (now - last_render_time >= 0.4):
-                    live.update(build_interactive_dashboard(history, selected_idx, latest_block[0], latest_tx_count[0], wallet, status_msg, show_modal, active_filter=active_filter, sort_mode=sort_mode, snipe_confirm=snipe_confirm, active_tab=active_tab, portfolio_data=portfolio_data, port_selected_idx=port_selected_idx, smart_selected_idx=smart_selected_idx))
+                    live.update(build_interactive_dashboard(history, selected_idx, latest_block[0], latest_tx_count[0], wallet, status_msg, show_modal, active_filter=active_filter, sort_mode=sort_mode, snipe_confirm=snipe_confirm, active_tab=active_tab, portfolio_data=portfolio_data, port_selected_idx=port_selected_idx, smart_selected_idx=smart_selected_idx, sell_confirm=sell_confirm))
                     last_render_time = now
                     needs_update = False
     finally:
@@ -4351,10 +5423,11 @@ def run_explore_mode(rpc: BscRpcClient, wallet: str):
     needs_update = True
     last_render_time = time.time()
     snipe_confirm = None
+    sell_confirm = None
 
     try:
         with Live(
-            build_interactive_dashboard(history, selected_idx, curr_b, 0, wallet, status_msg, show_modal, active_filter=active_filter, sort_mode=sort_mode, snipe_confirm=snipe_confirm, active_tab=active_tab, portfolio_data=portfolio_data, port_selected_idx=port_selected_idx, smart_selected_idx=smart_selected_idx),
+            build_interactive_dashboard(history, selected_idx, curr_b, 0, wallet, status_msg, show_modal, active_filter=active_filter, sort_mode=sort_mode, snipe_confirm=snipe_confirm, active_tab=active_tab, portfolio_data=portfolio_data, port_selected_idx=port_selected_idx, smart_selected_idx=smart_selected_idx, sell_confirm=sell_confirm),
             refresh_per_second=6,
             screen=True
         ) as live:
@@ -4364,11 +5437,41 @@ def run_explore_mode(rpc: BscRpcClient, wallet: str):
                 smart_history = [x for x in history if not is_system_infra(x) and (x.get("smart_wallets") or x.get("smart_minters"))]
                 smart_history.sort(key=lambda x: len(x.get("smart_wallets") or x.get("smart_minters") or []), reverse=True)
 
+                # Active Exit / Take-Profit Sell Confirmation Gate
+                if sell_confirm:
+                    if key in ('y', 'Y', 'ENTER', '\r', '\n'):
+                        status_msg = "⏳ Broadcasting Take-Profit Sell on BNB Chain via Binance Agentic Wallet..."
+                        live.update(build_interactive_dashboard(history, selected_idx, curr_b, 0, wallet, status_msg, show_modal, active_filter=active_filter, sort_mode=sort_mode, snipe_confirm=snipe_confirm, active_tab=active_tab, portfolio_data=portfolio_data, port_selected_idx=port_selected_idx, smart_selected_idx=smart_selected_idx, sell_confirm=sell_confirm))
+                        req_id = sell_confirm.get("requestId")
+                        if req_id:
+                            res = execute_snipe_call(req_id)
+                        else:
+                            res = {"success": False, "error": {"message": "Missing requestId"}}
+                        if res.get("success"):
+                            tx_h = res.get("data", {}).get("txHash", "")
+                            status_msg = f"🎉 TAKE-PROFIT SUCCESSFUL! Tx: {tx_h[:10]}...{tx_h[-8:]} Swapped to BNB!"
+                            refresh_portfolio(rpc, history, wallet)
+                            portfolio_data = build_portfolio_data(rpc, wallet, history)
+                            notify_alert()
+                        else:
+                            err = res.get("error", {}).get("message", "Execution failed")
+                            status_msg = f"❌ Sell Failed: {err[:60]}"
+                        sell_confirm = None
+                        status_timer = time.time()
+                        needs_update = True
+                        continue
+                    elif key in ('n', 'N', 'ESC', 'q', 'Q'):
+                        sell_confirm = None
+                        status_msg = "🚫 Exit sell cancelled by user."
+                        status_timer = time.time()
+                        needs_update = True
+                        continue
+
                 # Active Sniper Confirmation Gate
                 if snipe_confirm:
                     if key in ('y', 'Y', 'ENTER', '\r', '\n'):
                         status_msg = "⏳ Broadcasting snipe transaction on BNB Chain..."
-                        live.update(build_interactive_dashboard(history, selected_idx, curr_b, 0, wallet, status_msg, show_modal, active_filter=active_filter, sort_mode=sort_mode, snipe_confirm=snipe_confirm, active_tab=active_tab, portfolio_data=portfolio_data, port_selected_idx=port_selected_idx, smart_selected_idx=smart_selected_idx))
+                        live.update(build_interactive_dashboard(history, selected_idx, curr_b, 0, wallet, status_msg, show_modal, active_filter=active_filter, sort_mode=sort_mode, snipe_confirm=snipe_confirm, active_tab=active_tab, portfolio_data=portfolio_data, port_selected_idx=port_selected_idx, smart_selected_idx=smart_selected_idx, sell_confirm=sell_confirm))
                         req_id = snipe_confirm.get("requestId")
                         res = execute_snipe_call(req_id)
                         if res.get("success"):
@@ -4406,7 +5509,7 @@ def run_explore_mode(rpc: BscRpcClient, wallet: str):
                     if show_modal:
                         show_modal = False
                         needs_update = True
-                elif key in ('TAB', 'p', 'P'):
+                elif key == 'TAB':
                     if not show_modal:
                         tabs = ["RADAR", "SMART", "PORTFOLIO"]
                         cur_tab_idx = tabs.index(active_tab) if active_tab in tabs else 0
@@ -4414,6 +5517,13 @@ def run_explore_mode(rpc: BscRpcClient, wallet: str):
                         tab_names = {"RADAR": "📡 Live Radar", "SMART": "🧠 Smart Money Alpha", "PORTFOLIO": "🎒 My Portfolio"}
                         status_msg = f"Switched to {tab_names.get(active_tab, active_tab)}"
                         status_timer = time.time()
+                        needs_update = True
+                elif key in ('p', 'P'):
+                    if active_tab == "RADAR":
+                        active_filter = "ALL" if active_filter in ("PROXY", "CLONE") else "PROXY"
+                        status_msg = f"🔍 Filter: {'🧩 PROXY CLONES ONLY' if active_filter == 'PROXY' else 'ALL PROJECTS'}"
+                        status_timer = time.time()
+                        selected_idx = 0
                         needs_update = True
                 elif key in ('s', 'S'):
                     if active_tab == "PORTFOLIO":
@@ -4480,6 +5590,20 @@ def run_explore_mode(rpc: BscRpcClient, wallet: str):
                             status_msg = f"⚠️ Snipe simulation failed: {err[:60]}"
                             status_timer = time.time()
                             needs_update = True
+                elif key in ('k', 'K', 'v', 'V'):
+                    if active_tab == "RADAR":
+                        active_filter = "ALL" if active_filter == "SNIPER_READY" else "SNIPER_READY"
+                        status_msg = f"🔍 Filter: {'🎯 SNIPER READY (60%+ & ANTI-RUG)' if active_filter == 'SNIPER_READY' else 'ALL PROJECTS'}"
+                        status_timer = time.time()
+                        selected_idx = 0
+                        needs_update = True
+                elif key in ('u', 'U', 'e', 'E'):
+                    if active_tab == "RADAR":
+                        active_filter = "ALL" if active_filter == "NFT_SURGE" else "NFT_SURGE"
+                        status_msg = f"🔍 Filter: {'🦋 NFT SURGE (Element Spike)' if active_filter == 'NFT_SURGE' else 'ALL PROJECTS'}"
+                        status_timer = time.time()
+                        selected_idx = 0
+                        needs_update = True
                 elif key in ('f', 'F'):
                     if active_tab == "RADAR":
                         active_filter = "ALL" if active_filter == "FREE" else "FREE"
@@ -4517,7 +5641,7 @@ def run_explore_mode(rpc: BscRpcClient, wallet: str):
                         needs_update = True
                 elif key in ('o', 'O'):
                     if active_tab == "RADAR":
-                        modes = ["NEWEST", "SMART", "HEAT", "VELOCITY", "PROGRESS", "SAFETY"]
+                        modes = ["NEWEST", "PROFIT", "SMART", "HEAT", "VELOCITY", "PROGRESS", "SAFETY"]
                         cur_i = modes.index(sort_mode) if sort_mode in modes else 0
                         sort_mode = modes[(cur_i + 1) % len(modes)]
                         status_msg = f"🔀 Sorting by: {sort_mode}"
@@ -4683,16 +5807,61 @@ def run_explore_mode(rpc: BscRpcClient, wallet: str):
                         status_timer = time.time()
                         needs_update = True
                 elif key in ('x', 'X'):
-                    cur_proj = smart_history[smart_selected_idx] if (active_tab == "SMART" and smart_history and 0 <= smart_selected_idx < len(smart_history)) else (disp_history[selected_idx] if (disp_history and 0 <= selected_idx < len(disp_history)) else None)
-                    if cur_proj:
-                        x_url = cur_proj.get("twitter")
-                        if x_url:
-                            subprocess.Popen(["open", x_url])
-                            status_msg = f"🐦 Opened X / Twitter in browser: {x_url}"
-                        else:
-                            status_msg = "⚠️ No X / Twitter account found for this project."
-                        status_timer = time.time()
-                        needs_update = True
+                    if active_tab == "PORTFOLIO":
+                        p_items = portfolio_data.get("items", []) if portfolio_data else []
+                        if p_items and 0 <= port_selected_idx < len(p_items):
+                            sel_p = p_items[port_selected_idx]
+                            c_addr = sel_p.get("contract", "")
+                            if c_addr == "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee":
+                                status_msg = "⛽ BNB is your operational gas reserve. Keep it for transaction fees."
+                            elif sel_p.get("is_nft"):
+                                m_url = sel_p.get("market_url") or get_element_market_url(sel_p.get("name", ""), c_addr)
+                                subprocess.Popen(["open", m_url])
+                                status_msg = "🛒 Opened Element Market collection to list NFT!"
+                            elif sel_p.get("balance", 0) <= 0:
+                                status_msg = "⚠️ Zero balance to exit."
+                            else:
+                                raw_bal = int(sel_p.get("raw_balance") or sel_p.get("balance") or 1)
+                                calldata = build_pancakeswap_sell_calldata(c_addr, raw_bal, wallet)
+                                status_msg = f"🔍 Simulating PancakeSwap V2 sell for {sel_p.get('name')}..."
+                                live.update(build_interactive_dashboard(history, selected_idx, latest_block[0], latest_tx_count[0], wallet, status_msg, show_modal, active_filter=active_filter, sort_mode=sort_mode, snipe_confirm=snipe_confirm, active_tab=active_tab, portfolio_data=portfolio_data, port_selected_idx=port_selected_idx, smart_selected_idx=smart_selected_idx, sell_confirm=None))
+                                prev = preview_snipe_call(wallet, PANCAKE_ROUTER_V2, "0", calldata)
+                                if prev.get("success"):
+                                    data = prev.get("data", {})
+                                    req_id = data.get("requestId")
+                                    sell_confirm = {
+                                        "asset": sel_p,
+                                        "requestId": req_id,
+                                        "calldata": calldata,
+                                        "preview_data": data
+                                    }
+                                    status_msg = "🎯 Review sell confirmation below. Press [Y] to confirm or [N] to cancel."
+                                else:
+                                    err = prev.get("error", {}).get("message", "Simulation failed")
+                                    req_id = prev.get("data", {}).get("requestId") if prev.get("data") else None
+                                    if req_id:
+                                        sell_confirm = {
+                                            "asset": sel_p,
+                                            "requestId": req_id,
+                                            "calldata": calldata,
+                                            "preview_data": prev.get("data", {})
+                                        }
+                                        status_msg = "🎯 Review sell confirmation below. Press [Y] to confirm or [N] to cancel."
+                                    else:
+                                        status_msg = f"❌ Sell Preview Failed: {err[:60]}"
+                            status_timer = time.time()
+                            needs_update = True
+                    else:
+                        cur_proj = smart_history[smart_selected_idx] if (active_tab == "SMART" and smart_history and 0 <= smart_selected_idx < len(smart_history)) else (disp_history[selected_idx] if (disp_history and 0 <= selected_idx < len(disp_history)) else None)
+                        if cur_proj:
+                            x_url = cur_proj.get("twitter")
+                            if x_url:
+                                subprocess.Popen(["open", x_url])
+                                status_msg = f"🐦 Opened X / Twitter in browser: {x_url}"
+                            else:
+                                status_msg = "⚠️ No X / Twitter account found for this project."
+                            status_timer = time.time()
+                            needs_update = True
                 elif key in ('m', 'M'):
                     if active_tab == "PORTFOLIO":
                         p_items = portfolio_data.get("items", [])
@@ -4731,7 +5900,7 @@ def run_explore_mode(rpc: BscRpcClient, wallet: str):
                     needs_update = True
 
                 if needs_update or (now - last_render_time >= 0.5):
-                    live.update(build_interactive_dashboard(history, selected_idx, curr_b, 0, wallet, status_msg, show_modal, active_filter=active_filter, sort_mode=sort_mode, snipe_confirm=snipe_confirm, active_tab=active_tab, portfolio_data=portfolio_data, port_selected_idx=port_selected_idx, smart_selected_idx=smart_selected_idx))
+                    live.update(build_interactive_dashboard(history, selected_idx, curr_b, 0, wallet, status_msg, show_modal, active_filter=active_filter, sort_mode=sort_mode, snipe_confirm=snipe_confirm, active_tab=active_tab, portfolio_data=portfolio_data, port_selected_idx=port_selected_idx, smart_selected_idx=smart_selected_idx, sell_confirm=sell_confirm))
                     last_render_time = now
                     needs_update = False
     finally:
@@ -4757,12 +5926,15 @@ def inspect_contract(rpc: BscRpcClient, contract_addr: str, wallet: str):
     print_banner()
     print(f"[*] Inspecting Contract: {C_CYAN}{contract_addr}{C_RESET}\n")
     code = rpc.get_code(contract_addr)
+    full_code, proxy_type, impl_addr = resolve_full_bytecode(rpc, contract_addr, code)
     if not code or code == "0x":
         print(f"{C_RED}[!] Address has no bytecode on BSC.{C_RESET}")
         return
 
-    links_to_registry = AGENT_ID_BYTES in code
+    links_to_registry = AGENT_ID_BYTES in (full_code or code).lower()
     print(f"• {C_BOLD}References .ai Agent ID Registry?{C_RESET} {C_GREEN if links_to_registry else C_RED}{links_to_registry}{C_RESET}")
+    if proxy_type:
+        print(f"• {C_BOLD}Proxy / Clone Pattern:{C_RESET} {C_CYAN}🧩 {proxy_type}{C_RESET} (Master: {impl_addr})")
 
     details = analyze_contract(rpc, contract_addr, wallet)
     cls = details["classification"]

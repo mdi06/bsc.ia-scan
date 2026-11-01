@@ -14,6 +14,7 @@ import time
 import json
 import re
 import threading
+import concurrent.futures
 import urllib.request
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 
@@ -202,7 +203,16 @@ def run_discovery_loop():
                                         "signals": mkt.get("signals", [f"Discovered via smart wallet {aid}"]),
                                         "detected_at": time.strftime("%Y-%m-%d %H:%M:%S"),
                                         "smart_wallets": [aid],
-                                        "smart_minters": [aid]
+                                        "smart_minters": [aid],
+                                        "has_refund": det.get("has_refund", False),
+                                        "security": mkt.get("security", {}),
+                                        "risk_level": mkt.get("risk_level", "SAFE"),
+                                        "risk_badge": mkt.get("risk_badge", "🟢 Clean"),
+                                        "risk_flags": mkt.get("risk_flags", []),
+                                        "sniper_ready": mkt.get("sniper_ready", False),
+                                        "sniper_status": mkt.get("sniper_status", "TRACKING"),
+                                        "sniper_badge": mkt.get("sniper_badge", "⏳ Tracking"),
+                                        "sniper_checklist": mkt.get("sniper_checklist", [])
                                     }
                                     history.insert(0, new_entry)
                                     monitor.save_history(history)
@@ -221,7 +231,8 @@ def run_discovery_loop():
                                         log_addr = log.get("address")
                                         if log_addr:
                                             code = rpc.get_code(log_addr)
-                                            if monitor.AGENT_ID_BYTES in (code or "").lower():
+                                            full_c, _, _ = monitor.resolve_full_bytecode(rpc, log_addr, code)
+                                            if monitor.AGENT_ID_BYTES in (full_c or code or "").lower():
                                                 dep_addr = log_addr
                                                 break
                                 if dep_addr and not any(x.get("contract", "").lower() == dep_addr.lower() for x in history):
@@ -259,7 +270,21 @@ def run_discovery_loop():
                                         "pair_url": mkt.get("pair_url", ""),
                                         "mint_calldata": det.get("mint_calldata", "0x1249c58b"),
                                         "signals": mkt.get("signals", ["Block-0 Agent ID Deployment"]),
-                                        "detected_at": time.strftime("%Y-%m-%d %H:%M:%S")
+                                        "detected_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+                                        "has_refund": det.get("has_refund", False),
+                                        "security": mkt.get("security", {}),
+                                        "risk_level": mkt.get("risk_level", "SAFE"),
+                                        "risk_badge": mkt.get("risk_badge", "🟢 Clean"),
+                                        "risk_flags": mkt.get("risk_flags", []),
+                                        "sniper_ready": mkt.get("sniper_ready", False),
+                                        "sniper_status": mkt.get("sniper_status", "TRACKING"),
+                                        "sniper_badge": mkt.get("sniper_badge", "⏳ Tracking"),
+                                        "sniper_checklist": mkt.get("sniper_checklist", []),
+                                        "is_proxy_clone": det.get("is_proxy_clone", False),
+                                        "proxy_type": det.get("proxy_type"),
+                                        "master_implementation": det.get("master_implementation"),
+                                        "is_factory": det.get("is_factory", False),
+                                        "factory_badge": det.get("factory_badge")
                                     }
                                     with history_lock:
                                         history = monitor.load_history()
@@ -280,6 +305,185 @@ def run_discovery_loop():
         except Exception as e:
             print(f"[⚠️ Discovery Loop Error] {e}")
             time.sleep(2)
+
+
+def fast_sweep_contract(rpc: monitor.BscRpcClient, item: dict) -> tuple:
+    """
+    Lightweight on-chain progress fetcher (Option B):
+    - Fast multicall to read totalSupply() / totalMinted() / sold()
+    - Uses discovered sold_sel cache to avoid checking multiple selectors
+    - Returns (did_change: bool, new_minted_value: Optional[float])
+    """
+    c = item.get("contract")
+    if not c:
+        return False, None
+    std = str(item.get("standard") or "")
+    is_nft = "NFT" in std or "721" in std or "1155" in std or bool((item.get("classification") or {}).get("is_nft"))
+    is_token = ("BEP-20" in std or "Fair-Mint" in std) and not is_nft
+
+    cur_tm = item.get("total_minted")
+    new_tm = None
+
+    if is_nft:
+        # Fast NFT supply check
+        selectors = [item.get("sold_sel")] if item.get("sold_sel") else ["0x18160ddd", "0x449a52f8", "0xd1e42c2d"]
+        for sel in selectors:
+            if not sel:
+                continue
+            res = rpc.call_contract(c, sel)
+            if res and len(res) >= 66:
+                try:
+                    val = int(res[:66], 16)
+                    new_tm = val
+                    if not item.get("sold_sel"):
+                        item["sold_sel"] = sel
+                    break
+                except Exception:
+                    pass
+    elif is_token:
+        # Fast Fair-Mint bonding curve check
+        selectors = [item.get("sold_sel")] if item.get("sold_sel") else ["0x06661cb4", "0xa2309ff8", "0x4c0a5d21"]
+        for sel in selectors:
+            if not sel:
+                continue
+            res = rpc.call_contract(c, sel)
+            if res and len(res) >= 66:
+                try:
+                    raw_val = int(res[:66], 16)
+                    dec = item.get("decimals")
+                    if dec is None:
+                        m_dec = re.search(r"(\d+)\s*decimals?", std, re.I)
+                        dec = int(m_dec.group(1)) if m_dec else 18
+                    if raw_val > 10**12:
+                        raw_val = raw_val / (10 ** dec)
+                    new_tm = raw_val
+                    if not item.get("sold_sel"):
+                        item["sold_sel"] = sel
+                    break
+                except Exception:
+                    pass
+
+    item["sweep_at"] = time.time()
+    if new_tm is not None and new_tm != cur_tm and new_tm > 0:
+        item["total_minted"] = new_tm
+        return True, new_tm
+    return False, cur_tm
+
+
+def run_fast_track_progress_sweeper_loop():
+    """
+    Option B: High-Frequency Tiered Progress Sweeper (runs continuously every 15 seconds)
+    - Lane 1 (Fast-Track): warming/surging contracts (progress >= 45% or holders >= 50, < 100% sold out).
+    - Lane 2 (Cold Sweeper): remaining uncompleted contracts.
+    - Concurrent parallel workers (6 threads) check on-chain progress in ~1.5s.
+    - Escalates contracts crossing 45% -> 60% -> 100%.
+    - If a contract crosses 60% and becomes newly sniper-ready, logs a high-priority alert and persists immediately!
+    - Thread-safe persistence to history.json.
+    """
+    print("[⚡ Fast-Track Sweeper] Initializing 15-second Tiered Progress Sweeper...", flush=True)
+    time.sleep(3)
+    rpc = monitor.BscRpcClient(monitor.RPC_ENDPOINTS)
+
+    while True:
+        try:
+            with history_lock:
+                history = monitor.load_history()
+
+            if not history:
+                time.sleep(15)
+                continue
+
+            lane1 = []
+            lane2 = []
+
+            for it in history:
+                if monitor.is_system_infra(it) or it.get("is_paused") is True:
+                    continue
+                c = it.get("contract")
+                if not c:
+                    continue
+                ms = it.get("max_supply")
+                if ms is not None:
+                    try:
+                        if float(ms) >= 1e25 or float(ms) >= 2**128:
+                            ms = None
+                            it["max_supply"] = None
+                    except Exception:
+                        pass
+                tm = it.get("total_minted") or 0
+                std = str(it.get("standard") or "")
+                is_nft = "NFT" in std or "721" in std or "1155" in std
+
+                if is_nft:
+                    prog = (tm / ms) if (ms and ms > 0) else 0.0
+                else:
+                    prog = (tm / ms) if (ms and ms > 0 and ms != tm) else 0.0
+
+                if prog >= 0.999 or (is_nft and ms and tm >= ms):
+                    continue
+
+                holders = int(it.get("holders", 0) or 0)
+                if prog >= 0.45 or holders >= 50:
+                    lane1.append(it)
+                else:
+                    lane2.append(it)
+
+            # Prioritize least-recently swept
+            lane1.sort(key=lambda x: x.get("sweep_at", 0))
+            lane2.sort(key=lambda x: x.get("sweep_at", 0))
+
+            # Batch top 30 fast-track items + top 20 cold items
+            candidates = lane1[:30] + lane2[:20]
+
+            if candidates:
+                updated_count = 0
+                new_ready_count = 0
+
+                def worker(it):
+                    try:
+                        return fast_sweep_contract(rpc, it)
+                    except Exception:
+                        return False, None
+
+                with concurrent.futures.ThreadPoolExecutor(max_workers=6) as executor:
+                    results = list(executor.map(worker, candidates))
+
+                for it, (changed, new_val) in zip(candidates, results):
+                    if changed:
+                        updated_count += 1
+                        ms = it.get("max_supply")
+                if ms is not None:
+                    try:
+                        if float(ms) >= 1e25 or float(ms) >= 2**128:
+                            ms = None
+                            it["max_supply"] = None
+                    except Exception:
+                        pass
+                        tm = it.get("total_minted") or 0
+                        pct = (tm / ms) * 100.0 if (ms and ms > 0) else 0.0
+
+                        was_ready = it.get("sniper_ready", False)
+                        s_eval = monitor.evaluate_sniper_ready(it)
+                        it["sniper_ready"] = s_eval["is_ready"]
+                        it["sniper_status"] = s_eval["status"]
+                        it["sniper_badge"] = s_eval["badge"]
+                        it["sniper_checklist"] = s_eval["checklist"]
+
+                        if s_eval["is_ready"] and not was_ready:
+                            new_ready_count += 1
+                            it["is_new_snipe_ready"] = True
+                            print(f"\n[🎯 FAST-TRACK TRIGGER] {it.get('name')} surged to {pct:.1f}% ({tm}/{ms}) ➔ SNIPER READY!", flush=True)
+
+                if updated_count > 0:
+                    with history_lock:
+                        monitor.save_history(history)
+                    if new_ready_count > 0:
+                        print(f"[⚡ Fast-Track Sweeper] Persisted {updated_count} updates ({new_ready_count} newly SNIPER READY)!", flush=True)
+
+        except Exception as e:
+            print(f"[⚠️ Fast-Track Sweeper Error] {e}", flush=True)
+
+        time.sleep(15)
 
 
 def run_market_dynamics_updater_loop():
@@ -463,7 +667,17 @@ def run_market_dynamics_updater_loop():
                 else:
                     item["rating"] = "❄️ COLD / DORMANT"
 
-            # 5. Thread-safe Atomic Persistence
+                # 5. Dynamic Sniper Ready Conviction Evaluation
+                s_eval = monitor.evaluate_sniper_ready(item)
+                item["sniper_ready"] = s_eval["is_ready"]
+                item["sniper_status"] = s_eval["status"]
+                item["sniper_badge"] = s_eval["badge"]
+                item["sniper_checklist"] = s_eval["checklist"]
+
+                # 6. Persistent Post-Mint Profit & ATH Metrics Tracking
+                monitor.update_post_mint_profit_metrics(item, bnb_price)
+
+            # 7. Thread-safe Atomic Persistence
             with history_lock:
                 monitor.save_history(history)
 
@@ -474,6 +688,192 @@ def run_market_dynamics_updater_loop():
 
         # Polling frequency: 60 seconds
         time.sleep(60)
+
+
+def run_element_nft_volume_sweeper_loop():
+    """
+    Option D: Element Market NFT Volume & Spike Detector (runs continuously every 60 seconds)
+    - Directly adapted from watch.mjs nftVolWatch()
+    - Scans ELEMENT_EX for ERC721SellOrderFilled events over recent 15,000 blocks (~12h on BSC)
+    - Correlates with tracked NFT collections and detects real paid trades in BNB/WBNB
+    - Evaluates volume surge criteria:
+      * Held in wallet (user_balance > 0): sales >= 3 AND vol > 0 (or 2x spike vs previous check)
+      * Monitored collections: sales >= 5 OR vol >= 0.5 BNB (or 2x spike with >= 5 sales)
+    - Updates secondary_sales_count, secondary_vol_bnb, floor_price_bnb, high_price_bnb,
+      secondary_transfers, is_nft_surge, and nft_surge_badge
+    - Thread-safe atomic persistence to history.json
+    - Logs alert for newly surging NFT collections: 🦋 SURGE DETECTED!
+    """
+    print("[🦋 Element NFT Sweeper] Initializing 60-second Element Volume Detector...", flush=True)
+    time.sleep(4)
+    rpc = monitor.BscRpcClient(monitor.RPC_ENDPOINTS)
+    wallet = monitor.DEFAULT_WALLET
+
+    while True:
+        try:
+            with history_lock:
+                history = monitor.load_history()
+
+            if history:
+                res_map = monitor.scan_element_nft_volume(rpc, history, lookback_blocks=15000, wallet_addr=wallet)
+                surge_cnt = sum(1 for v in res_map.values() if v.get("is_nft_surge"))
+                active_sales = sum(1 for v in res_map.values() if v.get("sales_count", 0) > 0)
+
+                # Update post-mint profit & ATH high-water mark for collections trading on secondary
+                bnb_p = monitor.get_bnb_price_usd(rpc)
+                for it in history:
+                    if (it.get("contract") or "").lower() in res_map:
+                        monitor.update_post_mint_profit_metrics(it, bnb_price=bnb_p)
+
+                with history_lock:
+                    monitor.save_history(history)
+
+                if surge_cnt > 0:
+                    surging_names = [it.get("name") for it in history if it.get("is_nft_surge")]
+                    print(f"[🦋 Element NFT Sweeper] {active_sales} collections trading on Element. {surge_cnt} SURGING: {', '.join(surging_names[:5])}", flush=True)
+
+        except Exception as e:
+            print(f"[⚠️ Element NFT Sweeper Error] {e}", flush=True)
+
+        time.sleep(60)
+
+
+def run_proxy_factory_watcher_loop():
+    """
+    Option E: Stealth Factory & EIP-1167 / Beacon Proxy Clone Watcher (runs continuously every 20s)
+    - Monitors VAULT_FACTORIES (Flap Vault Factory 0x90497450f2a706f1951b5bdda52b4e5d16f34c06, etc.)
+      for creation events (T_BEACON_UP, T_UPGRADED, T_VAULT_CREATED).
+    - Unwraps EIP-1167 minimal proxies, EIP-1967 storage slots, and Beacon implementations.
+    - If the implementation or clone references the Agent ID registry or was spawned by a vault factory,
+      it captures the drop at Block-0 and integrates it into history.json with full security analysis.
+    """
+    print("[🧩 Proxy Factory Watcher] Initializing Stealth Factory & Proxy Clone Watcher...", flush=True)
+    time.sleep(5)
+    rpc = monitor.BscRpcClient(monitor.RPC_ENDPOINTS)
+    wallet = monitor.DEFAULT_WALLET
+
+    last_block = 0
+    try:
+        last_block = rpc.get_block_number() - 100
+    except Exception:
+        last_block = 0
+
+    while True:
+        try:
+            curr_block = rpc.get_block_number()
+            if curr_block > last_block:
+                from_b = max(curr_block - 200, last_block + 1)
+                to_b = curr_block
+
+                for factory_addr in monitor.VAULT_FACTORIES:
+                    logs_filter = {
+                        "fromBlock": hex(from_b),
+                        "toBlock": hex(to_b),
+                        "address": factory_addr
+                    }
+                    logs = rpc.call("eth_getLogs", [logs_filter])
+                    if logs and isinstance(logs, list):
+                        for log in logs:
+                            tx_h = log.get("transactionHash")
+                            if not tx_h:
+                                continue
+                            rcpt = rpc.get_receipt(tx_h)
+                            if not rcpt or int(rcpt.get("status", "0"), 16) != 1:
+                                continue
+
+                            candidates = set()
+                            if rcpt.get("contractAddress"):
+                                candidates.add(rcpt.get("contractAddress").lower())
+                            for l in rcpt.get("logs", []):
+                                if l.get("address"):
+                                    candidates.add(l.get("address").lower())
+                                for top in l.get("topics", [])[1:]:
+                                    if len(top) == 66 and top.startswith("0x000000000000000000000000"):
+                                        c_cand = "0x" + top[26:].lower()
+                                        candidates.add(c_cand)
+
+                            with history_lock:
+                                history = monitor.load_history()
+
+                            for cand in candidates:
+                                if cand in [x.get("contract", "").lower() for x in history]:
+                                    continue
+                                if cand in [monitor.WBNB_ADDRESS.lower(), monitor.USDT_ADDRESS.lower(), monitor.PANCAKE_FACTORY_V2.lower(), factory_addr.lower()]:
+                                    continue
+
+                                cand_code = rpc.get_code(cand)
+                                if not cand_code or len(cand_code) < 10:
+                                    continue
+
+                                full_code, proxy_type, impl_addr = monitor.resolve_full_bytecode(rpc, cand, cand_code)
+                                is_fac, fac_badge = monitor.is_launchpad_factory(full_code, cand)
+
+                                if monitor.AGENT_ID_BYTES in full_code.lower() or proxy_type is not None:
+                                    det = monitor.analyze_contract(rpc, cand, wallet)
+                                    cls = det.get("classification", {})
+                                    if monitor.is_system_infra({"contract": cand, "classification": cls, "name": det.get("name"), "symbol": det.get("symbol")}):
+                                        continue
+
+                                    mkt = monitor.analyze_market_interest(rpc, cand, rcpt.get("from"), det, history=history)
+                                    new_entry = {
+                                        "block": int(log.get("blockNumber", hex(curr_block)), 16),
+                                        "contract": cand,
+                                        "deployer": rcpt.get("from", ""),
+                                        "tx_hash": tx_h,
+                                        "name": det.get("name") or "Proxy Drop",
+                                        "symbol": det.get("symbol") or "",
+                                        "standard": cls.get("standard", ""),
+                                        "icon": cls.get("icon", ""),
+                                        "is_paused": det.get("is_paused"),
+                                        "has_free_mint": det.get("has_free_mint"),
+                                        "mint_price_str": det.get("mint_price_str", "TBD"),
+                                        "mint_price_bnb": det.get("mint_price_bnb", 0.0),
+                                        "mint_value_wei": det.get("mint_value_wei", "0"),
+                                        "max_supply": det.get("max_supply"),
+                                        "total_minted": det.get("total_minted", 0),
+                                        "score": mkt.get("score", 0),
+                                        "rating": mkt.get("rating", "N/A"),
+                                        "lp_usd": mkt.get("lp_usd", 0),
+                                        "lp_wbnb": mkt.get("lp_wbnb", 0),
+                                        "token_symbol": mkt.get("token_symbol", ""),
+                                        "token_price_usd": mkt.get("token_price_usd", 0),
+                                        "holders": mkt.get("holders", 0),
+                                        "buys_24h": mkt.get("buys_24h", 0),
+                                        "buys_1h": mkt.get("buys_1h", 0),
+                                        "sells_24h": mkt.get("sells_24h", 0),
+                                        "volume_24h": mkt.get("volume_24h", 0.0),
+                                        "market_url": det.get("market_url", ""),
+                                        "pair_url": mkt.get("pair_url", ""),
+                                        "mint_calldata": det.get("mint_calldata", "0x1249c58b"),
+                                        "signals": mkt.get("signals", [f"Factory Clone: {proxy_type or 'Proxy'} via {fac_badge or 'Factory'}"]),
+                                        "detected_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+                                        "has_refund": det.get("has_refund", False),
+                                        "security": mkt.get("security", {}),
+                                        "risk_level": mkt.get("risk_level", "SAFE"),
+                                        "risk_badge": mkt.get("risk_badge", "🟢 Clean"),
+                                        "risk_flags": mkt.get("risk_flags", []),
+                                        "sniper_ready": mkt.get("sniper_ready", False),
+                                        "sniper_status": mkt.get("sniper_status", "TRACKING"),
+                                        "sniper_badge": mkt.get("sniper_badge", "⏳ Tracking"),
+                                        "sniper_checklist": mkt.get("sniper_checklist", []),
+                                        "is_proxy_clone": proxy_type is not None,
+                                        "proxy_type": proxy_type,
+                                        "master_implementation": impl_addr,
+                                        "is_factory": is_fac,
+                                        "factory_badge": fac_badge
+                                    }
+                                    with history_lock:
+                                        history = monitor.load_history()
+                                        if not any(x.get("contract", "").lower() == cand.lower() for x in history):
+                                            history.insert(0, new_entry)
+                                            monitor.save_history(history)
+                                            print(f"[🧩 NEW PROXY CLONE DETECTED] {new_entry['name']} ({cand}) [{proxy_type}] Master: {impl_addr}", flush=True)
+
+                last_block = curr_block
+        except Exception as e:
+            print(f"[⚠️ Proxy Factory Watcher Error] {e}", flush=True)
+
+        time.sleep(20)
 
 
 def start_server(port=8080):
@@ -495,5 +895,17 @@ if __name__ == "__main__":
     market_thread = threading.Thread(target=run_market_dynamics_updater_loop, daemon=True)
     market_thread.start()
 
-    # 3. Start HTTP server on main thread
+    # 3. Start high-frequency fast-track progress sweeper thread (Option B)
+    fast_sweeper_thread = threading.Thread(target=run_fast_track_progress_sweeper_loop, daemon=True)
+    fast_sweeper_thread.start()
+
+    # 4. Start Element Market NFT volume detector thread (Option D)
+    element_sweeper_thread = threading.Thread(target=run_element_nft_volume_sweeper_loop, daemon=True)
+    element_sweeper_thread.start()
+
+    # 5. Start Stealth Factory & Proxy Clone Watcher thread (Option E)
+    proxy_factory_thread = threading.Thread(target=run_proxy_factory_watcher_loop, daemon=True)
+    proxy_factory_thread.start()
+
+    # 6. Start HTTP server on main thread
     start_server(port=port)

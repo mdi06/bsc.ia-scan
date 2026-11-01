@@ -92,11 +92,17 @@
           <button class="tab-btn" id="tabSmart" data-tab="SMART" role="tab" aria-selected="false">
             2: 🧠 Smart Alpha (<span id="smartCount">0</span>)
           </button>
+          <button class="tab-btn" id="tabPortfolio" data-tab="PORTFOLIO" role="tab" aria-selected="false">
+            3: 🎒 My Portfolio (<span id="portfolioCount">0</span>)
+          </button>
         </div>
 
         <div class="controls-row">
           <div class="filter-pills" role="toolbar" aria-label="Filter Drops">
             <button class="pill active" data-filter="ALL">ALL</button>
+            <button class="pill" data-filter="SNIPER_READY" id="pillSniperReady" style="color: #4ade80; border-color: rgba(74, 222, 128, 0.4); font-weight: 700;">🎯 SNIPE READY (<span id="sniperReadyCount">0</span>)</button>
+            <button class="pill" data-filter="NFT_SURGE" id="pillNftSurge" style="color: #d946ef; border-color: rgba(217, 70, 239, 0.4); font-weight: 700;">🦋 NFT SURGE (<span id="nftSurgeCount">0</span>)</button>
+            <button class="pill" data-filter="PROXY" id="pillProxy" style="color: #38bdf8; border-color: rgba(56, 189, 248, 0.4); font-weight: 700;">🧩 PROXY (<span id="proxyCount">0</span>)</button>
             <button class="pill" data-filter="FAVORITES" id="pillFavorites">⭐ FAVORITES (<span id="favCount">0</span>)</button>
             <button class="pill" data-filter="FREE">★ FREE MINTS</button>
             <button class="pill" data-filter="SMART">🧠 SMART ALPHA</button>
@@ -121,6 +127,10 @@
                   <span>Block (Newest)</span>
                   <span class="opt-check">✓</span>
                 </li>
+                <li class="custom-option" data-value="PROFIT" role="option" aria-selected="false">
+                  <span>🏆 Post-Mint Profit</span>
+                  <span class="opt-check">✓</span>
+                </li>
                 <li class="custom-option" data-value="INTEREST" role="option" aria-selected="false">
                   <span>Interest Score</span>
                   <span class="opt-check">✓</span>
@@ -141,6 +151,7 @@
               <!-- Hidden native select for fallback & state management -->
               <select id="sortSelect" class="visually-hidden" aria-hidden="true" tabindex="-1">
                 <option value="NEWEST" selected>Block (Newest)</option>
+                <option value="PROFIT">🏆 Post-Mint Profit</option>
                 <option value="INTEREST">Interest Score</option>
                 <option value="HOLDERS">Holders Count</option>
                 <option value="PROGRESS">Mint Progress %</option>
@@ -170,12 +181,13 @@
           <span class="stat-highlight" id="momentumNames">[Hallowed 60%, SOLVED 60%]</span>
         </div>
         <div class="stat-sep">│</div>
-        <div class="stat-card gainer-card">
+        <div class="stat-card gainer-card" id="topGainerBanner" role="button" tabindex="0" title="Click to view Top Post-Mint Profit Hall of Fame Leaderboard">
           <span class="stat-label gold">🏆 TOP POST-MINT PROFIT:</span>
           <span class="badge badge-cyan" id="topGainerName">Hash21 (HASH)</span>
           <span class="stat-text" id="topGainerDetails">Mint: FREE ➔ Secondary: $0.0148</span>
           <span class="badge badge-green" id="topGainerNet">Net: +$0.0148 / token</span>
           <span class="stat-runner" id="runnerUpDetails">│ 🥈 Runner-Up: Ptah (PTAH) [$0.0017]</span>
+          <span class="stat-hof-badge">👑 Hall of Fame ↗</span>
         </div>
       </div>
     </header>
@@ -235,6 +247,13 @@
   <!-- Full Project Inspection Modal (<dialog>) -->
   <dialog id="inspectModal" class="project-modal">
     <div class="modal-content" id="modalContent">
+      <!-- Injected by app.js -->
+    </div>
+  </dialog>
+
+  <!-- Hall of Fame / Top Post-Mint Profit Leaderboard Modal (<dialog>) -->
+  <dialog id="hallOfFameModal" class="project-modal hof-modal">
+    <div class="modal-content" id="hofModalContent">
       <!-- Injected by app.js -->
     </div>
   </dialog>
