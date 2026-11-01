@@ -28,7 +28,7 @@ function saveFavorites() {
     if (typeof localStorage !== 'undefined') {
       localStorage.setItem(FAVORITES_STORAGE_KEY, JSON.stringify([...favorites]));
     }
-  } catch (e) {}
+  } catch (e) { }
 }
 
 function isFavorited(contract, item) {
@@ -482,7 +482,7 @@ function getSniperEval(item) {
 
   if (isToken) {
     if (lp >= 500) {
-      checklist.push(`<span style="color:var(--color-yellow);">✖ Secondary Market: DEX LP already active ($${lp.toLocaleString(undefined, {maximumFractionDigits: 0})}) → Trade on DEX</span>`);
+      checklist.push(`<span style="color:var(--color-yellow);">✖ Secondary Market: DEX LP already active ($${lp.toLocaleString(undefined, { maximumFractionDigits: 0 })}) → Trade on DEX</span>`);
     } else {
       checklist.push('<span style="color:var(--color-green);">✔ Secondary Market: Primary bonding phase (No DEX LP yet)</span>');
     }
@@ -842,7 +842,7 @@ function getFilteredDrops() {
   // Search
   if (searchQuery.trim()) {
     const q = searchQuery.toLowerCase().trim();
-    list = list.filter(d => 
+    list = list.filter(d =>
       (d.name && d.name.toLowerCase().includes(q)) ||
       (d.symbol && d.symbol.toLowerCase().includes(q)) ||
       (d.contract && d.contract.toLowerCase().includes(q))
@@ -960,7 +960,7 @@ function renderTable() {
     const secVol = Number(item.secondary_vol_bnb || 0);
     let lpStr = `<span class="dim">—</span>`;
     if (lpUsd > 0) {
-      lpStr = `<span style="color: var(--color-green); font-weight:600;">$${lpUsd.toLocaleString(undefined, {maximumFractionDigits: 0})}</span>`;
+      lpStr = `<span style="color: var(--color-green); font-weight:600;">$${lpUsd.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>`;
     } else if (item.is_nft_surge && secVol > 0) {
       lpStr = `<span style="color: var(--color-magenta); font-weight:700;" title="${item.secondary_sales_count || 0} Element sales">${secVol.toFixed(3)} BNB 🦋</span>`;
     } else if (secVol > 0) {
@@ -1076,11 +1076,11 @@ function renderTable() {
 
     const isPort = (activeTab === 'PORTFOLIO');
     const isNft = std.includes('721') || std.includes('NFT');
-    const cellHolders = isPort 
+    const cellHolders = isPort
       ? `<span style="color: var(--color-green); font-weight:700;">Holdings: ${formatCount(item.user_balance || 1)}</span>`
       : hbStr;
-    const cellFloor = isPort 
-      ? `<span class="badge ${exitSignal.badge_class}" style="font-size: 11px;">${exitSignal.badge}</span>` 
+    const cellFloor = isPort
+      ? `<span class="badge ${exitSignal.badge_class}" style="font-size: 11px;">${exitSignal.badge}</span>`
       : floorStr;
     let actBtn = `<button class="inspect-btn"><span class="desktop-only">Inspect</span><span class="mobile-only">🔍 Deep Dive & Snipe CLI ➔</span></button>`;
     if (isPort) {
@@ -1126,8 +1126,8 @@ function openModal(item) {
   const name = item.name || 'Unknown';
   const sym = item.symbol || '';
 
-  const mktUrl = isNft 
-    ? getElementUrl(name, cAddr) 
+  const mktUrl = isNft
+    ? getElementUrl(name, cAddr)
     : (item.market_url || `https://pancakeswap.finance/swap?outputCurrency=${cAddr}`);
 
   const smList = item.smart_wallets || item.smart_minters || [];
@@ -1175,9 +1175,9 @@ function openModal(item) {
       <div class="modal-section-title">🛡️ Security & Anti-Rug Audit</div>
       <div class="modal-grid">
         <div><span class="dim">Risk Rating:</span> <strong>${item.risk_badge || item.risk_level || '🟢 Clean (SAFE)'}</strong></div>
-        <div><span class="dim">Bytecode Refund:</span> ${item.security && item.security.has_refund ? '<span style="color: var(--color-green); font-weight:600;">🛡️ Verified (' + (item.security.refund_methods || []).slice(0,1).join('') + ')</span>' : (Number(item.mint_price_bnb || 0) > 0 ? '<span style="color: var(--color-yellow); font-weight:600;">⚠️ No Refund Function</span>' : '<span class="dim">N/A (Free Mint)</span>')}</div>
+        <div><span class="dim">Bytecode Refund:</span> ${item.security && item.security.has_refund ? '<span style="color: var(--color-green); font-weight:600;">🛡️ Verified (' + (item.security.refund_methods || []).slice(0, 1).join('') + ')</span>' : (Number(item.mint_price_bnb || 0) > 0 ? '<span style="color: var(--color-yellow); font-weight:600;">⚠️ No Refund Function</span>' : '<span class="dim">N/A (Free Mint)</span>')}</div>
         <div><span class="dim">Deployer Profile:</span> ${item.security && item.security.is_serial_dev ? '<span style="color: var(--color-red); font-weight:700;">🚨 Serial Dev (' + item.security.serial_count + ' drops)</span>' : (item.security && item.security.is_fresh_dev ? '<span style="color: var(--color-yellow);">🟡 Fresh Wallet</span>' : '<span style="color: var(--color-green);">🟢 Established Nonce</span>')}</div>
-        <div><span class="dim">PancakeSwap LP:</span> ${item.lp_usd ? '<span style="color: var(--color-green); font-weight:700;">$' + Number(item.lp_usd).toLocaleString(undefined, {maximumFractionDigits: 0}) + '</span>' : '<span class="dim">No LP Pool detected</span>'}</div>
+        <div><span class="dim">PancakeSwap LP:</span> ${item.lp_usd ? '<span style="color: var(--color-green); font-weight:700;">$' + Number(item.lp_usd).toLocaleString(undefined, { maximumFractionDigits: 0 }) + '</span>' : '<span class="dim">No LP Pool detected</span>'}</div>
       </div>
       ${item.risk_flags && item.risk_flags.length > 0 ? `
         <div style="margin-top: 8px; font-size: 11px;">
@@ -1348,8 +1348,8 @@ function openHallOfFameModal(filterMode = 'ALL') {
       const curPriceStr = g.secUsd > 0 ? formatCryptoPrice(g.secUsd) : '<span class="dim">—</span>';
       const curNetStr = g.profit > 0 ? `<span style="color: var(--color-green); font-weight:600;">${formatCryptoPrice(g.profit, true)}</span>` : '<span class="dim">—</span>';
 
-      const statusBadge = g.isSold 
-        ? `<span class="badge badge-magenta" style="font-size: 10px;">Sold Out</span>` 
+      const statusBadge = g.isSold
+        ? `<span class="badge badge-magenta" style="font-size: 10px;">Sold Out</span>`
         : `<span class="badge badge-cyan" style="font-size: 10px;">Active</span>`;
 
       // Marketplace / DEX links
