@@ -1113,6 +1113,10 @@ function openModal(item) {
   const modal = document.getElementById('inspectModal');
   const content = document.getElementById('modalContent');
 
+  if (typeof window !== 'undefined' && window.va) {
+    window.va('event', { name: 'inspect_drop', data: { name: item.name || '', symbol: item.symbol || '' } });
+  }
+
   const std = String(item.standard || 'ERC-721');
   const isNft = std.includes('721') || std.includes('NFT');
   const cAddr = item.contract || '';
@@ -1305,6 +1309,10 @@ function openHallOfFameModal(filterMode = 'ALL') {
   const modal = document.getElementById('hallOfFameModal');
   const content = document.getElementById('hofModalContent');
   if (!modal || !content) return;
+
+  if (typeof window !== 'undefined' && window.va) {
+    window.va('event', { name: 'view_hall_of_fame', data: { filter: filterMode } });
+  }
 
   const stats = computeStats(allDrops);
   let list = stats.allGainers;
@@ -1606,6 +1614,9 @@ function setupCustomDropdown() {
       if (label) label.textContent = text;
       sortMode = val;
       if (nativeSelect) nativeSelect.value = val;
+      if (typeof window !== 'undefined' && window.va) {
+        window.va('event', { name: 'sort_changed', data: { sort: val } });
+      }
 
       wrapper.classList.remove('open');
       trigger.setAttribute('aria-expanded', 'false');
@@ -1721,6 +1732,9 @@ async function init() {
         document.querySelectorAll('.pill').forEach(b => b.classList.remove('active'));
         btn.classList.add('active');
         activeFilter = btn.getAttribute('data-filter');
+        if (typeof window !== 'undefined' && window.va) {
+          window.va('event', { name: 'filter_changed', data: { filter: activeFilter } });
+        }
         renderTable();
       });
     });
