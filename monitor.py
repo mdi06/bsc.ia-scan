@@ -1594,20 +1594,20 @@ def update_post_mint_profit_metrics(item: Dict[str, Any], bnb_price: float = 705
     # High-water mark (ATH) persistence
     cur_ath = float(item.get("ath_price_usd") or 0.0)
     if sec_usd > cur_ath and sec_usd > 0:
-        item["ath_price_usd"] = round(sec_usd, 6)
-        item["ath_profit_usd"] = round(profit, 6)
+        item["ath_price_usd"] = float(f"{sec_usd:.10g}")
+        item["ath_profit_usd"] = float(f"{profit:.10g}") if profit > 0 else 0.0
         item["ath_multiplier"] = multiplier
         item["ath_timestamp"] = int(time.time())
     elif not item.get("ath_price_usd") and sec_usd > 0:
-        item["ath_price_usd"] = round(sec_usd, 6)
-        item["ath_profit_usd"] = round(profit, 6)
+        item["ath_price_usd"] = float(f"{sec_usd:.10g}")
+        item["ath_profit_usd"] = float(f"{profit:.10g}") if profit > 0 else 0.0
         item["ath_multiplier"] = multiplier
         item["ath_timestamp"] = int(time.time())
 
-    item["current_profit_usd"] = round(profit, 6)
+    item["current_profit_usd"] = float(f"{profit:.10g}") if profit > 0 else 0.0
     item["current_multiplier"] = multiplier
     item["mint_cost_usd"] = round(mint_usd, 4)
-    item["secondary_price_usd"] = round(sec_usd, 6)
+    item["secondary_price_usd"] = float(f"{sec_usd:.10g}") if sec_usd > 0 else 0.0
 
     return {
         "sec_usd": sec_usd,
@@ -1655,7 +1655,7 @@ def compute_market_cap_stats(history: List[Dict[str, Any]], bnb_price: float = 7
         sec_usd = prof_info["sec_usd"]
         ath_profit = prof_info["ath_profit_usd"]
 
-        if sec_usd > 0 or ath_profit > 0:
+        if sec_usd > 0 and ath_profit > 0:
             gainers.append({
                 "item": it,
                 "contract": it.get("contract", ""),

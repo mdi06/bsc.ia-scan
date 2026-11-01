@@ -229,6 +229,22 @@ function formatCount(val) {
   return n.toLocaleString();
 }
 
+// Universal Crypto Price & Net Profit Formatter (Supports Sub-Cent & Micro-Cap Tokens)
+function formatCryptoPrice(val, isNet = false) {
+  const n = Number(val || 0);
+  if (!isFinite(n) || n === 0) return isNet ? '+$0.00' : '$0.00';
+  const sign = n < 0 ? '-' : (isNet ? '+' : '');
+  const absN = Math.abs(n);
+  if (absN >= 1.0) return `${sign}$${absN.toFixed(2)}`;
+  if (absN >= 0.01) return `${sign}$${absN.toFixed(4)}`;
+  if (absN >= 0.0001) return `${sign}$${absN.toFixed(6)}`;
+  if (absN >= 1e-6) return `${sign}$${absN.toFixed(8)}`;
+  // Trim redundant trailing zeros for clean readability
+  const rawStr = absN.toFixed(10);
+  const cleanStr = rawStr.replace(/0+$/, '');
+  return `${sign}$${cleanStr}`;
+}
+
 // Compute Individual Project Profit and Maintain ATH High-Water Mark
 function computeItemProfit(item, bnbPriceUsd = bnbPrice) {
   const c = String(item.contract || '').toLowerCase();
@@ -319,7 +335,8 @@ function computeStats(drops) {
     }
 
     const pInfo = computeItemProfit(item, bnbPrice);
-    if (pInfo.secUsd > 0 || pInfo.athProfit > 0) {
+    // Strict non-zero guard: only drops with actual secondary trading and positive profit are gainers
+    if (pInfo.secUsd > 0 && pInfo.athProfit > 0) {
       gainers.push({
         item,
         name: item.name || 'Unknown',
@@ -341,6 +358,7 @@ function computeStats(drops) {
   const fillRatePct = cappedTotal > 0 ? (soldOutCount / cappedTotal) * 100 : 0;
   const soldGainers = gainers.filter(g => g.isSold).sort((a, b) => Math.max(b.athProfit, b.profit) - Math.max(a.athProfit, a.profit));
   const allGainers = gainers.sort((a, b) => Math.max(b.athProfit, b.profit) - Math.max(a.athProfit, a.profit));
+  const majorGainers = allGainers.filter(g => Math.max(g.athProfit, g.profit) >= 0.001);
 
   const topGainer = soldGainers[0] || allGainers[0] || null;
   const runnerUp = soldGainers[1] || allGainers[1] || null;
@@ -354,7 +372,8 @@ function computeStats(drops) {
     topGainer,
     runnerUp,
     allGainers,
-    soldGainers
+    soldGainers,
+    majorGainers
   };
 }
 
@@ -369,18 +388,18 @@ function renderStats(drops) {
 
   if (stats.topGainer) {
     const tg = stats.topGainer;
-    const tgMint = tg.isFree || tg.mintUsd === 0 ? 'FREE' : `$${tg.mintUsd.toFixed(4)}`;
+    const tgMint = tg.isFree || tg.mintUsd === 0 ? 'FREE' : formatCryptoPrice(tg.mintUsd);
     const tgAth = Math.max(tg.athPrice, tg.secUsd);
     const tgNet = Math.max(tg.athProfit, tg.profit);
     document.getElementById('topGainerName').textContent = `${tg.name} (${tg.symbol})`;
-    document.getElementById('topGainerDetails').textContent = `Mint: ${tgMint} ➔ ATH: $${tgAth.toFixed(4)}`;
-    document.getElementById('topGainerNet').textContent = `Net: +$${tgNet.toFixed(4)} / token`;
+    document.getElementById('topGainerDetails').textContent = `Mint: ${tgMint} ➔ ATH: ${formatCryptoPrice(tgAth)}`;
+    document.getElementById('topGainerNet').textContent = `Net: ${formatCryptoPrice(tgNet, true)} / token`;
   }
 
   if (stats.runnerUp) {
     const ru = stats.runnerUp;
     const ruAth = Math.max(ru.athPrice, ru.secUsd);
-    document.getElementById('runnerUpDetails').textContent = `│ 🥈 Runner-Up: ${ru.name} (${ru.symbol}) [$${ruAth.toFixed(4)}]`;
+    document.getElementById('runnerUpDetails').textContent = `│ 🥈 Runner-Up: ${ru.name} (${ru.symbol}) [${formatCryptoPrice(ruAth)}]`;
   }
 }
 
@@ -1037,7 +1056,7 @@ function renderTable() {
     const curProf = Number(item.current_profit_usd || 0);
     const maxProf = Math.max(athProf, curProf);
     if (maxProf > 0) {
-      const pStrVal = maxProf >= 1 ? `+$${maxProf.toFixed(2)}` : `+$${maxProf.toFixed(4)}`;
+      const pStrVal = formatCryptoPrice(maxProf, true);
       const multVal = item.ath_multiplier ? ` [${item.ath_multiplier}x]` : '';
       floorStr += ` <span class="badge badge-green" style="font-size: 9px; padding: 1px 4px; margin-left: 2px;" title="Peak ATH Post-Mint Net: ${pStrVal} / token${multVal}">🏆 ${pStrVal}</span>`;
     }
@@ -1288,11 +1307,19 @@ function openHallOfFameModal(filterMode = 'ALL') {
   if (!modal || !content) return;
 
   const stats = computeStats(allDrops);
-  const list = filterMode === 'SOLD' ? stats.soldGainers : stats.allGainers;
+  let list = stats.allGainers;
+  if (filterMode === 'SOLD') {
+    list = stats.soldGainers;
+  } else if (filterMode === 'MAJOR') {
+    list = stats.majorGainers;
+  }
+
+  // Strict non-zero guard: completely filter out any zero-price or zero-profit entries
+  list = list.filter(g => g.athPrice > 0 && (g.athProfit > 0 || g.profit > 0));
 
   let rowsHtml = '';
   if (!list || list.length === 0) {
-    rowsHtml = `<tr><td colspan="7" style="text-align:center; padding: 24px; color: var(--text-dim);">No post-mint gains recorded yet. As secondary trades settle on Element and PancakeSwap, top performers will appear here.</td></tr>`;
+    rowsHtml = `<tr><td colspan="7" style="text-align:center; padding: 24px; color: var(--text-dim);">No post-mint gains recorded for current filter. As secondary trades settle on Element and PancakeSwap, top performers will appear here.</td></tr>`;
   } else {
     list.forEach((g, idx) => {
       const rankNum = idx + 1;
@@ -1302,13 +1329,13 @@ function openHallOfFameModal(filterMode = 'ALL') {
       else if (rankNum === 3) rankBadge = `<span class="hof-rank hof-rank-3">🥉 #3</span>`;
       else rankBadge = `<span class="hof-rank" style="color: var(--text-dim);">#${rankNum}</span>`;
 
-      const mintCostStr = g.isFree || g.mintUsd === 0 ? '<span style="color: var(--color-green); font-weight:700;">FREE</span>' : `$${g.mintUsd.toFixed(4)}`;
-      const athPriceStr = `$${g.athPrice.toFixed(4)}`;
-      const athProfitStr = `+$${g.athProfit.toFixed(4)}`;
+      const mintCostStr = g.isFree || g.mintUsd === 0 ? '<span style="color: var(--color-green); font-weight:700;">FREE</span>' : formatCryptoPrice(g.mintUsd);
+      const athPriceStr = formatCryptoPrice(g.athPrice);
+      const athProfitStr = formatCryptoPrice(g.athProfit, true);
       const multStr = g.multiplier ? `<span class="badge badge-yellow" style="font-size: 10px;">${g.multiplier}x</span>` : (g.isFree ? `<span class="badge badge-green" style="font-size: 10px;">FREE ALPHA</span>` : '');
 
-      const curPriceStr = g.secUsd > 0 ? `$${g.secUsd.toFixed(4)}` : '<span class="dim">—</span>';
-      const curNetStr = g.profit > 0 ? `<span style="color: var(--color-green); font-weight:600;">+$${g.profit.toFixed(4)}</span>` : '<span class="dim">—</span>';
+      const curPriceStr = g.secUsd > 0 ? formatCryptoPrice(g.secUsd) : '<span class="dim">—</span>';
+      const curNetStr = g.profit > 0 ? `<span style="color: var(--color-green); font-weight:600;">${formatCryptoPrice(g.profit, true)}</span>` : '<span class="dim">—</span>';
 
       const statusBadge = g.isSold 
         ? `<span class="badge badge-magenta" style="font-size: 10px;">Sold Out</span>` 
@@ -1359,6 +1386,9 @@ function openHallOfFameModal(filterMode = 'ALL') {
     });
   }
 
+  const topPeak = list[0] ? Math.max(list[0].athProfit, list[0].profit) : 0;
+  const topPeakStr = formatCryptoPrice(topPeak, true);
+
   content.innerHTML = `
     <div class="hof-header">
       <div class="hof-title-group">
@@ -1371,10 +1401,11 @@ function openHallOfFameModal(filterMode = 'ALL') {
     <div class="hof-controls">
       <div class="hof-filters">
         <button class="hof-filter-btn ${filterMode === 'ALL' ? 'active' : ''}" id="hofFilterAll">🌟 All Gainers (${stats.allGainers.length})</button>
+        <button class="hof-filter-btn ${filterMode === 'MAJOR' ? 'active' : ''}" id="hofFilterMajor">💎 Major Gainers (≥$0.001) (${stats.majorGainers.length})</button>
         <button class="hof-filter-btn ${filterMode === 'SOLD' ? 'active' : ''}" id="hofFilterSold">🔒 Sold Out Only (${stats.soldGainers.length})</button>
       </div>
       <div class="hof-summary-pill">
-        📈 Tracking ${list.length} Profitable Drops │ Top Gain: +$${(list[0] ? Math.max(list[0].athProfit, list[0].profit).toFixed(4) : '0.0000')} / token
+        📈 Tracking ${list.length} Profitable Drops │ Top Gain: ${topPeakStr} / token
       </div>
     </div>
 
@@ -1385,8 +1416,8 @@ function openHallOfFameModal(filterMode = 'ALL') {
             <th style="width: 60px;">Rank</th>
             <th>Collection / Token</th>
             <th style="width: 100px;">Mint Price</th>
-            <th style="width: 140px;">Peak ATH / Net</th>
-            <th style="width: 120px;">Current Price</th>
+            <th style="width: 150px;">Peak ATH / Net</th>
+            <th style="width: 130px;">Current Price</th>
             <th style="width: 110px;">Status</th>
             <th style="width: 150px;">Market Links</th>
           </tr>
@@ -1414,6 +1445,11 @@ function openHallOfFameModal(filterMode = 'ALL') {
   const btnAll = document.getElementById('hofFilterAll');
   if (btnAll) {
     btnAll.addEventListener('click', () => openHallOfFameModal('ALL'));
+  }
+
+  const btnMajor = document.getElementById('hofFilterMajor');
+  if (btnMajor) {
+    btnMajor.addEventListener('click', () => openHallOfFameModal('MAJOR'));
   }
 
   const btnSold = document.getElementById('hofFilterSold');
@@ -1757,6 +1793,7 @@ if (typeof module !== 'undefined' && module.exports) {
     isSniperReady,
     evaluateNftSurge,
     updateProxyCount,
+    formatCryptoPrice,
     computeItemProfit,
     computeStats,
     openHallOfFameModal,

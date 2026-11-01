@@ -1,5 +1,173 @@
 [
   {
+    "block": 131060739,
+    "contract": "0x105d904d64520d9bcefb66af936c2cce59037777",
+    "deployer": "0x2696cac84551a8dca268a02e061827a0ba6c9054",
+    "tx_hash": "0x101988d43a47ba469366ca7ce80d5e819a104530f1beed83c4504ca012020bb4",
+    "name": "AVESAKE",
+    "symbol": "AVESAKE",
+    "standard": "BEP-20 Token (18 decimals)",
+    "icon": "\ud83e\ude99",
+    "is_paused": null,
+    "has_free_mint": false,
+    "mint_price_str": "DEX Traded",
+    "mint_price_bnb": 0.0,
+    "mint_value_wei": "0",
+    "max_supply": 1000000000.0,
+    "total_minted": 1000000000.0,
+    "score": 55,
+    "rating": "\ud83d\udd25 HIGH TRACTION",
+    "lp_usd": 8776.51,
+    "lp_wbnb": 0.0,
+    "token_symbol": "AVESAKE",
+    "token_price_usd": 3.963e-06,
+    "holders": 7,
+    "buys_24h": 8,
+    "buys_1h": 8,
+    "sells_24h": 8,
+    "volume_24h": 1684.53,
+    "market_url": "https://pancakeswap.finance/swap?outputCurrency=0x105d904d64520d9bcefb66af936c2cce59037777",
+    "pair_url": "https://dexscreener.com/bsc/0xd80766155f834d8107e5686b17cc59fcdb810bf4",
+    "mint_calldata": "0x1249c58b",
+    "signals": [
+      "Solid Seed Liquidity ($8,777)",
+      "Near Sellout (100.0% claimed)",
+      "Active Deployer Nonce (128 txs)",
+      "Safety: Closed Source",
+      "Safety: Top 10 Holds 100%"
+    ],
+    "detected_at": "2026-11-01 13:58:34",
+    "has_refund": false,
+    "security": {
+      "audited": true,
+      "is_honeypot": false,
+      "buy_tax": 0.0,
+      "sell_tax": 0.0,
+      "cannot_sell_all": false,
+      "is_open_source": false,
+      "lp_locked_pct": 0.0,
+      "top10_pct": 100.0,
+      "risk_level": "MED",
+      "risk_badge": "\ud83d\udfe1 Med Risk",
+      "risk_flags": [
+        "Closed Source",
+        "Top 10 Holds 100%"
+      ],
+      "has_refund": false,
+      "refund_methods": []
+    },
+    "risk_level": "MED",
+    "risk_badge": "\ud83d\udfe1 Med Risk",
+    "risk_flags": [
+      "Closed Source",
+      "Top 10 Holds 100%"
+    ],
+    "sniper_ready": false,
+    "sniper_status": "GRADUATED_TO_DEX",
+    "sniper_badge": "\ud83d\udcc8 On DEX",
+    "sniper_checklist": [
+      "\u25ab [yellow]\u23f3[/yellow] Progress: 0% (<60% threshold, tracking)",
+      "\u25ab [green]\u2714[/green] Deployer: Clean reputation (No spam deployment)",
+      "\u25ab [green]\u2714[/green] Capital Safety: No fund drain detected",
+      "\u25ab [dim]\u25ab Refund Guarantee: N/A (Free Mint / Gas Only)[/dim]",
+      "\u25ab [yellow]\u2716[/yellow] Secondary Market: DEX LP already active ($8,777) -> Trade on DEX instead of minting"
+    ],
+    "is_proxy_clone": true,
+    "proxy_type": "EIP-1167 Clone",
+    "master_implementation": "0x024f18294970b5c76c0691b87f138a0317156422",
+    "is_factory": false,
+    "factory_badge": null,
+    "smart_wallets": [],
+    "smart_minters": [],
+    "ath_price_usd": 3.963e-06,
+    "ath_profit_usd": 3.963e-06,
+    "ath_multiplier": 0.0,
+    "ath_timestamp": 1793541604,
+    "current_profit_usd": 3.963e-06,
+    "current_multiplier": 0.0,
+    "mint_cost_usd": 0.0,
+    "secondary_price_usd": 3.963e-06
+  },
+  {
+    "block": 131060739,
+    "contract": "0xd80766155f834d8107e5686b17cc59fcdb810bf4",
+    "deployer": "0x2696cac84551a8dca268a02e061827a0ba6c9054",
+    "tx_hash": "0x101988d43a47ba469366ca7ce80d5e819a104530f1beed83c4504ca012020bb4",
+    "name": "Uniswap V2",
+    "symbol": "UNI-V2",
+    "standard": "BEP-20 Token (18 decimals)",
+    "icon": "\ud83e\ude99",
+    "is_paused": null,
+    "has_free_mint": false,
+    "mint_price_str": "DEX Traded",
+    "mint_price_bnb": 0.0,
+    "mint_value_wei": "0",
+    "max_supply": null,
+    "total_minted": 82445.16757991338,
+    "score": 50,
+    "rating": "\ud83d\udd25 HIGH TRACTION",
+    "lp_usd": 0.0,
+    "lp_wbnb": 0.0,
+    "token_symbol": "UNI-V2",
+    "token_price_usd": 0.0,
+    "holders": 82445.16757991338,
+    "buys_24h": 82445.16757991338,
+    "buys_1h": 0,
+    "sells_24h": 0,
+    "volume_24h": 0.0,
+    "market_url": "https://pancakeswap.finance/swap?outputCurrency=0xd80766155f834d8107e5686b17cc59fcdb810bf4",
+    "pair_url": "",
+    "mint_calldata": "0x1249c58b",
+    "signals": [
+      "\ud83c\udfaf High-Conviction Sniper Ready (Passed 60% & Anti-Rug)",
+      "No DEX LP detected yet",
+      "Heavy Buy Volume (82,445.16757991338 purchases / 24h)",
+      "Massive Holder Base (82,445.16757991338 holders)",
+      "Active Deployer Nonce (128 txs)"
+    ],
+    "detected_at": "2026-11-01 13:57:34",
+    "has_refund": false,
+    "security": {
+      "audited": false,
+      "is_honeypot": false,
+      "buy_tax": 0.0,
+      "sell_tax": 0.0,
+      "cannot_sell_all": false,
+      "is_open_source": true,
+      "lp_locked_pct": 0.0,
+      "top10_pct": 0.0,
+      "risk_level": "SAFE",
+      "risk_badge": "\ud83d\udfe2 Clean",
+      "risk_flags": [],
+      "has_refund": false,
+      "refund_methods": []
+    },
+    "risk_level": "SAFE",
+    "risk_badge": "\ud83d\udfe2 Clean",
+    "risk_flags": [],
+    "sniper_ready": true,
+    "sniper_status": "SNIPER_READY",
+    "sniper_badge": "\ud83c\udfaf Snipe Ready",
+    "sniper_checklist": [
+      "\u25ab [green]\u2714[/green] Progress: Crowd Surge (82445 active agent wallets)",
+      "\u25ab [green]\u2714[/green] Deployer: Clean reputation (No spam deployment)",
+      "\u25ab [green]\u2714[/green] Capital Safety: No fund drain detected",
+      "\u25ab [dim]\u25ab Refund Guarantee: N/A (Free Mint / Gas Only)[/dim]",
+      "\u25ab [green]\u2714[/green] Secondary Market: Primary bonding phase (No DEX LP yet)"
+    ],
+    "is_proxy_clone": true,
+    "proxy_type": "Beacon Proxy",
+    "master_implementation": "0xa39a573d33181f014b326c50575589ed8efcee98",
+    "is_factory": false,
+    "factory_badge": null,
+    "smart_wallets": [],
+    "smart_minters": [],
+    "current_profit_usd": 0.0,
+    "current_multiplier": 0.0,
+    "mint_cost_usd": 0.0,
+    "secondary_price_usd": 0.0
+  },
+  {
     "block": 131037320,
     "contract": "0xbf7d91ca002a768b4694728d1b9a42e65e35343d",
     "deployer": "",
@@ -14,7 +182,7 @@
     "mint_price_bnb": 0.0,
     "mint_value_wei": "0",
     "max_supply": 3e-16,
-    "total_minted": 1.7e-17,
+    "total_minted": 101,
     "score": 10,
     "rating": "\u2744\ufe0f COLD / DORMANT",
     "lp_usd": 0.0,
@@ -42,7 +210,7 @@
       "dyq.ai"
     ],
     "sold_sel": "0xa2309ff8",
-    "sweep_at": 1793530930.579328,
+    "sweep_at": 1793541467.6023479,
     "sniper_ready": false,
     "sniper_status": "SOLD_OUT",
     "sniper_badge": "\ud83d\uded1 Sold Out",
@@ -351,14 +519,14 @@
       "\u25ab [yellow]\u2716[/yellow] Secondary Market: DEX LP already active ($6,829) -> Trade on DEX instead of minting"
     ],
     "sweep_at": 1793530846.0881238,
-    "ath_price_usd": 5e-06,
-    "ath_profit_usd": 5e-06,
+    "ath_price_usd": 5.042e-06,
+    "ath_profit_usd": 5.042e-06,
     "ath_multiplier": 0.0,
-    "ath_timestamp": 1793539722,
-    "current_profit_usd": 5e-06,
+    "ath_timestamp": 1793541604,
+    "current_profit_usd": 5.042e-06,
     "current_multiplier": 0.0,
     "mint_cost_usd": 0.0,
-    "secondary_price_usd": 5e-06
+    "secondary_price_usd": 5.042e-06
   },
   {
     "block": 131034128,
@@ -522,7 +690,7 @@
       "\u25ab [dim]\u25ab Refund Guarantee: N/A (Free Mint / Gas Only)[/dim]",
       "\u25ab [green]\u2714[/green] Secondary Market: Primary bonding phase (No DEX LP yet)"
     ],
-    "sweep_at": 1793530931.448713,
+    "sweep_at": 1793541468.1362963,
     "current_profit_usd": 0.0,
     "current_multiplier": 0.0,
     "mint_cost_usd": 0.0,
@@ -607,14 +775,14 @@
       "\u25ab [yellow]\u2716[/yellow] Secondary Market: DEX LP already active ($16,019) -> Trade on DEX instead of minting"
     ],
     "sweep_at": 1793530757.628027,
-    "ath_price_usd": 0.0,
-    "ath_profit_usd": 0.0,
+    "ath_price_usd": 1.672e-08,
+    "ath_profit_usd": 1.672e-08,
     "ath_multiplier": 0.0,
-    "ath_timestamp": 1793539722,
-    "current_profit_usd": 0.0,
+    "ath_timestamp": 1793541604,
+    "current_profit_usd": 1.672e-08,
     "current_multiplier": 0.0,
     "mint_cost_usd": 0.0,
-    "secondary_price_usd": 0.0
+    "secondary_price_usd": 1.672e-08
   },
   {
     "block": 131034125,
@@ -954,14 +1122,14 @@
     ],
     "sweep_at": 1793530465.1364532,
     "token_price_bnb": 9.658e-08,
-    "ath_price_usd": 6.9e-05,
-    "ath_profit_usd": 6.9e-05,
+    "ath_price_usd": 6.906e-05,
+    "ath_profit_usd": 6.906e-05,
     "ath_multiplier": 0.0,
-    "ath_timestamp": 1793539722,
-    "current_profit_usd": 6.9e-05,
+    "ath_timestamp": 1793541604,
+    "current_profit_usd": 6.906e-05,
     "current_multiplier": 0.0,
     "mint_cost_usd": 0.0,
-    "secondary_price_usd": 6.9e-05
+    "secondary_price_usd": 6.906e-05
   },
   {
     "block": 131034119,
@@ -978,7 +1146,7 @@
     "mint_price_bnb": 0.0,
     "mint_value_wei": "0",
     "max_supply": 3e-16,
-    "total_minted": 4.1e-17,
+    "total_minted": 88,
     "score": 10,
     "rating": "\u2744\ufe0f COLD / DORMANT",
     "lp_usd": 0.0,
@@ -1043,7 +1211,7 @@
       "\u25ab [green]\u2714[/green] Secondary Market: Primary bonding phase (No DEX LP yet)"
     ],
     "sold_sel": "0xa2309ff8",
-    "sweep_at": 1793530411.8712692,
+    "sweep_at": 1793541466.5164366,
     "current_profit_usd": 0.0,
     "current_multiplier": 0.0,
     "mint_cost_usd": 0.0,
@@ -1127,7 +1295,7 @@
       "\u25ab [green]\u2714[/green] Refund Guarantee: Bytecode refund verified (refund())",
       "\u25ab [green]\u2714[/green] Secondary Market: Primary bonding phase (No DEX LP yet)"
     ],
-    "sweep_at": 1793530292.7638988,
+    "sweep_at": 1793541466.9282906,
     "current_profit_usd": 0.0,
     "current_multiplier": 0.0,
     "mint_cost_usd": 0.705,
@@ -3179,23 +3347,23 @@
     ],
     "detected_at": "2026-11-01 09:09:15",
     "smart_wallets": [
-      "darkside.ai",
-      "zhonghua1.ai",
+      "37andxiaopai.ai",
       "xiangjiong.ai",
       "scp682.ai",
       "aweibaba.ai",
-      "37andxiaopai.ai",
+      "zhonghua1.ai",
       "xiejie.ai",
+      "darkside.ai",
       "cljlaopo.ai"
     ],
     "smart_minters": [
-      "darkside.ai",
-      "zhonghua1.ai",
+      "37andxiaopai.ai",
       "xiangjiong.ai",
       "scp682.ai",
       "aweibaba.ai",
-      "37andxiaopai.ai",
+      "zhonghua1.ai",
       "xiejie.ai",
+      "darkside.ai",
       "cljlaopo.ai"
     ],
     "token_price_bnb": 6.576e-05,
@@ -3213,10 +3381,10 @@
     "ath_profit_usd": 9.8e-05,
     "ath_multiplier": 0.0,
     "ath_timestamp": 1793539722,
-    "current_profit_usd": 9.8e-05,
+    "current_profit_usd": 9.775e-05,
     "current_multiplier": 0.0,
     "mint_cost_usd": 0.0,
-    "secondary_price_usd": 9.8e-05
+    "secondary_price_usd": 9.775e-05
   },
   {
     "block": 131021001,
@@ -3804,7 +3972,7 @@
       "\u25ab [green]\u2714[/green] Capital Safety: No fund drain detected",
       "\u25ab [red]\u2716[/red] Refund Guarantee: \u26a0\ufe0f No refund method (Capital trapped if unfilled)"
     ],
-    "sweep_at": 1793530519.829334,
+    "sweep_at": 1793541466.5164664,
     "current_profit_usd": 0.0,
     "current_multiplier": 0.0,
     "mint_cost_usd": 0.705,
@@ -4841,7 +5009,7 @@
       "\u25ab [green]\u2714[/green] Capital Safety: No fund drain detected",
       "\u25ab [dim]\u25ab Refund Guarantee: N/A (Free Mint / Gas Only)[/dim]"
     ],
-    "sweep_at": 1793530521.653301,
+    "sweep_at": 1793541467.5826507,
     "secondary_sales_count": 0,
     "secondary_vol_bnb": 0,
     "floor_price_bnb": 0.0,
@@ -5094,7 +5262,7 @@
       "\u25ab [green]\u2714[/green] Capital Safety: No fund drain detected",
       "\u25ab [dim]\u25ab Refund Guarantee: N/A (Free Mint / Gas Only)[/dim]"
     ],
-    "sweep_at": 1793530522.02809,
+    "sweep_at": 1793541467.7657635,
     "secondary_sales_count": 0,
     "secondary_vol_bnb": 0,
     "floor_price_bnb": 0.0,
@@ -8795,7 +8963,7 @@
       "\u25ab [red]\u2716[/red] Refund Guarantee: \u26a0\ufe0f No refund method (Capital trapped if unfilled)",
       "\u25ab [green]\u2714[/green] Secondary Market: Primary bonding phase (No DEX LP yet)"
     ],
-    "sweep_at": 1793530522.111097,
+    "sweep_at": 1793541467.8937988,
     "current_profit_usd": 0.0,
     "current_multiplier": 0.0,
     "mint_cost_usd": 0.2115,
@@ -8887,7 +9055,7 @@
       "\u25ab [red]\u2716[/red] Refund Guarantee: \u26a0\ufe0f No refund method (Capital trapped if unfilled)"
     ],
     "sold_sel": "0x18160ddd",
-    "sweep_at": 1793530520.283552,
+    "sweep_at": 1793541466.7483466,
     "secondary_sales_count": 0,
     "secondary_vol_bnb": 0,
     "floor_price_bnb": 0.0,
@@ -9154,7 +9322,7 @@
       "\u25ab [red]\u2716[/red] Refund Guarantee: \u26a0\ufe0f No refund method (Capital trapped if unfilled)",
       "\u25ab [green]\u2714[/green] Secondary Market: Primary bonding phase (No DEX LP yet)"
     ],
-    "sweep_at": 1793530522.132843,
+    "sweep_at": 1793541468.0095394,
     "current_profit_usd": 0.0,
     "current_multiplier": 0.0,
     "mint_cost_usd": 0.2115,
@@ -9308,15 +9476,15 @@
     "detected_at": "2026-11-01 01:46:29",
     "smart_wallets": [
       "yudachi.ai",
-      "arkan.ai",
+      "9177.ai",
       "superczpro.ai",
-      "9177.ai"
+      "arkan.ai"
     ],
     "smart_minters": [
       "yudachi.ai",
-      "arkan.ai",
+      "9177.ai",
       "superczpro.ai",
-      "9177.ai"
+      "arkan.ai"
     ],
     "mint_history": [
       {
@@ -9373,14 +9541,14 @@
     "secondary_transfers": 2,
     "is_nft_surge": false,
     "nft_surge_badge": "",
-    "ath_price_usd": 0.053605,
-    "ath_profit_usd": 0.053605,
+    "ath_price_usd": 0.05360509749,
+    "ath_profit_usd": 0.05360509749,
     "ath_multiplier": null,
-    "ath_timestamp": 1793539722,
-    "current_profit_usd": 0.053605,
+    "ath_timestamp": 1793541604,
+    "current_profit_usd": 0.05360509749,
     "current_multiplier": null,
     "mint_cost_usd": 0.0,
-    "secondary_price_usd": 0.053605
+    "secondary_price_usd": 0.05360509749
   },
   {
     "block": 130963049,
@@ -9422,14 +9590,14 @@
     ],
     "detected_at": "2026-11-01 01:45:58",
     "smart_wallets": [
-      "mcbig.ai",
       "xiaoduo.ai",
+      "mcbig.ai",
       "umtwlp.ai",
       "oxfz.ai"
     ],
     "smart_minters": [
-      "mcbig.ai",
       "xiaoduo.ai",
+      "mcbig.ai",
       "umtwlp.ai",
       "oxfz.ai"
     ],
@@ -9531,18 +9699,18 @@
     ],
     "detected_at": "2026-11-01 01:45:46",
     "smart_wallets": [
+      "lunarisxyz.ai",
       "nyi.ai",
-      "boyrashad.ai",
-      "n7sb0.ai",
       "velkino.ai",
-      "lunarisxyz.ai"
+      "boyrashad.ai",
+      "n7sb0.ai"
     ],
     "smart_minters": [
+      "lunarisxyz.ai",
       "nyi.ai",
-      "boyrashad.ai",
-      "n7sb0.ai",
       "velkino.ai",
-      "lunarisxyz.ai"
+      "boyrashad.ai",
+      "n7sb0.ai"
     ],
     "velocity_ppm": 0.0,
     "token_price_bnb": 1.123e-07,
@@ -9582,14 +9750,14 @@
       "\u25ab [yellow]\u2716[/yellow] Secondary Market: DEX LP already active ($27,540) -> Trade on DEX instead of minting"
     ],
     "sweep_at": 1793530519.299146,
-    "ath_price_usd": 0.0,
-    "ath_profit_usd": 0.0,
+    "ath_price_usd": 1.123e-07,
+    "ath_profit_usd": 1.123e-07,
     "ath_multiplier": 0.0,
-    "ath_timestamp": 1793539722,
-    "current_profit_usd": 0.0,
+    "ath_timestamp": 1793541604,
+    "current_profit_usd": 1.123e-07,
     "current_multiplier": 0.0,
     "mint_cost_usd": 0.0,
-    "secondary_price_usd": 0.0
+    "secondary_price_usd": 1.123e-07
   },
   {
     "block": 130963042,
@@ -9734,12 +9902,12 @@
     ],
     "detected_at": "2026-11-01 01:45:09",
     "smart_wallets": [
-      "68686.ai",
-      "0xjl1222.ai"
+      "0xjl1222.ai",
+      "68686.ai"
     ],
     "smart_minters": [
-      "68686.ai",
-      "0xjl1222.ai"
+      "0xjl1222.ai",
+      "68686.ai"
     ],
     "mint_history": [
       {
@@ -9840,12 +10008,12 @@
     ],
     "detected_at": "2026-11-01 01:44:43",
     "smart_wallets": [
-      "8893.ai",
-      "88899.ai"
+      "88899.ai",
+      "8893.ai"
     ],
     "smart_minters": [
-      "8893.ai",
-      "88899.ai"
+      "88899.ai",
+      "8893.ai"
     ],
     "mint_history": [
       {
@@ -9947,15 +10115,15 @@
     "detected_at": "2026-11-01 01:44:35",
     "smart_wallets": [
       "bobi888.ai",
-      "bobi666.ai",
+      "z1101.ai",
       "boba66.ai",
-      "z1101.ai"
+      "bobi666.ai"
     ],
     "smart_minters": [
       "bobi888.ai",
-      "bobi666.ai",
+      "z1101.ai",
       "boba66.ai",
-      "z1101.ai"
+      "bobi666.ai"
     ],
     "mint_history": [
       {
@@ -10159,12 +10327,12 @@
     ],
     "detected_at": "2026-11-01 01:44:19",
     "smart_wallets": [
-      "mcbig.ai",
-      "xiaoduo.ai"
+      "xiaoduo.ai",
+      "mcbig.ai"
     ],
     "smart_minters": [
-      "mcbig.ai",
-      "xiaoduo.ai"
+      "xiaoduo.ai",
+      "mcbig.ai"
     ],
     "mint_history": [
       {
@@ -10260,38 +10428,38 @@
     ],
     "detected_at": "2026-11-01 01:44:11",
     "smart_wallets": [
-      "luisxdrop.ai",
-      "wangzeming.ai",
-      "weijili.ai",
       "jiangnan6.ai",
-      "laowei.ai",
+      "weijili.ai",
+      "yanyanjiejie.ai",
+      "wangzeming.ai",
+      "dayanatapia.ai",
+      "zsheng.ai",
+      "abelcow.ai",
+      "luisxdrop.ai",
       "rachmatbudi89.ai",
+      "xiaolu123.ai",
+      "iotex.ai",
+      "laowei.ai",
       "cfdhdfv.ai",
       "louma.ai",
-      "abelcow.ai",
-      "zsheng.ai",
-      "xiaolu123.ai",
-      "yanyanjiejie.ai",
-      "dayanatapia.ai",
-      "laobanniang.ai",
-      "iotex.ai"
+      "laobanniang.ai"
     ],
     "smart_minters": [
-      "luisxdrop.ai",
-      "wangzeming.ai",
-      "weijili.ai",
       "jiangnan6.ai",
-      "laowei.ai",
+      "weijili.ai",
+      "yanyanjiejie.ai",
+      "wangzeming.ai",
+      "dayanatapia.ai",
+      "zsheng.ai",
+      "abelcow.ai",
+      "luisxdrop.ai",
       "rachmatbudi89.ai",
+      "xiaolu123.ai",
+      "iotex.ai",
+      "laowei.ai",
       "cfdhdfv.ai",
       "louma.ai",
-      "abelcow.ai",
-      "zsheng.ai",
-      "xiaolu123.ai",
-      "yanyanjiejie.ai",
-      "dayanatapia.ai",
-      "laobanniang.ai",
-      "iotex.ai"
+      "laobanniang.ai"
     ],
     "mint_history": [
       {
@@ -10383,36 +10551,36 @@
     ],
     "detected_at": "2026-11-01 01:43:46",
     "smart_wallets": [
-      "santaz.ai",
-      "scat.ai",
-      "olo.ai",
-      "pbr.ai",
       "1588.ai",
-      "ere.ai",
       "derinajah.ai",
-      "rangga.ai",
-      "c1z.ai",
-      "odbo.ai",
-      "1518.ai",
       "themaster.ai",
+      "ssii.ai",
+      "pbr.ai",
+      "rangga.ai",
+      "scat.ai",
+      "1518.ai",
       "kadocay.ai",
-      "ssii.ai"
+      "ere.ai",
+      "santaz.ai",
+      "olo.ai",
+      "c1z.ai",
+      "odbo.ai"
     ],
     "smart_minters": [
-      "santaz.ai",
-      "scat.ai",
-      "olo.ai",
-      "pbr.ai",
       "1588.ai",
-      "ere.ai",
       "derinajah.ai",
-      "rangga.ai",
-      "c1z.ai",
-      "odbo.ai",
-      "1518.ai",
       "themaster.ai",
+      "ssii.ai",
+      "pbr.ai",
+      "rangga.ai",
+      "scat.ai",
+      "1518.ai",
       "kadocay.ai",
-      "ssii.ai"
+      "ere.ai",
+      "santaz.ai",
+      "olo.ai",
+      "c1z.ai",
+      "odbo.ai"
     ],
     "mint_history": [
       {
@@ -10464,13 +10632,13 @@
     "secondary_vol_bnb": 0.000347,
     "floor_price_bnb": 8.9e-05,
     "high_price_bnb": 0.000129,
-    "secondary_transfers": 5,
+    "secondary_transfers": 4,
     "is_nft_surge": false,
     "nft_surge_badge": "",
-    "ath_price_usd": 0.062745,
-    "ath_profit_usd": 0.062745,
+    "ath_price_usd": 0.063699,
+    "ath_profit_usd": 0.063699,
     "ath_multiplier": null,
-    "ath_timestamp": 1793539722,
+    "ath_timestamp": 1793541403,
     "current_profit_usd": 0.062745,
     "current_multiplier": null,
     "mint_cost_usd": 0.0,
@@ -10622,28 +10790,28 @@
     ],
     "detected_at": "2026-11-01 01:36:23",
     "smart_wallets": [
-      "0x325000.ai",
-      "xiyingying.ai",
-      "hepp.ai",
+      "gauravsunaa.ai",
+      "xgreat.ai",
       "earnreward.ai",
-      "tatou.ai",
-      "proustygg.ai",
+      "hepp.ai",
       "sweet998.ai",
       "kanicuni.ai",
-      "xgreat.ai",
-      "gauravsunaa.ai"
+      "xiyingying.ai",
+      "tatou.ai",
+      "proustygg.ai",
+      "0x325000.ai"
     ],
     "smart_minters": [
-      "0x325000.ai",
-      "xiyingying.ai",
-      "hepp.ai",
+      "gauravsunaa.ai",
+      "xgreat.ai",
       "earnreward.ai",
-      "tatou.ai",
-      "proustygg.ai",
+      "hepp.ai",
       "sweet998.ai",
       "kanicuni.ai",
-      "xgreat.ai",
-      "gauravsunaa.ai"
+      "xiyingying.ai",
+      "tatou.ai",
+      "proustygg.ai",
+      "0x325000.ai"
     ],
     "velocity_ppm": 0.0,
     "security": {
@@ -10678,7 +10846,7 @@
       "\u25ab [green]\u2714[/green] Capital Safety: No fund drain detected",
       "\u25ab [dim]\u25ab Refund Guarantee: N/A (Free Mint / Gas Only)[/dim]"
     ],
-    "sweep_at": 1793530520.7582872,
+    "sweep_at": 1793541466.9312112,
     "current_profit_usd": 0.0,
     "current_multiplier": 0.0,
     "mint_cost_usd": 0.0,
@@ -11128,12 +11296,12 @@
     ],
     "detected_at": "2026-11-01 01:34:53",
     "smart_wallets": [
-      "mcbig.ai",
-      "xiaoduo.ai"
+      "xiaoduo.ai",
+      "mcbig.ai"
     ],
     "smart_minters": [
-      "mcbig.ai",
-      "xiaoduo.ai"
+      "xiaoduo.ai",
+      "mcbig.ai"
     ],
     "mint_history": [
       {
@@ -11235,15 +11403,15 @@
     "detected_at": "2026-11-01 01:34:46",
     "smart_wallets": [
       "bobi888.ai",
-      "bobi666.ai",
+      "z1101.ai",
       "boba66.ai",
-      "z1101.ai"
+      "bobi666.ai"
     ],
     "smart_minters": [
       "bobi888.ai",
-      "bobi666.ai",
+      "z1101.ai",
       "boba66.ai",
-      "z1101.ai"
+      "bobi666.ai"
     ],
     "mint_history": [
       {
@@ -11345,13 +11513,13 @@
     ],
     "detected_at": "2026-11-01 01:34:37",
     "smart_wallets": [
-      "richy6655.ai",
       "fb666.ai",
+      "richy6655.ai",
       "applepie.ai"
     ],
     "smart_minters": [
-      "richy6655.ai",
       "fb666.ai",
+      "richy6655.ai",
       "applepie.ai"
     ],
     "mint_history": [
@@ -11511,16 +11679,16 @@
     ],
     "detected_at": "2026-11-01 01:33:53",
     "smart_wallets": [
-      "19491001.ai",
-      "xiaozz.ai",
+      "yemen.ai",
       "kevin2002.ai",
-      "yemen.ai"
+      "xiaozz.ai",
+      "19491001.ai"
     ],
     "smart_minters": [
-      "19491001.ai",
-      "xiaozz.ai",
+      "yemen.ai",
       "kevin2002.ai",
-      "yemen.ai"
+      "xiaozz.ai",
+      "19491001.ai"
     ],
     "velocity_ppm": 0.0,
     "user_balance": 0,
@@ -11600,14 +11768,14 @@
       "\u25ab [yellow]\u2716[/yellow] Secondary Market: DEX LP already active ($14,454) -> Trade on DEX instead of minting"
     ],
     "sweep_at": 1793531115.783694,
-    "ath_price_usd": 0.0,
-    "ath_profit_usd": 0.0,
+    "ath_price_usd": 1.238e-08,
+    "ath_profit_usd": 1.238e-08,
     "ath_multiplier": 0.0,
-    "ath_timestamp": 1793539722,
-    "current_profit_usd": 0.0,
+    "ath_timestamp": 1793541604,
+    "current_profit_usd": 1.238e-08,
     "current_multiplier": 0.0,
     "mint_cost_usd": 0.0,
-    "secondary_price_usd": 0.0
+    "secondary_price_usd": 1.238e-08
   },
   {
     "block": 130911337,
@@ -11805,12 +11973,12 @@
     ],
     "detected_at": "2026-10-31 19:15:23",
     "smart_wallets": [
-      "zyg888.ai",
-      "akasheep.ai"
+      "akasheep.ai",
+      "zyg888.ai"
     ],
     "smart_minters": [
-      "zyg888.ai",
-      "akasheep.ai"
+      "akasheep.ai",
+      "zyg888.ai"
     ],
     "mint_history": [
       {
@@ -12054,16 +12222,16 @@
     ],
     "detected_at": "2026-10-31 19:13:59",
     "smart_wallets": [
-      "5269.ai",
       "lixunhuan.ai",
-      "0xfatdog.ai",
-      "2169.ai"
+      "2169.ai",
+      "5269.ai",
+      "0xfatdog.ai"
     ],
     "smart_minters": [
-      "5269.ai",
       "lixunhuan.ai",
-      "0xfatdog.ai",
-      "2169.ai"
+      "2169.ai",
+      "5269.ai",
+      "0xfatdog.ai"
     ],
     "mint_history": [
       {
@@ -12163,14 +12331,14 @@
     ],
     "detected_at": "2026-10-31 19:13:18",
     "smart_wallets": [
+      "332528zch.ai",
       "perpdex.ai",
-      "0xjl1222.ai",
-      "332528zch.ai"
+      "0xjl1222.ai"
     ],
     "smart_minters": [
+      "332528zch.ai",
       "perpdex.ai",
-      "0xjl1222.ai",
-      "332528zch.ai"
+      "0xjl1222.ai"
     ],
     "mint_history": [
       {
@@ -12249,12 +12417,12 @@
     ],
     "detected_at": "2026-10-31 19:13:07",
     "smart_wallets": [
-      "quan2709.ai",
-      "perpdex.ai"
+      "perpdex.ai",
+      "quan2709.ai"
     ],
     "smart_minters": [
-      "quan2709.ai",
-      "perpdex.ai"
+      "perpdex.ai",
+      "quan2709.ai"
     ],
     "mint_history": [
       {
@@ -12499,12 +12667,12 @@
     ],
     "detected_at": "2026-10-31 19:12:26",
     "smart_wallets": [
-      "zengwb.ai",
-      "332528zch.ai"
+      "332528zch.ai",
+      "zengwb.ai"
     ],
     "smart_minters": [
-      "zengwb.ai",
-      "332528zch.ai"
+      "332528zch.ai",
+      "zengwb.ai"
     ],
     "mint_history": [
       {
@@ -12578,34 +12746,34 @@
     ],
     "detected_at": "2026-10-31 19:12:41",
     "smart_wallets": [
-      "xiaoxiaowang.ai",
       "aka668.ai",
-      "ac4575.ai",
-      "louhuisha.ai",
-      "botxp.ai",
       "nmdc.ai",
       "dwk666.ai",
-      "nikoll.ai",
-      "nietzsche.ai",
       "hanfeiling.ai",
       "shdjjdjd.ai",
       "nyfyqh1.ai",
-      "scp682.ai"
+      "scp682.ai",
+      "louhuisha.ai",
+      "ac4575.ai",
+      "nietzsche.ai",
+      "nikoll.ai",
+      "xiaoxiaowang.ai",
+      "botxp.ai"
     ],
     "smart_minters": [
-      "xiaoxiaowang.ai",
       "aka668.ai",
-      "ac4575.ai",
-      "louhuisha.ai",
-      "botxp.ai",
       "nmdc.ai",
       "dwk666.ai",
-      "nikoll.ai",
-      "nietzsche.ai",
       "hanfeiling.ai",
       "shdjjdjd.ai",
       "nyfyqh1.ai",
-      "scp682.ai"
+      "scp682.ai",
+      "louhuisha.ai",
+      "ac4575.ai",
+      "nietzsche.ai",
+      "nikoll.ai",
+      "xiaoxiaowang.ai",
+      "botxp.ai"
     ],
     "mint_history": [
       {
@@ -12676,12 +12844,12 @@
     ],
     "detected_at": "2026-10-31 19:12:17",
     "smart_wallets": [
-      "nancy.ai",
-      "abelcow.ai"
+      "abelcow.ai",
+      "nancy.ai"
     ],
     "smart_minters": [
-      "nancy.ai",
-      "abelcow.ai"
+      "abelcow.ai",
+      "nancy.ai"
     ],
     "mint_history": [
       {
@@ -12759,20 +12927,20 @@
     ],
     "detected_at": "2026-10-31 19:12:09",
     "smart_wallets": [
-      "openwhale.ai",
       "musaceza.ai",
-      "4ma.ai",
-      "arpas.ai",
       "wcg.ai",
-      "wahane.ai"
+      "4ma.ai",
+      "wahane.ai",
+      "arpas.ai",
+      "openwhale.ai"
     ],
     "smart_minters": [
-      "openwhale.ai",
       "musaceza.ai",
-      "4ma.ai",
-      "arpas.ai",
       "wcg.ai",
-      "wahane.ai"
+      "4ma.ai",
+      "wahane.ai",
+      "arpas.ai",
+      "openwhale.ai"
     ],
     "mint_history": [
       {
@@ -12929,18 +13097,18 @@
     ],
     "detected_at": "2026-10-31 19:11:44",
     "smart_wallets": [
+      "lair.ai",
       "qing2.ai",
-      "chao1.ai",
       "zein007.ai",
       "1475.ai",
-      "lair.ai"
+      "chao1.ai"
     ],
     "smart_minters": [
+      "lair.ai",
       "qing2.ai",
-      "chao1.ai",
       "zein007.ai",
       "1475.ai",
-      "lair.ai"
+      "chao1.ai"
     ],
     "mint_history": [
       {
@@ -13259,12 +13427,12 @@
     ],
     "detected_at": "2026-10-31 19:07:29",
     "smart_wallets": [
-      "jietou.ai",
-      "perpdex.ai"
+      "perpdex.ai",
+      "jietou.ai"
     ],
     "smart_minters": [
-      "jietou.ai",
-      "perpdex.ai"
+      "perpdex.ai",
+      "jietou.ai"
     ],
     "mint_history": [
       {
@@ -13423,26 +13591,26 @@
     ],
     "detected_at": "2026-10-31 19:06:38",
     "smart_wallets": [
-      "0xjustin.ai",
-      "procyons.ai",
-      "belp.ai",
-      "susu9.ai",
-      "ikundogbuning.ai",
       "ethgas.ai",
-      "zai.ai",
+      "0xjustin.ai",
+      "belp.ai",
       "sbb.ai",
-      "kadocay.ai"
+      "kadocay.ai",
+      "procyons.ai",
+      "zai.ai",
+      "susu9.ai",
+      "ikundogbuning.ai"
     ],
     "smart_minters": [
-      "0xjustin.ai",
-      "procyons.ai",
-      "belp.ai",
-      "susu9.ai",
-      "ikundogbuning.ai",
       "ethgas.ai",
-      "zai.ai",
+      "0xjustin.ai",
+      "belp.ai",
       "sbb.ai",
-      "kadocay.ai"
+      "kadocay.ai",
+      "procyons.ai",
+      "zai.ai",
+      "susu9.ai",
+      "ikundogbuning.ai"
     ],
     "user_balance": 0,
     "sniper_ready": false,
@@ -13568,12 +13736,12 @@
     ],
     "detected_at": "2026-10-31 19:06:04",
     "smart_wallets": [
-      "mcbig.ai",
-      "xiaoduo.ai"
+      "xiaoduo.ai",
+      "mcbig.ai"
     ],
     "smart_minters": [
-      "mcbig.ai",
-      "xiaoduo.ai"
+      "xiaoduo.ai",
+      "mcbig.ai"
     ],
     "user_balance": 0,
     "sniper_ready": true,
@@ -13639,12 +13807,12 @@
     ],
     "detected_at": "2026-10-31 19:05:55",
     "smart_wallets": [
-      "yufaping.ai",
-      "hujinhua.ai"
+      "hujinhua.ai",
+      "yufaping.ai"
     ],
     "smart_minters": [
-      "yufaping.ai",
-      "hujinhua.ai"
+      "hujinhua.ai",
+      "yufaping.ai"
     ],
     "user_balance": 0,
     "sniper_ready": false,
@@ -13701,12 +13869,12 @@
     ],
     "detected_at": "2026-10-31 19:05:46",
     "smart_wallets": [
-      "mcbig.ai",
-      "xiaoduo.ai"
+      "xiaoduo.ai",
+      "mcbig.ai"
     ],
     "smart_minters": [
-      "mcbig.ai",
-      "xiaoduo.ai"
+      "xiaoduo.ai",
+      "mcbig.ai"
     ],
     "user_balance": 0,
     "sniper_ready": false,
@@ -13764,22 +13932,22 @@
     ],
     "detected_at": "2026-10-31 19:05:36",
     "smart_wallets": [
-      "formula1.ai",
       "boba66.ai",
       "aa888999.ai",
-      "dnlm.ai",
-      "z1101.ai",
       "bobi666.ai",
-      "quqiyzh.ai"
+      "dnlm.ai",
+      "formula1.ai",
+      "quqiyzh.ai",
+      "z1101.ai"
     ],
     "smart_minters": [
-      "formula1.ai",
       "boba66.ai",
       "aa888999.ai",
-      "dnlm.ai",
-      "z1101.ai",
       "bobi666.ai",
-      "quqiyzh.ai"
+      "dnlm.ai",
+      "formula1.ai",
+      "quqiyzh.ai",
+      "z1101.ai"
     ],
     "user_balance": 0,
     "sniper_ready": false,
@@ -13841,13 +14009,13 @@
     ],
     "detected_at": "2026-10-31 19:05:17",
     "smart_wallets": [
-      "nan2.ai",
       "nan1.ai",
+      "nan2.ai",
       "skmaster.ai"
     ],
     "smart_minters": [
-      "nan2.ai",
       "nan1.ai",
+      "nan2.ai",
       "skmaster.ai"
     ],
     "user_balance": 0,
@@ -13908,12 +14076,12 @@
     ],
     "detected_at": "2026-10-31 18:52:19",
     "smart_wallets": [
-      "ambika.ai",
-      "yatyou.ai"
+      "yatyou.ai",
+      "ambika.ai"
     ],
     "smart_minters": [
-      "ambika.ai",
-      "yatyou.ai"
+      "yatyou.ai",
+      "ambika.ai"
     ],
     "user_balance": 0,
     "sniper_ready": true,
@@ -14181,16 +14349,16 @@
     ],
     "detected_at": "2026-10-31 18:49:48",
     "smart_wallets": [
+      "longmao.ai",
       "xiaoze.ai",
       "chifan.ai",
-      "jenifer.ai",
-      "longmao.ai"
+      "jenifer.ai"
     ],
     "smart_minters": [
+      "longmao.ai",
       "xiaoze.ai",
       "chifan.ai",
-      "jenifer.ai",
-      "longmao.ai"
+      "jenifer.ai"
     ],
     "mint_history": [
       {
@@ -14358,26 +14526,26 @@
     ],
     "detected_at": "2026-10-31 18:49:07",
     "smart_wallets": [
-      "sloane.ai",
-      "hu9527.ai",
-      "liuhuan.ai",
-      "lovelove7.ai",
-      "superczpro.ai",
-      "100.ai",
       "syi1088.ai",
-      "2432.ai",
-      "zmllww.ai"
+      "superczpro.ai",
+      "sloane.ai",
+      "lovelove7.ai",
+      "hu9527.ai",
+      "zmllww.ai",
+      "liuhuan.ai",
+      "100.ai",
+      "2432.ai"
     ],
     "smart_minters": [
-      "sloane.ai",
-      "hu9527.ai",
-      "liuhuan.ai",
-      "lovelove7.ai",
-      "superczpro.ai",
-      "100.ai",
       "syi1088.ai",
-      "2432.ai",
-      "zmllww.ai"
+      "superczpro.ai",
+      "sloane.ai",
+      "lovelove7.ai",
+      "hu9527.ai",
+      "zmllww.ai",
+      "liuhuan.ai",
+      "100.ai",
+      "2432.ai"
     ],
     "token_price_bnb": 5.722e-11,
     "user_balance": 0,
@@ -14392,14 +14560,14 @@
       "\u25ab [yellow]\u2716[/yellow] Secondary Market: DEX LP already active ($23,653) -> Trade on DEX instead of minting"
     ],
     "sweep_at": 1793531117.6638458,
-    "ath_price_usd": 0.0,
-    "ath_profit_usd": 0.0,
+    "ath_price_usd": 4.088e-08,
+    "ath_profit_usd": 4.088e-08,
     "ath_multiplier": 0.0,
-    "ath_timestamp": 1793539722,
-    "current_profit_usd": 0.0,
+    "ath_timestamp": 1793541604,
+    "current_profit_usd": 4.088e-08,
     "current_multiplier": 0.0,
     "mint_cost_usd": 0.0,
-    "secondary_price_usd": 0.0
+    "secondary_price_usd": 4.088e-08
   },
   {
     "block": 130907670,
@@ -14443,12 +14611,12 @@
     ],
     "detected_at": "2026-10-31 18:48:59",
     "smart_wallets": [
-      "adameve.ai",
-      "6952.ai"
+      "6952.ai",
+      "adameve.ai"
     ],
     "smart_minters": [
-      "adameve.ai",
-      "6952.ai"
+      "6952.ai",
+      "adameve.ai"
     ],
     "mint_history": [
       {
@@ -14605,13 +14773,13 @@
     ],
     "detected_at": "2026-10-31 18:48:35",
     "smart_wallets": [
-      "wishhjr.ai",
       "cxmaa.ai",
+      "wishhjr.ai",
       "1109.ai"
     ],
     "smart_minters": [
-      "wishhjr.ai",
       "cxmaa.ai",
+      "wishhjr.ai",
       "1109.ai"
     ],
     "user_balance": 0,
@@ -14690,14 +14858,14 @@
       "\u25ab [yellow]\u2716[/yellow] Secondary Market: DEX LP already active ($88,326) -> Trade on DEX instead of minting"
     ],
     "sweep_at": 1793531142.703264,
-    "ath_price_usd": 0.0,
-    "ath_profit_usd": 0.0,
+    "ath_price_usd": 3.547e-07,
+    "ath_profit_usd": 3.547e-07,
     "ath_multiplier": 0.0,
-    "ath_timestamp": 1793539722,
-    "current_profit_usd": 0.0,
+    "ath_timestamp": 1793541604,
+    "current_profit_usd": 3.547e-07,
     "current_multiplier": 0.0,
     "mint_cost_usd": 0.0,
-    "secondary_price_usd": 0.0
+    "secondary_price_usd": 3.547e-07
   },
   {
     "block": 130906908,
@@ -14737,12 +14905,12 @@
     ],
     "detected_at": "2026-10-31 18:46:06",
     "smart_wallets": [
-      "mcbig.ai",
-      "xiaoduo.ai"
+      "xiaoduo.ai",
+      "mcbig.ai"
     ],
     "smart_minters": [
-      "mcbig.ai",
-      "xiaoduo.ai"
+      "xiaoduo.ai",
+      "mcbig.ai"
     ],
     "user_balance": 0,
     "sniper_ready": false,
@@ -14868,12 +15036,12 @@
     ],
     "detected_at": "2026-10-31 18:44:17",
     "smart_wallets": [
-      "ox10k.ai",
-      "quexue.ai"
+      "quexue.ai",
+      "ox10k.ai"
     ],
     "smart_minters": [
-      "ox10k.ai",
-      "quexue.ai"
+      "quexue.ai",
+      "ox10k.ai"
     ],
     "user_balance": 0,
     "sniper_ready": false,
@@ -14939,16 +15107,16 @@
     ],
     "detected_at": "2026-10-31 18:43:31",
     "smart_wallets": [
-      "zyg888.ai",
-      "xiaoze.ai",
+      "4ma.ai",
       "xiaoduo.ai",
-      "4ma.ai"
+      "xiaoze.ai",
+      "zyg888.ai"
     ],
     "smart_minters": [
-      "zyg888.ai",
-      "xiaoze.ai",
+      "4ma.ai",
       "xiaoduo.ai",
-      "4ma.ai"
+      "xiaoze.ai",
+      "zyg888.ai"
     ],
     "user_balance": 0,
     "sniper_ready": false,
@@ -15075,24 +15243,24 @@
     ],
     "detected_at": "2026-10-31 18:43:19",
     "smart_wallets": [
+      "ygf.ai",
+      "zhixia.ai",
       "apart.ai",
       "0xshenyuan.ai",
-      "dong1125.ai",
-      "ygf.ai",
       "hhdr.ai",
-      "zhixia.ai",
-      "8v8.ai",
-      "880.ai"
+      "880.ai",
+      "dong1125.ai",
+      "8v8.ai"
     ],
     "smart_minters": [
+      "ygf.ai",
+      "zhixia.ai",
       "apart.ai",
       "0xshenyuan.ai",
-      "dong1125.ai",
-      "ygf.ai",
       "hhdr.ai",
-      "zhixia.ai",
-      "8v8.ai",
-      "880.ai"
+      "880.ai",
+      "dong1125.ai",
+      "8v8.ai"
     ],
     "mint_history": [
       {
@@ -15249,12 +15417,12 @@
     ],
     "detected_at": "2026-10-31 18:42:55",
     "smart_wallets": [
-      "yangmiemie.ai",
-      "ethanz.ai"
+      "ethanz.ai",
+      "yangmiemie.ai"
     ],
     "smart_minters": [
-      "yangmiemie.ai",
-      "ethanz.ai"
+      "ethanz.ai",
+      "yangmiemie.ai"
     ],
     "user_balance": 0,
     "sniper_ready": false,
@@ -15516,16 +15684,16 @@
     ],
     "detected_at": "2026-10-31 18:38:39",
     "smart_wallets": [
-      "2777.ai",
+      "mudin.ai",
       "xiaofengwangluo.ai",
       "xunervel.ai",
-      "mudin.ai"
+      "2777.ai"
     ],
     "smart_minters": [
-      "2777.ai",
+      "mudin.ai",
       "xiaofengwangluo.ai",
       "xunervel.ai",
-      "mudin.ai"
+      "2777.ai"
     ],
     "user_balance": 0,
     "sniper_ready": false,
@@ -15586,17 +15754,17 @@
     ],
     "detected_at": "2026-10-31 18:38:03",
     "smart_wallets": [
-      "zengwb.ai",
       "musaceza.ai",
-      "vuvu8243.ai",
       "iapots.ai",
+      "vuvu8243.ai",
+      "zengwb.ai",
       "diwy.ai"
     ],
     "smart_minters": [
-      "zengwb.ai",
       "musaceza.ai",
-      "vuvu8243.ai",
       "iapots.ai",
+      "vuvu8243.ai",
+      "zengwb.ai",
       "diwy.ai"
     ],
     "user_balance": 0,
@@ -15736,12 +15904,12 @@
     ],
     "detected_at": "2026-10-31 18:37:38",
     "smart_wallets": [
-      "5269.ai",
-      "6952.ai"
+      "6952.ai",
+      "5269.ai"
     ],
     "smart_minters": [
-      "5269.ai",
-      "6952.ai"
+      "6952.ai",
+      "5269.ai"
     ],
     "user_balance": 0,
     "sniper_ready": false,
@@ -15948,14 +16116,14 @@
     "smart_wallets": [
       "zhen1.ai",
       "nan1.ai",
-      "qing2.ai",
-      "hujinhua.ai"
+      "hujinhua.ai",
+      "qing2.ai"
     ],
     "smart_minters": [
       "zhen1.ai",
       "nan1.ai",
-      "qing2.ai",
-      "hujinhua.ai"
+      "hujinhua.ai",
+      "qing2.ai"
     ],
     "user_balance": 0,
     "sniper_ready": false,
@@ -16085,20 +16253,20 @@
     ],
     "detected_at": "2026-10-31 18:36:28",
     "smart_wallets": [
-      "mcbig.ai",
-      "miman.ai",
-      "minbtc.ai",
-      "yuhuayu.ai",
+      "hujinhua.ai",
       "xiaoduo.ai",
-      "hujinhua.ai"
+      "minbtc.ai",
+      "miman.ai",
+      "yuhuayu.ai",
+      "mcbig.ai"
     ],
     "smart_minters": [
-      "mcbig.ai",
-      "miman.ai",
-      "minbtc.ai",
-      "yuhuayu.ai",
+      "hujinhua.ai",
       "xiaoduo.ai",
-      "hujinhua.ai"
+      "minbtc.ai",
+      "miman.ai",
+      "yuhuayu.ai",
+      "mcbig.ai"
     ],
     "user_balance": 0,
     "sniper_ready": false,
@@ -16159,16 +16327,16 @@
     ],
     "detected_at": "2026-10-31 18:36:18",
     "smart_wallets": [
-      "xianyuxiaofe.ai",
-      "nancy.ai",
       "yxv.ai",
-      "2169.ai"
+      "2169.ai",
+      "nancy.ai",
+      "xianyuxiaofe.ai"
     ],
     "smart_minters": [
-      "xianyuxiaofe.ai",
-      "nancy.ai",
       "yxv.ai",
-      "2169.ai"
+      "2169.ai",
+      "nancy.ai",
+      "xianyuxiaofe.ai"
     ],
     "user_balance": 0,
     "sniper_ready": false,
@@ -16235,16 +16403,16 @@
     ],
     "detected_at": "2026-10-31 18:33:47",
     "smart_wallets": [
-      "2777.ai",
+      "zhaoran.ai",
       "hotlilith.ai",
       "jietou.ai",
-      "zhaoran.ai"
+      "2777.ai"
     ],
     "smart_minters": [
-      "2777.ai",
+      "zhaoran.ai",
       "hotlilith.ai",
       "jietou.ai",
-      "zhaoran.ai"
+      "2777.ai"
     ],
     "user_balance": 0,
     "sniper_ready": false,
@@ -16440,16 +16608,16 @@
     ],
     "detected_at": "2026-10-31 18:32:57",
     "smart_wallets": [
-      "mikeyinbentley.ai",
+      "xiaoduo.ai",
       "yufaping.ai",
-      "chao1.ai",
-      "xiaoduo.ai"
+      "mikeyinbentley.ai",
+      "chao1.ai"
     ],
     "smart_minters": [
-      "mikeyinbentley.ai",
+      "xiaoduo.ai",
       "yufaping.ai",
-      "chao1.ai",
-      "xiaoduo.ai"
+      "mikeyinbentley.ai",
+      "chao1.ai"
     ],
     "user_balance": 0,
     "sniper_ready": false,
@@ -16581,14 +16749,14 @@
     ],
     "detected_at": "2026-10-31 18:32:21",
     "smart_wallets": [
+      "0x435646f960285.ai",
       "classrep.ai",
-      "yanqinghua.ai",
-      "0x435646f960285.ai"
+      "yanqinghua.ai"
     ],
     "smart_minters": [
+      "0x435646f960285.ai",
       "classrep.ai",
-      "yanqinghua.ai",
-      "0x435646f960285.ai"
+      "yanqinghua.ai"
     ],
     "user_balance": 0,
     "sniper_ready": false,
@@ -16655,12 +16823,12 @@
     ],
     "detected_at": "2026-10-31 18:32:00",
     "smart_wallets": [
-      "zengwb.ai",
-      "vuvu8243.ai"
+      "vuvu8243.ai",
+      "zengwb.ai"
     ],
     "smart_minters": [
-      "zengwb.ai",
-      "vuvu8243.ai"
+      "vuvu8243.ai",
+      "zengwb.ai"
     ],
     "user_balance": 0,
     "sniper_ready": false,
@@ -16854,12 +17022,12 @@
     ],
     "detected_at": "2026-10-31 18:31:21",
     "smart_wallets": [
-      "zengwb.ai",
-      "hotlilith.ai"
+      "hotlilith.ai",
+      "zengwb.ai"
     ],
     "smart_minters": [
-      "zengwb.ai",
-      "hotlilith.ai"
+      "hotlilith.ai",
+      "zengwb.ai"
     ],
     "user_balance": 0,
     "sniper_ready": false,
@@ -16926,16 +17094,16 @@
     ],
     "detected_at": "2026-10-31 18:31:14",
     "smart_wallets": [
-      "bitbigcat.ai",
+      "youliqi.ai",
       "xiaoze.ai",
-      "flap777.ai",
-      "youliqi.ai"
+      "bitbigcat.ai",
+      "flap777.ai"
     ],
     "smart_minters": [
-      "bitbigcat.ai",
+      "youliqi.ai",
       "xiaoze.ai",
-      "flap777.ai",
-      "youliqi.ai"
+      "bitbigcat.ai",
+      "flap777.ai"
     ],
     "user_balance": 0,
     "sniper_ready": false,
@@ -17199,14 +17367,14 @@
     "smart_wallets": [
       "zhen1.ai",
       "bianvip888.ai",
-      "miman.ai",
-      "vuvu8243.ai"
+      "vuvu8243.ai",
+      "miman.ai"
     ],
     "smart_minters": [
       "zhen1.ai",
       "bianvip888.ai",
-      "miman.ai",
-      "vuvu8243.ai"
+      "vuvu8243.ai",
+      "miman.ai"
     ],
     "mint_history": [
       {
@@ -17419,16 +17587,16 @@
     ],
     "detected_at": "2026-10-31 18:13:50",
     "smart_wallets": [
-      "3377.ai",
-      "just123.ai",
+      "4ma.ai",
       "0x1412.ai",
-      "4ma.ai"
+      "just123.ai",
+      "3377.ai"
     ],
     "smart_minters": [
-      "3377.ai",
-      "just123.ai",
+      "4ma.ai",
       "0x1412.ai",
-      "4ma.ai"
+      "just123.ai",
+      "3377.ai"
     ],
     "user_balance": 0,
     "sniper_ready": true,
@@ -17495,24 +17663,24 @@
     ],
     "detected_at": "2026-10-31 18:13:33",
     "smart_wallets": [
+      "hujinhua.ai",
+      "xiaodan.ai",
+      "kaiduo.ai",
       "yufaping.ai",
       "miman.ai",
-      "xiaodan.ai",
-      "yuguoping.ai",
-      "kaiduo.ai",
       "yuhuayu.ai",
-      "hujinhua.ai",
-      "baihuzixinye.ai"
+      "baihuzixinye.ai",
+      "yuguoping.ai"
     ],
     "smart_minters": [
+      "hujinhua.ai",
+      "xiaodan.ai",
+      "kaiduo.ai",
       "yufaping.ai",
       "miman.ai",
-      "xiaodan.ai",
-      "yuguoping.ai",
-      "kaiduo.ai",
       "yuhuayu.ai",
-      "hujinhua.ai",
-      "baihuzixinye.ai"
+      "baihuzixinye.ai",
+      "yuguoping.ai"
     ],
     "user_balance": 0,
     "sniper_ready": false,
@@ -17787,12 +17955,12 @@
     ],
     "detected_at": "2026-10-31 18:08:55",
     "smart_wallets": [
-      "zyg888.ai",
-      "bncb.ai"
+      "bncb.ai",
+      "zyg888.ai"
     ],
     "smart_minters": [
-      "zyg888.ai",
-      "bncb.ai"
+      "bncb.ai",
+      "zyg888.ai"
     ],
     "user_balance": 0,
     "sniper_ready": false,
@@ -17922,19 +18090,19 @@
     ],
     "detected_at": "2026-10-31 18:07:56",
     "smart_wallets": [
-      "bandungrx24.ai",
-      "cryptrv.ai",
-      "lanz.ai",
-      "fishing.ai",
       "ibehh.ai",
+      "fishing.ai",
+      "lanz.ai",
+      "cryptrv.ai",
+      "bandungrx24.ai",
       "yl306123.ai"
     ],
     "smart_minters": [
-      "bandungrx24.ai",
-      "cryptrv.ai",
-      "lanz.ai",
-      "fishing.ai",
       "ibehh.ai",
+      "fishing.ai",
+      "lanz.ai",
+      "cryptrv.ai",
+      "bandungrx24.ai",
       "yl306123.ai"
     ],
     "token_price_bnb": 0.0001597,
@@ -17949,15 +18117,15 @@
       "\u25ab [dim]\u25ab Refund Guarantee: N/A (Free Mint / Gas Only)[/dim]",
       "\u25ab [green]\u2714[/green] Secondary Market: Primary bonding phase (No DEX LP yet)"
     ],
-    "sweep_at": 1793529535.538058,
+    "sweep_at": 1793541465.4412165,
     "ath_price_usd": 0.00016,
     "ath_profit_usd": 0.00016,
     "ath_multiplier": 0.0,
     "ath_timestamp": 1793539722,
-    "current_profit_usd": 0.00016,
+    "current_profit_usd": 0.0001597,
     "current_multiplier": 0.0,
     "mint_cost_usd": 0.0,
-    "secondary_price_usd": 0.00016
+    "secondary_price_usd": 0.0001597
   },
   {
     "block": 130902199,
@@ -18315,12 +18483,12 @@
     ],
     "detected_at": "2026-10-31 18:03:25",
     "smart_wallets": [
-      "hy6.ai",
-      "czbnbchain.ai"
+      "czbnbchain.ai",
+      "hy6.ai"
     ],
     "smart_minters": [
-      "hy6.ai",
-      "czbnbchain.ai"
+      "czbnbchain.ai",
+      "hy6.ai"
     ],
     "mint_history": [
       {
@@ -18364,7 +18532,7 @@
       "\u25ab [dim]\u25ab Refund Guarantee: N/A (Free Mint / Gas Only)[/dim]",
       "\u25ab [green]\u2714[/green] Secondary Market: Primary bonding phase (No DEX LP yet)"
     ],
-    "sweep_at": 1793529535.581825,
+    "sweep_at": 1793541465.4359932,
     "current_profit_usd": 0.0,
     "current_multiplier": 0.0,
     "mint_cost_usd": 0.0,
@@ -18462,7 +18630,7 @@
       "\u25ab [green]\u2714[/green] Capital Safety: No fund drain detected",
       "\u25ab [dim]\u25ab Refund Guarantee: N/A (Free Mint / Gas Only)[/dim]"
     ],
-    "sweep_at": 1793529535.923438,
+    "sweep_at": 1793541465.4225948,
     "secondary_sales_count": 0,
     "secondary_vol_bnb": 0,
     "floor_price_bnb": 0.0,
@@ -18517,18 +18685,18 @@
     ],
     "detected_at": "2026-10-31 18:02:39",
     "smart_wallets": [
-      "zyg888.ai",
       "2169.ai",
       "5269.ai",
-      "lzp.ai",
-      "10024.ai"
+      "zyg888.ai",
+      "10024.ai",
+      "lzp.ai"
     ],
     "smart_minters": [
-      "zyg888.ai",
       "2169.ai",
       "5269.ai",
-      "lzp.ai",
-      "10024.ai"
+      "zyg888.ai",
+      "10024.ai",
+      "lzp.ai"
     ],
     "mint_history": [
       {
@@ -18577,7 +18745,7 @@
       "\u25ab [dim]\u25ab Refund Guarantee: N/A (Free Mint / Gas Only)[/dim]"
     ],
     "sold_sel": "0x18160ddd",
-    "sweep_at": 1793529535.097282,
+    "sweep_at": 1793541464.988541,
     "is_new_snipe_ready": true,
     "secondary_sales_count": 0,
     "secondary_vol_bnb": 0,
@@ -18844,30 +19012,30 @@
     ],
     "detected_at": "2026-10-31 18:01:48",
     "smart_wallets": [
-      "xiaoze.ai",
-      "nancy.ai",
-      "flux.ai",
-      "5550.ai",
-      "luoxiaohei.ai",
-      "tiny888.ai",
       "yxv.ai",
-      "000000000000001.ai",
-      "zhuojin.ai",
       "dominik312.ai",
-      "sapphy.ai"
+      "flux.ai",
+      "zhuojin.ai",
+      "tiny888.ai",
+      "5550.ai",
+      "sapphy.ai",
+      "luoxiaohei.ai",
+      "xiaoze.ai",
+      "000000000000001.ai",
+      "nancy.ai"
     ],
     "smart_minters": [
-      "xiaoze.ai",
-      "nancy.ai",
-      "flux.ai",
-      "5550.ai",
-      "luoxiaohei.ai",
-      "tiny888.ai",
       "yxv.ai",
-      "000000000000001.ai",
-      "zhuojin.ai",
       "dominik312.ai",
-      "sapphy.ai"
+      "flux.ai",
+      "zhuojin.ai",
+      "tiny888.ai",
+      "5550.ai",
+      "sapphy.ai",
+      "luoxiaohei.ai",
+      "xiaoze.ai",
+      "000000000000001.ai",
+      "nancy.ai"
     ],
     "mint_history": [
       {
@@ -18944,7 +19112,7 @@
     "mint_price_bnb": 0.0,
     "mint_value_wei": "0",
     "max_supply": 50000,
-    "total_minted": 1041,
+    "total_minted": 1044,
     "score": 15,
     "rating": "\u2744\ufe0f COLD / DORMANT",
     "lp_usd": 0.0,
@@ -19021,7 +19189,7 @@
       "\u25ab [dim]\u25ab Refund Guarantee: N/A (Free Mint / Gas Only)[/dim]"
     ],
     "sold_sel": "0x18160ddd",
-    "sweep_at": 1793529535.544415,
+    "sweep_at": 1793541464.9778993,
     "secondary_sales_count": 0,
     "secondary_vol_bnb": 0,
     "floor_price_bnb": 0.0,
@@ -19049,7 +19217,7 @@
     "mint_price_bnb": 0.0,
     "mint_value_wei": "0",
     "max_supply": 1354,
-    "total_minted": 810,
+    "total_minted": 813,
     "score": 20,
     "rating": "\u2744\ufe0f COLD / DORMANT",
     "lp_usd": 0.0,
@@ -19127,7 +19295,7 @@
       "\u25ab [dim]\u25ab Refund Guarantee: N/A (Free Mint / Gas Only)[/dim]"
     ],
     "sold_sel": "0x18160ddd",
-    "sweep_at": 1793529535.9303732,
+    "sweep_at": 1793541465.196519,
     "secondary_sales_count": 0,
     "secondary_vol_bnb": 0,
     "floor_price_bnb": 0.0,
@@ -19155,7 +19323,7 @@
     "mint_price_bnb": 0.0,
     "mint_value_wei": "0",
     "max_supply": 1309,
-    "total_minted": 1098,
+    "total_minted": 1099,
     "score": 30,
     "rating": "\ud83c\udf31 WARM INTEREST",
     "lp_usd": 0.0,
@@ -19181,16 +19349,16 @@
     ],
     "detected_at": "2026-10-31 07:29:48",
     "smart_wallets": [
-      "mhg.ai",
       "jiebao.ai",
-      "youliqi.ai",
-      "vuvu8243.ai"
+      "mhg.ai",
+      "vuvu8243.ai",
+      "youliqi.ai"
     ],
     "smart_minters": [
-      "mhg.ai",
       "jiebao.ai",
-      "youliqi.ai",
-      "vuvu8243.ai"
+      "mhg.ai",
+      "vuvu8243.ai",
+      "youliqi.ai"
     ],
     "mint_history": [
       {
@@ -19239,7 +19407,7 @@
       "\u25ab [dim]\u25ab Refund Guarantee: N/A (Free Mint / Gas Only)[/dim]"
     ],
     "sold_sel": "0x18160ddd",
-    "sweep_at": 1793529535.9221802,
+    "sweep_at": 1793541465.0009768,
     "is_new_snipe_ready": true,
     "secondary_sales_count": 0,
     "secondary_vol_bnb": 0,
@@ -19268,7 +19436,7 @@
     "mint_price_bnb": 0.0,
     "mint_value_wei": "0",
     "max_supply": 9999,
-    "total_minted": 1495,
+    "total_minted": 1504,
     "score": 15,
     "rating": "\u2744\ufe0f COLD / DORMANT",
     "lp_usd": 0.0,
@@ -19294,12 +19462,12 @@
     ],
     "detected_at": "2026-10-31 07:29:34",
     "smart_wallets": [
-      "ggy.ai",
-      "xiaoduo.ai"
+      "xiaoduo.ai",
+      "ggy.ai"
     ],
     "smart_minters": [
-      "ggy.ai",
-      "xiaoduo.ai"
+      "xiaoduo.ai",
+      "ggy.ai"
     ],
     "mint_history": [
       {
@@ -19348,7 +19516,7 @@
       "\u25ab [dim]\u25ab Refund Guarantee: N/A (Free Mint / Gas Only)[/dim]"
     ],
     "sold_sel": "0x18160ddd",
-    "sweep_at": 1793529536.219338,
+    "sweep_at": 1793541465.2022285,
     "secondary_sales_count": 0,
     "secondary_vol_bnb": 0,
     "floor_price_bnb": 0.0,
@@ -19454,7 +19622,7 @@
       "\u25ab [dim]\u25ab Refund Guarantee: N/A (Free Mint / Gas Only)[/dim]"
     ],
     "sold_sel": "0x18160ddd",
-    "sweep_at": 1793529536.266447,
+    "sweep_at": 1793541465.2161894,
     "is_new_snipe_ready": true,
     "secondary_sales_count": 0,
     "secondary_vol_bnb": 0,
@@ -19563,7 +19731,7 @@
       "\u25ab [dim]\u25ab Refund Guarantee: N/A (Free Mint / Gas Only)[/dim]"
     ],
     "sold_sel": "0x18160ddd",
-    "sweep_at": 1793529536.3959072,
+    "sweep_at": 1793541465.4279432,
     "is_new_snipe_ready": true,
     "secondary_sales_count": 0,
     "secondary_vol_bnb": 0,
@@ -19592,7 +19760,7 @@
     "mint_price_bnb": 0.001,
     "mint_value_wei": "1000000000000000",
     "max_supply": 21000,
-    "total_minted": 450,
+    "total_minted": 483,
     "score": 10,
     "rating": "\u2744\ufe0f COLD / DORMANT",
     "lp_usd": 0.0,
@@ -19670,7 +19838,7 @@
       "\u25ab [red]\u2716[/red] Refund Guarantee: \u26a0\ufe0f No refund method (Capital trapped if unfilled)"
     ],
     "sold_sel": "0x18160ddd",
-    "sweep_at": 1793529536.38952,
+    "sweep_at": 1793541465.4151056,
     "secondary_sales_count": 0,
     "secondary_vol_bnb": 0,
     "floor_price_bnb": 0.0,
@@ -19698,7 +19866,7 @@
     "mint_price_bnb": 0.0,
     "mint_value_wei": "0",
     "max_supply": 20000,
-    "total_minted": 787,
+    "total_minted": 790,
     "score": 15,
     "rating": "\u2744\ufe0f COLD / DORMANT",
     "lp_usd": 0.0,
@@ -19777,7 +19945,7 @@
       "\u25ab [dim]\u25ab Refund Guarantee: N/A (Free Mint / Gas Only)[/dim]"
     ],
     "sold_sel": "0x18160ddd",
-    "sweep_at": 1793529536.395085,
+    "sweep_at": 1793541465.4105837,
     "secondary_sales_count": 0,
     "secondary_vol_bnb": 0,
     "floor_price_bnb": 0.0,
@@ -19805,7 +19973,7 @@
     "mint_price_bnb": 0.0005,
     "mint_value_wei": "500000000000000",
     "max_supply": 20000,
-    "total_minted": 828,
+    "total_minted": 837,
     "score": 15,
     "rating": "\u2744\ufe0f COLD / DORMANT",
     "lp_usd": 0.0,
@@ -19883,7 +20051,7 @@
       "\u25ab [red]\u2716[/red] Refund Guarantee: \u26a0\ufe0f No refund method (Capital trapped if unfilled)"
     ],
     "sold_sel": "0x18160ddd",
-    "sweep_at": 1793529536.405775,
+    "sweep_at": 1793541465.62977,
     "secondary_sales_count": 0,
     "secondary_vol_bnb": 0,
     "floor_price_bnb": 0.0,
@@ -19911,7 +20079,7 @@
     "mint_price_bnb": 0.0,
     "mint_value_wei": "0",
     "max_supply": 4200,
-    "total_minted": 652,
+    "total_minted": 654,
     "score": 10,
     "rating": "\u2744\ufe0f COLD / DORMANT",
     "lp_usd": 0.0,
@@ -19988,7 +20156,7 @@
       "\u25ab [dim]\u25ab Refund Guarantee: N/A (Free Mint / Gas Only)[/dim]"
     ],
     "sold_sel": "0x18160ddd",
-    "sweep_at": 1793529536.6689951,
+    "sweep_at": 1793541465.6542466,
     "secondary_sales_count": 0,
     "secondary_vol_bnb": 0,
     "floor_price_bnb": 0.0,
@@ -20060,7 +20228,7 @@
       "\u25ab [dim]\u25ab Refund Guarantee: N/A (Free Mint / Gas Only)[/dim]",
       "\u25ab [yellow]\u2716[/yellow] Secondary Market: DEX LP already active ($207,296) -> Trade on DEX instead of minting"
     ],
-    "sweep_at": 1793529537.596561,
+    "sweep_at": 1793541466.2770343,
     "ath_price_usd": 18.4,
     "ath_profit_usd": 18.4,
     "ath_multiplier": 0.0,
@@ -20219,18 +20387,18 @@
     ],
     "detected_at": "2026-10-31 07:28:04",
     "smart_wallets": [
-      "6952.ai",
       "iamryu.ai",
       "2169.ai",
+      "goudai.ai",
       "5269.ai",
-      "goudai.ai"
+      "6952.ai"
     ],
     "smart_minters": [
-      "6952.ai",
       "iamryu.ai",
       "2169.ai",
+      "goudai.ai",
       "5269.ai",
-      "goudai.ai"
+      "6952.ai"
     ],
     "mint_history": [
       {
@@ -20384,15 +20552,15 @@
       "\u25ab [dim]\u25ab Refund Guarantee: N/A (Free Mint / Gas Only)[/dim]",
       "\u25ab [green]\u2714[/green] Secondary Market: Primary bonding phase (No DEX LP yet)"
     ],
-    "sweep_at": 1793529537.754603,
-    "ath_price_usd": 0.0,
-    "ath_profit_usd": 0.0,
+    "sweep_at": 1793541466.3080769,
+    "ath_price_usd": 4.067563885e-07,
+    "ath_profit_usd": 4.067563885e-07,
     "ath_multiplier": null,
-    "ath_timestamp": 1793539722,
-    "current_profit_usd": 0.0,
+    "ath_timestamp": 1793541604,
+    "current_profit_usd": 4.067563885e-07,
     "current_multiplier": null,
     "mint_cost_usd": 0.0,
-    "secondary_price_usd": 0.0
+    "secondary_price_usd": 4.067563885e-07
   },
   {
     "block": 130816910,
@@ -20409,7 +20577,7 @@
     "mint_price_bnb": 0.0,
     "mint_value_wei": "0",
     "max_supply": 1666,
-    "total_minted": 1005,
+    "total_minted": 1009,
     "score": 25,
     "rating": "\ud83c\udf31 WARM INTEREST",
     "lp_usd": 0.0,
@@ -20486,7 +20654,7 @@
       "\u25ab [dim]\u25ab Refund Guarantee: N/A (Free Mint / Gas Only)[/dim]"
     ],
     "sold_sel": "0x18160ddd",
-    "sweep_at": 1793529536.8744042,
+    "sweep_at": 1793541465.6592398,
     "is_new_snipe_ready": true,
     "secondary_sales_count": 0,
     "secondary_vol_bnb": 0,
@@ -20593,7 +20761,7 @@
       "\u25ab [dim]\u25ab Refund Guarantee: N/A (Free Mint / Gas Only)[/dim]"
     ],
     "sold_sel": "0x18160ddd",
-    "sweep_at": 1793529537.1072068,
+    "sweep_at": 1793541465.644277,
     "is_new_snipe_ready": true,
     "secondary_sales_count": 0,
     "secondary_vol_bnb": 0,
@@ -20829,7 +20997,7 @@
     "mint_price_bnb": 0.0006,
     "mint_value_wei": "600000000000000",
     "max_supply": null,
-    "total_minted": 868,
+    "total_minted": 871,
     "score": 10,
     "rating": "\u2744\ufe0f COLD / DORMANT",
     "lp_usd": 0.0,
@@ -20906,7 +21074,7 @@
       "\u25ab [red]\u2716[/red] Refund Guarantee: \u26a0\ufe0f No refund method (Capital trapped if unfilled)"
     ],
     "sold_sel": "0x18160ddd",
-    "sweep_at": 1793529537.322369,
+    "sweep_at": 1793541465.672536,
     "secondary_sales_count": 0,
     "secondary_vol_bnb": 0,
     "floor_price_bnb": 0.0,
@@ -20960,18 +21128,18 @@
     ],
     "detected_at": "2026-10-31 04:53:41",
     "smart_wallets": [
-      "flap777.ai",
       "longmao.ai",
+      "mm1111.ai",
       "4ma.ai",
       "bncb.ai",
-      "mm1111.ai"
+      "flap777.ai"
     ],
     "smart_minters": [
-      "flap777.ai",
       "longmao.ai",
+      "mm1111.ai",
       "4ma.ai",
       "bncb.ai",
-      "mm1111.ai"
+      "flap777.ai"
     ],
     "mint_history": [
       {
@@ -21020,7 +21188,7 @@
       "\u25ab [dim]\u25ab Refund Guarantee: N/A (Free Mint / Gas Only)[/dim]"
     ],
     "sold_sel": "0x18160ddd",
-    "sweep_at": 1793529537.333463,
+    "sweep_at": 1793541465.663663,
     "is_new_snipe_ready": true,
     "secondary_sales_count": 0,
     "secondary_vol_bnb": 0,
@@ -21123,7 +21291,7 @@
       "\u25ab [dim]\u25ab Refund Guarantee: N/A (Free Mint / Gas Only)[/dim]",
       "\u25ab [green]\u2714[/green] Secondary Market: Primary bonding phase (No DEX LP yet)"
     ],
-    "sweep_at": 1793529538.453289,
+    "sweep_at": 1793541466.340325,
     "current_profit_usd": 0.0,
     "current_multiplier": 0.0,
     "mint_cost_usd": 0.0,
@@ -21384,15 +21552,15 @@
     "detected_at": "2026-10-31 09:05:14",
     "smart_wallets": [
       "mrhabibie.ai",
+      "suguobin.ai",
       "cdc.ai",
-      "wabi.ai",
-      "suguobin.ai"
+      "wabi.ai"
     ],
     "smart_minters": [
       "mrhabibie.ai",
+      "suguobin.ai",
       "cdc.ai",
-      "wabi.ai",
-      "suguobin.ai"
+      "wabi.ai"
     ],
     "mint_history": [
       {
@@ -21449,7 +21617,7 @@
       "\u25ab [dim]\u25ab Refund Guarantee: N/A (Free Mint / Gas Only)[/dim]"
     ],
     "sold_sel": "0x18160ddd",
-    "sweep_at": 1793529537.772099,
+    "sweep_at": 1793541465.8789258,
     "is_new_snipe_ready": true,
     "secondary_sales_count": 0,
     "secondary_vol_bnb": 0,
@@ -21478,7 +21646,7 @@
     "mint_price_bnb": 0.0,
     "mint_value_wei": "0",
     "max_supply": 7777,
-    "total_minted": 2271,
+    "total_minted": 2274,
     "score": 15,
     "rating": "\u2744\ufe0f COLD / DORMANT",
     "lp_usd": 0.0,
@@ -21586,7 +21754,7 @@
       "\u25ab [dim]\u25ab Refund Guarantee: N/A (Free Mint / Gas Only)[/dim]"
     ],
     "sold_sel": "0x18160ddd",
-    "sweep_at": 1793529560.7032902,
+    "sweep_at": 1793541465.8803637,
     "secondary_sales_count": 0,
     "secondary_vol_bnb": 0,
     "floor_price_bnb": 0.0,
@@ -21614,7 +21782,7 @@
     "mint_price_bnb": 0.0,
     "mint_value_wei": "0",
     "max_supply": 2048,
-    "total_minted": 1272,
+    "total_minted": 1274,
     "score": 25,
     "rating": "\ud83c\udf31 WARM INTEREST",
     "lp_usd": 0.0,
@@ -21638,12 +21806,12 @@
     ],
     "detected_at": "2026-10-30 23:13:52",
     "smart_wallets": [
-      "dewa.ai",
-      "song90.ai"
+      "song90.ai",
+      "dewa.ai"
     ],
     "smart_minters": [
-      "dewa.ai",
-      "song90.ai"
+      "song90.ai",
+      "dewa.ai"
     ],
     "mint_history": [
       {
@@ -21723,7 +21891,7 @@
       "\u25ab [dim]\u25ab Refund Guarantee: N/A (Free Mint / Gas Only)[/dim]"
     ],
     "sold_sel": "0x18160ddd",
-    "sweep_at": 1793529560.702454,
+    "sweep_at": 1793541465.8883648,
     "is_new_snipe_ready": true,
     "secondary_sales_count": 0,
     "secondary_vol_bnb": 0,
@@ -21812,7 +21980,7 @@
       "\u25ab [dim]\u25ab Refund Guarantee: N/A (Free Mint / Gas Only)[/dim]",
       "\u25ab [green]\u2714[/green] Secondary Market: Primary bonding phase (No DEX LP yet)"
     ],
-    "sweep_at": 1793530208.556858,
+    "sweep_at": 1793541466.9239478,
     "current_profit_usd": 0.0,
     "current_multiplier": 0.0,
     "mint_cost_usd": 0.0,
@@ -21904,14 +22072,14 @@
       "\u25ab [yellow]\u2716[/yellow] Secondary Market: DEX LP already active ($19,236) -> Trade on DEX instead of minting"
     ],
     "sweep_at": 1793529561.645361,
-    "ath_price_usd": 0.0,
-    "ath_profit_usd": 0.0,
+    "ath_price_usd": 1.942e-08,
+    "ath_profit_usd": 1.942e-08,
     "ath_multiplier": 0.0,
-    "ath_timestamp": 1793539722,
-    "current_profit_usd": 0.0,
+    "ath_timestamp": 1793541604,
+    "current_profit_usd": 1.942e-08,
     "current_multiplier": 0.0,
     "mint_cost_usd": 0.0,
-    "secondary_price_usd": 0.0
+    "secondary_price_usd": 1.942e-08
   },
   {
     "block": 130687052,
@@ -21928,7 +22096,7 @@
     "mint_price_bnb": 0.0,
     "mint_value_wei": "0",
     "max_supply": 5555,
-    "total_minted": 2297,
+    "total_minted": 2299,
     "score": 15,
     "rating": "\u2744\ufe0f COLD / DORMANT",
     "lp_usd": 0.0,
@@ -22036,7 +22204,7 @@
       "\u25ab [dim]\u25ab Refund Guarantee: N/A (Free Mint / Gas Only)[/dim]"
     ],
     "sold_sel": "0x18160ddd",
-    "sweep_at": 1793529560.713686,
+    "sweep_at": 1793541466.094193,
     "secondary_sales_count": 0,
     "secondary_vol_bnb": 0,
     "floor_price_bnb": 0.0,
@@ -22151,7 +22319,7 @@
     "mint_price_bnb": 0.0,
     "mint_value_wei": "0",
     "max_supply": 6666,
-    "total_minted": 2490,
+    "total_minted": 2494,
     "score": 20,
     "rating": "\u2744\ufe0f COLD / DORMANT",
     "lp_usd": 0.0,
@@ -22259,7 +22427,7 @@
       "\u25ab [dim]\u25ab Refund Guarantee: N/A (Free Mint / Gas Only)[/dim]"
     ],
     "sold_sel": "0x18160ddd",
-    "sweep_at": 1793529560.7144132,
+    "sweep_at": 1793541466.1086397,
     "secondary_sales_count": 0,
     "secondary_vol_bnb": 0,
     "floor_price_bnb": 0.0,
@@ -22374,7 +22542,7 @@
     "mint_price_bnb": 0.0,
     "mint_value_wei": "0",
     "max_supply": 5555,
-    "total_minted": 2344,
+    "total_minted": 2349,
     "score": 15,
     "rating": "\u2744\ufe0f COLD / DORMANT",
     "lp_usd": 0.0,
@@ -22399,12 +22567,12 @@
     ],
     "detected_at": "2026-10-30 23:13:52",
     "smart_wallets": [
-      "henson.ai",
-      "fanhua.ai"
+      "fanhua.ai",
+      "henson.ai"
     ],
     "smart_minters": [
-      "henson.ai",
-      "fanhua.ai"
+      "fanhua.ai",
+      "henson.ai"
     ],
     "mint_history": [
       {
@@ -22484,7 +22652,7 @@
       "\u25ab [dim]\u25ab Refund Guarantee: N/A (Free Mint / Gas Only)[/dim]"
     ],
     "sold_sel": "0x18160ddd",
-    "sweep_at": 1793529561.143007,
+    "sweep_at": 1793541466.0963664,
     "secondary_sales_count": 0,
     "secondary_vol_bnb": 0,
     "floor_price_bnb": 0.0,
@@ -22512,7 +22680,7 @@
     "mint_price_bnb": 0.0,
     "mint_value_wei": "0",
     "max_supply": 4444,
-    "total_minted": 2372,
+    "total_minted": 2377,
     "score": 30,
     "rating": "\ud83c\udf31 WARM INTEREST",
     "lp_usd": 0.0,
@@ -22620,7 +22788,7 @@
       "\u25ab [dim]\u25ab Refund Guarantee: N/A (Free Mint / Gas Only)[/dim]"
     ],
     "sold_sel": "0x18160ddd",
-    "sweep_at": 1793529561.1674812,
+    "sweep_at": 1793541466.3419719,
     "secondary_sales_count": 0,
     "secondary_vol_bnb": 0,
     "floor_price_bnb": 0.0,
@@ -22648,7 +22816,7 @@
     "mint_price_bnb": 0.0,
     "mint_value_wei": "0",
     "max_supply": 6666,
-    "total_minted": 2425,
+    "total_minted": 2430,
     "score": 20,
     "rating": "\u2744\ufe0f COLD / DORMANT",
     "lp_usd": 0.0,
@@ -22756,7 +22924,7 @@
       "\u25ab [dim]\u25ab Refund Guarantee: N/A (Free Mint / Gas Only)[/dim]"
     ],
     "sold_sel": "0x18160ddd",
-    "sweep_at": 1793529561.173942,
+    "sweep_at": 1793541466.3168912,
     "secondary_sales_count": 0,
     "secondary_vol_bnb": 0,
     "floor_price_bnb": 0.0,
@@ -22784,7 +22952,7 @@
     "mint_price_bnb": 0.0,
     "mint_value_wei": "0",
     "max_supply": 100000,
-    "total_minted": 2152,
+    "total_minted": 2153,
     "score": 15,
     "rating": "\u2744\ufe0f COLD / DORMANT",
     "lp_usd": 0.0,
@@ -22892,7 +23060,7 @@
       "\u25ab [dim]\u25ab Refund Guarantee: N/A (Free Mint / Gas Only)[/dim]"
     ],
     "sold_sel": "0x18160ddd",
-    "sweep_at": 1793529561.59024,
+    "sweep_at": 1793541466.4295888,
     "secondary_sales_count": 0,
     "secondary_vol_bnb": 0,
     "floor_price_bnb": 0.0,
@@ -23215,12 +23383,12 @@
     ],
     "detected_at": "2026-10-30 23:13:52",
     "smart_wallets": [
-      "henson.ai",
-      "mhg.ai"
+      "mhg.ai",
+      "henson.ai"
     ],
     "smart_minters": [
-      "henson.ai",
-      "mhg.ai"
+      "mhg.ai",
+      "henson.ai"
     ],
     "mint_history": [
       {
@@ -23623,26 +23791,26 @@
     ],
     "detected_at": "2026-10-30 23:13:52",
     "smart_wallets": [
-      "654.ai",
-      "hualuo.ai",
-      "louba.ai",
-      "zeppeto.ai",
-      "nietzsche.ai",
-      "818.ai",
       "jiamiao.ai",
       "chenyuhua.ai",
-      "ctm.ai"
+      "zeppeto.ai",
+      "hualuo.ai",
+      "818.ai",
+      "654.ai",
+      "louba.ai",
+      "ctm.ai",
+      "nietzsche.ai"
     ],
     "smart_minters": [
-      "654.ai",
-      "hualuo.ai",
-      "louba.ai",
-      "zeppeto.ai",
-      "nietzsche.ai",
-      "818.ai",
       "jiamiao.ai",
       "chenyuhua.ai",
-      "ctm.ai"
+      "zeppeto.ai",
+      "hualuo.ai",
+      "818.ai",
+      "654.ai",
+      "louba.ai",
+      "ctm.ai",
+      "nietzsche.ai"
     ],
     "velocity_ppm": 0.0,
     "market_url": "https://pancakeswap.finance/swap?outputCurrency=0x6a87de92deb752c6162cf80bd16e3efd4bdc6d90",
@@ -23997,46 +24165,46 @@
     ],
     "detected_at": "2026-10-30 23:13:52",
     "smart_wallets": [
-      "boba66.ai",
-      "0xharry.ai",
-      "ai13.ai",
-      "shing02.ai",
       "honey.ai",
-      "roh.ai",
-      "ginn952.ai",
-      "ozen.ai",
-      "kiwalangsangit.ai",
-      "artdizy.ai",
-      "bobi888.ai",
-      "654.ai",
       "maxfree123.ai",
-      "awei2.ai",
       "818.ai",
-      "lalalawu.ai",
       "xiejie.ai",
       "1pprgb.ai",
-      "skkun.ai"
+      "0xharry.ai",
+      "bobi888.ai",
+      "shing02.ai",
+      "ai13.ai",
+      "roh.ai",
+      "ozen.ai",
+      "654.ai",
+      "ginn952.ai",
+      "artdizy.ai",
+      "lalalawu.ai",
+      "kiwalangsangit.ai",
+      "skkun.ai",
+      "awei2.ai",
+      "boba66.ai"
     ],
     "smart_minters": [
-      "boba66.ai",
-      "0xharry.ai",
-      "ai13.ai",
-      "shing02.ai",
       "honey.ai",
-      "roh.ai",
-      "ginn952.ai",
-      "ozen.ai",
-      "kiwalangsangit.ai",
-      "artdizy.ai",
-      "bobi888.ai",
-      "654.ai",
       "maxfree123.ai",
-      "awei2.ai",
       "818.ai",
-      "lalalawu.ai",
       "xiejie.ai",
       "1pprgb.ai",
-      "skkun.ai"
+      "0xharry.ai",
+      "bobi888.ai",
+      "shing02.ai",
+      "ai13.ai",
+      "roh.ai",
+      "ozen.ai",
+      "654.ai",
+      "ginn952.ai",
+      "artdizy.ai",
+      "lalalawu.ai",
+      "kiwalangsangit.ai",
+      "skkun.ai",
+      "awei2.ai",
+      "boba66.ai"
     ],
     "mint_history": [
       {
@@ -24384,14 +24552,14 @@
     ],
     "detected_at": "2026-10-30 23:13:52",
     "smart_wallets": [
+      "btc768.ai",
       "kiwalangsangit.ai",
-      "pon4ik.ai",
-      "btc768.ai"
+      "pon4ik.ai"
     ],
     "smart_minters": [
+      "btc768.ai",
       "kiwalangsangit.ai",
-      "pon4ik.ai",
-      "btc768.ai"
+      "pon4ik.ai"
     ],
     "mint_history": [
       {
@@ -25238,7 +25406,7 @@
       "\u25ab [green]\u2714[/green] Capital Safety: No fund drain detected",
       "\u25ab [red]\u2716[/red] Refund Guarantee: \u26a0\ufe0f No refund method (Capital trapped if unfilled)"
     ],
-    "sweep_at": 1793530519.839775,
+    "sweep_at": 1793541467.3682811,
     "secondary_sales_count": 0,
     "secondary_vol_bnb": 0,
     "floor_price_bnb": 0.0,
@@ -25367,7 +25535,7 @@
       "\u25ab [red]\u2716[/red] Refund Guarantee: \u26a0\ufe0f No refund method (Capital trapped if unfilled)"
     ],
     "sold_sel": "0x18160ddd",
-    "sweep_at": 1793530518.843998,
+    "sweep_at": 1793541466.5407748,
     "secondary_sales_count": 0,
     "secondary_vol_bnb": 0,
     "floor_price_bnb": 0.0,
@@ -25496,7 +25664,7 @@
       "\u25ab [green]\u2714[/green] Capital Safety: No fund drain detected",
       "\u25ab [red]\u2716[/red] Refund Guarantee: \u26a0\ufe0f No refund method (Capital trapped if unfilled)"
     ],
-    "sweep_at": 1793530520.212555,
+    "sweep_at": 1793541467.1407976,
     "secondary_sales_count": 0,
     "secondary_vol_bnb": 0,
     "floor_price_bnb": 0.0,
@@ -25628,7 +25796,7 @@
       "\u25ab [green]\u2714[/green] Capital Safety: No fund drain detected",
       "\u25ab [dim]\u25ab Refund Guarantee: N/A (Free Mint / Gas Only)[/dim]"
     ],
-    "sweep_at": 1793530520.299314,
+    "sweep_at": 1793541467.2348108,
     "secondary_sales_count": 0,
     "secondary_vol_bnb": 0,
     "floor_price_bnb": 0.0,
@@ -25756,7 +25924,7 @@
       "\u25ab [dim]\u25ab Refund Guarantee: N/A (Free Mint / Gas Only)[/dim]",
       "\u25ab [green]\u2714[/green] Secondary Market: Primary bonding phase (No DEX LP yet)"
     ],
-    "sweep_at": 1793530520.7401721,
+    "sweep_at": 1793541467.3643045,
     "current_profit_usd": 0.0,
     "current_multiplier": 0.0,
     "mint_cost_usd": 0.0,
@@ -25876,7 +26044,7 @@
       "\u25ab [green]\u2714[/green] Capital Safety: No fund drain detected",
       "\u25ab [red]\u2716[/red] Refund Guarantee: \u26a0\ufe0f No refund method (Capital trapped if unfilled)"
     ],
-    "sweep_at": 1793530520.7572658,
+    "sweep_at": 1793541467.5295393,
     "secondary_sales_count": 0,
     "secondary_vol_bnb": 0,
     "floor_price_bnb": 0.0,
@@ -26130,14 +26298,14 @@
       "\u25ab [yellow]\u2716[/yellow] Secondary Market: DEX LP already active ($14,008) -> Trade on DEX instead of minting"
     ],
     "sweep_at": 1793529564.329076,
-    "ath_price_usd": 7e-05,
-    "ath_profit_usd": 7e-05,
+    "ath_price_usd": 7.003827353e-05,
+    "ath_profit_usd": 7.003827353e-05,
     "ath_multiplier": 0.0,
-    "ath_timestamp": 1793539722,
-    "current_profit_usd": 7e-05,
+    "ath_timestamp": 1793541604,
+    "current_profit_usd": 7.003827353e-05,
     "current_multiplier": 0.0,
     "mint_cost_usd": 0.0,
-    "secondary_price_usd": 7e-05
+    "secondary_price_usd": 7.003827353e-05
   },
   {
     "block": 130511744,
@@ -29156,7 +29324,7 @@
       "\u25ab [red]\u2716[/red] Refund Guarantee: \u26a0\ufe0f No refund method (Capital trapped if unfilled)"
     ],
     "sold_sel": "0x18160ddd",
-    "sweep_at": 1793530519.346188,
+    "sweep_at": 1793541466.5379572,
     "secondary_sales_count": 0,
     "secondary_vol_bnb": 0,
     "floor_price_bnb": 0.0,
@@ -30079,7 +30247,7 @@
       "\u25ab [red]\u2716[/red] Refund Guarantee: \u26a0\ufe0f No refund method (Capital trapped if unfilled)"
     ],
     "sold_sel": "0x18160ddd",
-    "sweep_at": 1793530519.82931,
+    "sweep_at": 1793541466.624061,
     "secondary_sales_count": 0,
     "secondary_vol_bnb": 0,
     "floor_price_bnb": 0.0,
@@ -30592,10 +30760,10 @@
     "ath_profit_usd": 0.050861,
     "ath_multiplier": null,
     "ath_timestamp": 1793539722,
-    "current_profit_usd": 0.050861,
+    "current_profit_usd": 0.05086088579,
     "current_multiplier": null,
     "mint_cost_usd": 0.0,
-    "secondary_price_usd": 0.050861
+    "secondary_price_usd": 0.05086088579
   },
   {
     "block": 130420000,
@@ -30722,14 +30890,14 @@
     "secondary_sales_count": 0,
     "secondary_vol_bnb": 0,
     "high_price_bnb": 0.0,
-    "secondary_transfers": 2,
+    "secondary_transfers": 11,
     "is_nft_surge": false,
     "nft_surge_badge": "",
     "ath_price_usd": 0.1128,
-    "ath_profit_usd": -0.2397,
+    "ath_profit_usd": 0.0,
     "ath_multiplier": 0.32,
-    "ath_timestamp": 1793539722,
-    "current_profit_usd": -0.2397,
+    "ath_timestamp": 1793541604,
+    "current_profit_usd": 0.0,
     "current_multiplier": 0.32,
     "mint_cost_usd": 0.3525,
     "secondary_price_usd": 0.1128
@@ -30858,13 +31026,13 @@
     "secondary_vol_bnb": 5.702e-05,
     "floor_price_bnb": 6e-06,
     "high_price_bnb": 8e-06,
-    "secondary_transfers": 1,
+    "secondary_transfers": 20,
     "is_nft_surge": true,
     "nft_surge_badge": "[bold magenta]\ud83e\udd8b SURGE (8 sales)[/bold magenta]",
-    "ath_price_usd": 0.00423,
-    "ath_profit_usd": 0.00423,
+    "ath_price_usd": 0.004294,
+    "ath_profit_usd": 0.004294,
     "ath_multiplier": null,
-    "ath_timestamp": 1793539722,
+    "ath_timestamp": 1793541403,
     "current_profit_usd": 0.00423,
     "current_multiplier": null,
     "mint_cost_usd": 0.0,
