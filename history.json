@@ -1,5 +1,388 @@
 [
   {
+    "block": 130983062,
+    "contract": "0x66168a1e9fa7d1f50debd8dcbec141d6b29d523d",
+    "deployer": "0x7af22521cbddccc31007a6f933e85dd27f3d0135",
+    "tx_hash": "0xfef64ef0a960ded435361da847b2f0bc12fa32625429cbba523b54844aa1c6b2",
+    "name": "Pulsar Agent",
+    "symbol": "PUAGENT",
+    "standard": "ERC-721 (NFT Collection)",
+    "icon": "\ud83c\udfa8",
+    "is_paused": null,
+    "has_free_mint": false,
+    "mint_price_str": "0.0010 BNB",
+    "mint_price_bnb": 0.001,
+    "mint_value_wei": "1000000000000000",
+    "max_supply": 10000,
+    "total_minted": 6054,
+    "score": 60,
+    "rating": "\ud83d\udd25 HIGH TRACTION",
+    "lp_usd": 0.0,
+    "lp_wbnb": 0.0,
+    "token_symbol": "PUAGENT",
+    "token_price_usd": 0.0,
+    "holders": 6054,
+    "buys_24h": 6054,
+    "buys_1h": 0,
+    "sells_24h": 0,
+    "volume_24h": 0.0,
+    "market_url": "https://element.market/collections/pulsar-agent",
+    "pair_url": "",
+    "mint_calldata": "0xa0712d680000000000000000000000000000000000000000000000000000000000000001",
+    "signals": [
+      "No DEX LP detected yet",
+      "Strong Demand (60.5% claimed)",
+      "Heavy Buy Volume (6,054 purchases / 24h)",
+      "Solid Community (6,054 holders)",
+      "Active Deployer Nonce (66 txs)",
+      "Safety: Standard NFT Contract",
+      "Safety: Verified Interface"
+    ],
+    "detected_at": "2026-11-01 04:15:24",
+    "smart_wallets": [],
+    "smart_minters": []
+  },
+  {
+    "block": 130981622,
+    "contract": "0x30f14ef05a92cd020aa21562c6ccd7ab00dc6140",
+    "deployer": "0x102653bad152620b96c5606c590f70ea5ccb7801",
+    "tx_hash": "0x74c1df41afb12b90d9b01325e8986520ed99c931e6f8bc89b789f39965c15cf2",
+    "name": "MoonBot",
+    "symbol": "MBOT",
+    "standard": "BEP-20 Token (18 decimals)",
+    "icon": "\ud83e\ude99",
+    "is_paused": null,
+    "has_free_mint": false,
+    "mint_price_str": "0.0003 BNB",
+    "mint_price_bnb": 0.0003,
+    "mint_value_wei": "300000000000000",
+    "max_supply": 1000000000.0,
+    "total_minted": 0.0,
+    "score": 0,
+    "rating": "\u2744\ufe0f COLD / DORMANT",
+    "lp_usd": 0.0,
+    "lp_wbnb": 0.0,
+    "token_symbol": "MBOT",
+    "token_price_usd": 0.0,
+    "holders": 0,
+    "buys_24h": 0,
+    "buys_1h": 0,
+    "sells_24h": 0,
+    "volume_24h": 0.0,
+    "pair_url": "",
+    "mint_calldata": "0xa0712d680000000000000000000000000000000000000000000000000000000000000001",
+    "signals": [
+      "No DEX LP detected yet",
+      "Safety: Closed Source"
+    ],
+    "detected_at": "2026-11-01 12:03:34",
+    "velocity_ppm": 0.0,
+    "market_url": "https://pancakeswap.finance/swap?outputCurrency=0x30f14ef05a92cd020aa21562c6ccd7ab00dc6140",
+    "security": {
+      "audited": true,
+      "is_honeypot": false,
+      "buy_tax": 0.0,
+      "sell_tax": 0.0,
+      "cannot_sell_all": false,
+      "is_open_source": false,
+      "lp_locked_pct": 0.0,
+      "top10_pct": 0.0,
+      "risk_level": "MED",
+      "risk_badge": "\ud83d\udfe1 Med Risk",
+      "risk_flags": [
+        "Closed Source"
+      ]
+    },
+    "risk_level": "MED",
+    "risk_badge": "\ud83d\udfe1 Med Risk",
+    "risk_flags": [
+      "Closed Source"
+    ],
+    "smart_wallets": [],
+    "smart_minters": []
+  },
+  {
+    "block": 130981493,
+    "contract": "0x577213b640b69548ed4a79c7803540c92bbf4f35",
+    "deployer": "0xa6ad919164a947a50b03b96fd3f7ad81278b30de",
+    "tx_hash": "0x1e213c9579d59a824edd3bbedbbebcc8e7ebbc89b5e4cafcfc8a29f70641c2ee",
+    "name": "Gravi Lynx",
+    "symbol": "GRLY",
+    "standard": "ERC-721 (NFT Collection)",
+    "icon": "\ud83c\udfa8",
+    "is_paused": false,
+    "has_free_mint": false,
+    "mint_price_str": "0.0001 BNB",
+    "mint_price_bnb": 0.0001,
+    "mint_value_wei": "100000000000000",
+    "max_supply": 20000,
+    "total_minted": 1,
+    "score": 25,
+    "rating": "\ud83c\udf31 WARMING UP / SEEDED",
+    "lp_usd": 0.0,
+    "lp_wbnb": 0.0,
+    "token_symbol": "GRLY",
+    "token_price_usd": 0.0,
+    "holders": 1,
+    "buys_24h": 1,
+    "buys_1h": 0,
+    "sells_24h": 0,
+    "volume_24h": 0.0,
+    "pair_url": "",
+    "mint_calldata": "0xa0712d680000000000000000000000000000000000000000000000000000000000000001",
+    "signals": [
+      "No DEX LP detected yet",
+      "Mint is LIVE / Active",
+      "Early Mints (0.0% claimed)",
+      "Active Deployer Nonce (291 txs)",
+      "Safety: Standard NFT Contract",
+      "Safety: Verified Interface"
+    ],
+    "detected_at": "2026-11-01 12:02:09",
+    "mint_history": [
+      {
+        "t": 1793506070.8641741,
+        "m": 0
+      },
+      {
+        "t": 1793506103.317908,
+        "m": 1
+      }
+    ],
+    "market_url": "https://element.market/collections/gravi-lynx",
+    "security": {
+      "audited": true,
+      "is_honeypot": false,
+      "buy_tax": 0.0,
+      "sell_tax": 0.0,
+      "cannot_sell_all": false,
+      "is_open_source": true,
+      "lp_locked_pct": 0.0,
+      "top10_pct": 100.0,
+      "risk_level": "SAFE",
+      "risk_badge": "\ud83d\udfe2 Clean",
+      "risk_flags": [
+        "Standard NFT Contract",
+        "Verified Interface"
+      ]
+    },
+    "risk_level": "SAFE",
+    "risk_badge": "\ud83d\udfe2 Clean",
+    "risk_flags": [
+      "Standard NFT Contract",
+      "Verified Interface"
+    ],
+    "velocity_ppm": 1.8,
+    "organic_pct": 100.0,
+    "smart_wallets": [],
+    "smart_minters": []
+  },
+  {
+    "block": 130975343,
+    "contract": "0x9c7b674dc9f2ac91a5a933bf2f3c1316786a9f3b",
+    "deployer": "0x7af22521cbddccc31007a6f933e85dd27f3d0135",
+    "tx_hash": "0x597a7bdcab9759bd456b2bac10bf2048ff6a5ee4a0b7b5f54af2b05e81a35727",
+    "name": "Agent Sniper Test NFT",
+    "symbol": "AGTEST",
+    "standard": "ERC-721 (NFT Collection)",
+    "icon": "\ud83c\udfa8",
+    "is_paused": null,
+    "has_free_mint": false,
+    "mint_price_str": "0.0010 BNB",
+    "mint_price_bnb": 0.001,
+    "mint_value_wei": "1000000000000000",
+    "max_supply": 10000,
+    "total_minted": 6181,
+    "score": 60,
+    "rating": "\ud83d\udd25 HIGH TRACTION",
+    "lp_usd": 0.0,
+    "lp_wbnb": 0.0,
+    "token_symbol": "AGTEST",
+    "token_price_usd": 0.0,
+    "holders": 6181,
+    "buys_24h": 6181,
+    "buys_1h": 0,
+    "sells_24h": 0,
+    "volume_24h": 0.0,
+    "pair_url": "",
+    "mint_calldata": "0xa0712d680000000000000000000000000000000000000000000000000000000000000001",
+    "signals": [
+      "No DEX LP detected yet",
+      "Strong Demand (61.8% claimed)",
+      "Heavy Buy Volume (6,181 purchases / 24h)",
+      "Solid Community (6,181 holders)",
+      "Active Deployer Nonce (60 txs)",
+      "Safety: Standard NFT Contract",
+      "Safety: Verified Interface"
+    ],
+    "detected_at": "2026-11-01 11:16:07",
+    "mint_history": [
+      {
+        "t": 1793506070.864191,
+        "m": 6181
+      },
+      {
+        "t": 1793506113.690007,
+        "m": 6181
+      }
+    ],
+    "organic_pct": 100.0,
+    "market_url": "https://element.market/collections/agent-sniper-test-nft",
+    "security": {
+      "audited": true,
+      "is_honeypot": false,
+      "buy_tax": 0.0,
+      "sell_tax": 0.0,
+      "cannot_sell_all": false,
+      "is_open_source": true,
+      "lp_locked_pct": 0.0,
+      "top10_pct": 0.0,
+      "risk_level": "SAFE",
+      "risk_badge": "\ud83d\udfe2 Clean",
+      "risk_flags": [
+        "Standard NFT Contract",
+        "Verified Interface"
+      ]
+    },
+    "risk_level": "SAFE",
+    "risk_badge": "\ud83d\udfe2 Clean",
+    "risk_flags": [
+      "Standard NFT Contract",
+      "Verified Interface"
+    ],
+    "velocity_ppm": 0.0,
+    "smart_wallets": [],
+    "smart_minters": []
+  },
+  {
+    "block": 130971305,
+    "contract": "0x2a9ee47ee1d99084fafddaad00e3ed535627fb6b",
+    "deployer": "0x984b957c21910c52ed71aaac3aa8dca75adff749",
+    "tx_hash": "0x77b8e9abb3f6b21b0f989726f15d78a249912ca9cfbb36e1c52bfbf0a73948a3",
+    "name": "AgentPool",
+    "symbol": "APOOL",
+    "standard": "BEP-20 Token (18 decimals)",
+    "icon": "\ud83e\ude99",
+    "is_paused": null,
+    "has_free_mint": false,
+    "mint_price_str": "0.0003 BNB",
+    "mint_price_bnb": 0.0003,
+    "mint_value_wei": "300000000000000",
+    "max_supply": 1000000000.0,
+    "total_minted": 1000.0,
+    "score": 47,
+    "rating": "\ud83c\udf31 WARMING UP / SEEDED",
+    "lp_usd": 0.0,
+    "lp_wbnb": 0.0,
+    "token_symbol": "APOOL",
+    "token_price_usd": 0.0,
+    "holders": 1000.0,
+    "buys_24h": 1000.0,
+    "buys_1h": 0,
+    "sells_24h": 0,
+    "volume_24h": 0.0,
+    "market_url": "https://pancakeswap.finance/swap?outputCurrency=0x2a9ee47ee1d99084fafddaad00e3ed535627fb6b",
+    "pair_url": "",
+    "mint_calldata": "0x1249c58b",
+    "signals": [
+      "No DEX LP detected yet",
+      "Early Mints (0.0% claimed)",
+      "Heavy Buy Volume (1,000.0 purchases / 24h)",
+      "Solid Community (1,000.0 holders)",
+      "Safety: Closed Source"
+    ],
+    "detected_at": "2026-11-01 02:47:03",
+    "smart_wallets": [],
+    "smart_minters": [],
+    "velocity_ppm": 0.0,
+    "security": {
+      "audited": true,
+      "is_honeypot": false,
+      "buy_tax": 0.0,
+      "sell_tax": 0.0,
+      "cannot_sell_all": false,
+      "is_open_source": false,
+      "lp_locked_pct": 0.0,
+      "top10_pct": 0.0,
+      "risk_level": "MED",
+      "risk_badge": "\ud83d\udfe1 Med Risk",
+      "risk_flags": [
+        "Closed Source"
+      ]
+    },
+    "risk_level": "MED",
+    "risk_badge": "\ud83d\udfe1 Med Risk",
+    "risk_flags": [
+      "Closed Source"
+    ]
+  },
+  {
+    "block": 130967104,
+    "contract": "0x7a262215a1f5b2621a25b50ec7f143a6b678f87a",
+    "deployer": "",
+    "tx_hash": "0x43fbf48639420a8c8e4b87700d86a95eed8b7a9c31d372739a77ed0c5686a8bf",
+    "name": "Agent X",
+    "symbol": "AGX",
+    "standard": "BEP-20 Token (18 decimals)",
+    "icon": "\ud83e\ude99",
+    "is_paused": null,
+    "has_free_mint": false,
+    "mint_price_str": "0.0003 BNB",
+    "mint_price_bnb": 0.0003,
+    "mint_value_wei": "300000000000000",
+    "max_supply": 1000000000.0,
+    "total_minted": 17.0,
+    "score": 23,
+    "rating": "\u2744\ufe0f COLD / DORMANT",
+    "lp_usd": 0.0,
+    "lp_wbnb": 0.0,
+    "token_symbol": "AGX",
+    "token_price_usd": 0.0,
+    "holders": 17.0,
+    "buys_24h": 17.0,
+    "buys_1h": 0,
+    "sells_24h": 0,
+    "volume_24h": 0.0,
+    "market_url": "https://pancakeswap.finance/swap?outputCurrency=0x7a262215a1f5b2621a25b50ec7f143a6b678f87a",
+    "pair_url": "",
+    "mint_calldata": "0xa0712d680000000000000000000000000000000000000000000000000000000000000001",
+    "signals": [
+      "No DEX LP detected yet",
+      "Early Mints (0.0% claimed)",
+      "Early Purchases (17.0 buys / 24h)",
+      "Active Deployer Nonce (5 txs)",
+      "Safety: Closed Source"
+    ],
+    "detected_at": "2026-11-01 02:18:01",
+    "smart_wallets": [
+      "kuramawen.ai"
+    ],
+    "smart_minters": [
+      "kuramawen.ai"
+    ],
+    "velocity_ppm": 0.0,
+    "security": {
+      "audited": true,
+      "is_honeypot": false,
+      "buy_tax": 0.0,
+      "sell_tax": 0.0,
+      "cannot_sell_all": false,
+      "is_open_source": false,
+      "lp_locked_pct": 0.0,
+      "top10_pct": 0.0,
+      "risk_level": "MED",
+      "risk_badge": "\ud83d\udfe1 Med Risk",
+      "risk_flags": [
+        "Closed Source"
+      ]
+    },
+    "risk_level": "MED",
+    "risk_badge": "\ud83d\udfe1 Med Risk",
+    "risk_flags": [
+      "Closed Source"
+    ]
+  },
+  {
     "block": 130963061,
     "contract": "0x99617d687b5fea7153c0626beb87166bbe25955e",
     "deployer": "",
@@ -44,7 +427,41 @@
     ],
     "smart_minters": [
       "0xjl1222.ai"
-    ]
+    ],
+    "mint_history": [
+      {
+        "t": 1793506070.864314,
+        "m": 59
+      },
+      {
+        "t": 1793506150.9216099,
+        "m": 248
+      }
+    ],
+    "organic_pct": 100.0,
+    "security": {
+      "audited": true,
+      "is_honeypot": false,
+      "buy_tax": 0.0,
+      "sell_tax": 0.0,
+      "cannot_sell_all": false,
+      "is_open_source": true,
+      "lp_locked_pct": 0.0,
+      "top10_pct": 0.4,
+      "risk_level": "SAFE",
+      "risk_badge": "\ud83d\udfe2 Clean",
+      "risk_flags": [
+        "Free Mint Available",
+        "Organic Community Distribution"
+      ]
+    },
+    "risk_level": "SAFE",
+    "risk_badge": "\ud83d\udfe2 Clean",
+    "risk_flags": [
+      "Free Mint Available",
+      "Organic Community Distribution"
+    ],
+    "velocity_ppm": 141.6
   },
   {
     "block": 130963056,
@@ -61,7 +478,7 @@
     "mint_price_bnb": 0.0,
     "mint_value_wei": "0",
     "max_supply": 9999,
-    "total_minted": 6302,
+    "total_minted": 6300,
     "score": 100,
     "rating": "\ud83d\ude80 VIRAL RUSH / SNIPER FRENZY",
     "lp_usd": 4674.568232560163,
@@ -88,11 +505,50 @@
     ],
     "detected_at": "2026-11-01 01:46:29",
     "smart_wallets": [
+      "yudachi.ai",
+      "9177.ai",
       "arkan.ai"
     ],
     "smart_minters": [
+      "yudachi.ai",
+      "9177.ai",
       "arkan.ai"
-    ]
+    ],
+    "mint_history": [
+      {
+        "t": 1793506070.864327,
+        "m": 6776
+      },
+      {
+        "t": 1793506172.981925,
+        "m": 6802
+      }
+    ],
+    "organic_pct": 100.0,
+    "website": "https://www.marscoinbnb.com/",
+    "twitter": "https://x.com/bnbMarsCoin",
+    "token_price_bnb": 7.581152110616519e-05,
+    "security": {
+      "audited": true,
+      "is_honeypot": false,
+      "buy_tax": 0.0,
+      "sell_tax": 0.0,
+      "cannot_sell_all": false,
+      "is_open_source": true,
+      "lp_locked_pct": 0.0,
+      "top10_pct": 72.5887982273686,
+      "risk_level": "MED",
+      "risk_badge": "\ud83d\udfe1 Med Risk",
+      "risk_flags": [
+        "Top 10 Holds 73%"
+      ]
+    },
+    "risk_level": "MED",
+    "risk_badge": "\ud83d\udfe1 Med Risk",
+    "risk_flags": [
+      "Top 10 Holds 73%"
+    ],
+    "velocity_ppm": 15.3
   },
   {
     "block": 130963049,
@@ -134,13 +590,51 @@
     ],
     "detected_at": "2026-11-01 01:45:58",
     "smart_wallets": [
-      "xiaoduo.ai",
-      "mcbig.ai"
+      "mcbig.ai",
+      "umtwlp.ai",
+      "oxfz.ai",
+      "xiaoduo.ai"
     ],
     "smart_minters": [
-      "xiaoduo.ai",
-      "mcbig.ai"
-    ]
+      "mcbig.ai",
+      "umtwlp.ai",
+      "oxfz.ai",
+      "xiaoduo.ai"
+    ],
+    "mint_history": [
+      {
+        "t": 1793506070.864343,
+        "m": 42
+      },
+      {
+        "t": 1793506182.761643,
+        "m": 373
+      }
+    ],
+    "organic_pct": 100.0,
+    "security": {
+      "audited": true,
+      "is_honeypot": false,
+      "buy_tax": 0.0,
+      "sell_tax": 0.0,
+      "cannot_sell_all": false,
+      "is_open_source": true,
+      "lp_locked_pct": 0.0,
+      "top10_pct": 0.3,
+      "risk_level": "SAFE",
+      "risk_badge": "\ud83d\udfe2 Clean",
+      "risk_flags": [
+        "Free Mint Available",
+        "Organic Community Distribution"
+      ]
+    },
+    "risk_level": "SAFE",
+    "risk_badge": "\ud83d\udfe2 Clean",
+    "risk_flags": [
+      "Free Mint Available",
+      "Organic Community Distribution"
+    ],
+    "velocity_ppm": 177.5
   },
   {
     "block": 130963045,
@@ -182,16 +676,45 @@
     ],
     "detected_at": "2026-11-01 01:45:46",
     "smart_wallets": [
-      "n7sb0.ai",
       "velkino.ai",
-      "boyrashad.ai"
+      "nyi.ai",
+      "lunarisxyz.ai",
+      "boyrashad.ai",
+      "n7sb0.ai"
     ],
     "smart_minters": [
-      "n7sb0.ai",
       "velkino.ai",
-      "boyrashad.ai"
+      "nyi.ai",
+      "lunarisxyz.ai",
+      "boyrashad.ai",
+      "n7sb0.ai"
     ],
-    "velocity_ppm": 0.0
+    "velocity_ppm": 0.0,
+    "token_price_bnb": 2.562e-07,
+    "security": {
+      "audited": true,
+      "is_honeypot": false,
+      "buy_tax": 1.0,
+      "sell_tax": 2.0,
+      "cannot_sell_all": false,
+      "is_open_source": true,
+      "lp_locked_pct": 99.41302518458176,
+      "top10_pct": 64.28760989622417,
+      "risk_level": "SAFE",
+      "risk_badge": "\ud83d\udfe2 Clean",
+      "risk_flags": [
+        "Taxes: 1%/2%",
+        "LP 99% Locked",
+        "Open Source"
+      ]
+    },
+    "risk_level": "SAFE",
+    "risk_badge": "\ud83d\udfe2 Clean",
+    "risk_flags": [
+      "Taxes: 1%/2%",
+      "LP 99% Locked",
+      "Open Source"
+    ]
   },
   {
     "block": 130963042,
@@ -237,7 +760,41 @@
     ],
     "smart_minters": [
       "4billll111.ai"
-    ]
+    ],
+    "mint_history": [
+      {
+        "t": 1793506070.864369,
+        "m": 1935
+      },
+      {
+        "t": 1793506201.639317,
+        "m": 1955
+      }
+    ],
+    "organic_pct": 100.0,
+    "security": {
+      "audited": true,
+      "is_honeypot": false,
+      "buy_tax": 0.0,
+      "sell_tax": 0.0,
+      "cannot_sell_all": false,
+      "is_open_source": true,
+      "lp_locked_pct": 0.0,
+      "top10_pct": 0.1,
+      "risk_level": "SAFE",
+      "risk_badge": "\ud83d\udfe2 Clean",
+      "risk_flags": [
+        "Free Mint Available",
+        "Organic Community Distribution"
+      ]
+    },
+    "risk_level": "SAFE",
+    "risk_badge": "\ud83d\udfe2 Clean",
+    "risk_flags": [
+      "Free Mint Available",
+      "Organic Community Distribution"
+    ],
+    "velocity_ppm": 9.2
   },
   {
     "block": 130963032,
@@ -279,11 +836,47 @@
     ],
     "detected_at": "2026-11-01 01:45:09",
     "smart_wallets": [
+      "68686.ai",
       "0xjl1222.ai"
     ],
     "smart_minters": [
+      "68686.ai",
       "0xjl1222.ai"
-    ]
+    ],
+    "mint_history": [
+      {
+        "t": 1793506070.864379,
+        "m": 40
+      },
+      {
+        "t": 1793506211.4753358,
+        "m": 297
+      }
+    ],
+    "organic_pct": 100.0,
+    "security": {
+      "audited": true,
+      "is_honeypot": false,
+      "buy_tax": 0.0,
+      "sell_tax": 0.0,
+      "cannot_sell_all": false,
+      "is_open_source": true,
+      "lp_locked_pct": 0.0,
+      "top10_pct": 0.3,
+      "risk_level": "SAFE",
+      "risk_badge": "\ud83d\udfe2 Clean",
+      "risk_flags": [
+        "Free Mint Available",
+        "Organic Community Distribution"
+      ]
+    },
+    "risk_level": "SAFE",
+    "risk_badge": "\ud83d\udfe2 Clean",
+    "risk_flags": [
+      "Free Mint Available",
+      "Organic Community Distribution"
+    ],
+    "velocity_ppm": 109.7
   },
   {
     "block": 130963026,
@@ -325,13 +918,47 @@
     ],
     "detected_at": "2026-11-01 01:44:43",
     "smart_wallets": [
-      "8893.ai",
-      "88899.ai"
+      "88899.ai",
+      "8893.ai"
     ],
     "smart_minters": [
-      "8893.ai",
-      "88899.ai"
-    ]
+      "88899.ai",
+      "8893.ai"
+    ],
+    "mint_history": [
+      {
+        "t": 1793506070.864395,
+        "m": 44
+      },
+      {
+        "t": 1793506221.542169,
+        "m": 411
+      }
+    ],
+    "organic_pct": 100.0,
+    "security": {
+      "audited": true,
+      "is_honeypot": false,
+      "buy_tax": 0.0,
+      "sell_tax": 0.0,
+      "cannot_sell_all": false,
+      "is_open_source": true,
+      "lp_locked_pct": 0.0,
+      "top10_pct": 0.2,
+      "risk_level": "SAFE",
+      "risk_badge": "\ud83d\udfe2 Clean",
+      "risk_flags": [
+        "Free Mint Available",
+        "Organic Community Distribution"
+      ]
+    },
+    "risk_level": "SAFE",
+    "risk_badge": "\ud83d\udfe2 Clean",
+    "risk_flags": [
+      "Free Mint Available",
+      "Organic Community Distribution"
+    ],
+    "velocity_ppm": 146.1
   },
   {
     "block": 130963026,
@@ -374,17 +1001,51 @@
     ],
     "detected_at": "2026-11-01 01:44:35",
     "smart_wallets": [
-      "z1101.ai",
+      "bobi888.ai",
       "boba66.ai",
-      "bobi666.ai",
-      "bobi888.ai"
+      "z1101.ai",
+      "bobi666.ai"
     ],
     "smart_minters": [
-      "z1101.ai",
+      "bobi888.ai",
       "boba66.ai",
-      "bobi666.ai",
-      "bobi888.ai"
-    ]
+      "z1101.ai",
+      "bobi666.ai"
+    ],
+    "mint_history": [
+      {
+        "t": 1793506070.864404,
+        "m": 429
+      },
+      {
+        "t": 1793506231.589607,
+        "m": 590
+      }
+    ],
+    "organic_pct": 100.0,
+    "security": {
+      "audited": true,
+      "is_honeypot": false,
+      "buy_tax": 0.0,
+      "sell_tax": 0.0,
+      "cannot_sell_all": false,
+      "is_open_source": true,
+      "lp_locked_pct": 0.0,
+      "top10_pct": 0.2,
+      "risk_level": "SAFE",
+      "risk_badge": "\ud83d\udfe2 Clean",
+      "risk_flags": [
+        "Free Mint Available",
+        "Organic Community Distribution"
+      ]
+    },
+    "risk_level": "SAFE",
+    "risk_badge": "\ud83d\udfe2 Clean",
+    "risk_flags": [
+      "Free Mint Available",
+      "Organic Community Distribution"
+    ],
+    "velocity_ppm": 60.1
   },
   {
     "block": 130963024,
@@ -431,7 +1092,41 @@
     ],
     "smart_minters": [
       "2432.ai"
-    ]
+    ],
+    "mint_history": [
+      {
+        "t": 1793506070.864417,
+        "m": 187
+      },
+      {
+        "t": 1793506241.41946,
+        "m": 270
+      }
+    ],
+    "organic_pct": 100.0,
+    "security": {
+      "audited": true,
+      "is_honeypot": false,
+      "buy_tax": 0.0,
+      "sell_tax": 0.0,
+      "cannot_sell_all": false,
+      "is_open_source": true,
+      "lp_locked_pct": 0.0,
+      "top10_pct": 0.4,
+      "risk_level": "SAFE",
+      "risk_badge": "\ud83d\udfe2 Clean",
+      "risk_flags": [
+        "Free Mint Available",
+        "Organic Community Distribution"
+      ]
+    },
+    "risk_level": "SAFE",
+    "risk_badge": "\ud83d\udfe2 Clean",
+    "risk_flags": [
+      "Free Mint Available",
+      "Organic Community Distribution"
+    ],
+    "velocity_ppm": 29.2
   },
   {
     "block": 130963023,
@@ -479,7 +1174,41 @@
     "smart_minters": [
       "mcbig.ai",
       "xiaoduo.ai"
-    ]
+    ],
+    "mint_history": [
+      {
+        "t": 1793506070.864426,
+        "m": 48
+      },
+      {
+        "t": 1793506251.28637,
+        "m": 338
+      }
+    ],
+    "organic_pct": 100.0,
+    "security": {
+      "audited": true,
+      "is_honeypot": false,
+      "buy_tax": 0.0,
+      "sell_tax": 0.0,
+      "cannot_sell_all": false,
+      "is_open_source": true,
+      "lp_locked_pct": 0.0,
+      "top10_pct": 0.3,
+      "risk_level": "SAFE",
+      "risk_badge": "\ud83d\udfe2 Clean",
+      "risk_flags": [
+        "Free Mint Available",
+        "Organic Community Distribution"
+      ]
+    },
+    "risk_level": "SAFE",
+    "risk_badge": "\ud83d\udfe2 Clean",
+    "risk_flags": [
+      "Free Mint Available",
+      "Organic Community Distribution"
+    ],
+    "velocity_ppm": 96.4
   },
   {
     "block": 130963022,
@@ -517,23 +1246,62 @@
     ],
     "detected_at": "2026-11-01 01:44:11",
     "smart_wallets": [
-      "xiaolu123.ai",
       "laowei.ai",
-      "louma.ai",
-      "weijili.ai",
-      "wangzeming.ai",
       "yanyanjiejie.ai",
-      "laobanniang.ai"
+      "abelcow.ai",
+      "xiaolu123.ai",
+      "louma.ai",
+      "cfdhdfv.ai",
+      "weijili.ai",
+      "laobanniang.ai",
+      "wangzeming.ai",
+      "jiangnan6.ai",
+      "rachmatbudi89.ai"
     ],
     "smart_minters": [
-      "xiaolu123.ai",
       "laowei.ai",
-      "louma.ai",
-      "weijili.ai",
-      "wangzeming.ai",
       "yanyanjiejie.ai",
-      "laobanniang.ai"
-    ]
+      "abelcow.ai",
+      "xiaolu123.ai",
+      "louma.ai",
+      "cfdhdfv.ai",
+      "weijili.ai",
+      "laobanniang.ai",
+      "wangzeming.ai",
+      "jiangnan6.ai",
+      "rachmatbudi89.ai"
+    ],
+    "mint_history": [
+      {
+        "t": 1793506070.864442,
+        "m": 0
+      },
+      {
+        "t": 1793506279.275933,
+        "m": 0
+      }
+    ],
+    "security": {
+      "audited": true,
+      "is_honeypot": false,
+      "buy_tax": 0.0,
+      "sell_tax": 0.0,
+      "cannot_sell_all": false,
+      "is_open_source": true,
+      "lp_locked_pct": 0.0,
+      "top10_pct": 99.93079824173145,
+      "risk_level": "MED",
+      "risk_badge": "\ud83d\udfe1 Med Risk",
+      "risk_flags": [
+        "Top 10 Holds 100%"
+      ]
+    },
+    "risk_level": "MED",
+    "risk_badge": "\ud83d\udfe1 Med Risk",
+    "risk_flags": [
+      "Top 10 Holds 100%"
+    ],
+    "velocity_ppm": 0.0
   },
   {
     "block": 130963017,
@@ -577,27 +1345,71 @@
     ],
     "detected_at": "2026-11-01 01:43:46",
     "smart_wallets": [
+      "ssii.ai",
       "rangga.ai",
-      "santaz.ai",
-      "1588.ai",
-      "themaster.ai",
-      "1518.ai",
       "scat.ai",
-      "odbo.ai",
+      "derinajah.ai",
+      "pbr.ai",
       "olo.ai",
-      "pbr.ai"
+      "ere.ai",
+      "c1z.ai",
+      "santaz.ai",
+      "odbo.ai",
+      "themaster.ai",
+      "kadocay.ai",
+      "1518.ai",
+      "1588.ai"
     ],
     "smart_minters": [
+      "ssii.ai",
       "rangga.ai",
-      "santaz.ai",
-      "1588.ai",
-      "themaster.ai",
-      "1518.ai",
       "scat.ai",
-      "odbo.ai",
+      "derinajah.ai",
+      "pbr.ai",
       "olo.ai",
-      "pbr.ai"
-    ]
+      "ere.ai",
+      "c1z.ai",
+      "santaz.ai",
+      "odbo.ai",
+      "themaster.ai",
+      "kadocay.ai",
+      "1518.ai",
+      "1588.ai"
+    ],
+    "mint_history": [
+      {
+        "t": 1793506070.8644512,
+        "m": 8103
+      },
+      {
+        "t": 1793506297.683727,
+        "m": 10000
+      }
+    ],
+    "organic_pct": 100.0,
+    "security": {
+      "audited": true,
+      "is_honeypot": false,
+      "buy_tax": 0.0,
+      "sell_tax": 0.0,
+      "cannot_sell_all": false,
+      "is_open_source": true,
+      "lp_locked_pct": 0.0,
+      "top10_pct": 0.0,
+      "risk_level": "SAFE",
+      "risk_badge": "\ud83d\udfe2 Clean",
+      "risk_flags": [
+        "Standard NFT Contract",
+        "Verified Interface"
+      ]
+    },
+    "risk_level": "SAFE",
+    "risk_badge": "\ud83d\udfe2 Clean",
+    "risk_flags": [
+      "Standard NFT Contract",
+      "Verified Interface"
+    ],
+    "velocity_ppm": 501.8
   },
   {
     "block": 130961689,
@@ -656,7 +1468,29 @@
       }
     ],
     "organic_pct": 100.0,
-    "velocity_ppm": 0.0
+    "velocity_ppm": 0.0,
+    "security": {
+      "audited": true,
+      "is_honeypot": false,
+      "buy_tax": 0.0,
+      "sell_tax": 0.0,
+      "cannot_sell_all": false,
+      "is_open_source": true,
+      "lp_locked_pct": 0.0,
+      "top10_pct": 0.0,
+      "risk_level": "SAFE",
+      "risk_badge": "\ud83d\udfe2 Clean",
+      "risk_flags": [
+        "Free Mint Available",
+        "Organic Community Distribution"
+      ]
+    },
+    "risk_level": "SAFE",
+    "risk_badge": "\ud83d\udfe2 Clean",
+    "risk_flags": [
+      "Free Mint Available",
+      "Organic Community Distribution"
+    ]
   },
   {
     "block": 130961685,
@@ -697,14 +1531,50 @@
     ],
     "detected_at": "2026-11-01 01:36:23",
     "smart_wallets": [
-      "tatou.ai",
-      "0x325000.ai"
+      "xgreat.ai",
+      "sweet998.ai",
+      "earnreward.ai",
+      "hepp.ai",
+      "xiyingying.ai",
+      "proustygg.ai",
+      "0x325000.ai",
+      "kanicuni.ai",
+      "tatou.ai"
     ],
     "smart_minters": [
-      "tatou.ai",
-      "0x325000.ai"
+      "xgreat.ai",
+      "sweet998.ai",
+      "earnreward.ai",
+      "hepp.ai",
+      "xiyingying.ai",
+      "proustygg.ai",
+      "0x325000.ai",
+      "kanicuni.ai",
+      "tatou.ai"
     ],
-    "velocity_ppm": 0.0
+    "velocity_ppm": 0.0,
+    "security": {
+      "audited": true,
+      "is_honeypot": false,
+      "buy_tax": 0.0,
+      "sell_tax": 0.0,
+      "cannot_sell_all": false,
+      "is_open_source": true,
+      "lp_locked_pct": 0.0,
+      "top10_pct": 0.0,
+      "risk_level": "SAFE",
+      "risk_badge": "\ud83d\udfe2 Clean",
+      "risk_flags": [
+        "Free Mint Available",
+        "Organic Community Distribution"
+      ]
+    },
+    "risk_level": "SAFE",
+    "risk_badge": "\ud83d\udfe2 Clean",
+    "risk_flags": [
+      "Free Mint Available",
+      "Organic Community Distribution"
+    ]
   },
   {
     "block": 130961680,
@@ -763,7 +1633,30 @@
       }
     ],
     "organic_pct": 100.0,
-    "velocity_ppm": 0.0
+    "velocity_ppm": 0.0,
+    "website": "https://ws-6d4136d3d5982b3d.lightvela.site",
+    "security": {
+      "audited": true,
+      "is_honeypot": false,
+      "buy_tax": 0.0,
+      "sell_tax": 0.0,
+      "cannot_sell_all": false,
+      "is_open_source": true,
+      "lp_locked_pct": 0.0,
+      "top10_pct": 0.7,
+      "risk_level": "SAFE",
+      "risk_badge": "\ud83d\udfe2 Clean",
+      "risk_flags": [
+        "Standard NFT Contract",
+        "Verified Interface"
+      ]
+    },
+    "risk_level": "SAFE",
+    "risk_badge": "\ud83d\udfe2 Clean",
+    "risk_flags": [
+      "Standard NFT Contract",
+      "Verified Interface"
+    ]
   },
   {
     "block": 130961668,
@@ -822,7 +1715,29 @@
       }
     ],
     "organic_pct": 100.0,
-    "velocity_ppm": 0.0
+    "velocity_ppm": 0.0,
+    "security": {
+      "audited": true,
+      "is_honeypot": false,
+      "buy_tax": 0.0,
+      "sell_tax": 0.0,
+      "cannot_sell_all": false,
+      "is_open_source": true,
+      "lp_locked_pct": 0.0,
+      "top10_pct": 0.1,
+      "risk_level": "SAFE",
+      "risk_badge": "\ud83d\udfe2 Clean",
+      "risk_flags": [
+        "Free Mint Available",
+        "Organic Community Distribution"
+      ]
+    },
+    "risk_level": "SAFE",
+    "risk_badge": "\ud83d\udfe2 Clean",
+    "risk_flags": [
+      "Free Mint Available",
+      "Organic Community Distribution"
+    ]
   },
   {
     "block": 130961668,
@@ -877,7 +1792,27 @@
         "m": 0
       }
     ],
-    "velocity_ppm": 0.0
+    "velocity_ppm": 0.0,
+    "security": {
+      "audited": true,
+      "is_honeypot": false,
+      "buy_tax": 0.0,
+      "sell_tax": 0.0,
+      "cannot_sell_all": false,
+      "is_open_source": false,
+      "lp_locked_pct": 0.0,
+      "top10_pct": 30.864197530864203,
+      "risk_level": "MED",
+      "risk_badge": "\ud83d\udfe1 Med Risk",
+      "risk_flags": [
+        "Closed Source"
+      ]
+    },
+    "risk_level": "MED",
+    "risk_badge": "\ud83d\udfe1 Med Risk",
+    "risk_flags": [
+      "Closed Source"
+    ]
   },
   {
     "block": 130961665,
@@ -936,7 +1871,30 @@
       }
     ],
     "organic_pct": 100.0,
-    "velocity_ppm": 0.0
+    "velocity_ppm": 0.0,
+    "website": "https://ws-6d4136d3d5982b3d.lightvela.site",
+    "security": {
+      "audited": true,
+      "is_honeypot": false,
+      "buy_tax": 0.0,
+      "sell_tax": 0.0,
+      "cannot_sell_all": false,
+      "is_open_source": true,
+      "lp_locked_pct": 0.0,
+      "top10_pct": 0.7,
+      "risk_level": "SAFE",
+      "risk_badge": "\ud83d\udfe2 Clean",
+      "risk_flags": [
+        "Standard NFT Contract",
+        "Verified Interface"
+      ]
+    },
+    "risk_level": "SAFE",
+    "risk_badge": "\ud83d\udfe2 Clean",
+    "risk_flags": [
+      "Standard NFT Contract",
+      "Verified Interface"
+    ]
   },
   {
     "block": 130961659,
@@ -979,12 +1937,12 @@
     ],
     "detected_at": "2026-11-01 01:34:53",
     "smart_wallets": [
-      "xiaoduo.ai",
-      "mcbig.ai"
+      "mcbig.ai",
+      "xiaoduo.ai"
     ],
     "smart_minters": [
-      "xiaoduo.ai",
-      "mcbig.ai"
+      "mcbig.ai",
+      "xiaoduo.ai"
     ],
     "mint_history": [
       {
@@ -997,7 +1955,29 @@
       }
     ],
     "organic_pct": 100.0,
-    "velocity_ppm": 0.0
+    "velocity_ppm": 0.0,
+    "security": {
+      "audited": true,
+      "is_honeypot": false,
+      "buy_tax": 0.0,
+      "sell_tax": 0.0,
+      "cannot_sell_all": false,
+      "is_open_source": true,
+      "lp_locked_pct": 0.0,
+      "top10_pct": 0.1,
+      "risk_level": "SAFE",
+      "risk_badge": "\ud83d\udfe2 Clean",
+      "risk_flags": [
+        "Free Mint Available",
+        "Organic Community Distribution"
+      ]
+    },
+    "risk_level": "SAFE",
+    "risk_badge": "\ud83d\udfe2 Clean",
+    "risk_flags": [
+      "Free Mint Available",
+      "Organic Community Distribution"
+    ]
   },
   {
     "block": 130961658,
@@ -1040,16 +2020,16 @@
     ],
     "detected_at": "2026-11-01 01:34:46",
     "smart_wallets": [
+      "bobi888.ai",
       "boba66.ai",
-      "bobi666.ai",
       "z1101.ai",
-      "bobi888.ai"
+      "bobi666.ai"
     ],
     "smart_minters": [
+      "bobi888.ai",
       "boba66.ai",
-      "bobi666.ai",
       "z1101.ai",
-      "bobi888.ai"
+      "bobi666.ai"
     ],
     "mint_history": [
       {
@@ -1062,7 +2042,29 @@
       }
     ],
     "organic_pct": 100.0,
-    "velocity_ppm": 0.0
+    "velocity_ppm": 0.0,
+    "security": {
+      "audited": true,
+      "is_honeypot": false,
+      "buy_tax": 0.0,
+      "sell_tax": 0.0,
+      "cannot_sell_all": false,
+      "is_open_source": true,
+      "lp_locked_pct": 0.0,
+      "top10_pct": 0.1,
+      "risk_level": "SAFE",
+      "risk_badge": "\ud83d\udfe2 Clean",
+      "risk_flags": [
+        "Free Mint Available",
+        "Organic Community Distribution"
+      ]
+    },
+    "risk_level": "SAFE",
+    "risk_badge": "\ud83d\udfe2 Clean",
+    "risk_flags": [
+      "Free Mint Available",
+      "Organic Community Distribution"
+    ]
   },
   {
     "block": 130961655,
@@ -1105,13 +2107,13 @@
     ],
     "detected_at": "2026-11-01 01:34:37",
     "smart_wallets": [
-      "applepie.ai",
       "richy6655.ai",
+      "applepie.ai",
       "fb666.ai"
     ],
     "smart_minters": [
-      "applepie.ai",
       "richy6655.ai",
+      "applepie.ai",
       "fb666.ai"
     ],
     "mint_history": [
@@ -1226,13 +2228,15 @@
     ],
     "detected_at": "2026-11-01 01:33:53",
     "smart_wallets": [
-      "kevin2002.ai",
       "19491001.ai",
+      "xiaozz.ai",
+      "kevin2002.ai",
       "yemen.ai"
     ],
     "smart_minters": [
-      "kevin2002.ai",
       "19491001.ai",
+      "xiaozz.ai",
+      "kevin2002.ai",
       "yemen.ai"
     ],
     "velocity_ppm": 0.0
@@ -1283,7 +2287,8 @@
     "smart_minters": [
       "rangga.ai"
     ],
-    "velocity_ppm": 0.0
+    "velocity_ppm": 0.0,
+    "token_price_bnb": 1.803e-08
   },
   {
     "block": 130911337,
@@ -1333,7 +2338,9 @@
       }
     ],
     "organic_pct": 100.0,
-    "velocity_ppm": 0.0
+    "velocity_ppm": 0.0,
+    "smart_wallets": [],
+    "smart_minters": []
   },
   {
     "block": 130910760,
@@ -1433,12 +2440,12 @@
     ],
     "detected_at": "2026-10-31 19:15:23",
     "smart_wallets": [
-      "zyg888.ai",
-      "akasheep.ai"
+      "akasheep.ai",
+      "zyg888.ai"
     ],
     "smart_minters": [
-      "zyg888.ai",
-      "akasheep.ai"
+      "akasheep.ai",
+      "zyg888.ai"
     ],
     "mint_history": [
       {
@@ -1611,16 +2618,16 @@
     ],
     "detected_at": "2026-10-31 19:13:59",
     "smart_wallets": [
-      "0xfatdog.ai",
       "lixunhuan.ai",
       "2169.ai",
-      "5269.ai"
+      "5269.ai",
+      "0xfatdog.ai"
     ],
     "smart_minters": [
-      "0xfatdog.ai",
       "lixunhuan.ai",
       "2169.ai",
-      "5269.ai"
+      "5269.ai",
+      "0xfatdog.ai"
     ],
     "mint_history": [
       {
@@ -1696,14 +2703,14 @@
     ],
     "detected_at": "2026-10-31 19:13:18",
     "smart_wallets": [
+      "perpdex.ai",
       "0xjl1222.ai",
-      "332528zch.ai",
-      "perpdex.ai"
+      "332528zch.ai"
     ],
     "smart_minters": [
+      "perpdex.ai",
       "0xjl1222.ai",
-      "332528zch.ai",
-      "perpdex.ai"
+      "332528zch.ai"
     ],
     "mint_history": [
       {
@@ -1759,12 +2766,12 @@
     ],
     "detected_at": "2026-10-31 19:13:07",
     "smart_wallets": [
-      "quan2709.ai",
-      "perpdex.ai"
+      "perpdex.ai",
+      "quan2709.ai"
     ],
     "smart_minters": [
-      "quan2709.ai",
-      "perpdex.ai"
+      "perpdex.ai",
+      "quan2709.ai"
     ],
     "mint_history": [
       {
@@ -1938,12 +2945,12 @@
     ],
     "detected_at": "2026-10-31 19:12:26",
     "smart_wallets": [
-      "332528zch.ai",
-      "zengwb.ai"
+      "zengwb.ai",
+      "332528zch.ai"
     ],
     "smart_minters": [
-      "332528zch.ai",
-      "zengwb.ai"
+      "zengwb.ai",
+      "332528zch.ai"
     ],
     "mint_history": [
       {
@@ -1994,14 +3001,18 @@
     ],
     "detected_at": "2026-10-31 19:12:41",
     "smart_wallets": [
-      "dwk666.ai",
+      "hanfeiling.ai",
+      "ac4575.ai",
       "nietzsche.ai",
-      "ac4575.ai"
+      "louhuisha.ai",
+      "dwk666.ai"
     ],
     "smart_minters": [
-      "dwk666.ai",
+      "hanfeiling.ai",
+      "ac4575.ai",
       "nietzsche.ai",
-      "ac4575.ai"
+      "louhuisha.ai",
+      "dwk666.ai"
     ],
     "mint_history": [
       {
@@ -2116,10 +3127,14 @@
     ],
     "detected_at": "2026-10-31 19:12:09",
     "smart_wallets": [
-      "wcg.ai"
+      "4ma.ai",
+      "wcg.ai",
+      "openwhale.ai"
     ],
     "smart_minters": [
-      "wcg.ai"
+      "4ma.ai",
+      "wcg.ai",
+      "openwhale.ai"
     ],
     "mint_history": [
       {
@@ -2231,14 +3246,14 @@
     "detected_at": "2026-10-31 19:11:44",
     "smart_wallets": [
       "qing2.ai",
-      "1475.ai",
       "chao1.ai",
+      "1475.ai",
       "lair.ai"
     ],
     "smart_minters": [
       "qing2.ai",
-      "1475.ai",
       "chao1.ai",
+      "1475.ai",
       "lair.ai"
     ],
     "mint_history": [
@@ -2472,12 +3487,12 @@
     ],
     "detected_at": "2026-10-31 19:07:29",
     "smart_wallets": [
-      "jietou.ai",
-      "perpdex.ai"
+      "perpdex.ai",
+      "jietou.ai"
     ],
     "smart_minters": [
-      "jietou.ai",
-      "perpdex.ai"
+      "perpdex.ai",
+      "jietou.ai"
     ],
     "mint_history": [
       {
@@ -2589,18 +3604,18 @@
     ],
     "detected_at": "2026-10-31 19:06:38",
     "smart_wallets": [
-      "kadocay.ai",
-      "zai.ai",
       "susu9.ai",
+      "procyons.ai",
+      "kadocay.ai",
       "ikundogbuning.ai",
-      "procyons.ai"
+      "zai.ai"
     ],
     "smart_minters": [
-      "kadocay.ai",
-      "zai.ai",
       "susu9.ai",
+      "procyons.ai",
+      "kadocay.ai",
       "ikundogbuning.ai",
-      "procyons.ai"
+      "zai.ai"
     ]
   },
   {
@@ -2687,12 +3702,12 @@
     ],
     "detected_at": "2026-10-31 19:06:04",
     "smart_wallets": [
-      "xiaoduo.ai",
-      "mcbig.ai"
+      "mcbig.ai",
+      "xiaoduo.ai"
     ],
     "smart_minters": [
-      "xiaoduo.ai",
-      "mcbig.ai"
+      "mcbig.ai",
+      "xiaoduo.ai"
     ]
   },
   {
@@ -2734,12 +3749,12 @@
     ],
     "detected_at": "2026-10-31 19:05:55",
     "smart_wallets": [
-      "yufaping.ai",
-      "hujinhua.ai"
+      "hujinhua.ai",
+      "yufaping.ai"
     ],
     "smart_minters": [
-      "yufaping.ai",
-      "hujinhua.ai"
+      "hujinhua.ai",
+      "yufaping.ai"
     ]
   },
   {
@@ -2779,12 +3794,12 @@
     ],
     "detected_at": "2026-10-31 19:05:46",
     "smart_wallets": [
-      "xiaoduo.ai",
-      "mcbig.ai"
+      "mcbig.ai",
+      "xiaoduo.ai"
     ],
     "smart_minters": [
-      "xiaoduo.ai",
-      "mcbig.ai"
+      "mcbig.ai",
+      "xiaoduo.ai"
     ]
   },
   {
@@ -2825,14 +3840,18 @@
     ],
     "detected_at": "2026-10-31 19:05:36",
     "smart_wallets": [
-      "boba66.ai",
+      "bobi666.ai",
       "z1101.ai",
-      "bobi666.ai"
+      "boba66.ai",
+      "formula1.ai",
+      "aa888999.ai"
     ],
     "smart_minters": [
-      "boba66.ai",
+      "bobi666.ai",
       "z1101.ai",
-      "bobi666.ai"
+      "boba66.ai",
+      "formula1.ai",
+      "aa888999.ai"
     ]
   },
   {
@@ -2922,10 +3941,12 @@
     ],
     "detected_at": "2026-10-31 18:52:19",
     "smart_wallets": [
-      "ambika.ai"
+      "ambika.ai",
+      "yatyou.ai"
     ],
     "smart_minters": [
-      "ambika.ai"
+      "ambika.ai",
+      "yatyou.ai"
     ]
   },
   {
@@ -3013,12 +4034,14 @@
     ],
     "detected_at": "2026-10-31 18:50:16",
     "smart_wallets": [
-      "tuananh1993.ai",
-      "lj1988.ai"
+      "lj1988.ai",
+      "fle.ai",
+      "tuananh1993.ai"
     ],
     "smart_minters": [
-      "tuananh1993.ai",
-      "lj1988.ai"
+      "lj1988.ai",
+      "fle.ai",
+      "tuananh1993.ai"
     ]
   },
   {
@@ -3108,15 +4131,15 @@
     "detected_at": "2026-10-31 18:49:48",
     "smart_wallets": [
       "chifan.ai",
-      "jenifer.ai",
+      "longmao.ai",
       "xiaoze.ai",
-      "longmao.ai"
+      "jenifer.ai"
     ],
     "smart_minters": [
       "chifan.ai",
-      "jenifer.ai",
+      "longmao.ai",
       "xiaoze.ai",
-      "longmao.ai"
+      "jenifer.ai"
     ],
     "mint_history": [
       {
@@ -3247,22 +4270,24 @@
     "smart_wallets": [
       "100.ai",
       "sloane.ai",
+      "hu9527.ai",
       "superczpro.ai",
-      "liuhuan.ai",
       "lovelove7.ai",
-      "syi1088.ai",
       "2432.ai",
-      "hu9527.ai"
+      "liuhuan.ai",
+      "zmllww.ai",
+      "syi1088.ai"
     ],
     "smart_minters": [
       "100.ai",
       "sloane.ai",
+      "hu9527.ai",
       "superczpro.ai",
-      "liuhuan.ai",
       "lovelove7.ai",
-      "syi1088.ai",
       "2432.ai",
-      "hu9527.ai"
+      "liuhuan.ai",
+      "zmllww.ai",
+      "syi1088.ai"
     ],
     "token_price_bnb": 5.596e-11
   },
@@ -3430,14 +4455,14 @@
     ],
     "detected_at": "2026-10-31 18:48:35",
     "smart_wallets": [
-      "1109.ai",
+      "cxmaa.ai",
       "wishhjr.ai",
-      "cxmaa.ai"
+      "1109.ai"
     ],
     "smart_minters": [
-      "1109.ai",
+      "cxmaa.ai",
       "wishhjr.ai",
-      "cxmaa.ai"
+      "1109.ai"
     ]
   },
   {
@@ -3485,7 +4510,8 @@
     ],
     "smart_minters": [
       "boyrashad.ai"
-    ]
+    ],
+    "token_price_bnb": 1.342e-09
   },
   {
     "block": 130906908,
@@ -3525,12 +4551,12 @@
     ],
     "detected_at": "2026-10-31 18:46:06",
     "smart_wallets": [
-      "xiaoduo.ai",
-      "mcbig.ai"
+      "mcbig.ai",
+      "xiaoduo.ai"
     ],
     "smart_minters": [
-      "xiaoduo.ai",
-      "mcbig.ai"
+      "mcbig.ai",
+      "xiaoduo.ai"
     ]
   },
   {
@@ -3616,10 +4642,12 @@
     ],
     "detected_at": "2026-10-31 18:44:17",
     "smart_wallets": [
-      "quexue.ai"
+      "quexue.ai",
+      "ox10k.ai"
     ],
     "smart_minters": [
-      "quexue.ai"
+      "quexue.ai",
+      "ox10k.ai"
     ]
   },
   {
@@ -3663,16 +4691,16 @@
     ],
     "detected_at": "2026-10-31 18:43:31",
     "smart_wallets": [
-      "zyg888.ai",
+      "xiaoze.ai",
       "4ma.ai",
-      "xiaoduo.ai",
-      "xiaoze.ai"
+      "zyg888.ai",
+      "xiaoduo.ai"
     ],
     "smart_minters": [
-      "zyg888.ai",
+      "xiaoze.ai",
       "4ma.ai",
-      "xiaoduo.ai",
-      "xiaoze.ai"
+      "zyg888.ai",
+      "xiaoduo.ai"
     ]
   },
   {
@@ -3759,24 +4787,24 @@
     ],
     "detected_at": "2026-10-31 18:43:19",
     "smart_wallets": [
-      "8v8.ai",
-      "apart.ai",
-      "dong1125.ai",
+      "0xshenyuan.ai",
+      "zhixia.ai",
+      "hhdr.ai",
       "880.ai",
       "ygf.ai",
-      "0xshenyuan.ai",
-      "hhdr.ai",
-      "zhixia.ai"
+      "apart.ai",
+      "8v8.ai",
+      "dong1125.ai"
     ],
     "smart_minters": [
-      "8v8.ai",
-      "apart.ai",
-      "dong1125.ai",
+      "0xshenyuan.ai",
+      "zhixia.ai",
+      "hhdr.ai",
       "880.ai",
       "ygf.ai",
-      "0xshenyuan.ai",
-      "hhdr.ai",
-      "zhixia.ai"
+      "apart.ai",
+      "8v8.ai",
+      "dong1125.ai"
     ],
     "mint_history": [
       {
@@ -3893,12 +4921,12 @@
     ],
     "detected_at": "2026-10-31 18:42:55",
     "smart_wallets": [
-      "yangmiemie.ai",
-      "ethanz.ai"
+      "ethanz.ai",
+      "yangmiemie.ai"
     ],
     "smart_minters": [
-      "yangmiemie.ai",
-      "ethanz.ai"
+      "ethanz.ai",
+      "yangmiemie.ai"
     ]
   },
   {
@@ -4076,11 +5104,15 @@
     "detected_at": "2026-10-31 18:38:39",
     "smart_wallets": [
       "mudin.ai",
-      "xunervel.ai"
+      "2777.ai",
+      "xunervel.ai",
+      "xiaofengwangluo.ai"
     ],
     "smart_minters": [
       "mudin.ai",
-      "xunervel.ai"
+      "2777.ai",
+      "xunervel.ai",
+      "xiaofengwangluo.ai"
     ]
   },
   {
@@ -4124,17 +5156,17 @@
     ],
     "detected_at": "2026-10-31 18:38:03",
     "smart_wallets": [
-      "zengwb.ai",
       "iapots.ai",
-      "musaceza.ai",
       "diwy.ai",
+      "zengwb.ai",
+      "musaceza.ai",
       "vuvu8243.ai"
     ],
     "smart_minters": [
-      "zengwb.ai",
       "iapots.ai",
-      "musaceza.ai",
       "diwy.ai",
+      "zengwb.ai",
+      "musaceza.ai",
       "vuvu8243.ai"
     ]
   },
@@ -4275,12 +5307,12 @@
     ],
     "detected_at": "2026-10-31 18:37:13",
     "smart_wallets": [
-      "mrsuit.ai",
-      "zhaoran.ai"
+      "zhaoran.ai",
+      "mrsuit.ai"
     ],
     "smart_minters": [
-      "mrsuit.ai",
-      "zhaoran.ai"
+      "zhaoran.ai",
+      "mrsuit.ai"
     ]
   },
   {
@@ -4369,16 +5401,16 @@
     ],
     "detected_at": "2026-10-31 18:36:56",
     "smart_wallets": [
-      "qing2.ai",
-      "zhen1.ai",
+      "nan1.ai",
       "hujinhua.ai",
-      "nan1.ai"
+      "qing2.ai",
+      "zhen1.ai"
     ],
     "smart_minters": [
-      "qing2.ai",
-      "zhen1.ai",
+      "nan1.ai",
       "hujinhua.ai",
-      "nan1.ai"
+      "qing2.ai",
+      "zhen1.ai"
     ]
   },
   {
@@ -4422,12 +5454,12 @@
     ],
     "detected_at": "2026-10-31 18:36:46",
     "smart_wallets": [
-      "belp.ai",
-      "just123.ai"
+      "just123.ai",
+      "belp.ai"
     ],
     "smart_minters": [
-      "belp.ai",
-      "just123.ai"
+      "just123.ai",
+      "belp.ai"
     ]
   },
   {
@@ -4467,20 +5499,20 @@
     ],
     "detected_at": "2026-10-31 18:36:28",
     "smart_wallets": [
-      "xiaoduo.ai",
-      "minbtc.ai",
       "mcbig.ai",
+      "xiaoduo.ai",
       "hujinhua.ai",
-      "yuhuayu.ai",
-      "miman.ai"
+      "miman.ai",
+      "minbtc.ai",
+      "yuhuayu.ai"
     ],
     "smart_minters": [
-      "xiaoduo.ai",
-      "minbtc.ai",
       "mcbig.ai",
+      "xiaoduo.ai",
       "hujinhua.ai",
-      "yuhuayu.ai",
-      "miman.ai"
+      "miman.ai",
+      "minbtc.ai",
+      "yuhuayu.ai"
     ]
   },
   {
@@ -4524,16 +5556,16 @@
     ],
     "detected_at": "2026-10-31 18:36:18",
     "smart_wallets": [
-      "nancy.ai",
-      "yxv.ai",
       "2169.ai",
-      "xianyuxiaofe.ai"
+      "xianyuxiaofe.ai",
+      "nancy.ai",
+      "yxv.ai"
     ],
     "smart_minters": [
-      "nancy.ai",
-      "yxv.ai",
       "2169.ai",
-      "xianyuxiaofe.ai"
+      "xianyuxiaofe.ai",
+      "nancy.ai",
+      "yxv.ai"
     ]
   },
   {
@@ -4577,16 +5609,16 @@
     ],
     "detected_at": "2026-10-31 18:33:47",
     "smart_wallets": [
-      "2777.ai",
+      "zhaoran.ai",
       "hotlilith.ai",
       "jietou.ai",
-      "zhaoran.ai"
+      "2777.ai"
     ],
     "smart_minters": [
-      "2777.ai",
+      "zhaoran.ai",
       "hotlilith.ai",
       "jietou.ai",
-      "zhaoran.ai"
+      "2777.ai"
     ]
   },
   {
@@ -4720,15 +5752,15 @@
     ],
     "detected_at": "2026-10-31 18:32:57",
     "smart_wallets": [
-      "yufaping.ai",
       "mikeyinbentley.ai",
       "chao1.ai",
+      "yufaping.ai",
       "xiaoduo.ai"
     ],
     "smart_minters": [
-      "yufaping.ai",
       "mikeyinbentley.ai",
       "chao1.ai",
+      "yufaping.ai",
       "xiaoduo.ai"
     ]
   },
@@ -4773,12 +5805,12 @@
     ],
     "detected_at": "2026-10-31 18:32:46",
     "smart_wallets": [
-      "mm111.ai",
-      "zhaoran.ai"
+      "zhaoran.ai",
+      "mm111.ai"
     ],
     "smart_minters": [
-      "mm111.ai",
-      "zhaoran.ai"
+      "zhaoran.ai",
+      "mm111.ai"
     ]
   },
   {
@@ -4821,14 +5853,14 @@
     ],
     "detected_at": "2026-10-31 18:32:21",
     "smart_wallets": [
-      "yanqinghua.ai",
       "classrep.ai",
-      "0x435646f960285.ai"
+      "0x435646f960285.ai",
+      "yanqinghua.ai"
     ],
     "smart_minters": [
-      "yanqinghua.ai",
       "classrep.ai",
-      "0x435646f960285.ai"
+      "0x435646f960285.ai",
+      "yanqinghua.ai"
     ]
   },
   {
@@ -4872,12 +5904,12 @@
     ],
     "detected_at": "2026-10-31 18:32:00",
     "smart_wallets": [
-      "vuvu8243.ai",
-      "zengwb.ai"
+      "zengwb.ai",
+      "vuvu8243.ai"
     ],
     "smart_minters": [
-      "vuvu8243.ai",
-      "zengwb.ai"
+      "zengwb.ai",
+      "vuvu8243.ai"
     ]
   },
   {
@@ -5057,16 +6089,16 @@
     ],
     "detected_at": "2026-10-31 18:31:14",
     "smart_wallets": [
-      "bitbigcat.ai",
       "youliqi.ai",
+      "flap777.ai",
       "xiaoze.ai",
-      "flap777.ai"
+      "bitbigcat.ai"
     ],
     "smart_minters": [
-      "bitbigcat.ai",
       "youliqi.ai",
+      "flap777.ai",
       "xiaoze.ai",
-      "flap777.ai"
+      "bitbigcat.ai"
     ]
   },
   {
@@ -5104,7 +6136,9 @@
       "Safety: Standard NFT Contract",
       "Safety: Verified Interface"
     ],
-    "detected_at": "2026-11-01 02:26:08"
+    "detected_at": "2026-11-01 02:26:08",
+    "smart_wallets": [],
+    "smart_minters": []
   },
   {
     "block": 130904603,
@@ -5237,16 +6271,16 @@
     ],
     "detected_at": "2026-10-31 18:25:37",
     "smart_wallets": [
-      "zhen1.ai",
-      "vuvu8243.ai",
+      "bianvip888.ai",
       "miman.ai",
-      "bianvip888.ai"
+      "vuvu8243.ai",
+      "zhen1.ai"
     ],
     "smart_minters": [
-      "zhen1.ai",
-      "vuvu8243.ai",
+      "bianvip888.ai",
       "miman.ai",
-      "bianvip888.ai"
+      "vuvu8243.ai",
+      "zhen1.ai"
     ],
     "mint_history": [
       {
@@ -5454,24 +6488,24 @@
     ],
     "detected_at": "2026-10-31 18:13:33",
     "smart_wallets": [
-      "xiaodan.ai",
-      "yufaping.ai",
-      "hujinhua.ai",
-      "baihuzixinye.ai",
       "kaiduo.ai",
       "yuguoping.ai",
-      "yuhuayu.ai",
-      "miman.ai"
+      "hujinhua.ai",
+      "xiaodan.ai",
+      "miman.ai",
+      "yufaping.ai",
+      "baihuzixinye.ai",
+      "yuhuayu.ai"
     ],
     "smart_minters": [
-      "xiaodan.ai",
-      "yufaping.ai",
-      "hujinhua.ai",
-      "baihuzixinye.ai",
       "kaiduo.ai",
       "yuguoping.ai",
-      "yuhuayu.ai",
-      "miman.ai"
+      "hujinhua.ai",
+      "xiaodan.ai",
+      "miman.ai",
+      "yufaping.ai",
+      "baihuzixinye.ai",
+      "yuhuayu.ai"
     ]
   },
   {
@@ -5745,11 +6779,16 @@
     ],
     "detected_at": "2026-10-31 18:07:56",
     "smart_wallets": [
-      "bandungrx24.ai"
+      "bandungrx24.ai",
+      "ibehh.ai",
+      "yl306123.ai"
     ],
     "smart_minters": [
-      "bandungrx24.ai"
-    ]
+      "bandungrx24.ai",
+      "ibehh.ai",
+      "yl306123.ai"
+    ],
+    "token_price_bnb": 5.844e-05
   },
   {
     "block": 130902199,
@@ -6185,16 +7224,16 @@
     ],
     "detected_at": "2026-10-31 18:02:39",
     "smart_wallets": [
-      "zyg888.ai",
-      "10024.ai",
+      "5269.ai",
       "2169.ai",
-      "5269.ai"
+      "zyg888.ai",
+      "10024.ai"
     ],
     "smart_minters": [
-      "zyg888.ai",
-      "10024.ai",
+      "5269.ai",
       "2169.ai",
-      "5269.ai"
+      "zyg888.ai",
+      "10024.ai"
     ],
     "mint_history": [
       {
@@ -6441,30 +7480,30 @@
     ],
     "detected_at": "2026-10-31 18:01:48",
     "smart_wallets": [
+      "000000000000001.ai",
+      "yxv.ai",
+      "luoxiaohei.ai",
+      "sapphy.ai",
+      "zhuojin.ai",
+      "5550.ai",
+      "xiaoze.ai",
       "flux.ai",
       "dominik312.ai",
-      "luoxiaohei.ai",
       "tiny888.ai",
-      "xiaoze.ai",
-      "nancy.ai",
-      "yxv.ai",
-      "zhuojin.ai",
-      "sapphy.ai",
-      "5550.ai",
-      "000000000000001.ai"
+      "nancy.ai"
     ],
     "smart_minters": [
+      "000000000000001.ai",
+      "yxv.ai",
+      "luoxiaohei.ai",
+      "sapphy.ai",
+      "zhuojin.ai",
+      "5550.ai",
+      "xiaoze.ai",
       "flux.ai",
       "dominik312.ai",
-      "luoxiaohei.ai",
       "tiny888.ai",
-      "xiaoze.ai",
-      "nancy.ai",
-      "yxv.ai",
-      "zhuojin.ai",
-      "sapphy.ai",
-      "5550.ai",
-      "000000000000001.ai"
+      "nancy.ai"
     ],
     "mint_history": [
       {
@@ -6709,16 +7748,16 @@
     ],
     "detected_at": "2026-10-31 07:29:48",
     "smart_wallets": [
-      "jiebao.ai",
       "youliqi.ai",
-      "vuvu8243.ai",
-      "mhg.ai"
+      "jiebao.ai",
+      "mhg.ai",
+      "vuvu8243.ai"
     ],
     "smart_minters": [
-      "jiebao.ai",
       "youliqi.ai",
-      "vuvu8243.ai",
-      "mhg.ai"
+      "jiebao.ai",
+      "mhg.ai",
+      "vuvu8243.ai"
     ],
     "mint_history": [
       {
@@ -7518,15 +8557,15 @@
     "detected_at": "2026-10-31 07:28:04",
     "smart_wallets": [
       "2169.ai",
-      "6952.ai",
       "iamryu.ai",
+      "6952.ai",
       "goudai.ai",
       "5269.ai"
     ],
     "smart_minters": [
       "2169.ai",
-      "6952.ai",
       "iamryu.ai",
+      "6952.ai",
       "goudai.ai",
       "5269.ai"
     ],
@@ -8101,16 +9140,16 @@
     "smart_wallets": [
       "flap777.ai",
       "bncb.ai",
-      "mm1111.ai",
+      "longmao.ai",
       "4ma.ai",
-      "longmao.ai"
+      "mm1111.ai"
     ],
     "smart_minters": [
       "flap777.ai",
       "bncb.ai",
-      "mm1111.ai",
+      "longmao.ai",
       "4ma.ai",
-      "longmao.ai"
+      "mm1111.ai"
     ],
     "mint_history": [
       {
@@ -8439,16 +9478,16 @@
     ],
     "detected_at": "2026-10-31 09:05:14",
     "smart_wallets": [
-      "suguobin.ai",
       "mrhabibie.ai",
-      "wabi.ai",
-      "cdc.ai"
+      "cdc.ai",
+      "suguobin.ai",
+      "wabi.ai"
     ],
     "smart_minters": [
-      "suguobin.ai",
       "mrhabibie.ai",
-      "wabi.ai",
-      "cdc.ai"
+      "cdc.ai",
+      "suguobin.ai",
+      "wabi.ai"
     ],
     "mint_history": [
       {
@@ -9192,10 +10231,12 @@
     ],
     "detected_at": "2026-10-30 23:13:52",
     "smart_wallets": [
-      "chulchul15.ai"
+      "chulchul15.ai",
+      "ethelia.ai"
     ],
     "smart_minters": [
-      "chulchul15.ai"
+      "chulchul15.ai",
+      "ethelia.ai"
     ],
     "velocity_ppm": 0.0,
     "market_url": "https://pancakeswap.finance/swap?outputCurrency=0xcb54cfbc2699c405e5c88cdec75cba2ec8b7bfb3",
@@ -10272,7 +11313,7 @@
     "sells_24h": 1428,
     "volume_24h": 5273.51,
     "pair_url": "https://dexscreener.com/bsc/0x8f581c63c41b5a1123139a43b982e136b0706165",
-    "mint_calldata": "0x1249c58b",
+    "mint_calldata": "0x095ea7b3000000000000000000000000b300000b72deaeb607a12d5f54773d1c19c7028d00000000000000000000000000000000000000000000000022b1c8c1227a0000",
     "signals": [
       "No DEX LP detected yet",
       "Near Sellout (100.0% claimed)",
@@ -10282,24 +11323,26 @@
     ],
     "detected_at": "2026-10-30 23:13:52",
     "smart_wallets": [
-      "louba.ai",
-      "chenyuhua.ai",
+      "jiamiao.ai",
       "654.ai",
-      "ctm.ai",
+      "chenyuhua.ai",
+      "louba.ai",
       "nietzsche.ai",
-      "818.ai",
       "hualuo.ai",
-      "jiamiao.ai"
+      "818.ai",
+      "zeppeto.ai",
+      "ctm.ai"
     ],
     "smart_minters": [
-      "louba.ai",
-      "chenyuhua.ai",
+      "jiamiao.ai",
       "654.ai",
-      "ctm.ai",
+      "chenyuhua.ai",
+      "louba.ai",
       "nietzsche.ai",
-      "818.ai",
       "hualuo.ai",
-      "jiamiao.ai"
+      "818.ai",
+      "zeppeto.ai",
+      "ctm.ai"
     ],
     "velocity_ppm": 0.0,
     "market_url": "https://pancakeswap.finance/swap?outputCurrency=0x6a87de92deb752c6162cf80bd16e3efd4bdc6d90",
@@ -10589,44 +11632,46 @@
     ],
     "detected_at": "2026-10-30 23:13:52",
     "smart_wallets": [
-      "kiwalangsangit.ai",
-      "honey.ai",
-      "1pprgb.ai",
       "654.ai",
+      "artdizy.ai",
+      "kiwalangsangit.ai",
+      "roh.ai",
+      "skkun.ai",
+      "maxfree123.ai",
+      "xiejie.ai",
       "0xharry.ai",
+      "1pprgb.ai",
+      "lalalawu.ai",
+      "ginn952.ai",
+      "honey.ai",
+      "ai13.ai",
       "shing02.ai",
       "boba66.ai",
-      "roh.ai",
-      "lalalawu.ai",
-      "818.ai",
+      "ozen.ai",
       "awei2.ai",
-      "xiejie.ai",
-      "artdizy.ai",
-      "ginn952.ai",
-      "maxfree123.ai",
-      "skkun.ai",
-      "ai13.ai",
-      "ozen.ai"
+      "818.ai",
+      "bobi888.ai"
     ],
     "smart_minters": [
-      "kiwalangsangit.ai",
-      "honey.ai",
-      "1pprgb.ai",
       "654.ai",
+      "artdizy.ai",
+      "kiwalangsangit.ai",
+      "roh.ai",
+      "skkun.ai",
+      "maxfree123.ai",
+      "xiejie.ai",
       "0xharry.ai",
+      "1pprgb.ai",
+      "lalalawu.ai",
+      "ginn952.ai",
+      "honey.ai",
+      "ai13.ai",
       "shing02.ai",
       "boba66.ai",
-      "roh.ai",
-      "lalalawu.ai",
-      "818.ai",
+      "ozen.ai",
       "awei2.ai",
-      "xiejie.ai",
-      "artdizy.ai",
-      "ginn952.ai",
-      "maxfree123.ai",
-      "skkun.ai",
-      "ai13.ai",
-      "ozen.ai"
+      "818.ai",
+      "bobi888.ai"
     ],
     "mint_history": [
       {
@@ -10913,14 +11958,14 @@
     ],
     "detected_at": "2026-10-30 23:13:52",
     "smart_wallets": [
-      "btc768.ai",
+      "pon4ik.ai",
       "kiwalangsangit.ai",
-      "pon4ik.ai"
+      "btc768.ai"
     ],
     "smart_minters": [
-      "btc768.ai",
+      "pon4ik.ai",
       "kiwalangsangit.ai",
-      "pon4ik.ai"
+      "btc768.ai"
     ],
     "mint_history": [
       {

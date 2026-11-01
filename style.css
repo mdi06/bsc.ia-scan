@@ -580,21 +580,32 @@ tbody tr.selected {
 .col-holders span.buy { color: var(--color-cyan); font-weight: 600; }
 
 /* Progress bar inside table cell */
+.col-progress {
+  min-width: 250px;
+}
+
 .progress-cell {
   display: flex;
   align-items: center;
   gap: 8px;
-  min-width: 220px;
+  min-width: 240px;
+  width: 100%;
 }
 
 .prog-tag {
   font-weight: 700;
   font-size: 10px;
-  width: 38px;
+  min-width: 80px;
+  width: 80px;
+  flex-shrink: 0;
+  white-space: nowrap;
+  letter-spacing: 0.3px;
+  font-variant-numeric: tabular-nums;
 }
 
 .prog-bar-container {
   flex: 1;
+  min-width: 60px;
   height: 8px;
   background: var(--bg-surface-elevated);
   border-radius: 3px;
@@ -611,8 +622,11 @@ tbody tr.selected {
 .prog-ratio {
   font-size: 11px;
   color: var(--text-white);
-  min-width: 65px;
+  min-width: 75px;
   text-align: right;
+  white-space: nowrap;
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
 }
 
 /* Action button */
@@ -1292,17 +1306,32 @@ tbody tr.selected {
 
   .col-progress {
     width: 100%;
+    min-width: 0;
     margin-top: 4px;
   }
 
   .progress-cell {
     width: 100%;
-    gap: 6px;
+    min-width: 0;
+    gap: 8px;
+  }
+
+  .prog-tag {
+    min-width: 78px;
+    width: 78px;
+    flex-shrink: 0;
   }
 
   .prog-bar-container {
     flex-grow: 1;
+    min-width: 50px;
     height: 7px;
+  }
+
+  .prog-ratio {
+    min-width: auto;
+    flex-shrink: 0;
+    white-space: nowrap;
   }
 
   .col-holders, .col-lp, .col-price, .col-floor {

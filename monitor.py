@@ -29,7 +29,7 @@ import termios
 import threading
 import webbrowser
 import shutil
-from typing import Optional, Dict, Any, List, Tuple
+from typing import Optional, Dict, Any, List, Tuple, Iterable, Set
 
 try:
     from rich.console import Console, Group
@@ -60,6 +60,36 @@ DONATION_WALLET = "0xa15BB4AEdC1b3426159C3cACf8548Cf09506A20a"
 PANCAKE_FACTORY_V2 = "0xcA143Ce32Fe78f1f7019d7d551a6402fC5350c73"
 WBNB_ADDRESS = "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c"
 USDT_ADDRESS = "0x55d398326f99059fF775485246999027B3197955"
+USD1_ADDRESS = "0x8d0D000ee44948FC98c9B98A4FA4921476f08B0D"
+BNCB_ADDRESS = "0x4902C5ebc598265ED2212b559b042de8a5eeec3f"
+USDC_ADDRESS = "0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d"
+
+# Top BSC quote pairs for PancakeSwap V2 secondary liquidity resolution
+QUOTE_TOKENS = [
+    {"symbol": "WBNB", "address": WBNB_ADDRESS, "is_bnb": True, "decimals": 18},
+    {"symbol": "USDT", "address": USDT_ADDRESS, "is_bnb": False, "decimals": 18, "usd_rate": 1.0},
+    {"symbol": "USD1", "address": USD1_ADDRESS, "is_bnb": False, "decimals": 18, "usd_rate": 1.0},
+    {"symbol": "BNCB", "address": BNCB_ADDRESS, "is_bnb": True, "decimals": 18},
+    {"symbol": "USDC", "address": USDC_ADDRESS, "is_bnb": False, "decimals": 18, "usd_rate": 1.0},
+]
+
+# Refund function signatures to audit contract bytecode for fair-mint refund guarantees
+REFUND_SELECTORS = {
+    "590e1ae3": "refund()",
+    "278ecde1": "claimRefund()",
+    "fa89401a": "claimRefund(uint256)",
+    "38e771ab": "refundOpen()",
+    "b5545a3c": "refundable(address)",
+    "5b7baf64": "getRefund()",
+    "110f8874": "withdrawRefund()",
+    "b2d5ae44": "isRefundable()",
+    "bffa55d5": "refundAmount(address)",
+    "68ec0d99": "refundAll()",
+    "74c1b1c9": "userRefund()",
+    "b30196e5": "enableRefund()",
+    "c033a490": "requestRefund()",
+    "64cfd025": "withdrawRefund()",
+}
 
 HISTORY_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "history.json")
 SMART_WALLETS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "smart_wallets.json")
@@ -174,6 +204,9 @@ class BscRpcClient:
     def get_logs(self, params: Dict[str, Any]) -> List[Dict[str, Any]]:
         return self.call("eth_getLogs", [params]) or []
 
+    def get_storage_at(self, address: str, position: str) -> Optional[str]:
+        return self.call("eth_getStorageAt", [address, position, "latest"])
+
     def call_contract(self, to: str, data: str) -> Optional[str]:
         try:
             res = self.call("eth_call", [{"to": to, "data": data}, "latest"])
@@ -225,6 +258,90 @@ def decode_string(hex_res: str) -> str:
         return str_bytes.decode("utf-8", errors="ignore")
     except Exception:
         return ""
+
+
+_SMART_WALLETS_CACHE: Optional[Dict[str, str]] = None
+
+
+def get_cached_smart_wallets() -> Dict[str, str]:
+    """Returns memory-cached smart wallets mapping to prevent repeated file I/O."""
+    global _SMART_WALLETS_CACHE
+    if _SMART_WALLETS_CACHE is None:
+        try:
+            _SMART_WALLETS_CACHE = load_smart_wallets() or {}
+        except Exception:
+            _SMART_WALLETS_CACHE = {}
+    return _SMART_WALLETS_CACHE
+
+
+def replace_calldata_recipient(
+    calldata: Optional[str],
+    target_wallet: str,
+    original_sender: Optional[str] = None,
+    extra_addresses: Optional[Iterable[str]] = None
+) -> str:
+    """
+    Replaces address parameters in EVM calldata with the active user's wallet address.
+
+    1. Supports recv (plain BNB transfer): returns '0x' if calldata is empty, '0x', 'recv', 'receive', or None.
+    2. Pattern C (0x836a1040): Word 1 (bytes 36..68) is the recipient parameter of mint(uint256,address,uint256),
+       always replaced with target_wallet.
+    3. Any 32-byte word matching original_sender, DEFAULT_WALLET, or any tracked smart wallet
+       is replaced with target_wallet.
+    """
+    if not calldata:
+        return "0x"
+    c_str = str(calldata).strip()
+    if c_str.lower() in ("0x", "recv", "receive", "none", ""):
+        return "0x"
+
+    prefix = "0x" if c_str.startswith("0x") else ""
+    raw = c_str[2:] if c_str.startswith("0x") else c_str
+    if len(raw) < 8:
+        return ("0x" + raw) if prefix else raw
+
+    selector = raw[:8].lower()
+    params = raw[8:]
+
+    tgt_clean = target_wallet.lower().replace("0x", "").strip()
+    if len(tgt_clean) != 40:
+        return ("0x" + raw) if prefix else raw
+    tgt_word = "0" * 24 + tgt_clean
+
+    words = [params[i:i+64] for i in range(0, len(params), 64)]
+
+    # Collect known smart wallets, sender & default wallet
+    known_sw = get_cached_smart_wallets()
+
+    explicit_addrs = set()
+    if original_sender:
+        explicit_addrs.add(original_sender.lower().replace("0x", "").strip())
+    if DEFAULT_WALLET:
+        explicit_addrs.add(DEFAULT_WALLET.lower().replace("0x", "").strip())
+    if extra_addresses:
+        for ea in extra_addresses:
+            if ea:
+                explicit_addrs.add(ea.lower().replace("0x", "").strip())
+
+    new_words = []
+    for idx, w in enumerate(words):
+        if len(w) == 64:
+            # Pattern C (0x836a1040): mint(uint256 quantity, address recipient, uint256 maxCost)
+            if selector == "836a1040" and idx == 1:
+                new_words.append(tgt_word)
+            elif w.startswith("0" * 24):
+                addr_hex = w[24:].lower()
+                addr_with_prefix = "0x" + addr_hex
+                if addr_hex in explicit_addrs or addr_with_prefix in known_sw:
+                    new_words.append(tgt_word)
+                else:
+                    new_words.append(w)
+            else:
+                new_words.append(w)
+        else:
+            new_words.append(w)
+
+    return ("0x" if prefix else "") + selector + "".join(new_words)
 
 
 def classify_asset_type(rpc: BscRpcClient, addr: str) -> Dict[str, Any]:
@@ -350,7 +467,9 @@ def analyze_contract(rpc: BscRpcClient, contract_addr: str, wallet_addr: str) ->
         "mint_note": "",
         "website": "",
         "twitter": "",
-        "market_url": ""
+        "market_url": "",
+        "has_refund": False,
+        "refund_methods": []
     }
 
     # Retrieve Name & Symbol
@@ -685,6 +804,25 @@ def analyze_contract(rpc: BscRpcClient, contract_addr: str, wallet_addr: str) ->
                     info["mint_price_str"] = p_str
                     info["mint_value_wei"] = str(val)
 
+    # Check for Bytecode Refund Signatures (supports direct and EIP-1967 proxy unwrap)
+    try:
+        code_hex = (rpc.get_code(contract_addr) or "").lower()
+        impl_code_hex = ""
+        try:
+            eip1967_impl = rpc.get_storage_at(contract_addr, "0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc")
+            if eip1967_impl and len(eip1967_impl) >= 66 and eip1967_impl[-40:] != "0"*40:
+                impl_addr = "0x" + eip1967_impl[-40:].lower()
+                impl_code_hex = (rpc.get_code(impl_addr) or "").lower()
+        except Exception:
+            pass
+
+        full_code = code_hex + impl_code_hex
+        matched_refund = [name for sel, name in REFUND_SELECTORS.items() if sel in full_code]
+        info["has_refund"] = len(matched_refund) > 0
+        info["refund_methods"] = matched_refund
+    except Exception:
+        pass
+
     return info
 
 
@@ -724,6 +862,11 @@ def fetch_token_market_data(token_addr: str) -> Dict[str, Any]:
         "pair_url": "",
         "market_price_usd": 0.0,
         "market_price_bnb": 0.0,
+        "lp_usd": 0.0,
+        "dex_id": "",
+        "pair_address": "",
+        "quote_symbol": "",
+        "token_symbol": "",
         "website": "",
         "twitter": "",
         "security": {
@@ -850,6 +993,8 @@ def fetch_token_market_data(token_addr: str) -> Dict[str, Any]:
             payload = json.loads(r.read().decode("utf-8"))
             pairs = payload.get("pairs") or []
             if pairs:
+                # Prioritize pool with highest liquidity depth
+                pairs.sort(key=lambda x: float((x.get("liquidity") or {}).get("usd", 0) or 0), reverse=True)
                 p = pairs[0]
                 txns = p.get("txns", {})
                 res["buys_24h"] = txns.get("h24", {}).get("buys", 0)
@@ -859,6 +1004,13 @@ def fetch_token_market_data(token_addr: str) -> Dict[str, Any]:
                 res["pair_url"] = p.get("url", "")
                 res["market_price_usd"] = float(p.get("priceUsd") or 0.0)
                 res["market_price_bnb"] = float(p.get("priceNative") or 0.0)
+                res["lp_usd"] = float((p.get("liquidity") or {}).get("usd", 0.0) or 0.0)
+                res["dex_id"] = p.get("dexId", "")
+                res["pair_address"] = p.get("pairAddress", "")
+                res["quote_symbol"] = (p.get("quoteToken") or {}).get("symbol", "")
+                if (p.get("baseToken") or {}).get("symbol"):
+                    res["token_symbol"] = p["baseToken"]["symbol"]
+
                 p_info = p.get("info") or {}
                 ws = p_info.get("websites") or []
                 if ws:
@@ -1025,7 +1177,9 @@ def format_floor_trade_price(item: Dict[str, Any], bnb_price: float = 705.0) -> 
 
     # 2. DEX Token Trading Price
     if token_usd > 0:
-        if token_usd < 0.0001:
+        if token_usd < 0.000001:
+            p_str = f"${token_usd:.9f}"
+        elif token_usd < 0.0001:
             p_str = f"${token_usd:.6f}"
         elif token_usd < 1.0:
             p_str = f"${token_usd:.4f}"
@@ -1196,7 +1350,13 @@ def compute_market_cap_stats(history: List[Dict[str, Any]], bnb_price: float = 7
     }
 
 
-def analyze_market_interest(rpc: BscRpcClient, contract_addr: str, deployer_addr: Optional[str], details: Dict[str, Any]) -> Dict[str, Any]:
+def analyze_market_interest(
+    rpc: BscRpcClient,
+    contract_addr: str,
+    deployer_addr: Optional[str],
+    details: Dict[str, Any],
+    history: Optional[List[Dict[str, Any]]] = None
+) -> Dict[str, Any]:
     stats = {
         "score": 0,
         "rating": "❄️ COLD / DORMANT",
@@ -1223,18 +1383,45 @@ def analyze_market_interest(rpc: BscRpcClient, contract_addr: str, deployer_addr
         "signals": []
     }
 
+    contract_addr = contract_addr.lower()
+
     # 1. Resolve deployer if missing
     if not deployer_addr:
         owner_res = rpc.call_contract(contract_addr, keccak_selector("owner()"))
         if owner_res and len(owner_res) >= 66:
             deployer_addr = "0x" + owner_res[-40:].lower()
 
+    is_serial_dev = False
+    serial_count = 1
+    is_fresh_dev = False
+
     if deployer_addr:
+        deployer_addr = deployer_addr.lower()
         try:
             stats["deployer_balance_bnb"] = rpc.get_balance(deployer_addr) / 1e18
             stats["deployer_nonce"] = rpc.get_tx_count(deployer_addr)
         except Exception:
             pass
+
+        # Check for Fresh Dev Wallet (nonce <= 2 and balance < 0.05 BNB)
+        if stats["deployer_nonce"] <= 2 and stats["deployer_balance_bnb"] < 0.05:
+            is_fresh_dev = True
+
+        # Check for Serial Dev across history
+        if history is None:
+            try:
+                history = load_history()
+            except Exception:
+                history = []
+        if history:
+            prev_deps = [
+                h for h in history
+                if (h.get("deployer") or "").lower() == deployer_addr
+                and (h.get("contract") or "").lower() != contract_addr
+            ]
+            serial_count = len(prev_deps) + 1
+            if serial_count >= 3:
+                is_serial_dev = True
 
     # 2. Identify associated token for liquidity analysis
     target_token = None
@@ -1243,27 +1430,49 @@ def analyze_market_interest(rpc: BscRpcClient, contract_addr: str, deployer_addr
     if cls.get("category") == "TOKEN":
         target_token = contract_addr
     elif cls.get("underlying"):
-        target_token = cls["underlying"]
+        target_token = cls["underlying"].lower()
         token_sym = cls.get("underlying_symbol", "") or token_sym
     else:
-        mars_res = rpc.call_contract(contract_addr, "0x7419f946")  # marsToken()
-        if mars_res and len(mars_res) >= 66 and mars_res[-40:] != "0"*40:
-            target_token = "0x" + mars_res[-40:].lower()
+        # Check token()
+        t_res = rpc.call_contract(contract_addr, "0xfc0c546a")
+        if t_res and len(t_res) >= 66 and t_res[-40:] != "0"*40:
+            target_token = "0x" + t_res[-40:].lower()
             sym_res = rpc.call_contract(target_token, keccak_selector("symbol()"))
             if sym_res:
                 token_sym = decode_string(sym_res)
+        else:
+            # Check marsToken()
+            mars_res = rpc.call_contract(contract_addr, "0x7419f946")
+            if mars_res and len(mars_res) >= 66 and mars_res[-40:] != "0"*40:
+                target_token = "0x" + mars_res[-40:].lower()
+                sym_res = rpc.call_contract(target_token, keccak_selector("symbol()"))
+                if sym_res:
+                    token_sym = decode_string(sym_res)
+            else:
+                # Fallback: test contract_addr directly
+                target_token = contract_addr
 
     stats["token_symbol"] = token_sym
 
-    # 3. Live Holders & DEX Purchase Analytics
+    # 3. Live Holders & Multi-Source DEX Analytics via DexScreener
+    mkt_data = {}
     if target_token:
         mkt_data = fetch_token_market_data(target_token)
+    if (not mkt_data or mkt_data.get("lp_usd", 0) == 0) and contract_addr != target_token:
+        alt_data = fetch_token_market_data(contract_addr)
+        if alt_data and alt_data.get("lp_usd", 0) > 0:
+            mkt_data = alt_data
+            target_token = contract_addr
+
+    if mkt_data:
         stats["holders"] = mkt_data.get("holders", 0)
         stats["buys_24h"] = mkt_data.get("buys_24h", 0)
         stats["buys_1h"] = mkt_data.get("buys_1h", 0)
         stats["sells_24h"] = mkt_data.get("sells_24h", 0)
         stats["volume_24h"] = mkt_data.get("volume_24h", 0.0)
         stats["pair_url"] = mkt_data.get("pair_url", "")
+        if mkt_data.get("lp_usd"):
+            stats["lp_usd"] = mkt_data["lp_usd"]
         if mkt_data.get("market_price_usd"):
             stats["token_price_usd"] = mkt_data["market_price_usd"]
         if mkt_data.get("market_price_bnb"):
@@ -1294,7 +1503,7 @@ def analyze_market_interest(rpc: BscRpcClient, contract_addr: str, deployer_addr
 
     # NFT Volume Resolution
     if cls.get("category") == "NFT" or details.get("classification", {}).get("is_nft"):
-        if contract_addr.lower() == "0xb777c52296f0d7d3c5cab7ae0c1aaac6b014b256":
+        if contract_addr == "0xb777c52296f0d7d3c5cab7ae0c1aaac6b014b256":
             try:
                 m_req = urllib.request.Request("https://oathbots.pages.dev/market.json", headers={"User-Agent": "Mozilla/5.0"})
                 with urllib.request.urlopen(m_req, timeout=2.0) as m_resp:
@@ -1310,35 +1519,70 @@ def analyze_market_interest(rpc: BscRpcClient, contract_addr: str, deployer_addr
         if not stats.get("total_volume_bnb") and details.get("total_volume_bnb"):
             stats["total_volume_bnb"] = details["total_volume_bnb"]
 
-    # 4. Liquidity check on PancakeSwap V2
+    # 4. Multi-Quote Secondary Liquidity Check on PancakeSwap V2
     if target_token:
         try:
             bnb_price = get_bnb_price_usd(rpc)
-            pair_call = "0xe6a43905" + target_token[2:].lower().zfill(64) + WBNB_ADDRESS[2:].lower().zfill(64)
-            pair_res = rpc.call_contract(PANCAKE_FACTORY_V2, pair_call)
-            if pair_res and len(pair_res) >= 66:
-                lp_addr = "0x" + pair_res[-40:].lower()
-                if lp_addr != "0x" + "0"*40:
-                    stats["lp_pool"] = lp_addr
-                    reserves = rpc.call_contract(lp_addr, "0x0902f1ac")
-                    if reserves and len(reserves) >= 130:
-                        r0 = int(reserves[2:66], 16)
-                        r1 = int(reserves[66:130], 16)
-                        t0 = rpc.call_contract(lp_addr, "0x0dfe1681")
-                        if WBNB_ADDRESS[2:].lower() in (t0 or "").lower():
-                            wbnb_r = r0 / 1e18
-                            token_r = r1 / 1e18
-                        else:
-                            wbnb_r = r1 / 1e18
-                            token_r = r0 / 1e18
-                        
-                        stats["lp_wbnb"] = wbnb_r
-                        stats["lp_usd"] = wbnb_r * bnb_price * 2
-                        if token_r > 0:
-                            stats["token_price_usd"] = (wbnb_r * bnb_price) / token_r
-                            stats["token_price_bnb"] = wbnb_r / token_r
-                            if not stats.get("pair_url"):
-                                stats["pair_url"] = f"https://dexscreener.com/bsc/{lp_addr}"
+            best_lp_usd = stats.get("lp_usd", 0.0)
+            best_lp_wbnb = stats.get("lp_wbnb", 0.0)
+            best_pair_addr = None
+            best_px_usd = stats.get("token_price_usd", 0.0)
+            best_px_bnb = stats.get("token_price_bnb", 0.0)
+            token_dec = details.get("decimals", 18) or 18
+
+            for qt in QUOTE_TOKENS:
+                q_addr = qt["address"]
+                try:
+                    pair_call = "0xe6a43905" + target_token[2:].lower().zfill(64) + q_addr[2:].lower().zfill(64)
+                    pair_res = rpc.call_contract(PANCAKE_FACTORY_V2, pair_call)
+                    if pair_res and len(pair_res) >= 66:
+                        lp_addr = "0x" + pair_res[-40:].lower()
+                        if lp_addr != "0x" + "0"*40:
+                            reserves = rpc.call_contract(lp_addr, "0x0902f1ac")
+                            if reserves and len(reserves) >= 130:
+                                r0 = int(reserves[2:66], 16)
+                                r1 = int(reserves[66:130], 16)
+                                t0 = rpc.call_contract(lp_addr, "0x0dfe1681")
+                                is_t0_quote = (q_addr[2:].lower() in (t0 or "").lower())
+                                if is_t0_quote:
+                                    q_reserve = r0 / (10 ** qt["decimals"])
+                                    t_reserve = r1 / (10 ** token_dec)
+                                else:
+                                    q_reserve = r1 / (10 ** qt["decimals"])
+                                    t_reserve = r0 / (10 ** token_dec)
+
+                                if qt["is_bnb"]:
+                                    p_lp_usd = q_reserve * bnb_price * 2
+                                    p_px_usd = (q_reserve * bnb_price) / t_reserve if t_reserve > 0 else 0.0
+                                    p_px_bnb = q_reserve / t_reserve if t_reserve > 0 else 0.0
+                                    p_lp_wbnb = q_reserve * 2
+                                else:
+                                    rate = qt.get("usd_rate", 1.0)
+                                    p_lp_usd = q_reserve * rate * 2
+                                    p_px_usd = (q_reserve * rate) / t_reserve if t_reserve > 0 else 0.0
+                                    p_px_bnb = (p_px_usd / bnb_price) if bnb_price > 0 else 0.0
+                                    p_lp_wbnb = (p_lp_usd / bnb_price) if bnb_price > 0 else 0.0
+
+                                if p_lp_usd > best_lp_usd:
+                                    best_lp_usd = p_lp_usd
+                                    best_lp_wbnb = p_lp_wbnb
+                                    best_pair_addr = lp_addr
+                                    best_px_usd = p_px_usd
+                                    best_px_bnb = p_px_bnb
+                except Exception:
+                    pass
+
+            if best_lp_usd > stats.get("lp_usd", 0.0):
+                stats["lp_usd"] = best_lp_usd
+                stats["lp_wbnb"] = best_lp_wbnb
+                if best_pair_addr:
+                    stats["lp_pool"] = best_pair_addr
+                    if not stats.get("pair_url"):
+                        stats["pair_url"] = f"https://dexscreener.com/bsc/{best_pair_addr}"
+            if best_px_usd > 0 and stats.get("token_price_usd", 0.0) == 0:
+                stats["token_price_usd"] = best_px_usd
+            if best_px_bnb > 0 and stats.get("token_price_bnb", 0.0) == 0:
+                stats["token_price_bnb"] = best_px_bnb
         except Exception:
             pass
 
@@ -1348,9 +1592,66 @@ def analyze_market_interest(rpc: BscRpcClient, contract_addr: str, deployer_addr
     if max_sup and max_sup > 0 and minted is not None:
         stats["percent_claimed"] = (minted / max_sup) * 100.0
 
-    # 5. Score calculation (0-100)
-    score = 0
+    # 5. Security & Anti-Rug Protections Enrichment
+    sec = stats.get("security") or {}
+    sec_flags = list(stats.get("risk_flags") or sec.get("risk_flags") or [])
     signals = []
+
+    # A. Bytecode Refund Guarantee Check
+    has_refund = details.get("has_refund", False)
+    refund_methods = details.get("refund_methods", [])
+    sec["has_refund"] = has_refund
+    sec["refund_methods"] = refund_methods
+
+    mint_val_wei = int(details.get("mint_value_wei", "0") or 0)
+    mint_price_bnb = float(details.get("mint_price_bnb", 0.0) or 0.0)
+    is_paid_mint = (mint_price_bnb > 0.001 or mint_val_wei > 0)
+
+    if has_refund:
+        ref_label = refund_methods[0] if refund_methods else "refund()"
+        signals.append(f"🛡️ Verified Refund Protection ({ref_label})")
+    elif is_paid_mint:
+        sec_flags.append("No Refund Function in Bytecode")
+        signals.append("⚠️ No Refund Mechanism (Capital at risk if unreached)")
+        if stats.get("risk_level") == "SAFE" and mint_price_bnb >= 0.01:
+            stats["risk_level"] = "MED"
+            stats["risk_badge"] = "🟡 Med Risk"
+
+    # B. Serial Dev Check
+    if is_serial_dev:
+        sec["is_serial_dev"] = True
+        sec["serial_count"] = serial_count
+        sec_flags.append(f"🚨 Serial Dev ({serial_count} contracts deployed)")
+        stats["risk_level"] = "RUG" if serial_count >= 4 else "HIGH"
+        stats["risk_badge"] = "🚨 Serial Dev"
+        signals.append(f"🚨 Serial Dev: Deployed {serial_count} projects in tracked history")
+
+    # C. Fresh Dev Wallet Check
+    if is_fresh_dev:
+        sec["is_fresh_dev"] = True
+        sec_flags.append("🟡 Fresh Dev Wallet (low nonce)")
+        signals.append("🟡 Fresh Dev Wallet (low tx history)")
+
+    # D. Contract Fund Drain Check (Funds pocketed with no LP created)
+    contract_bnb = 0.0
+    try:
+        contract_bnb = rpc.get_balance(contract_addr) / 1e18
+    except Exception:
+        pass
+    tot_minted = details.get("total_minted", 0) or 0
+    if tot_minted > 20 and is_paid_mint and contract_bnb < 0.01 and stats.get("lp_usd", 0) < 100:
+        sec["is_fund_drain"] = True
+        sec_flags.append("🚨 Direct Capital Drain (No LP & Contract Empty)")
+        stats["risk_level"] = "RUG"
+        stats["risk_badge"] = "🚨 Fund Drain"
+        signals.append("🚨 Funds drained to dev wallet, no DEX LP")
+
+    stats["risk_flags"] = sec_flags
+    sec["risk_flags"] = sec_flags
+    stats["security"] = sec
+
+    # 6. Score calculation (0-100)
+    score = 0
 
     lp_usd = stats["lp_usd"]
     if lp_usd >= 20000:
@@ -1463,14 +1764,23 @@ def print_interest_report(stats: Dict[str, Any]):
     if stats.get("volume_24h", 0) > 0:
         print(f"• {C_BOLD}24h DEX Volume:{C_RESET} {C_YELLOW}${stats['volume_24h']:,.2f}{C_RESET}")
 
-    if stats.get("lp_pool"):
+    if stats.get("lp_usd", 0) > 0:
         token_str = f" (${stats['token_symbol']})" if stats['token_symbol'] else ""
-        print(f"• {C_BOLD}PancakeSwap V2 Liquidity:{C_RESET} {C_GREEN}${stats['lp_usd']:,.2f}{C_RESET} ({stats['lp_wbnb']:.2f} WBNB)")
+        pair_str = f" (Pair: {stats['lp_pool']})" if stats.get("lp_pool") else ""
+        print(f"• {C_BOLD}DEX Secondary Liquidity:{C_RESET} {C_GREEN}${stats['lp_usd']:,.2f}{C_RESET}{pair_str}")
         if stats["token_price_usd"] > 0:
-            print(f"• {C_BOLD}Token Implied Price{token_str}:{C_RESET} ${stats['token_price_usd']:.4f}")
-        print(f"• {C_BOLD}LP Pair Address:{C_RESET} {stats['lp_pool']}")
+            p_val = stats["token_price_usd"]
+            if p_val < 0.000001:
+                p_fmt = f"${p_val:.9f}"
+            elif p_val < 0.001:
+                p_fmt = f"${p_val:.6f}"
+            else:
+                p_fmt = f"${p_val:.4f}"
+            print(f"• {C_BOLD}Token Secondary Price{token_str}:{C_RESET} {p_fmt}")
+        if stats.get("pair_url"):
+            print(f"• {C_BOLD}DEX Chart / Trading URL:{C_RESET} {stats['pair_url']}")
     else:
-        print(f"• {C_BOLD}PancakeSwap V2 Liquidity:{C_RESET} {C_YELLOW}No DEX Pool detected yet{C_RESET}")
+        print(f"• {C_BOLD}DEX Secondary Liquidity:{C_RESET} {C_YELLOW}No DEX Pool detected yet{C_RESET}")
 
     if stats.get("percent_claimed") > 0:
         print(f"• {C_BOLD}Mint Progress:{C_RESET} {stats['percent_claimed']:.1f}% claimed")
@@ -1653,13 +1963,19 @@ KNOWN_PROJECTS = [
 
 def preview_snipe_call(wallet: str, to: str, value_wei: str, calldata: str) -> Dict[str, Any]:
     """
-    Simulates a contract call using Binance Agentic Wallet before broadcasting.
+    Simulates a contract call or plain BNB transfer using Binance Agentic Wallet before broadcasting.
+    Supports recv (plain BNB transfer) when calldata is empty, '0x', or 'recv'.
+    Guarantees that any recipient address parameters are set to the user's active wallet.
     """
     to_addr = str(to).strip()
     val = str(value_wei or "0").strip()
-    c_data = str(calldata or "0x1249c58b").strip()
-    if not c_data.startswith("0x"):
-        c_data = "0x" + c_data
+    raw_cd = str(calldata or "").strip()
+    if not raw_cd or raw_cd.lower() in ("0x", "recv", "receive", "none"):
+        c_data = "0x"
+    else:
+        c_data = replace_calldata_recipient(raw_cd, wallet)
+        if not c_data.startswith("0x"):
+            c_data = "0x" + c_data
 
     cmd = [
         "baw", "contract-call", "preview",
@@ -2225,18 +2541,22 @@ def format_structured_type(std: Any) -> str:
 def format_structured_safety(item: Dict[str, Any]) -> str:
     """
     Standardizes safety badge to uniform width, preventing table jitter.
-    Replaces misplaced 'Free' tags under safety with 'Clean'.
+    Supports Honeypot, Serial Dev, Drained, High Risk, Med Risk, and Clean.
     """
     r_lvl = str(item.get("risk_level", "SAFE")).upper()
-    r_bdg = str(item.get("risk_badge") or "")
-    if "HONEYPOT" in r_bdg.upper() or r_lvl == "RUG":
-        return "[bold red]🚨 Honeypot[/bold red]"
-    elif "HIGH" in r_bdg.upper() or r_lvl == "HIGH":
-        return "[bold yellow]🔴 HighRisk[/bold yellow]"
-    elif "MED" in r_bdg.upper() or r_lvl == "MED":
-        return "[yellow]🟡 Med Risk[/yellow]"
+    r_bdg = str(item.get("risk_badge") or "").upper()
+    if "SERIAL" in r_bdg:
+        return "[bold red]🚨 SerialDev[/bold red]"
+    elif "DRAIN" in r_bdg:
+        return "[bold red]🚨 Drained  [/bold red]"
+    elif "HONEYPOT" in r_bdg or r_lvl == "RUG":
+        return "[bold red]🚨 Honeypot [/bold red]"
+    elif "HIGH" in r_bdg or r_lvl == "HIGH":
+        return "[bold yellow]🔴 HighRisk [/bold yellow]"
+    elif "MED" in r_bdg or r_lvl == "MED":
+        return "[yellow]🟡 Med Risk [/yellow]"
     else:
-        return "[bold green]🟢 Clean   [/bold green]"
+        return "[bold green]🟢 Clean    [/bold green]"
 
 
 def format_structured_interest(item: Dict[str, Any]) -> str:
@@ -2459,11 +2779,18 @@ def build_interactive_dashboard(
         gain = snipe_confirm.get("gain_str", "+1 Token")
         r_bdg = proj.get("risk_badge", "🟢 Clean")
         val_wei = str(proj.get("mint_value_wei", "0") or "0")
+        calldata = replace_calldata_recipient(proj.get("mint_calldata"), wallet, extra_addresses=proj.get("smart_wallets"))
+        is_recv = (calldata == "0x")
 
         c_text = Text()
         c_text.append("⚡ 1-CLICK SNIPER BUY / MINT GATE\n\n", style="bold yellow")
         c_text.append("• Target Project:   ", style="bold white")
         c_text.append(f"{p_name} ({p_sym})\n", style="bold cyan")
+        c_text.append("• Action Type:      ", style="bold white")
+        if is_recv:
+            c_text.append("Plain BNB Transfer (recv / receive() fallback)\n", style="bold cyan")
+        else:
+            c_text.append(f"Contract Call ({calldata[:10]})\n", style="bold cyan")
         c_text.append("• Contract Address: ", style="bold white")
         c_text.append(f"{c_addr}\n", style="cyan")
         c_text.append("• Mint Cost:        ", style="bold white")
@@ -2474,8 +2801,8 @@ def build_interactive_dashboard(
         c_text.append(f"{gain}\n", style="bold green")
         c_text.append("• Security Status:  ", style="bold white")
         c_text.append(f"{r_bdg}\n", style="green" if "Clean" in r_bdg or "Free" in r_bdg else "yellow")
-        c_text.append("• Sender Wallet:    ", style="bold white")
-        c_text.append(f"{wallet} (nimus.ai)\n\n", style="dim")
+        c_text.append("• Recipient Wallet: ", style="bold white")
+        c_text.append(f"{wallet}\n\n", style="bold green")
         c_text.append("━" * 68 + "\n", style="dim")
         c_text.append("  👉 Press [Y] or [ENTER] to CONFIRM & BROADCAST ON-CHAIN VIA BINANCE AGENTIC WALLET\n", style="bold white on dark_green")
         c_text.append("  👉 Press [N] or [ESC] to CANCEL\n", style="bold white on dark_red")
@@ -2513,7 +2840,7 @@ def build_interactive_dashboard(
         t_price = item.get("token_price_usd", 0)
         t_sym = item.get("token_symbol", "")
         val_wei = item.get("mint_value_wei", "0")
-        calldata = item.get("mint_calldata", "0x1249c58b")
+        calldata = replace_calldata_recipient(item.get("mint_calldata"), wallet, extra_addresses=item.get("smart_wallets"))
 
         m_text = Text()
         m_text.append(f"PROJECT: {name} ({sym})\n\n", style="bold cyan")
@@ -2547,6 +2874,26 @@ def build_interactive_dashboard(
         r_bdg = item.get("risk_badge", "🟢 Clean")
         m_text.append("\n• 🛡️ Security & Anti-Rug Audit:\n", style="bold white")
         m_text.append(f"   ▫ Risk Rating:       {r_bdg} ({r_lvl})\n", style="bold green" if r_lvl == "SAFE" else ("bold yellow" if r_lvl == "MED" else "bold red"))
+        
+        # Bytecode Refund Check
+        has_ref = sec.get("has_refund") or item.get("has_refund")
+        ref_methods = sec.get("refund_methods") or item.get("refund_methods") or []
+        if has_ref:
+            ref_str = f"🛡️ VERIFIED REFUND ({', '.join(ref_methods[:2])})"
+            m_text.append(f"   ▫ Bytecode Refund:   {ref_str}\n", style="bold green")
+        elif item.get("mint_price_bnb", 0) > 0.001 or int(item.get("mint_value_wei", "0") or 0) > 0:
+            m_text.append("   ▫ Bytecode Refund:   ⚠️ NO REFUND MECHANISM (Capital at risk if unfilled)\n", style="bold yellow")
+        else:
+            m_text.append("   ▫ Bytecode Refund:   N/A (Free Mint / Gas Only)\n", style="dim")
+
+        # Deployer Profile Check
+        if sec.get("is_serial_dev"):
+            s_cnt = sec.get("serial_count", 3)
+            m_text.append(f"   ▫ Deployer Profile:  🚨 SERIAL DEV ({s_cnt} contracts deployed)\n", style="bold red")
+        elif sec.get("is_fresh_dev"):
+            m_text.append("   ▫ Deployer Profile:  🟡 Fresh Dev Wallet (Low tx count)\n", style="yellow")
+        else:
+            m_text.append("   ▫ Deployer Profile:  🟢 Established Deployer\n", style="green")
         if sec.get("audited"):
             hp_txt = "🚨 HONEYPOT DETECTED!" if sec.get("is_honeypot") else "PASSED (Normal Transfers)"
             hp_style = "bold red" if sec.get("is_honeypot") else "green"
@@ -2669,7 +3016,10 @@ def build_interactive_dashboard(
 
         m_text.append("\n[1-Click Sniper Execution]\n", style="bold yellow")
         m_text.append("• ⚡ Instant Buy: Press [s] to simulate & buy with 1-click confirmation!\n", style="bold green")
-        m_text.append(f"  Manual CLI: baw contract-call preview --binanceChainId 56 --from {wallet} --to {c_addr} --value {val_wei} --inputData {calldata} --json\n", style="dim")
+        if calldata == "0x":
+            m_text.append(f"  Manual CLI (recv): baw contract-call preview --binanceChainId 56 --from {wallet} --to {c_addr} --value {val_wei} --inputData 0x --json\n", style="dim")
+        else:
+            m_text.append(f"  Manual CLI: baw contract-call preview --binanceChainId 56 --from {wallet} --to {c_addr} --value {val_wei} --inputData {calldata} --json\n", style="dim")
         m_text.append(f"\n• 💎 Tip Dev / Donate (BNB/EVM): {DONATION_WALLET}\n", style="bold yellow")
 
         modal_panel = Panel(
@@ -2934,7 +3284,7 @@ def build_interactive_dashboard(
             s_name = sel_s.get("name", "Unknown")
             s_sym = sel_s.get("symbol", "")
             c_addr = sel_s.get("contract", "")
-            calldata = sel_s.get("mint_calldata", "0x1249c58b")
+            calldata = replace_calldata_recipient(sel_s.get("mint_calldata"), wallet, extra_addresses=sel_s.get("smart_wallets"))
             val_wei = sel_s.get("mint_value_wei", "0")
             sm_list = sel_s.get("smart_wallets") or sel_s.get("smart_minters") or []
 
@@ -3074,7 +3424,7 @@ def build_interactive_dashboard(
         lp_usd = sel_item.get("lp_usd", 0)
         lp_wbnb = sel_item.get("lp_wbnb", 0)
         t_price = sel_item.get("token_price_usd", 0)
-        calldata = sel_item.get("mint_calldata", "0x1249c58b")
+        calldata = replace_calldata_recipient(sel_item.get("mint_calldata"), wallet, extra_addresses=sel_item.get("smart_wallets"))
         val_wei = sel_item.get("mint_value_wei", "0")
         hld = sel_item.get("holders", 0)
         buys = sel_item.get("buys_24h", 0)
@@ -3238,7 +3588,8 @@ def run_live_monitor(rpc: BscRpcClient, wallet: str, plain: bool = False):
                                     print(f"• {C_BOLD}{C_GREEN}★ FREE MINT AVAILABLE FOR YOUR WALLET! ★{C_RESET}")
                                 print(f"• {C_BOLD}BscScan:{C_RESET} https://bscscan.com/address/{deployed_addr}")
                                 print(f"\n{C_BOLD}Quick CLI Snipe Command:{C_RESET}")
-                                print(f"{C_CYAN}baw contract-call preview --binanceChainId 56 --from {wallet} --to {deployed_addr} --value 0 --inputData {details['mint_calldata']} --json{C_RESET}\n")
+                                clean_cd = replace_calldata_recipient(details['mint_calldata'], wallet)
+                                print(f"{C_CYAN}baw contract-call preview --binanceChainId 56 --from {wallet} --to {deployed_addr} --value 0 --inputData {clean_cd} --json{C_RESET}\n")
                                 notify_alert()
 
                 last_block = curr_block
@@ -3324,9 +3675,10 @@ def run_live_monitor(rpc: BscRpcClient, wallet: str, plain: bool = False):
                         snd = (tx.get("from") or "").lower()
                         rcv = (tx.get("to") or "").lower()
                         inp = (tx.get("input") or "").lower()
+                        tx_val = int(tx.get("value") or "0", 16)
 
                         # 1. Real-Time Smart Wallet Tracker (5,000 Tracked Wallets)
-                        if snd in smart_wallets and rcv and rcv not in known_infra and len(inp) >= 10:
+                        if snd in smart_wallets and rcv and rcv not in known_infra and (len(inp) >= 10 or tx_val > 0):
                             aid = smart_wallets[snd]
                             matching = [item for item in history if item.get("contract", "").lower() == rcv]
                             if matching:
@@ -3336,6 +3688,8 @@ def run_live_monitor(rpc: BscRpcClient, wallet: str, plain: bool = False):
                                     cur_sm.add(aid)
                                     item["smart_wallets"] = list(cur_sm)
                                     item["smart_minters"] = list(cur_sm)
+                                    if (not item.get("mint_calldata") or item.get("mint_calldata") in ("0x", "0x1249c58b")) and len(inp) >= 10:
+                                        item["mint_calldata"] = replace_calldata_recipient(inp, wallet, original_sender=snd)
                                     save_history(history)
                                 p_n = item.get("name") or "Project"
                                 status_msg = f"⚡ Smart Money: {aid} called {p_n}!"
@@ -3347,6 +3701,20 @@ def run_live_monitor(rpc: BscRpcClient, wallet: str, plain: bool = False):
                                     if not is_system_infra({"contract": rcv, "classification": cls, "name": det.get("name"), "symbol": det.get("symbol"), "max_supply": det.get("max_supply"), "total_minted": det.get("total_minted")}):
                                         mkt = analyze_market_interest(rpc, rcv, None, det)
                                         w_cnt = 1
+                                        if len(inp) < 10 or inp in ("", "0x"):
+                                            mint_cd = "0x"
+                                            val_str = str(tx_val)
+                                            p_str = f"{tx_val/1e18:.4f} BNB" if tx_val > 0 else "⭐ FREE"
+                                            bnb_val = tx_val / 1e18
+                                            free_m = (tx_val == 0)
+                                        else:
+                                            base_cd = det.get("mint_calldata") if det.get("has_mint") else inp
+                                            mint_cd = replace_calldata_recipient(base_cd, wallet, original_sender=snd)
+                                            val_str = det.get("mint_value_wei") or str(tx_val)
+                                            p_str = det.get("mint_price_str") or (f"{tx_val/1e18:.4f} BNB" if tx_val > 0 else "⭐ FREE")
+                                            bnb_val = det.get("mint_price_bnb", 0.0) or (tx_val / 1e18)
+                                            free_m = det.get("has_free_mint", False)
+
                                         new_entry = {
                                             "block": b,
                                             "contract": rcv,
@@ -3357,10 +3725,10 @@ def run_live_monitor(rpc: BscRpcClient, wallet: str, plain: bool = False):
                                             "standard": cls.get("standard", ""),
                                             "icon": cls.get("icon", ""),
                                             "is_paused": det.get("is_paused"),
-                                            "has_free_mint": det.get("has_free_mint"),
-                                            "mint_price_str": det.get("mint_price_str", "TBD"),
-                                            "mint_price_bnb": det.get("mint_price_bnb", 0.0),
-                                            "mint_value_wei": det.get("mint_value_wei", "0"),
+                                            "has_free_mint": free_m,
+                                            "mint_price_str": p_str,
+                                            "mint_price_bnb": bnb_val,
+                                            "mint_value_wei": val_str,
                                             "max_supply": det.get("max_supply"),
                                             "total_minted": det.get("total_minted", 0),
                                             "score": mkt.get("score", 0),
@@ -3375,7 +3743,7 @@ def run_live_monitor(rpc: BscRpcClient, wallet: str, plain: bool = False):
                                             "sells_24h": mkt.get("sells_24h", 0),
                                             "volume_24h": mkt.get("volume_24h", 0.0),
                                             "pair_url": mkt.get("pair_url", ""),
-                                            "mint_calldata": det.get("mint_calldata", inp),
+                                            "mint_calldata": mint_cd,
                                             "signals": mkt.get("signals", [f"Discovered via smart wallet {aid}"]),
                                             "detected_at": time.strftime("%Y-%m-%d %H:%M:%S"),
                                             "smart_wallets": [aid],
@@ -3637,9 +4005,12 @@ def run_live_monitor(rpc: BscRpcClient, wallet: str, plain: bool = False):
                     if target_proj:
                         c_addr = target_proj.get("contract")
                         val_wei = str(target_proj.get("mint_value_wei", "0") or "0")
-                        calldata = target_proj.get("mint_calldata") or "0x1249c58b"
+                        raw_calldata = target_proj.get("mint_calldata")
+                        sm_addrs = target_proj.get("smart_wallets") or []
+                        calldata = replace_calldata_recipient(raw_calldata, wallet, extra_addresses=sm_addrs)
                         sel_name = target_proj.get("name", "Project")
-                        status_msg = f"🔍 Simulating snipe call on BSC node for {sel_name}..."
+                        action_label = "plain BNB transfer (recv)" if calldata == "0x" else "snipe call"
+                        status_msg = f"🔍 Simulating {action_label} on BSC node for {sel_name}..."
                         live.update(build_interactive_dashboard(history, selected_idx, latest_block[0], latest_tx_count[0], wallet, status_msg, show_modal, active_filter=active_filter, sort_mode=sort_mode, snipe_confirm=None, active_tab=active_tab, portfolio_data=portfolio_data, port_selected_idx=port_selected_idx, smart_selected_idx=smart_selected_idx))
                         prev = preview_snipe_call(wallet, c_addr, val_wei, calldata)
                         if prev.get("success"):
@@ -4064,9 +4435,12 @@ def run_explore_mode(rpc: BscRpcClient, wallet: str):
                     if target_proj:
                         c_addr = target_proj.get("contract")
                         val_wei = str(target_proj.get("mint_value_wei", "0") or "0")
-                        calldata = target_proj.get("mint_calldata") or "0x1249c58b"
+                        raw_calldata = target_proj.get("mint_calldata")
+                        sm_addrs = target_proj.get("smart_wallets") or []
+                        calldata = replace_calldata_recipient(raw_calldata, wallet, extra_addresses=sm_addrs)
                         sel_name = target_proj.get("name", "Project")
-                        status_msg = f"🔍 Simulating snipe call on BSC node for {sel_name}..."
+                        action_label = "plain BNB transfer (recv)" if calldata == "0x" else "snipe call"
+                        status_msg = f"🔍 Simulating {action_label} on BSC node for {sel_name}..."
                         live.update(build_interactive_dashboard(history, selected_idx, curr_b, 0, wallet, status_msg, show_modal, active_filter=active_filter, sort_mode=sort_mode, snipe_confirm=None, active_tab=active_tab, portfolio_data=portfolio_data, port_selected_idx=port_selected_idx, smart_selected_idx=smart_selected_idx))
                         prev = preview_snipe_call(wallet, c_addr, val_wei, calldata)
                         if prev.get("success"):
@@ -4417,7 +4791,8 @@ def inspect_contract(rpc: BscRpcClient, contract_addr: str, wallet: str):
     print_interest_report(mkt)
 
     print(f"\n{C_BOLD}Quick CLI Snipe Command:{C_RESET}")
-    print(f"{C_CYAN}baw contract-call preview --binanceChainId 56 --from {wallet} --to {contract_addr} --value {details.get('mint_value_wei', '0')} --inputData {details['mint_calldata']} --json{C_RESET}\n")
+    clean_cd = replace_calldata_recipient(details.get('mint_calldata'), wallet)
+    print(f"{C_CYAN}baw contract-call preview --binanceChainId 56 --from {wallet} --to {contract_addr} --value {details.get('mint_value_wei', '0')} --inputData {clean_cd} --json{C_RESET}\n")
 
 
 def scan_smart_wallets(rpc: BscRpcClient, wallet: str, blocks: int = 200):
@@ -4466,12 +4841,12 @@ def scan_smart_wallets(rpc: BscRpcClient, wallet: str, blocks: int = 200):
                     rcv = (tx.get("to") or "").lower()
                     inp = tx.get("input") or ""
                     val = int(tx.get("value") or "0", 16)
-                    if rcv and len(inp) >= 10:
+                    if rcv and (len(inp) >= 10 or val > 0):
                         hits.append({
                             "sender": snd,
                             "agent_id": smart_wallets[snd],
                             "contract": rcv,
-                            "selector": inp[:10],
+                            "selector": inp[:10] if len(inp) >= 10 else "0x (recv)",
                             "input": inp,
                             "value_wei": val,
                             "block": b_num,
@@ -4541,11 +4916,20 @@ def scan_smart_wallets(rpc: BscRpcClient, wallet: str, blocks: int = 200):
             c_data["category"] = cls.get("category") or "CUSTOM"
             c_data["total_minted"] = info.get("total_minted")
             c_data["max_supply"] = info.get("max_supply")
-            c_data["mint_price_str"] = info.get("mint_price_str") or ("⭐ FREE" if info.get("has_free_mint") else "TBD")
-            c_data["mint_price_bnb"] = info.get("mint_price_bnb") or 0.0
-            c_data["mint_calldata"] = info.get("mint_calldata") or c_data["sample_input"]
-            c_data["mint_value_wei"] = info.get("mint_value_wei") or str(c_data["max_value_wei"])
-            c_data["has_free_mint"] = info.get("has_free_mint")
+            sample_inp = c_data.get("sample_input") or ""
+            if len(sample_inp) < 10 or sample_inp in ("", "0x"):
+                c_data["mint_calldata"] = "0x"
+                c_data["mint_value_wei"] = str(c_data["max_value_wei"])
+                c_data["mint_price_bnb"] = c_data["max_value_wei"] / 1e18
+                c_data["mint_price_str"] = f"{c_data['mint_price_bnb']:.4f} BNB" if c_data["mint_price_bnb"] > 0 else "⭐ FREE"
+                c_data["has_free_mint"] = (c_data["max_value_wei"] == 0)
+            else:
+                base_cd = info.get("mint_calldata") if info.get("has_mint") else sample_inp
+                c_data["mint_calldata"] = replace_calldata_recipient(base_cd, wallet, extra_addresses=c_data["wallets"])
+                c_data["mint_price_str"] = info.get("mint_price_str") or ("⭐ FREE" if info.get("has_free_mint") else "TBD")
+                c_data["mint_price_bnb"] = info.get("mint_price_bnb") or 0.0
+                c_data["mint_value_wei"] = info.get("mint_value_wei") or str(c_data["max_value_wei"])
+                c_data["has_free_mint"] = info.get("has_free_mint")
             c_data["is_paused"] = info.get("is_paused")
             c_data["contract"] = c_addr
             c_data["risk_level"] = info.get("risk_level", "SAFE")
@@ -4656,7 +5040,7 @@ def scan_smart_wallets(rpc: BscRpcClient, wallet: str, blocks: int = 200):
                 safe_s = format_structured_safety(d)
                 type_s = format_structured_type(d.get("standard"))
 
-                c_cmd = f"baw contract-call preview --contract {d['contract']} --calldata {d['mint_calldata']} --value 0"
+                c_cmd = f"baw contract-call preview --binanceChainId 56 --from {wallet} --to {d['contract']} --value 0 --inputData {d['mint_calldata']} --json"
                 t1.add_row(str(idx), f"🧠 {d['name']} ({d['symbol']})", type_s, w_str, prog_s, safe_s, c_cmd)
 
         console.print(t1)
@@ -4684,7 +5068,7 @@ def scan_smart_wallets(rpc: BscRpcClient, wallet: str, blocks: int = 200):
                 safe_s = format_structured_safety(d)
                 type_s = format_structured_type(d.get("standard"))
 
-                c_cmd = f"baw contract-call preview --contract {d['contract']} --calldata {d['mint_calldata']} --value {d['mint_value_wei']}"
+                c_cmd = f"baw contract-call preview --binanceChainId 56 --from {wallet} --to {d['contract']} --value {d['mint_value_wei']} --inputData {d['mint_calldata']} --json"
                 t2.add_row(str(idx), f"🧠 {d['name']} ({d['symbol']})", type_s, w_str, v_str, prog_s, safe_s, c_cmd)
 
         console.print(t2)
@@ -4706,7 +5090,7 @@ def scan_smart_wallets(rpc: BscRpcClient, wallet: str, blocks: int = 200):
             a_names = list(d["agent_ids"])[:3]
             w_cnt = len(d["wallets"])
             print(f"#{idx} {d['name']} ({d['symbol']}) | {w_cnt} wallets ({a_names}) | Contract: {d['contract']}")
-            print(f"   Snipe Preview: baw contract-call preview --contract {d['contract']} --calldata {d['mint_calldata']} --value 0")
+            print(f"   Snipe Preview: baw contract-call preview --binanceChainId 56 --from {wallet} --to {d['contract']} --value 0 --inputData {d['mint_calldata']} --json")
 
         print("\n--- 💎 PAID TRENDS (Smart Money Inflow) ---")
         for idx, d in enumerate(paid_trends, 1):
@@ -4714,7 +5098,7 @@ def scan_smart_wallets(rpc: BscRpcClient, wallet: str, blocks: int = 200):
             w_cnt = len(d["wallets"])
             v_bnb = d["max_value_wei"] / 1e18
             print(f"#{idx} {d['name']} ({d['symbol']}) | {w_cnt} wallets ({a_names}) | Max Val: {v_bnb:.4f} BNB | Contract: {d['contract']}")
-            print(f"   Snipe Preview: baw contract-call preview --contract {d['contract']} --calldata {d['mint_calldata']} --value {d['mint_value_wei']}")
+            print(f"   Snipe Preview: baw contract-call preview --binanceChainId 56 --from {wallet} --to {d['contract']} --value {d['mint_value_wei']} --inputData {d['mint_calldata']} --json")
 
 
 def main():

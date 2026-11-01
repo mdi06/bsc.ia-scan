@@ -540,7 +540,12 @@ function openModal(item) {
     : (item.market_url || `https://pancakeswap.finance/swap?outputCurrency=${cAddr}`);
 
   const smList = item.smart_wallets || item.smart_minters || [];
-  const calldata = item.mint_calldata || '0x1249c58b';
+  const rawCd = item.mint_calldata;
+  const isRecv = !rawCd || rawCd === '0x' || rawCd === 'recv';
+  let calldata = isRecv ? '0x' : rawCd;
+  if (!isRecv && calldata.startsWith('0x836a1040') && calldata.length >= 138) {
+    calldata = calldata.slice(0, 74) + '000000000000000000000000<YOUR_WALLET>' + calldata.slice(138);
+  }
   const valWei = item.mint_value_wei || '0';
   const cliSnippet = `baw contract-call preview --binanceChainId 56 --from <YOUR_WALLET> --to ${cAddr} --value ${valWei} --inputData ${calldata} --json`;
 
@@ -572,11 +577,17 @@ function openModal(item) {
     <div class="modal-section">
       <div class="modal-section-title">🛡️ Security & Anti-Rug Audit</div>
       <div class="modal-grid">
-        <div><span class="dim">Risk Rating:</span> <strong>${item.risk_level || 'Clean (SAFE)'}</strong></div>
-        <div><span class="dim">Honeypot Check:</span> <span style="color: var(--color-green);">PASSED (Normal Transfers)</span></div>
-        <div><span class="dim">Buy / Sell Tax:</span> 0.0% / 0.0%</div>
-        <div><span class="dim">PancakeSwap LP:</span> ${item.lp_usd ? '$' + Number(item.lp_usd).toFixed(2) : 'No LP Pool detected'}</div>
+        <div><span class="dim">Risk Rating:</span> <strong>${item.risk_badge || item.risk_level || '🟢 Clean (SAFE)'}</strong></div>
+        <div><span class="dim">Bytecode Refund:</span> ${item.security && item.security.has_refund ? '<span style="color: var(--color-green); font-weight:600;">🛡️ Verified (' + (item.security.refund_methods || []).slice(0,1).join('') + ')</span>' : (Number(item.mint_price_bnb || 0) > 0 ? '<span style="color: var(--color-yellow); font-weight:600;">⚠️ No Refund Function</span>' : '<span class="dim">N/A (Free Mint)</span>')}</div>
+        <div><span class="dim">Deployer Profile:</span> ${item.security && item.security.is_serial_dev ? '<span style="color: var(--color-red); font-weight:700;">🚨 Serial Dev (' + item.security.serial_count + ' drops)</span>' : (item.security && item.security.is_fresh_dev ? '<span style="color: var(--color-yellow);">🟡 Fresh Wallet</span>' : '<span style="color: var(--color-green);">🟢 Established Nonce</span>')}</div>
+        <div><span class="dim">PancakeSwap LP:</span> ${item.lp_usd ? '<span style="color: var(--color-green); font-weight:700;">$' + Number(item.lp_usd).toLocaleString(undefined, {maximumFractionDigits: 0}) + '</span>' : '<span class="dim">No LP Pool detected</span>'}</div>
       </div>
+      ${item.risk_flags && item.risk_flags.length > 0 ? `
+        <div style="margin-top: 8px; font-size: 11px;">
+          <span class="dim">Audit Flags:</span>
+          ${item.risk_flags.map(f => `<span class="badge ${f.includes('🚨') || f.includes('Honeypot') || f.includes('Serial') || f.includes('Drain') ? 'badge-red' : 'badge-yellow'}" style="margin: 2px;">${f}</span>`).join(' ')}
+        </div>
+      ` : ''}
     </div>
 
     ${smList.length > 0 ? `

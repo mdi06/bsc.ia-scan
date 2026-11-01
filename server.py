@@ -130,9 +130,10 @@ def run_discovery_loop():
                     snd = (tx.get("from") or "").lower()
                     rcv = (tx.get("to") or "").lower()
                     inp = (tx.get("input") or "").lower()
+                    tx_val = int(tx.get("value") or "0", 16)
 
                     # 1. Smart Money Activity Tracker (5k Tracked Wallets)
-                    if snd in smart_wallets and rcv and rcv not in known_infra and len(inp) >= 10:
+                    if snd in smart_wallets and rcv and rcv not in known_infra and (len(inp) >= 10 or tx_val > 0):
                         aid = smart_wallets[snd]
                         with history_lock:
                             history = monitor.load_history()
@@ -144,6 +145,8 @@ def run_discovery_loop():
                                     cur_sm.add(aid)
                                     item["smart_wallets"] = list(cur_sm)
                                     item["smart_minters"] = list(cur_sm)
+                                    if (not item.get("mint_calldata") or item.get("mint_calldata") in ("0x", "0x1249c58b")) and len(inp) >= 10:
+                                        item["mint_calldata"] = monitor.replace_calldata_recipient(inp, wallet, original_sender=snd)
                                     monitor.save_history(history)
                                     print(f"[🧠 Smart Money Inflow] {aid} called {item.get('name')} ({rcv})")
                         if not matching:
@@ -151,7 +154,21 @@ def run_discovery_loop():
                                 det = monitor.analyze_contract(rpc, rcv, wallet)
                                 cls = det.get("classification", {})
                                 if not monitor.is_system_infra({"contract": rcv, "classification": cls, "name": det.get("name"), "symbol": det.get("symbol"), "max_supply": det.get("max_supply"), "total_minted": det.get("total_minted")}):
-                                    mkt = monitor.analyze_market_interest(rpc, rcv, None, det)
+                                    mkt = monitor.analyze_market_interest(rpc, rcv, None, det, history=history)
+                                    if len(inp) < 10 or inp in ("", "0x"):
+                                        mint_cd = "0x"
+                                        val_str = str(tx_val)
+                                        p_str = f"{tx_val/1e18:.4f} BNB" if tx_val > 0 else "⭐ FREE"
+                                        bnb_val = tx_val / 1e18
+                                        free_m = (tx_val == 0)
+                                    else:
+                                        base_cd = det.get("mint_calldata") if det.get("has_mint") else inp
+                                        mint_cd = monitor.replace_calldata_recipient(base_cd, wallet, original_sender=snd)
+                                        val_str = det.get("mint_value_wei") or str(tx_val)
+                                        p_str = det.get("mint_price_str") or (f"{tx_val/1e18:.4f} BNB" if tx_val > 0 else "⭐ FREE")
+                                        bnb_val = det.get("mint_price_bnb", 0.0) or (tx_val / 1e18)
+                                        free_m = det.get("has_free_mint", False)
+
                                     new_entry = {
                                         "block": b,
                                         "contract": rcv,
@@ -162,10 +179,10 @@ def run_discovery_loop():
                                         "standard": cls.get("standard", ""),
                                         "icon": cls.get("icon", ""),
                                         "is_paused": det.get("is_paused"),
-                                        "has_free_mint": det.get("has_free_mint"),
-                                        "mint_price_str": det.get("mint_price_str", "TBD"),
-                                        "mint_price_bnb": det.get("mint_price_bnb", 0.0),
-                                        "mint_value_wei": det.get("mint_value_wei", "0"),
+                                        "has_free_mint": free_m,
+                                        "mint_price_str": p_str,
+                                        "mint_price_bnb": bnb_val,
+                                        "mint_value_wei": val_str,
                                         "max_supply": det.get("max_supply"),
                                         "total_minted": det.get("total_minted", 0),
                                         "score": mkt.get("score", 0),
@@ -181,7 +198,7 @@ def run_discovery_loop():
                                         "volume_24h": mkt.get("volume_24h", 0.0),
                                         "market_url": det.get("market_url", ""),
                                         "pair_url": mkt.get("pair_url", ""),
-                                        "mint_calldata": det.get("mint_calldata", inp),
+                                        "mint_calldata": mint_cd,
                                         "signals": mkt.get("signals", [f"Discovered via smart wallet {aid}"]),
                                         "detected_at": time.strftime("%Y-%m-%d %H:%M:%S"),
                                         "smart_wallets": [aid],
@@ -210,7 +227,7 @@ def run_discovery_loop():
                                 if dep_addr and not any(x.get("contract", "").lower() == dep_addr.lower() for x in history):
                                     det = monitor.analyze_contract(rpc, dep_addr, wallet)
                                     cls = det.get("classification", {})
-                                    mkt = monitor.analyze_market_interest(rpc, dep_addr, tx.get("from"), det)
+                                    mkt = monitor.analyze_market_interest(rpc, dep_addr, tx.get("from"), det, history=history)
                                     new_entry = {
                                         "block": b,
                                         "contract": dep_addr,
