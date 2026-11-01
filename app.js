@@ -192,7 +192,7 @@ function showToast(title, desc, icon = '💎') {
 }
 
 // Copy Donation Wallet Address Helper
-function copyDonationAddress(btn) {
+function copyDonationAddress(btn, location = 'header') {
   navigator.clipboard.writeText(DONATION_WALLET);
   if (btn) {
     const orig = btn.innerHTML;
@@ -204,6 +204,9 @@ function copyDonationAddress(btn) {
     }, 2000);
   }
   showToast('💎 DONATION WALLET COPIED', `${DONATION_WALLET} (BNB / EVM) · Thank you for supporting!`, '💎');
+  if (typeof window !== 'undefined' && window.va) {
+    window.va('event', { name: 'tip_dev_copy', data: { location } });
+  }
 }
 if (typeof window !== 'undefined') window.copyDonationAddress = copyDonationAddress;
 
@@ -1293,7 +1296,7 @@ function openModal(item) {
       </div>
       <div class="cli-box">
         <code style="color: var(--color-yellow);">${DONATION_WALLET}</code>
-        <button class="copy-btn" onclick="copyDonationAddress(this)">Copy Address</button>
+        <button class="copy-btn" onclick="copyDonationAddress(this, 'inspect_modal')">Copy Address</button>
       </div>
     </div>
   `;
@@ -1676,11 +1679,11 @@ async function init() {
     // Donation buttons
     const donateHeader = document.getElementById('donateHeaderBtn');
     if (donateHeader) {
-      donateHeader.addEventListener('click', () => copyDonationAddress(donateHeader));
+      donateHeader.addEventListener('click', () => copyDonationAddress(donateHeader, 'header'));
     }
     const footerDonate = document.getElementById('footerDonate');
     if (footerDonate) {
-      footerDonate.addEventListener('click', () => copyDonationAddress(footerDonate));
+      footerDonate.addEventListener('click', () => copyDonationAddress(footerDonate, 'footer'));
     }
 
     // Unlock Web Audio context on user's first click or keystroke anywhere
@@ -1707,6 +1710,9 @@ async function init() {
         btn.classList.add('active');
         btn.setAttribute('aria-selected', 'true');
         activeTab = btn.getAttribute('data-tab');
+        if (typeof window !== 'undefined' && window.va) {
+          window.va('event', { name: 'tab_switch', data: { tab: activeTab } });
+        }
         renderTable();
       });
     });
