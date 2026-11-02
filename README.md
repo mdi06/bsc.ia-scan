@@ -105,6 +105,26 @@ Reverse-engineers any contract, calculating DEX liquidity, implied token price, 
 python3 monitor.py inspect <contract_address>
 ```
 
+### 7. 👛 Web3 "Connect Wallet" & Live Portfolio Sync (Web Application)
+The web client (`index.html` + `app.js`) features multi-wallet Web3 connectivity and live on-chain BSC portfolio scanning:
+- **👛 Multi-Wallet Support**: Connect **MetaMask**, **Binance Web3 Wallet**, or **Rabby** with 1-click automatic detection via EIP-1193 and EIP-6963.
+- **👁️ Watch-Only Auditor Mode**: Enter any public BSC address to audit token holdings, gas reserves, and exit recommendations without connecting a private key.
+- **🎒 100% Dynamic Tab 3 (My Portfolio)**:
+  - Scans all 348+ tracked .ai contracts via high-throughput JSON-RPC batching (~250ms).
+  - Live native BNB gas balance and USD valuation.
+  - Live automated take-profit & exit conviction triggers:
+    - **🚀 10x MOON**: Lock 80% Profit on PancakeSwap.
+    - **🚀 5x MOON**: Scale out 50% into BNB.
+    - **🟢 2x RECOUP**: Recoup initial principal (play risk-free with house money).
+    - **⚠️ -40% CRASH**: Trailing stop exit from peak valuation.
+    - **🦋 ELEMENT SURGE**: Element Market NFT volume spike exit.
+- **📱 Cross-Device Favorites Sync**:
+  - Starred watchlists are bound to the connected wallet address (`agent_id_favorites_0x...`).
+  - Automatically synchronizes between desktop and mobile browsers via the 24/7 Fly.io cloud API (`GET /api/favorites` & `POST /api/favorites`).
+  - Includes a **Mobile QR Code & Shareable Watchlist URL** for instant scanning and sync on phones.
+
+---
+
 ### 4. Asset Classification (NFT vs. Token)
 The monitor automatically analyzes contract interfaces on-chain to determine whether a newly detected project is an **NFT** or a **Fungible Token**:
 - **🎨 ERC-721 (NFT Collection)**: Verified via ERC-165 interface id `0x80ac58cd` or `tokenURI(uint256)`. (e.g. *Oathbots*)

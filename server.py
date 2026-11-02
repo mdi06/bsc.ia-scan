@@ -16,11 +16,31 @@ import re
 import threading
 import concurrent.futures
 import urllib.request
+import urllib.parse
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 
 import monitor
 
 history_lock = threading.Lock()
+favorites_lock = threading.Lock()
+FAVORITES_FILE = os.path.join(os.path.dirname(__file__), "user_favorites.json")
+
+
+def load_user_favorites() -> dict:
+    if os.path.exists(FAVORITES_FILE):
+        try:
+            with open(FAVORITES_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return {}
+    return {}
+
+
+def save_user_favorites(data: dict):
+    tmp = FAVORITES_FILE + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2)
+    os.replace(tmp, FAVORITES_FILE)
 
 
 class AgentIdServerHandler(SimpleHTTPRequestHandler):
@@ -36,7 +56,85 @@ class AgentIdServerHandler(SimpleHTTPRequestHandler):
         self.send_response(200)
         self.end_headers()
 
+    def do_GET(self):
+        parsed = urllib.parse.urlparse(self.path)
+        if parsed.path in ("/api/favorites", "/favorites"):
+            qs = urllib.parse.parse_qs(parsed.query)
+            wallet = (qs.get("wallet", [""])[0] or "").lower().strip()
+            if not wallet or not wallet.startswith("0x") or len(wallet) != 42:
+                self.send_response(400)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(json.dumps({"error": "Valid 0x... BSC wallet address required in ?wallet= parameter"}).encode("utf-8"))
+                return
+
+            with favorites_lock:
+                fav_data = load_user_favorites()
+                record = fav_data.get(wallet, {"favorites": [], "updated_at": 0})
+
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(json.dumps({
+                "success": True,
+                "wallet": wallet,
+                "favorites": record.get("favorites", []),
+                "updated_at": record.get("updated_at", 0)
+            }).encode("utf-8"))
+            return
+
+        super().do_GET()
+
     def do_POST(self):
+        parsed = urllib.parse.urlparse(self.path)
+        if parsed.path in ("/api/favorites", "/favorites"):
+            content_length = int(self.headers.get("Content-Length", 0))
+            if content_length > 0:
+                try:
+                    body = self.rfile.read(content_length).decode("utf-8")
+                    incoming = json.loads(body)
+                    wallet = (incoming.get("wallet") or "").lower().strip()
+                    if not wallet or not wallet.startswith("0x") or len(wallet) != 42:
+                        self.send_response(400)
+                        self.send_header("Content-Type", "application/json")
+                        self.end_headers()
+                        self.wfile.write(json.dumps({"error": "Valid 0x... BSC wallet address required"}).encode("utf-8"))
+                        return
+
+                    raw_favs = incoming.get("favorites", [])
+                    if not isinstance(raw_favs, list):
+                        raw_favs = []
+                    # Validate and sanitize contract addresses
+                    clean_favs = [c.lower() for c in raw_favs if isinstance(c, str) and c.startswith("0x") and len(c) == 42]
+                    # Deduplicate preserving order
+                    clean_favs = list(dict.fromkeys(clean_favs))
+                    ts = int(incoming.get("timestamp") or time.time())
+
+                    with favorites_lock:
+                        fav_data = load_user_favorites()
+                        fav_data[wallet] = {
+                            "favorites": clean_favs,
+                            "updated_at": ts
+                        }
+                        save_user_favorites(fav_data)
+
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.end_headers()
+                    self.wfile.write(json.dumps({
+                        "success": True,
+                        "wallet": wallet,
+                        "favorites": clean_favs,
+                        "updated_at": ts
+                    }).encode("utf-8"))
+                    return
+                except Exception as e:
+                    self.send_response(500)
+                    self.send_header("Content-Type", "application/json")
+                    self.end_headers()
+                    self.wfile.write(json.dumps({"error": str(e)}).encode("utf-8"))
+                    return
+
         if self.path in ("/api/sync", "/sync"):
             content_length = int(self.headers.get("Content-Length", 0))
             if content_length > 0:

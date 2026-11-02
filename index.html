@@ -43,7 +43,7 @@
     <!-- Top Suite Banner -->
     <header class="suite-header">
       <div class="suite-title-row">
-        <div class="suite-title">
+        <div class="suite-brand">
           <span class="suite-logo" aria-hidden="true">
             <svg class="agent-logo-svg" width="22" height="22" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg">
               <polygon points="14,2 25,8 25,20 14,26 3,20 3,8" stroke="url(#logoGrad)" stroke-width="1.8" fill="#081824" stroke-linejoin="round"/>
@@ -61,46 +61,109 @@
               </defs>
             </svg>
           </span>
-          <strong>BNB CHAIN .AI AGENT ID SUITE</strong>
+          <div class="suite-title-wrap">
+            <strong class="suite-title-text">BNB CHAIN .AI AGENT ID SUITE</strong>
+            <span class="meta-item registry-meta" title="Official Space ID / Binance .ai Agent ID Registry: 0x60B9262456dE011F7d15a54CdD8c48bAaa8B022F"><code>0x60B9...022F</code></span>
+          </div>
         </div>
+
         <div class="suite-meta">
-          <span class="meta-item registry-meta"><span class="dim">Registry:</span> <code>0x60B9...022F</code></span>
-          <span class="meta-sep">│</span>
-          <span class="meta-item"><span class="dim">Cloud Engine:</span> <code id="engineStatus" style="color: var(--color-green);"><span class="pulse-dot"></span>Fly.io 24/7</code></span>
-          <span class="meta-sep">│</span>
-          <span class="meta-item live-pill" id="liveBlockBadge">📡 BSC Block: <span id="latestBlock">Loading...</span></span>
-          <span class="meta-sep">│</span>
-          <span class="meta-item" style="color: var(--color-cyan); font-size: 11px;" id="syncTime">Synced just now</span>
-          <span class="meta-sep">│</span>
-          <button id="soundToggle" class="sound-toggle-btn active" aria-label="Toggle Sound Alerts" title="Click to test or toggle audio alerts for new markets">
-            <span class="sound-icon">🔊</span>
-            <span class="sound-label">SOUND ON</span>
-          </button>
-          <span class="meta-sep">│</span>
-          <button id="donateHeaderBtn" class="donate-btn" aria-label="Copy Donation Address" title="Support the 24/7 Cloud Scanner (BNB/EVM): 0xa15BB4AEdC1b3426159C3cACf8548Cf09506A20a">
-            <span class="donate-icon">💎</span>
-            <span class="donate-label">Tip Dev:</span>
-            <code class="donate-addr">0xa15B...A20a</code>
-            <span class="donate-copy-badge">📋</span>
-          </button>
+          <div class="suite-telemetry">
+            <span class="meta-item engine-meta" title="Cloud Engine: Fly.io 24/7"><code id="engineStatus" style="color: var(--color-green);"><span class="pulse-dot"></span>Fly.io</code></span>
+            <span class="meta-sep">│</span>
+            <span class="meta-item live-pill" id="liveBlockBadge" title="Live BSC Block Height">📡 <span id="latestBlock">Loading...</span></span>
+            <span class="meta-item sync-time-item visually-hidden" id="syncTime">Synced just now</span>
+          </div>
+          <div class="suite-actions-group">
+            <button id="soundToggle" class="sound-toggle-btn active" aria-label="Toggle Sound Alerts" title="Toggle audio alerts">
+              <span class="sound-icon">🔊</span>
+              <span class="sound-label">SOUND</span>
+            </button>
+            <span class="meta-sep">│</span>
+            <button id="donateHeaderBtn" class="donate-btn" aria-label="Copy Donation Address" title="Tip Dev (BNB/EVM): 0xa15BB4AEdC1b3426159C3cACf8548Cf09506A20a">
+              <span class="donate-icon">💎</span>
+              <span class="donate-label">Tip Dev</span>
+              <code class="donate-addr visually-hidden">0xa15B...A20a</code>
+            </button>
+            <button id="connectWalletBtn" class="connect-wallet-btn" aria-label="Connect Web3 Wallet" title="Connect MetaMask, Binance Web3 Wallet, or Rabby for live portfolio sync">
+              <span class="wallet-icon">👛</span>
+              <span class="wallet-label" id="walletBtnLabel">Connect Wallet</span>
+            </button>
+          </div>
         </div>
       </div>
 
-      <!-- Navigation & Tabs -->
-      <div class="nav-row">
-        <div class="tabs" role="tablist">
-          <button class="tab-btn active" id="tabRadar" data-tab="RADAR" role="tab" aria-selected="true">
-            1: 📡 Live Radar (<span id="radarCount">0</span>)
-          </button>
-          <button class="tab-btn" id="tabSmart" data-tab="SMART" role="tab" aria-selected="false">
-            2: 🧠 Smart Alpha (<span id="smartCount">0</span>)
-          </button>
-          <button class="tab-btn" id="tabPortfolio" data-tab="PORTFOLIO" role="tab" aria-selected="false">
-            3: 🎒 My Portfolio (<span id="portfolioCount">0</span>)
-          </button>
+      <!-- Navigation & Controls -->
+      <div class="nav-container">
+        <!-- Row 1: Primary Tabs on Left + Search & Sort on Right -->
+        <div class="nav-primary-row">
+          <div class="tabs" role="tablist">
+            <button class="tab-btn active" id="tabRadar" data-tab="RADAR" role="tab" aria-selected="true">
+              1: 📡 Live Radar (<span id="radarCount">0</span>)
+            </button>
+            <button class="tab-btn" id="tabSmart" data-tab="SMART" role="tab" aria-selected="false">
+              2: 🧠 Smart Alpha (<span id="smartCount">0</span>)
+            </button>
+            <button class="tab-btn" id="tabPortfolio" data-tab="PORTFOLIO" role="tab" aria-selected="false">
+              3: 🎒 My Portfolio (<span id="portfolioCount">0</span>)
+            </button>
+          </div>
+
+          <div class="search-sort-group">
+            <div class="search-box">
+              <span class="search-icon">🔍</span>
+              <input type="text" id="searchInput" placeholder="Search name, symbol, 0x..." aria-label="Search Drops">
+            </div>
+
+            <div class="sort-box">
+              <span class="dim">Sort:</span>
+              <div class="custom-select-wrapper" id="customSortWrapper">
+                <button type="button" class="custom-select-trigger" id="customSortTrigger" aria-haspopup="listbox" aria-expanded="false" aria-label="Sort options">
+                  <span id="customSortLabel">Block (Newest)</span>
+                  <span class="custom-select-arrow">▾</span>
+                </button>
+                <ul class="custom-select-options" id="customSortOptions" role="listbox" tabindex="-1">
+                  <li class="custom-option selected" data-value="NEWEST" role="option" aria-selected="true">
+                    <span>Block (Newest)</span>
+                    <span class="opt-check">✓</span>
+                  </li>
+                  <li class="custom-option" data-value="PROFIT" role="option" aria-selected="false">
+                    <span>🏆 Post-Mint Profit</span>
+                    <span class="opt-check">✓</span>
+                  </li>
+                  <li class="custom-option" data-value="INTEREST" role="option" aria-selected="false">
+                    <span>Interest Score</span>
+                    <span class="opt-check">✓</span>
+                  </li>
+                  <li class="custom-option" data-value="HOLDERS" role="option" aria-selected="false">
+                    <span>Holders Count</span>
+                    <span class="opt-check">✓</span>
+                  </li>
+                  <li class="custom-option" data-value="PROGRESS" role="option" aria-selected="false">
+                    <span>Mint Progress %</span>
+                    <span class="opt-check">✓</span>
+                  </li>
+                  <li class="custom-option" data-value="LP" role="option" aria-selected="false">
+                    <span>LP Depth ($)</span>
+                    <span class="opt-check">✓</span>
+                  </li>
+                </ul>
+                <!-- Hidden native select for fallback & state management -->
+                <select id="sortSelect" class="visually-hidden" aria-hidden="true" tabindex="-1">
+                  <option value="NEWEST" selected>Block (Newest)</option>
+                  <option value="PROFIT">🏆 Post-Mint Profit</option>
+                  <option value="INTEREST">Interest Score</option>
+                  <option value="HOLDERS">Holders Count</option>
+                  <option value="PROGRESS">Mint Progress %</option>
+                  <option value="LP">LP Depth ($)</option>
+                </select>
+              </div>
+            </div>
+          </div>
         </div>
 
-        <div class="controls-row">
+        <!-- Row 2: Filter Toolbar -->
+        <div class="filter-toolbar-row">
           <div class="filter-pills" role="toolbar" aria-label="Filter Drops">
             <button class="pill active" data-filter="ALL">ALL</button>
             <button class="pill" data-filter="SNIPER_READY" id="pillSniperReady" style="color: #4ade80; border-color: rgba(74, 222, 128, 0.4); font-weight: 700;">🎯 SNIPE READY (<span id="sniperReadyCount">0</span>)</button>
@@ -112,78 +175,30 @@
             <button class="pill" data-filter="LP">💧 DEX LP</button>
             <button class="pill" data-filter="ACTIVE">⚡ ACTIVE MINTS</button>
           </div>
-
-          <div class="search-box">
-            <span class="search-icon">🔍</span>
-            <input type="text" id="searchInput" placeholder="Search name, symbol, 0x..." aria-label="Search Drops">
-          </div>
-
-          <div class="sort-box">
-            <span class="dim">Sort:</span>
-            <div class="custom-select-wrapper" id="customSortWrapper">
-              <button type="button" class="custom-select-trigger" id="customSortTrigger" aria-haspopup="listbox" aria-expanded="false" aria-label="Sort options">
-                <span id="customSortLabel">Block (Newest)</span>
-                <span class="custom-select-arrow">▾</span>
-              </button>
-              <ul class="custom-select-options" id="customSortOptions" role="listbox" tabindex="-1">
-                <li class="custom-option selected" data-value="NEWEST" role="option" aria-selected="true">
-                  <span>Block (Newest)</span>
-                  <span class="opt-check">✓</span>
-                </li>
-                <li class="custom-option" data-value="PROFIT" role="option" aria-selected="false">
-                  <span>🏆 Post-Mint Profit</span>
-                  <span class="opt-check">✓</span>
-                </li>
-                <li class="custom-option" data-value="INTEREST" role="option" aria-selected="false">
-                  <span>Interest Score</span>
-                  <span class="opt-check">✓</span>
-                </li>
-                <li class="custom-option" data-value="HOLDERS" role="option" aria-selected="false">
-                  <span>Holders Count</span>
-                  <span class="opt-check">✓</span>
-                </li>
-                <li class="custom-option" data-value="PROGRESS" role="option" aria-selected="false">
-                  <span>Mint Progress %</span>
-                  <span class="opt-check">✓</span>
-                </li>
-                <li class="custom-option" data-value="LP" role="option" aria-selected="false">
-                  <span>LP Depth ($)</span>
-                  <span class="opt-check">✓</span>
-                </li>
-              </ul>
-              <!-- Hidden native select for fallback & state management -->
-              <select id="sortSelect" class="visually-hidden" aria-hidden="true" tabindex="-1">
-                <option value="NEWEST" selected>Block (Newest)</option>
-                <option value="PROFIT">🏆 Post-Mint Profit</option>
-                <option value="INTEREST">Interest Score</option>
-                <option value="HOLDERS">Holders Count</option>
-                <option value="PROGRESS">Mint Progress %</option>
-                <option value="LP">LP Depth ($)</option>
-              </select>
-            </div>
-          </div>
         </div>
       </div>
 
       <!-- Macro Key Stats Banner -->
       <div class="stats-banner" id="statsBanner">
-        <div class="stat-card">
-          <span class="stat-label">📊 MINT CAP FILL RATE:</span>
-          <span class="badge badge-green" id="fillRatePct">15.3%</span>
-          <span class="stat-sub" id="fillRateRatio">(11 / 72 Sold Out)</span>
+        <div class="stats-macro-group">
+          <div class="stat-card">
+            <span class="stat-label">📊 MINT CAP FILL RATE:</span>
+            <span class="badge badge-green" id="fillRatePct">15.3%</span>
+            <span class="stat-sub" id="fillRateRatio">(11 / 72 Sold Out)</span>
+          </div>
+          <div class="stat-sep">│</div>
+          <div class="stat-card">
+            <span class="stat-label">🔥 NEAR CAP (≥80%):</span>
+            <span class="badge badge-dim" id="nearCapCount">0</span>
+          </div>
+          <div class="stat-sep">│</div>
+          <div class="stat-card">
+            <span class="stat-label">⚡ MOMENTUM (≥50%):</span>
+            <span class="badge badge-yellow" id="momentumCount">2 ACTIVE</span>
+            <span class="stat-highlight" id="momentumNames">[Hallowed 60%, SOLVED 60%]</span>
+          </div>
         </div>
-        <div class="stat-sep">│</div>
-        <div class="stat-card">
-          <span class="stat-label">🔥 NEAR CAP (≥80%):</span>
-          <span class="badge badge-dim" id="nearCapCount">0</span>
-        </div>
-        <div class="stat-sep">│</div>
-        <div class="stat-card">
-          <span class="stat-label">⚡ MOMENTUM (≥50%):</span>
-          <span class="badge badge-yellow" id="momentumCount">2 ACTIVE</span>
-          <span class="stat-highlight" id="momentumNames">[Hallowed 60%, SOLVED 60%]</span>
-        </div>
-        <div class="stat-sep">│</div>
+
         <div class="stat-card gainer-card" id="topGainerBanner" role="button" tabindex="0" title="Click to view Top Post-Mint Profit Hall of Fame Leaderboard">
           <span class="stat-label gold">🏆 TOP POST-MINT PROFIT:</span>
           <span class="badge badge-cyan" id="topGainerName">Hash21 (HASH)</span>
@@ -191,6 +206,41 @@
           <span class="badge badge-green" id="topGainerNet">Net: +$0.0148 / token</span>
           <span class="stat-runner" id="runnerUpDetails">│ 🥈 Runner-Up: Ptah (PTAH) [$0.0017]</span>
           <span class="stat-hof-badge">👑 Hall of Fame ↗</span>
+        </div>
+      </div>
+
+      <!-- Tab 3 Dynamic Portfolio Banner (Active on Tab 3) -->
+      <div class="portfolio-banner" id="portfolioBanner" style="display: none;">
+        <div class="portfolio-stat-group">
+          <div class="port-stat-card">
+            <span class="port-stat-label">🎒 NET WORTH:</span>
+            <span class="badge badge-cyan" id="portTotalValue">$0.00</span>
+          </div>
+          <div class="stat-sep">│</div>
+          <div class="port-stat-card">
+            <span class="port-stat-label">⛽ GAS RESERVE:</span>
+            <span class="badge badge-green" id="portGasReserve">0.0000 BNB ($0.00)</span>
+          </div>
+          <div class="stat-sep">│</div>
+          <div class="port-stat-card">
+            <span class="port-stat-label">📊 HOLDINGS:</span>
+            <span class="badge badge-yellow" id="portAssetsCount">0 Assets</span>
+            <span class="stat-highlight" id="portTokensNftsCount">(0 Tokens / 0 NFTs)</span>
+          </div>
+          <div class="stat-sep">│</div>
+          <div class="port-stat-card">
+            <span class="port-stat-label">🎯 PROFIT TARGETS:</span>
+            <span class="badge badge-magenta" id="portProfitSignalsCount">0 Ready</span>
+          </div>
+        </div>
+        <div class="portfolio-actions">
+          <span class="dim" id="portScanTimestamp" style="font-size: 11px;">Not scanned yet</span>
+          <button id="portRescanBtn" class="port-action-btn" title="Trigger instant on-chain balance rescan">
+            <span>🔄 Rescan</span>
+          </button>
+          <button id="portSyncMobileBtn" class="port-action-btn port-sync-btn" title="Sync watchlists and portfolio to phone">
+            <span>📱 Sync to Mobile</span>
+          </button>
         </div>
       </div>
     </header>
@@ -257,6 +307,20 @@
   <!-- Hall of Fame / Top Post-Mint Profit Leaderboard Modal (<dialog>) -->
   <dialog id="hallOfFameModal" class="project-modal hof-modal">
     <div class="modal-content" id="hofModalContent">
+      <!-- Injected by app.js -->
+    </div>
+  </dialog>
+
+  <!-- Web3 Wallet Connection & Account Modal (<dialog>) -->
+  <dialog id="walletModal" class="project-modal wallet-modal">
+    <div class="modal-content" id="walletModalContent">
+      <!-- Injected by app.js -->
+    </div>
+  </dialog>
+
+  <!-- Cross-Device Watchlist & Mobile Sync Modal (<dialog>) -->
+  <dialog id="syncModal" class="project-modal sync-modal">
+    <div class="modal-content" id="syncModalContent">
       <!-- Injected by app.js -->
     </div>
   </dialog>

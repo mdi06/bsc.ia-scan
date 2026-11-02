@@ -11,24 +11,141 @@ let sortMode = 'NEWEST';
 let searchQuery = '';
 let bnbPrice = 705.0;
 
+// Web3 State & Live Portfolio Scan
+let connectedWallet = null;
+let walletProviderName = null;
+let isScanningPortfolio = false;
+let userNativeBnbBalance = 0.0;
+let userOwnedContracts = new Map(); // contract.toLowerCase() -> BigInt(rawBalance)
+let nativeBnbItem = null;
+let cloudSyncStatus = 'offline';
+
 // Favorites / Watchlist System (persisted in localStorage + auto-stars owned tokens)
-const FAVORITES_STORAGE_KEY = 'agent_id_favorites';
+const FAVORITES_STORAGE_KEY_GUEST = 'agent_id_favorites';
 let favorites = new Set();
-try {
-  const stored = (typeof localStorage !== 'undefined') ? JSON.parse(localStorage.getItem(FAVORITES_STORAGE_KEY) || '[]') : [];
-  if (Array.isArray(stored)) {
-    favorites = new Set(stored.map(s => String(s).toLowerCase()));
+
+function getFavoritesStorageKey() {
+  if (connectedWallet) {
+    return `agent_id_favorites_${connectedWallet.toLowerCase()}`;
   }
-} catch (e) {
-  favorites = new Set();
+  return FAVORITES_STORAGE_KEY_GUEST;
 }
+
+function loadFavoritesForActiveWallet() {
+  const key = getFavoritesStorageKey();
+  let localFavs = [];
+  try {
+    const raw = (typeof localStorage !== 'undefined') ? localStorage.getItem(key) : null;
+    if (raw) {
+      localFavs = JSON.parse(raw);
+    } else if (connectedWallet) {
+      // Migrate from guest favorites if wallet favorites don't exist yet
+      const guestRaw = (typeof localStorage !== 'undefined') ? localStorage.getItem(FAVORITES_STORAGE_KEY_GUEST) : null;
+      if (guestRaw) localFavs = JSON.parse(guestRaw);
+    }
+  } catch (e) {}
+
+  favorites = new Set((Array.isArray(localFavs) ? localFavs : []).map(s => String(s).toLowerCase()));
+
+  // Trigger cloud sync if connected to wallet
+  if (connectedWallet) {
+    syncFavoritesFromCloud(connectedWallet);
+  }
+  updateFavPillCount();
+}
+
+// Initial load
+loadFavoritesForActiveWallet();
 
 function saveFavorites() {
   try {
     if (typeof localStorage !== 'undefined') {
-      localStorage.setItem(FAVORITES_STORAGE_KEY, JSON.stringify([...favorites]));
+      const key = getFavoritesStorageKey();
+      localStorage.setItem(key, JSON.stringify([...favorites]));
     }
   } catch (e) { }
+
+  if (connectedWallet) {
+    scheduleCloudFavoritesSync(connectedWallet);
+  }
+}
+
+let syncTimeout = null;
+function scheduleCloudFavoritesSync(wallet) {
+  if (syncTimeout) clearTimeout(syncTimeout);
+  syncTimeout = setTimeout(() => {
+    pushFavoritesToCloud(wallet);
+  }, 600);
+}
+
+async function syncFavoritesFromCloud(wallet) {
+  if (!wallet) return;
+  try {
+    let res = null;
+    try {
+      res = await fetch(`https://agent-id-monitor.fly.dev/api/favorites?wallet=${wallet.toLowerCase()}&_t=${Date.now()}`);
+      if (!res.ok) throw new Error('Fly fetch failed');
+    } catch (e) {
+      res = await fetch(`/api/favorites?wallet=${wallet.toLowerCase()}&_t=${Date.now()}`);
+    }
+    if (res && res.ok) {
+      const data = await res.json();
+      if (data && Array.isArray(data.favorites)) {
+        let changed = false;
+        data.favorites.forEach(c => {
+          const cl = String(c).toLowerCase();
+          if (!favorites.has(cl)) {
+            favorites.add(cl);
+            changed = true;
+          }
+        });
+        if (changed) {
+          try {
+            if (typeof localStorage !== 'undefined') {
+              localStorage.setItem(getFavoritesStorageKey(), JSON.stringify([...favorites]));
+            }
+          } catch (e) {}
+          updateFavPillCount();
+          renderTable();
+        }
+        cloudSyncStatus = 'synced';
+      }
+    }
+  } catch (err) {
+    // Graceful offline fallback
+  }
+}
+
+async function pushFavoritesToCloud(wallet) {
+  if (!wallet) return;
+  try {
+    const payload = {
+      wallet: wallet.toLowerCase(),
+      favorites: [...favorites],
+      timestamp: Math.floor(Date.now() / 1000)
+    };
+    let ok = false;
+    try {
+      const res = await fetch('https://agent-id-monitor.fly.dev/api/favorites', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      if (res.ok) ok = true;
+    } catch (e) {}
+
+    if (!ok) {
+      const resLocal = await fetch('/api/favorites', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      if (resLocal.ok) ok = true;
+    }
+    if (ok) cloudSyncStatus = 'synced';
+  } catch (err) {
+    // Graceful offline fallback
+  }
 }
 
 function isFavorited(contract, item) {
@@ -76,6 +193,7 @@ function toggleModalFav(contract) {
 if (typeof window !== 'undefined') window.toggleModalFav = toggleModalFav;
 
 function updateFavPillCount() {
+  if (typeof document === 'undefined') return;
   const favEl = document.getElementById('favCount');
   if (!favEl) return;
   const count = allDrops.filter(d => isFavorited(d.contract, d)).length;
@@ -809,7 +927,14 @@ function getFilteredDrops() {
   if (activeTab === 'SMART') {
     list = list.filter(d => (d.smart_wallets && d.smart_wallets.length > 0) || (d.smart_minters && d.smart_minters.length > 0));
   } else if (activeTab === 'PORTFOLIO') {
-    list = list.filter(d => (Number(d.user_balance) > 0) || (d.name && d.name.toLowerCase().includes('butterfli')));
+    if (connectedWallet) {
+      list = list.filter(d => Number(d.user_balance) > 0);
+      if (nativeBnbItem && userNativeBnbBalance > 0) {
+        list.unshift(nativeBnbItem);
+      }
+    } else {
+      list = [];
+    }
   }
 
   // Toolbar filter pills
@@ -878,6 +1003,7 @@ function getFilteredDrops() {
 
 // Render Table Rows
 function renderTable() {
+  if (typeof document === 'undefined') return;
   const tbody = document.getElementById('tableBody');
   tbody.innerHTML = '';
   const filtered = getFilteredDrops();
@@ -891,7 +1017,38 @@ function renderTable() {
   if (filtered.length === 0) {
     const tr = document.createElement('tr');
     if (activeTab === 'PORTFOLIO') {
-      tr.innerHTML = `<td colspan="14" style="text-align: center; padding: 40px; color: var(--text-dim);">🎒 Your on-chain portfolio is empty. Click <strong style="color: var(--color-cyan); cursor: pointer;" onclick="document.getElementById('tabRadar').click()">1: 📡 Live Radar</strong> to discover and snipe new drops!</td>`;
+      if (!connectedWallet) {
+        tr.innerHTML = `
+          <td colspan="14" style="padding: 0;">
+            <div class="portfolio-onboarding">
+              <div class="portfolio-onboarding-icon">👛</div>
+              <div class="portfolio-onboarding-title">Connect Web3 Wallet for Live BSC Portfolio Sync</div>
+              <div class="portfolio-onboarding-desc">
+                Connect MetaMask, Binance Web3 Wallet, or Rabby to dynamically scan all 348+ .ai agent tokens and NFTs in your wallet, monitor real-time USD balances, and receive automated 1-Click Take-Profit recommendations.
+              </div>
+              <div class="portfolio-onboarding-actions">
+                <button class="onboarding-connect-btn" onclick="openWalletModal()">
+                  <span>👛 Connect Web3 Wallet</span>
+                </button>
+                <button class="onboarding-demo-btn" onclick="setWatchOnlyWallet('0x6827d403df6b07ba405a6cfe0305dbd0fc727f55')">
+                  <span>👁️ Demo with Smart Wallet (0x6827...7f55)</span>
+                </button>
+              </div>
+              <div style="margin-top: 16px; font-size: 11px; color: var(--text-dim);">
+                Or enter any public BSC address in the <a href="javascript:void(0)" onclick="openWalletModal()" style="color: var(--color-cyan); text-decoration: underline;">Watch-Only Auditor</a>
+              </div>
+            </div>
+          </td>
+        `;
+      } else {
+        tr.innerHTML = `
+          <td colspan="14" style="text-align: center; padding: 40px; color: var(--text-dim);">
+            🎒 No .ai tokens or NFTs detected in connected wallet <code>${connectedWallet.slice(0, 8)}...${connectedWallet.slice(-6)}</code>.<br/><br/>
+            <button class="port-action-btn" onclick="scanUserPortfolio('${connectedWallet}', true)" style="font-size: 11px; padding: 6px 14px; margin-right: 8px;">🔄 Rescan On-Chain</button>
+            or discover and snipe new drops in <strong style="color: var(--color-cyan); cursor: pointer;" onclick="document.getElementById('tabRadar').click()">1: 📡 Live Radar</strong>!
+          </td>
+        `;
+      }
     } else {
       tr.innerHTML = `<td colspan="14" style="text-align: center; padding: 30px; color: var(--text-dim);">No agentic projects match current filter [${activeFilter}] or search.</td>`;
     }
@@ -1076,18 +1233,25 @@ function renderTable() {
 
     const isPort = (activeTab === 'PORTFOLIO');
     const isNft = std.includes('721') || std.includes('NFT');
-    const cellHolders = isPort
-      ? `<span style="color: var(--color-green); font-weight:700;">Holdings: ${formatCount(item.user_balance || 1)}</span>`
-      : hbStr;
-    const cellFloor = isPort
-      ? `<span class="badge ${exitSignal.badge_class}" style="font-size: 11px;">${exitSignal.badge}</span>`
-      : floorStr;
+    let cellHolders = hbStr;
+    let cellFloor = floorStr;
     let actBtn = `<button class="inspect-btn"><span class="desktop-only">Inspect</span><span class="mobile-only">🔍 Deep Dive & Snipe CLI ➔</span></button>`;
+
     if (isPort) {
-      if (!isNft) {
-        actBtn = `<button class="inspect-btn" style="border-color: #f0b90b; color: #f0b90b; font-weight:700;"><span class="desktop-only">🥞 1-Click Exit</span><span class="mobile-only">🥞 Exit CLI ➔</span></button>`;
-      } else {
+      if (item.contract === '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee') {
+        cellHolders = `<span style="color: var(--color-green); font-weight:700;">Gas: ${Number(item.user_balance || 0).toFixed(4)} BNB</span>`;
+        cellFloor = `<span class="badge badge-cyan" style="font-size: 11px;">⛽ GAS RESERVE</span>`;
+        actBtn = `<button class="inspect-btn" style="border-color: var(--color-cyan); color: var(--color-cyan); font-weight:700;"><span class="desktop-only">⛽ Gas Reserve</span><span class="mobile-only">⛽ Gas ➔</span></button>`;
+      } else if (isNft) {
+        cellHolders = `<span style="color: var(--color-green); font-weight:700;">Holdings: ${formatCount(item.user_balance || 1)} NFT</span>`;
+        cellFloor = `<span class="badge ${exitSignal.badge_class}" style="font-size: 11px;">${exitSignal.badge}</span>`;
         actBtn = `<button class="inspect-btn" style="border-color: var(--color-magenta); color: var(--color-magenta); font-weight:700;"><span class="desktop-only">🎨 Element List</span><span class="mobile-only">🎨 Element ➔</span></button>`;
+      } else {
+        const balNum = Number(item.user_balance || 0);
+        const balStr = balNum >= 1000 ? formatCount(balNum) : (balNum < 0.01 ? balNum.toFixed(4) : balNum.toFixed(2));
+        cellHolders = `<span style="color: var(--color-green); font-weight:700;">Holdings: ${balStr}</span>`;
+        cellFloor = `<span class="badge ${exitSignal.badge_class}" style="font-size: 11px;">${exitSignal.badge}</span>`;
+        actBtn = `<button class="inspect-btn" style="border-color: #f0b90b; color: #f0b90b; font-weight:700;"><span class="desktop-only">🥞 1-Click Exit</span><span class="mobile-only">🥞 Exit CLI ➔</span></button>`;
       }
     }
 
@@ -1135,20 +1299,23 @@ function openModal(item) {
   const isReady = sEval.is_ready;
   const rawCd = item.mint_calldata;
   const isRecv = !rawCd || rawCd === '0x' || rawCd === 'recv';
+  const userWallet = connectedWallet || '<YOUR_WALLET>';
   let calldata = isRecv ? '0x' : rawCd;
   if (!isRecv && calldata.startsWith('0x836a1040') && calldata.length >= 138) {
-    calldata = calldata.slice(0, 74) + '000000000000000000000000<YOUR_WALLET>' + calldata.slice(138);
+    const cleanW = userWallet.replace('0x', '').padStart(40, '0');
+    calldata = calldata.slice(0, 74) + '000000000000000000000000' + cleanW + calldata.slice(138);
   }
   const valWei = item.mint_value_wei || '0';
-  const cliSnippet = `baw contract-call preview --binanceChainId 56 --from <YOUR_WALLET> --to ${cAddr} --value ${valWei} --inputData ${calldata} --json`;
+  const cliSnippet = `baw contract-call preview --binanceChainId 56 --from ${userWallet} --to ${cAddr} --value ${valWei} --inputData ${calldata} --json`;
 
   const isFav = isFavorited(cAddr, item);
   const favBtnClass = isFav ? 'modal-fav-btn starred' : 'modal-fav-btn';
   const favBtnText = isFav ? '★ Favorited' : '☆ Add to Favorites';
 
   const exitEval = evaluatePortfolioExit(item, bnbPrice);
-  const sellCalldata = !isNft ? buildPancakeSwapSellCalldata(cAddr, 1000000000000000000n, '<YOUR_WALLET>') : '';
-  const sellCliSnippet = !isNft ? `baw contract-call preview --binanceChainId 56 --from <YOUR_WALLET> --to ${PANCAKE_ROUTER_V2} --value 0 --inputData ${sellCalldata} --json` : '';
+  const rawHeldWei = item.user_balance_wei || 1000000000000000000n;
+  const sellCalldata = !isNft ? buildPancakeSwapSellCalldata(cAddr, rawHeldWei, userWallet) : '';
+  const sellCliSnippet = !isNft ? `baw contract-call preview --binanceChainId 56 --from ${userWallet} --to ${PANCAKE_ROUTER_V2} --value 0 --inputData ${sellCalldata} --json` : '';
 
   content.innerHTML = `
     <div class="modal-header">
@@ -1281,6 +1448,9 @@ function openModal(item) {
       </div>
       <div style="font-size: 12px; margin-top: 4px; margin-bottom: 8px; color: var(--text-dim);">
         <strong style="color: var(--text-white);">Exit Strategy:</strong> ${exitEval.recommendation}
+      </div>
+      <div class="modal-links" style="margin-bottom: 10px;">
+        <a href="https://pancakeswap.finance/swap?inputCurrency=${cAddr}&outputCurrency=BNB" target="_blank" rel="noopener" class="modal-btn" style="background: rgba(240, 185, 11, 0.2); border: 1px solid #f0b90b; color: #f0b90b; text-decoration: none;">🥞 1-Click Swap on PancakeSwap ↗</a>
       </div>
       <div class="cli-box">
         <code>${escapeHtml(sellCliSnippet)}</code>
@@ -1477,6 +1647,730 @@ const BSC_PUBLIC_RPCS = [
   'https://1rpc.io/bnb'
 ];
 
+// Robust JSON-RPC Single Call with failover
+async function sendRpcCall(method, params) {
+  for (const endpoint of BSC_PUBLIC_RPCS) {
+    try {
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params })
+      });
+      if (!res.ok) continue;
+      const data = await res.json();
+      if (data && data.result !== undefined) {
+        return data.result;
+      }
+    } catch (err) {
+      // try next RPC
+    }
+  }
+  return null;
+}
+
+// High-Throughput JSON-RPC Batch Call with failover
+async function sendRpcBatch(batch) {
+  if (!Array.isArray(batch) || batch.length === 0) return [];
+  for (const endpoint of BSC_PUBLIC_RPCS) {
+    try {
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(batch)
+      });
+      if (!res.ok) continue;
+      const data = await res.json();
+      if (Array.isArray(data)) {
+        data.sort((a, b) => Number(a.id || 0) - Number(b.id || 0));
+        return data;
+      }
+    } catch (err) {
+      // try next RPC
+    }
+  }
+  return [];
+}
+
+// Injected Web3 Provider Resolver (MetaMask, Binance Web3 Wallet, Rabby, EIP-1193)
+function getInjectedProvider(preferred = 'auto') {
+  if (typeof window === 'undefined') return null;
+
+  if (preferred === 'binance' && (window.binance || window.binancew3w)) {
+    return window.binance || window.binancew3w;
+  }
+  if (window.ethereum) {
+    if (Array.isArray(window.ethereum.providers) && window.ethereum.providers.length > 0) {
+      if (preferred === 'rabby') {
+        const p = window.ethereum.providers.find(x => x.isRabby);
+        if (p) return p;
+      }
+      if (preferred === 'binance') {
+        const p = window.ethereum.providers.find(x => x.isBinance);
+        if (p) return p;
+      }
+      if (preferred === 'metamask') {
+        const p = window.ethereum.providers.find(x => x.isMetaMask && !x.isRabby);
+        if (p) return p;
+      }
+      return window.ethereum.providers[0];
+    }
+    return window.ethereum;
+  }
+  if (window.binance || window.binancew3w) {
+    return window.binance || window.binancew3w;
+  }
+  return null;
+}
+
+// Web3 Wallet Connect Method
+async function connectWeb3(providerType = 'auto') {
+  const provider = getInjectedProvider(providerType);
+  if (!provider) {
+    alert('No Web3 Wallet detected! Please install MetaMask, Binance Web3 Wallet, or Rabby extension, or use Watch-Only mode.');
+    return false;
+  }
+
+  const btn = document.getElementById('connectWalletBtn');
+  if (btn) btn.classList.add('connecting');
+  const label = document.getElementById('walletBtnLabel');
+  if (label) label.textContent = 'Connecting...';
+
+  try {
+    const accounts = await provider.request({ method: 'eth_requestAccounts' });
+    if (!accounts || accounts.length === 0) {
+      throw new Error('No accounts selected');
+    }
+    const account = accounts[0].toLowerCase();
+    connectedWallet = account;
+
+    let provName = 'Web3 Wallet';
+    if (provider.isRabby) provName = 'Rabby';
+    else if (provider.isBinance || window.binance) provName = 'Binance Web3';
+    else if (provider.isMetaMask) provName = 'MetaMask';
+    walletProviderName = provName;
+
+    // Check & switch to BSC Mainnet (56 / 0x38)
+    try {
+      const chainId = await provider.request({ method: 'eth_chainId' });
+      if (chainId !== '0x38' && parseInt(chainId, 16) !== 56) {
+        try {
+          await provider.request({
+            method: 'wallet_switchEthereumChain',
+            params: [{ chainId: '0x38' }]
+          });
+        } catch (switchErr) {
+          if (switchErr.code === 4902 || switchErr.code === -32603) {
+            await provider.request({
+              method: 'wallet_addEthereumChain',
+              params: [{
+                chainId: '0x38',
+                chainName: 'BNB Smart Chain',
+                nativeCurrency: { name: 'BNB', symbol: 'BNB', decimals: 18 },
+                rpcUrls: ['https://bsc-dataseed.bnbchain.org'],
+                blockExplorerUrls: ['https://bscscan.com']
+              }]
+            });
+          }
+        }
+      }
+    } catch (netErr) {
+      console.warn('Network check error:', netErr);
+    }
+
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem('agent_id_connected_wallet', connectedWallet);
+      localStorage.setItem('agent_id_wallet_provider', walletProviderName);
+    }
+
+    updateWalletButtonUI();
+    loadFavoritesForActiveWallet();
+    await scanUserPortfolio(connectedWallet);
+
+    // Event listeners
+    if (provider.on) {
+      provider.on('accountsChanged', (newAccounts) => {
+        if (!newAccounts || newAccounts.length === 0) {
+          disconnectWallet();
+        } else {
+          connectedWallet = newAccounts[0].toLowerCase();
+          localStorage.setItem('agent_id_connected_wallet', connectedWallet);
+          updateWalletButtonUI();
+          loadFavoritesForActiveWallet();
+          scanUserPortfolio(connectedWallet);
+        }
+      });
+      provider.on('chainChanged', () => {
+        window.location.reload();
+      });
+    }
+
+    const modal = document.getElementById('walletModal');
+    if (modal && (modal.open || modal.hasAttribute('open'))) {
+      modal.close ? modal.close() : modal.removeAttribute('open');
+    }
+
+    return true;
+  } catch (err) {
+    console.error('Wallet connection error:', err);
+    updateWalletButtonUI();
+    return false;
+  }
+}
+
+// Watch-Only Mode (Inspect Any BSC Address Without Private Key)
+function setWatchOnlyWallet(addr) {
+  if (!addr || !addr.startsWith('0x') || addr.length !== 42) {
+    alert('Please enter a valid 42-character 0x... BSC address.');
+    return false;
+  }
+  connectedWallet = addr.toLowerCase();
+  walletProviderName = 'Watch-Only';
+  if (typeof localStorage !== 'undefined') {
+    localStorage.setItem('agent_id_connected_wallet', connectedWallet);
+    localStorage.setItem('agent_id_wallet_provider', 'Watch-Only');
+  }
+  updateWalletButtonUI();
+  loadFavoritesForActiveWallet();
+  scanUserPortfolio(connectedWallet);
+
+  const modal = (typeof document !== 'undefined') ? document.getElementById('walletModal') : null;
+  if (modal && (modal.open || modal.hasAttribute('open'))) {
+    modal.close ? modal.close() : modal.removeAttribute('open');
+  }
+  return true;
+}
+
+// Disconnect Wallet
+function disconnectWallet() {
+  connectedWallet = null;
+  walletProviderName = null;
+  userNativeBnbBalance = 0.0;
+  userOwnedContracts.clear();
+  nativeBnbItem = null;
+
+  if (typeof localStorage !== 'undefined') {
+    localStorage.removeItem('agent_id_connected_wallet');
+    localStorage.removeItem('agent_id_wallet_provider');
+  }
+
+  // Clear balances on allDrops
+  allDrops.forEach(d => {
+    d.user_balance = 0;
+    d.user_balance_wei = 0n;
+  });
+
+  updateWalletButtonUI();
+  loadFavoritesForActiveWallet();
+  updatePortfolioBannerUI();
+  renderTable();
+
+  const discModal = (typeof document !== 'undefined') ? document.getElementById('walletModal') : null;
+  if (discModal && (discModal.open || discModal.hasAttribute('open'))) {
+    discModal.close ? discModal.close() : discModal.removeAttribute('open');
+  }
+}
+
+// Update Header Connect Button State
+function updateWalletButtonUI() {
+  if (typeof document === 'undefined') return;
+  const btn = document.getElementById('connectWalletBtn');
+  if (!btn) return;
+
+  btn.classList.remove('connecting');
+  if (connectedWallet) {
+    btn.classList.add('connected');
+    const shortAddr = `${connectedWallet.slice(0, 6)}...${connectedWallet.slice(-4)}`;
+    btn.innerHTML = `
+      <span class="wallet-dot"></span>
+      <span class="wallet-label">${shortAddr}</span>
+      <span class="wallet-badge-bnb">${userNativeBnbBalance.toFixed(3)} BNB</span>
+    `;
+    btn.title = `Connected (${walletProviderName}): ${connectedWallet} - Click for account details`;
+  } else {
+    btn.classList.remove('connected');
+    btn.innerHTML = `
+      <span class="wallet-icon">👛</span>
+      <span class="wallet-label">Connect Wallet</span>
+    `;
+    btn.title = 'Connect MetaMask, Binance Web3 Wallet, or Rabby for live portfolio sync';
+  }
+}
+
+// 100% Dynamic On-Chain Portfolio Scanner (Native BNB + 348 drops batching)
+async function scanUserPortfolio(walletAddr, force = false) {
+  if (!walletAddr || isScanningPortfolio) return;
+  isScanningPortfolio = true;
+
+  const hasDom = (typeof document !== 'undefined');
+  const btn = hasDom ? document.getElementById('connectWalletBtn') : null;
+  if (btn) btn.classList.add('connecting');
+  const rescanBtn = hasDom ? document.getElementById('portRescanBtn') : null;
+  if (rescanBtn) rescanBtn.classList.add('connecting');
+
+  const tsEl = hasDom ? document.getElementById('portScanTimestamp') : null;
+  if (tsEl) tsEl.textContent = 'Scanning on-chain BSC...';
+
+  try {
+    // 1. Native Gas Balance (BNB)
+    try {
+      const bnbHex = await sendRpcCall('eth_getBalance', [walletAddr, 'latest']);
+      if (bnbHex && bnbHex !== '0x') {
+        userNativeBnbBalance = Number(BigInt(bnbHex)) / 1e18;
+      } else {
+        userNativeBnbBalance = 0.0;
+      }
+    } catch (e) {
+      console.warn('Native BNB query error:', e);
+    }
+
+    nativeBnbItem = {
+      contract: '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee',
+      name: 'Binance Coin (Gas Reserve)',
+      symbol: 'BNB',
+      standard: 'Native Gas',
+      user_balance: userNativeBnbBalance,
+      user_balance_wei: BigInt(Math.floor(userNativeBnbBalance * 1e18)),
+      token_price_usd: bnbPrice,
+      token_symbol: 'BNB',
+      mint_price_bnb: 0,
+      score: 100,
+      holders: 1500000,
+      is_nft: false
+    };
+
+    // 2. Query all contract balances in parallel batches of 60
+    const contracts = [];
+    const seen = new Set();
+    allDrops.forEach(d => {
+      const c = (d.contract || '').toLowerCase();
+      if (c && c.startsWith('0x') && c.length === 42 && !seen.has(c)) {
+        seen.add(c);
+        contracts.push(c);
+      }
+    });
+
+    const cleanWallet = walletAddr.replace('0x', '').toLowerCase().padStart(64, '0');
+    const calldata = '0x70a08231' + cleanWallet;
+    const chunks = [];
+    for (let i = 0; i < contracts.length; i += 60) {
+      chunks.push(contracts.slice(i, i + 60));
+    }
+
+    userOwnedContracts.clear();
+
+    await Promise.all(chunks.map(async (chunk) => {
+      const batch = chunk.map((c, idx) => ({
+        jsonrpc: '2.0',
+        id: idx + 1,
+        method: 'eth_call',
+        params: [{ to: c, data: calldata }, 'latest']
+      }));
+      const results = await sendRpcBatch(batch);
+      if (Array.isArray(results)) {
+        results.forEach((res, idx) => {
+          const c = chunk[idx];
+          if (res && res.result && res.result !== '0x' && !/^0x0+$/.test(res.result)) {
+            try {
+              const raw = BigInt(res.result);
+              if (raw > 0n) {
+                userOwnedContracts.set(c, raw);
+              }
+            } catch (e) {}
+          }
+        });
+      }
+    }));
+
+    // Re-hydrate allDrops balances
+    allDrops.forEach(drop => {
+      const c = (drop.contract || '').toLowerCase();
+      const raw = userOwnedContracts.get(c);
+      if (raw && raw > 0n) {
+        const std = String(drop.standard || '');
+        const isNft = std.includes('721') || std.includes('NFT') || Boolean(drop.is_nft);
+        let dec = 18;
+        if (std.includes('8 decimals')) dec = 8;
+        drop.user_balance = isNft ? Number(raw) : (Number(raw) / (10 ** dec));
+        drop.user_balance_wei = raw;
+      } else {
+        drop.user_balance = 0;
+        drop.user_balance_wei = 0n;
+      }
+    });
+
+  } catch (err) {
+    console.error('Portfolio scan failed:', err);
+  } finally {
+    isScanningPortfolio = false;
+    if (btn) btn.classList.remove('connecting');
+    if (rescanBtn) rescanBtn.classList.remove('connecting');
+    updateWalletButtonUI();
+    updatePortfolioBannerUI();
+    renderTable();
+  }
+}
+
+// Update Dynamic Tab 3 Portfolio Banner
+function updatePortfolioBannerUI() {
+  if (typeof document === 'undefined') return;
+  const banner = document.getElementById('portfolioBanner');
+  if (!banner) return;
+
+  let totalUsd = userNativeBnbBalance * bnbPrice;
+  let ownedTokens = 0;
+  let ownedNfts = 0;
+  let profitSignals = 0;
+
+  allDrops.forEach(drop => {
+    if (drop.user_balance && Number(drop.user_balance) > 0) {
+      const std = String(drop.standard || '');
+      const isNft = std.includes('721') || std.includes('NFT') || Boolean(drop.is_nft);
+      if (isNft) {
+        ownedNfts++;
+        const fl = Number(drop.floor_price_bnb || 0);
+        totalUsd += drop.user_balance * (fl * bnbPrice);
+      } else {
+        ownedTokens++;
+        const p = Number(drop.token_price_usd || drop.market_price_usd || 0);
+        totalUsd += drop.user_balance * p;
+      }
+      const exit = evaluatePortfolioExit(drop, bnbPrice);
+      if (exit.can_swap && (exit.signal.includes('MOON') || exit.signal.includes('RECOUP') || exit.signal.includes('CRASH') || exit.signal.includes('SURGE'))) {
+        profitSignals++;
+      }
+    }
+  });
+
+  const totalAssets = ownedTokens + ownedNfts + (userNativeBnbBalance > 0 ? 1 : 0);
+
+  const valEl = document.getElementById('portTotalValue');
+  if (valEl) valEl.textContent = `$${totalUsd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+  const gasEl = document.getElementById('portGasReserve');
+  if (gasEl) gasEl.textContent = `${userNativeBnbBalance.toFixed(4)} BNB ($${(userNativeBnbBalance * bnbPrice).toFixed(2)})`;
+
+  const assetsEl = document.getElementById('portAssetsCount');
+  if (assetsEl) assetsEl.textContent = `${totalAssets} Asset${totalAssets === 1 ? '' : 's'}`;
+
+  const tnEl = document.getElementById('portTokensNftsCount');
+  if (tnEl) tnEl.textContent = `(${ownedTokens} Tokens / ${ownedNfts} NFTs)`;
+
+  const sigEl = document.getElementById('portProfitSignalsCount');
+  if (sigEl) {
+    sigEl.textContent = `${profitSignals} Target${profitSignals === 1 ? '' : 's'} Ready`;
+    sigEl.className = profitSignals > 0 ? 'badge badge-green' : 'badge badge-dim';
+  }
+
+  const tsEl = document.getElementById('portScanTimestamp');
+  if (tsEl) tsEl.textContent = `Scanned ${new Date().toLocaleTimeString()}`;
+
+  const portCountEl = document.getElementById('portfolioCount');
+  if (portCountEl) portCountEl.textContent = totalAssets;
+}
+
+// Open Connect / Account Drawer Modal
+function openWalletModal() {
+  const modal = document.getElementById('walletModal');
+  const content = document.getElementById('walletModalContent');
+  if (!modal || !content) return;
+
+  if (!connectedWallet) {
+    content.innerHTML = `
+      <div class="wallet-card-container">
+        <div class="modal-header wallet-card-header">
+          <div class="modal-title wallet-card-title">
+            <span class="wallet-title-icon">👛</span>
+            <span>Connect Web3 Wallet</span>
+          </div>
+          <button class="modal-close-btn" onclick="document.getElementById('walletModal').close ? document.getElementById('walletModal').close() : document.getElementById('walletModal').removeAttribute('open')">✕ [ESC]</button>
+        </div>
+
+        <div class="wallet-connect-body">
+          <p class="wallet-connect-desc">
+            Select your injected browser wallet to dynamically scan your on-chain .ai holdings and receive automated profit alerts on BNB Chain.
+          </p>
+
+          <div class="provider-grid">
+            <div class="provider-card" onclick="connectWeb3('metamask')">
+              <span class="provider-icon">🦊</span>
+              <span class="provider-name">MetaMask</span>
+              <span class="provider-badge">Injected</span>
+            </div>
+            <div class="provider-card" onclick="connectWeb3('binance')">
+              <span class="provider-icon">🟡</span>
+              <span class="provider-name">Binance Web3</span>
+              <span class="provider-badge">BNB Chain</span>
+            </div>
+            <div class="provider-card" onclick="connectWeb3('rabby')">
+              <span class="provider-icon">🐰</span>
+              <span class="provider-name">Rabby</span>
+              <span class="provider-badge">DeFi Native</span>
+            </div>
+            <div class="provider-card" onclick="connectWeb3('auto')">
+              <span class="provider-icon">⚡</span>
+              <span class="provider-name">Auto Detect</span>
+              <span class="provider-badge">EIP-1193</span>
+            </div>
+          </div>
+
+          <div class="wallet-switch-card">
+            <div class="wallet-switch-header">
+              <span class="switch-title">👁️ Watch-Only Address (Auditor Mode)</span>
+              <span class="dim">No extension required</span>
+            </div>
+            <div class="wallet-switch-bar">
+              <span class="switch-icon">🔍</span>
+              <input type="text" id="watchAddressInput" placeholder="0x... BSC address or whale wallet" />
+              <button class="wallet-switch-submit" onclick="const addr = document.getElementById('watchAddressInput').value.trim(); if(addr) setWatchOnlyWallet(addr);">Audit</button>
+            </div>
+            <div class="wallet-demo-row">
+              <span class="dim">Try Demo Smart Wallet:</span>
+              <button class="pill demo-pill" onclick="setWatchOnlyWallet('0x6827d403df6b07ba405a6cfe0305dbd0fc727f55')">0x6827...7f55 (0724.ai)</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+  } else {
+    const bscUrl = `https://bscscan.com/address/${connectedWallet}`;
+    const shortAddr = `${connectedWallet.slice(0, 8)}...${connectedWallet.slice(-6)}`;
+    const isWatchOnly = walletProviderName === 'Watch-Only';
+
+    content.innerHTML = `
+      <div class="wallet-card-container">
+        <!-- Header -->
+        <div class="modal-header wallet-card-header">
+          <div class="modal-title wallet-card-title">
+            <span class="wallet-title-icon">👛</span>
+            <span>Connected Account</span>
+            <span class="badge ${isWatchOnly ? 'badge-yellow' : 'badge-green'} wallet-status-badge">
+              ${isWatchOnly ? '👁️ Watch-Only Auditor' : '🟢 Live Web3'}
+            </span>
+          </div>
+          <button class="modal-close-btn" onclick="document.getElementById('walletModal').close ? document.getElementById('walletModal').close() : document.getElementById('walletModal').removeAttribute('open')">✕ [ESC]</button>
+        </div>
+
+        <!-- Hero Identity Banner -->
+        <div class="wallet-hero-card">
+          <div class="wallet-hero-avatar">
+            <span class="avatar-emoji">${isWatchOnly ? '👁️' : '👛'}</span>
+          </div>
+          <div class="wallet-hero-content">
+            <div class="wallet-hero-meta">
+              <span class="wallet-hero-tag provider-tag">${walletProviderName}</span>
+              <span class="wallet-hero-tag network-tag">🟢 BSC Chain ID: 56</span>
+            </div>
+            <div class="wallet-addr-action-row">
+              <span class="wallet-addr-display" title="${connectedWallet}">${shortAddr}</span>
+              <button class="wallet-inline-btn" id="walletCopyBtn" onclick="navigator.clipboard.writeText('${connectedWallet}'); this.innerHTML='<span style=\\'color:var(--color-green)\\'>✓ Copied</span>'; setTimeout(()=>this.innerHTML='📋 Copy', 1500);" title="Copy Address">
+                📋 Copy
+              </button>
+              <a href="${bscUrl}" target="_blank" rel="noopener" class="wallet-inline-btn" title="View on BscScan">
+                ↗ BscScan
+              </a>
+            </div>
+            <div class="wallet-addr-full">
+              <code>${connectedWallet}</code>
+            </div>
+          </div>
+        </div>
+
+        <!-- 4 Clean Metric Tiles (2x2 Grid) -->
+        <div class="wallet-stats-grid">
+          <div class="wallet-stat-tile">
+            <div class="tile-header">
+              <span class="tile-icon">⛽</span>
+              <span class="tile-label">GAS RESERVE</span>
+            </div>
+            <div class="tile-value gold">${userNativeBnbBalance.toFixed(6)} BNB</div>
+            <div class="tile-sub">≈ $${(userNativeBnbBalance * bnbPrice).toFixed(2)} USD</div>
+          </div>
+
+          <div class="wallet-stat-tile">
+            <div class="tile-header">
+              <span class="tile-icon">🎒</span>
+              <span class="tile-label">HOLDINGS TRACKED</span>
+            </div>
+            <div class="tile-value cyan">${userOwnedContracts.size} .ai</div>
+            <div class="tile-sub">Active ecosystem positions</div>
+          </div>
+
+          <div class="wallet-stat-tile">
+            <div class="tile-header">
+              <span class="tile-icon">🌐</span>
+              <span class="tile-label">NETWORK</span>
+            </div>
+            <div class="tile-value green">BNB Smart Chain</div>
+            <div class="tile-sub">Chain ID: 56 Mainnet</div>
+          </div>
+
+          <div class="wallet-stat-tile">
+            <div class="tile-header">
+              <span class="tile-icon">☁️</span>
+              <span class="tile-label">CLOUD WATCHLIST</span>
+            </div>
+            <div class="tile-value green">
+              <span class="pulse-dot" style="margin-right: 4px;"></span>Active 24/7
+            </div>
+            <div class="tile-sub">Fly.io real-time engine</div>
+          </div>
+        </div>
+
+        <!-- Actions Grid -->
+        <div class="wallet-actions-section">
+          <div class="wallet-section-title">ACCOUNT ACTIONS</div>
+          <div class="wallet-actions-grid">
+            <button class="wallet-action-btn btn-rescan" onclick="scanUserPortfolio(connectedWallet, true)">
+              <span class="btn-icon">🔄</span>
+              <span class="btn-text">Rescan Portfolio</span>
+            </button>
+            <button class="wallet-action-btn btn-sync" onclick="openSyncModal()">
+              <span class="btn-icon">📱</span>
+              <span class="btn-text">Sync to Mobile</span>
+            </button>
+            <a href="${bscUrl}" target="_blank" rel="noopener" class="wallet-action-btn btn-explorer">
+              <span class="btn-icon">🔍</span>
+              <span class="btn-text">View on BscScan</span>
+            </a>
+            <button class="wallet-action-btn btn-disconnect" onclick="disconnectWallet()">
+              <span class="btn-icon">🔌</span>
+              <span class="btn-text">Disconnect Wallet</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Switch Address Section -->
+        <div class="wallet-switch-card">
+          <div class="wallet-switch-header">
+            <span class="switch-title">Switch Address (Watch-Only Auditor):</span>
+          </div>
+          <div class="wallet-switch-bar">
+            <span class="switch-icon">👁️</span>
+            <input type="text" id="switchAddressInput" placeholder="0x... paste new BSC address" />
+            <button class="wallet-switch-submit" onclick="const addr = document.getElementById('switchAddressInput').value.trim(); if(addr) setWatchOnlyWallet(addr);">
+              Switch
+            </button>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  if (typeof modal.showModal === 'function') modal.showModal();
+  else modal.setAttribute('open', '');
+}
+
+// Cross-Device Sync Modal (QR Code & Watchlist Link)
+function openSyncModal() {
+  const modal = document.getElementById('syncModal');
+  const content = document.getElementById('syncModalContent');
+  if (!modal || !content) return;
+
+  const activeWallet = connectedWallet || 'guest';
+  const syncUrl = `${(typeof window !== 'undefined' ? window.location.origin : '')}/?wallet=${activeWallet}`;
+  const qrApiUrl = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(syncUrl)}&bgcolor=ffffff&color=03080c&margin=8`;
+
+  content.innerHTML = `
+    <div class="modal-header">
+      <div class="modal-title">📱 Cross-Device Watchlist & Portfolio Sync</div>
+      <button class="modal-close-btn" onclick="document.getElementById('syncModal').close ? document.getElementById('syncModal').close() : document.getElementById('syncModal').removeAttribute('open')">✕ [ESC]</button>
+    </div>
+    <div class="modal-section">
+      <div style="font-size: 12px; color: var(--text-dim); line-height: 1.6;">
+        Your starred favorites and monitored tokens are bound to your wallet address:
+        <code style="color: var(--color-cyan);">${activeWallet}</code>.
+        <br/>Watchlists automatically synchronize between desktop and mobile browsers via the 24/7 Fly.io cloud engine.
+      </div>
+
+      <div class="qr-container">
+        <img src="${qrApiUrl}" alt="Scan QR Code to open on Mobile" style="width: 100%; height: 100%; object-fit: contain; border-radius: 4px;" onerror="this.parentElement.innerHTML='<div style=\\'color:#333; font-size:11px; text-align:center; padding:20px;\\'>Scan Link Below</div>'" />
+      </div>
+      <div style="text-align: center; font-size: 11px; color: var(--color-cyan); margin-top: 4px;">
+        Scan with Phone Camera or MetaMask / Binance Web3 App Browser
+      </div>
+
+      <div class="sync-url-box">
+        <input type="text" id="syncShareInput" readonly value="${syncUrl}" />
+        <button class="copy-btn" onclick="navigator.clipboard.writeText('${syncUrl}'); this.textContent='Copied!'; setTimeout(()=>this.textContent='Copy', 1500)">Copy</button>
+      </div>
+
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 14px; font-size: 11px; padding: 8px 12px; background: rgba(0, 255, 136, 0.06); border: 1px solid rgba(0, 255, 136, 0.2); border-radius: 4px;">
+        <span>Cloud Sync Status:</span>
+        <strong style="color: var(--color-green);">🟢 Synced (Fly.io 24/7 Engine)</strong>
+      </div>
+    </div>
+  `;
+
+  if (typeof modal.showModal === 'function') modal.showModal();
+  else modal.setAttribute('open', '');
+}
+
+// Check URL search params for deep linked wallet (e.g. ?wallet=0x...)
+function checkUrlParams() {
+  if (typeof window === 'undefined') return;
+  const urlParams = new URLSearchParams(window.location.search);
+  const qWallet = urlParams.get('wallet');
+  if (qWallet && qWallet.startsWith('0x') && qWallet.length === 42) {
+    setWatchOnlyWallet(qWallet);
+  }
+}
+
+// Auto-reconnect previously authorized wallet
+async function tryAutoReconnect() {
+  if (typeof localStorage === 'undefined') return;
+  const saved = localStorage.getItem('agent_id_connected_wallet');
+  const providerType = localStorage.getItem('agent_id_wallet_provider');
+  if (!saved || !saved.startsWith('0x')) return;
+
+  if (providerType === 'Watch-Only') {
+    connectedWallet = saved.toLowerCase();
+    walletProviderName = 'Watch-Only';
+    updateWalletButtonUI();
+    loadFavoritesForActiveWallet();
+    scanUserPortfolio(connectedWallet);
+    return;
+  }
+
+  const provider = getInjectedProvider(providerType);
+  if (provider && provider.request) {
+    try {
+      const accounts = await provider.request({ method: 'eth_accounts' });
+      if (accounts && accounts.length > 0 && accounts[0].toLowerCase() === saved.toLowerCase()) {
+        connectedWallet = accounts[0].toLowerCase();
+        walletProviderName = providerType || 'Web3 Wallet';
+        updateWalletButtonUI();
+        loadFavoritesForActiveWallet();
+        scanUserPortfolio(connectedWallet);
+
+        if (provider.on) {
+          provider.on('accountsChanged', (newAccounts) => {
+            if (!newAccounts || newAccounts.length === 0) disconnectWallet();
+            else {
+              connectedWallet = newAccounts[0].toLowerCase();
+              localStorage.setItem('agent_id_connected_wallet', connectedWallet);
+              updateWalletButtonUI();
+              loadFavoritesForActiveWallet();
+              scanUserPortfolio(connectedWallet);
+            }
+          });
+        }
+      }
+    } catch (e) {
+      console.warn('Auto-reconnect silent probe failed:', e);
+    }
+  }
+}
+
+// Expose Web3 functions on window for inline handlers
+if (typeof window !== 'undefined') {
+  window.openWalletModal = openWalletModal;
+  window.openSyncModal = openSyncModal;
+  window.connectWeb3 = connectWeb3;
+  window.disconnectWallet = disconnectWallet;
+  window.setWatchOnlyWallet = setWatchOnlyWallet;
+  window.scanUserPortfolio = scanUserPortfolio;
+}
+
 // Fetch Latest BSC Block via Public RPC (with fallback)
 async function pollLatestBlock() {
   for (const endpoint of BSC_PUBLIC_RPCS) {
@@ -1561,11 +2455,31 @@ async function fetchDrops() {
     isInitialLoad = false;
 
     const smartDrops = allDrops.filter(d => (d.smart_wallets && d.smart_wallets.length > 0) || (d.smart_minters && d.smart_minters.length > 0));
-    const portDrops = allDrops.filter(d => (Number(d.user_balance) > 0) || (d.name && d.name.toLowerCase().includes('butterfli')));
     document.getElementById('radarCount').textContent = allDrops.length;
     document.getElementById('smartCount').textContent = smartDrops.length;
-    const pCountEl = document.getElementById('portfolioCount');
-    if (pCountEl) pCountEl.textContent = portDrops.length;
+
+    // Re-hydrate user balances if wallet is connected
+    if (connectedWallet && userOwnedContracts.size > 0) {
+      allDrops.forEach(drop => {
+        const c = (drop.contract || '').toLowerCase();
+        const raw = userOwnedContracts.get(c);
+        if (raw && raw > 0n) {
+          const std = String(drop.standard || '');
+          const isNft = std.includes('721') || std.includes('NFT') || Boolean(drop.is_nft);
+          let dec = 18;
+          if (std.includes('8 decimals')) dec = 8;
+          drop.user_balance = isNft ? Number(raw) : (Number(raw) / (10 ** dec));
+          drop.user_balance_wei = raw;
+        } else {
+          drop.user_balance = 0;
+          drop.user_balance_wei = 0n;
+        }
+      });
+      updatePortfolioBannerUI();
+    } else {
+      const pCountEl = document.getElementById('portfolioCount');
+      if (pCountEl) pCountEl.textContent = '0';
+    }
 
     renderStats(allDrops);
     renderTable();
@@ -1710,6 +2624,22 @@ async function init() {
         btn.classList.add('active');
         btn.setAttribute('aria-selected', 'true');
         activeTab = btn.getAttribute('data-tab');
+
+        const isPort = (activeTab === 'PORTFOLIO');
+        const statsBanner = document.getElementById('statsBanner');
+        const portBanner = document.getElementById('portfolioBanner');
+        if (statsBanner && portBanner) {
+          statsBanner.style.display = isPort ? 'none' : 'flex';
+          portBanner.style.display = isPort ? 'flex' : 'none';
+        }
+
+        if (isPort) {
+          updatePortfolioBannerUI();
+          if (connectedWallet && userOwnedContracts.size === 0 && !isScanningPortfolio) {
+            scanUserPortfolio(connectedWallet);
+          }
+        }
+
         if (typeof window !== 'undefined' && window.va) {
           window.va('event', { name: 'tab_switch', data: { tab: activeTab } });
         }
@@ -1791,6 +2721,47 @@ async function init() {
       });
     }
 
+    // Connect Wallet Button
+    const connectBtn = document.getElementById('connectWalletBtn');
+    if (connectBtn) {
+      connectBtn.addEventListener('click', openWalletModal);
+    }
+
+    // Portfolio Action Buttons
+    const rescanBtn = document.getElementById('portRescanBtn');
+    if (rescanBtn) {
+      rescanBtn.addEventListener('click', () => {
+        if (connectedWallet) scanUserPortfolio(connectedWallet, true);
+        else openWalletModal();
+      });
+    }
+
+    const syncMobileBtn = document.getElementById('portSyncMobileBtn');
+    if (syncMobileBtn) {
+      syncMobileBtn.addEventListener('click', openSyncModal);
+    }
+
+    // Close Wallet & Sync modals on backdrop click
+    const walletModal = document.getElementById('walletModal');
+    if (walletModal) {
+      walletModal.addEventListener('click', e => {
+        if (e.target === walletModal) walletModal.close ? walletModal.close() : walletModal.removeAttribute('open');
+      });
+    }
+
+    const syncModal = document.getElementById('syncModal');
+    if (syncModal) {
+      syncModal.addEventListener('click', e => {
+        if (e.target === syncModal) syncModal.close ? syncModal.close() : syncModal.removeAttribute('open');
+      });
+    }
+
+    // Check URL parameters (e.g. ?wallet=0x...)
+    checkUrlParams();
+
+    // Auto-reconnect previously authorized wallet
+    tryAutoReconnect();
+
     // Poll latest block
     pollLatestBlock();
     setInterval(pollLatestBlock, 10000);
@@ -1817,6 +2788,17 @@ if (typeof module !== 'undefined' && module.exports) {
     computeItemProfit,
     computeStats,
     openHallOfFameModal,
+    openWalletModal,
+    openSyncModal,
+    connectWeb3,
+    disconnectWallet,
+    setWatchOnlyWallet,
+    scanUserPortfolio,
+    updateWalletButtonUI,
+    updatePortfolioBannerUI,
+    getFavoritesStorageKey,
+    loadFavoritesForActiveWallet,
+    saveFavorites,
     PANCAKE_ROUTER_V2,
     WBNB_ADDRESS
   };
