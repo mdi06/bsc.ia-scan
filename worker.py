@@ -339,8 +339,15 @@ def run_discovery_loop():
                     continue
 
                 if not block or "transactions" not in block:
-                    last_block = b
-                    continue
+                    # Retry once before skipping
+                    time.sleep(0.3)
+                    try:
+                        block = rpc.get_block(b, full_tx=True)
+                    except Exception:
+                        pass
+                    if not block or "transactions" not in block:
+                        last_block = b
+                        continue
 
                 txs = block.get("transactions", [])
                 print(f"[📡 BSC Block #{b}] {len(txs)} txs", flush=True)
@@ -487,7 +494,8 @@ def run_fast_track_progress_sweeper_loop():
             lane2_counter += 1
             sweep_targets = list(lane1_items)
             if lane2_counter >= 4 or not lane1_items:
-                sweep_targets.extend(lane2_items)
+                # Rotate a bounded batch of 50 cold contracts per cycle to prevent RPC pool exhaustion
+                sweep_targets.extend(lane2_items[:50])
                 lane2_counter = 0
 
             if sweep_targets:
@@ -634,7 +642,7 @@ def run_market_dynamics_updater_loop():
                         item_changed = True
                     except Exception:
                         pass
-                else:
+                elif item.get("total_minted", 0) > 0 or item.get("smart_wallets") or item.get("score", 0) > 0:
                     try:
                         pair_addr = monitor.get_pair_address(rpc, monitor.PANCAKE_FACTORY_V2, c, monitor.WBNB_ADDRESS)
                         if pair_addr:
@@ -774,7 +782,11 @@ def run_proxy_factory_watcher_loop():
     print("[🧩 Proxy Factory Watcher] Initializing Stealth Factory & Proxy Clone Watcher...", flush=True)
     time.sleep(4)
     rpc = monitor.BscRpcClient(monitor.RPC_ENDPOINTS)
-    last_block = rpc.get_block_number() - 1
+    curr_b = rpc.get_block_number()
+    while curr_b is None:
+        time.sleep(2.0)
+        curr_b = rpc.get_block_number()
+    last_block = curr_b - 1
 
     known_infra = {
         monitor.PANCAKE_FACTORY_V2.lower(),
@@ -788,6 +800,9 @@ def run_proxy_factory_watcher_loop():
     while True:
         try:
             curr_block = rpc.get_block_number()
+            if curr_block is None or curr_block <= last_block:
+                time.sleep(2.0)
+                continue
             if curr_block > last_block:
                 for b in range(last_block + 1, min(curr_block + 1, last_block + 6)):
                     try:
