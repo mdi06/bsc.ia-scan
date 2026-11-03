@@ -18,12 +18,22 @@ import concurrent.futures
 import urllib.request
 import urllib.parse
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+from typing import Optional, List
+from contextlib import asynccontextmanager
+from fastapi import FastAPI, Query, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
+import uvicorn
 
 import monitor
+from db import db
 
 history_lock = threading.Lock()
 favorites_lock = threading.Lock()
 FAVORITES_FILE = os.path.join(os.path.dirname(__file__), "user_favorites.json")
+_background_workers_started = False
+_background_lock = threading.Lock()
 
 
 def load_user_favorites() -> dict:
@@ -41,6 +51,12 @@ def save_user_favorites(data: dict):
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2)
     os.replace(tmp, FAVORITES_FILE)
+    try:
+        for wallet, entry in data.items():
+            if isinstance(entry, dict) and "favorites" in entry:
+                db.save_favorites(wallet, entry["favorites"], entry.get("updated_at"))
+    except Exception:
+        pass
 
 
 class AgentIdServerHandler(SimpleHTTPRequestHandler):
@@ -981,36 +997,191 @@ def run_proxy_factory_watcher_loop():
         time.sleep(20)
 
 
+def start_background_workers():
+    global _background_workers_started
+    with _background_lock:
+        if _background_workers_started:
+            return
+        _background_workers_started = True
+
+        print("[🚀 Engine] Spawning 24/7 background worker threads...", flush=True)
+        threading.Thread(target=run_discovery_loop, daemon=True).start()
+        threading.Thread(target=run_market_dynamics_updater_loop, daemon=True).start()
+        threading.Thread(target=run_fast_track_progress_sweeper_loop, daemon=True).start()
+        threading.Thread(target=run_element_nft_volume_sweeper_loop, daemon=True).start()
+        threading.Thread(target=run_proxy_factory_watcher_loop, daemon=True).start()
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    if not os.environ.get("DISABLE_BACKGROUND_WORKERS"):
+        start_background_workers()
+    yield
+
+
+app = FastAPI(
+    title="Agent ID Monitor Backend",
+    version="2.0.0",
+    description="High-performance async FastAPI backend powered by Supabase / SQLite WAL",
+    lifespan=lifespan
+)
+
+# CORS Middleware for Vercel, Render & cross-origin frontend
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+@app.get("/healthz")
+@app.get("/health")
+def health_check():
+    return {
+        "status": "ok",
+        "service": "agent-id-backend",
+        "db_mode": db.mode,
+        "project_count": db.get_project_count()
+    }
+
+
+@app.get("/history.json")
+def get_virtual_history_json():
+    """Virtual high-speed endpoint serving full cached project list (eliminates 1MB disk read)."""
+    projects = db.get_all_projects()
+    return JSONResponse(
+        content=projects,
+        headers={"Cache-Control": "no-cache, no-store, must-revalidate"}
+    )
+
+
+@app.get("/api/projects")
+def get_projects(
+    limit: int = Query(50, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+    search: Optional[str] = Query(None),
+    status: Optional[str] = Query(None),
+    sniper_ready: Optional[bool] = Query(None),
+    min_progress: Optional[float] = Query(None),
+    sort_by: str = Query("block"),
+    order: str = Query("desc")
+):
+    """Modernized REST endpoint with query filtering, pagination, and sorting."""
+    return db.get_projects(
+        limit=limit,
+        offset=offset,
+        search=search,
+        status=status,
+        sniper_ready=sniper_ready,
+        min_progress=min_progress,
+        sort_by=sort_by,
+        order=order
+    )
+
+
+@app.get("/api/favorites")
+@app.get("/favorites")
+def get_favorites(wallet: str = Query(..., description="0x... BSC wallet address")):
+    w = (wallet or "").lower().strip()
+    if not w or not w.startswith("0x") or len(w) != 42:
+        raise HTTPException(
+            status_code=400,
+            detail="Valid 0x... BSC wallet address required in ?wallet= parameter"
+        )
+    with favorites_lock:
+        fav_data = load_user_favorites()
+        if w in fav_data:
+            record = fav_data[w]
+        else:
+            record = db.get_favorites(w)
+
+    return {
+        "success": True,
+        "wallet": w,
+        "favorites": record.get("favorites", []),
+        "updated_at": record.get("updated_at", 0)
+    }
+
+
+@app.post("/api/favorites")
+@app.post("/favorites")
+async def post_favorites(request: Request):
+    try:
+        incoming = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON body")
+
+    wallet = (incoming.get("wallet") or "").lower().strip()
+    if not wallet or not wallet.startswith("0x") or len(wallet) != 42:
+        raise HTTPException(status_code=400, detail="Valid 0x... BSC wallet address required")
+
+    raw_favs = incoming.get("favorites", [])
+    if not isinstance(raw_favs, list):
+        raw_favs = []
+    clean_favs = [c.lower() for c in raw_favs if isinstance(c, str) and c.startswith("0x") and len(c) == 42]
+    clean_favs = list(dict.fromkeys(clean_favs))
+    ts = int(incoming.get("timestamp") or time.time())
+
+    with favorites_lock:
+        fav_data = load_user_favorites()
+        fav_data[wallet] = {
+            "favorites": clean_favs,
+            "updated_at": ts
+        }
+        save_user_favorites(fav_data)
+        db.save_favorites(wallet, clean_favs, ts)
+
+    return {
+        "success": True,
+        "wallet": wallet,
+        "favorites": clean_favs,
+        "updated_at": ts
+    }
+
+
+@app.post("/api/sync")
+@app.post("/sync")
+async def post_sync(request: Request):
+    try:
+        incoming = await request.json()
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Invalid JSON: {e}")
+
+    if isinstance(incoming, list):
+        with history_lock:
+            current = monitor.load_history()
+            merged_dict = {x["contract"].lower(): x for x in current if x.get("contract")}
+            for item in incoming:
+                c = (item.get("contract") or "").lower()
+                if c:
+                    if c not in merged_dict:
+                        merged_dict[c] = item
+                    else:
+                        for k, v in item.items():
+                            if v is not None and (k not in merged_dict[c] or merged_dict[c][k] is None or k == "user_balance"):
+                                merged_dict[c][k] = v
+            new_history = list(merged_dict.values())
+            new_history.sort(key=lambda x: x.get("block", 0) or 0, reverse=True)
+            monitor.save_history(new_history)
+        return {"success": True, "count": len(new_history)}
+    raise HTTPException(status_code=400, detail="Expected JSON array of projects")
+
+
+# Mount static files at root if available
+workspace_dir = os.path.dirname(os.path.abspath(__file__))
+if os.path.exists(os.path.join(workspace_dir, "index.html")):
+    app.mount("/", StaticFiles(directory=workspace_dir, html=True), name="static")
+
+
 def start_server(port=8080):
-    """Starts the HTTP server on port 8080."""
-    server_address = ("", port)
-    httpd = ThreadingHTTPServer(server_address, AgentIdServerHandler)
-    print(f"[🌐 Web & API Server] Serving on http://0.0.0.0:{port}...")
-    httpd.serve_forever()
+    """Starts the modern FastAPI / Uvicorn server."""
+    print(f"[🌐 FastAPI & Uvicorn Server] Serving on http://0.0.0.0:{port}...")
+    uvicorn.run(app, host="0.0.0.0", port=port, log_level="info")
 
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8080))
-
-    # 1. Start background block scanner thread
-    scanner_thread = threading.Thread(target=run_discovery_loop, daemon=True)
-    scanner_thread.start()
-
-    # 2. Start background market dynamics updater thread
-    market_thread = threading.Thread(target=run_market_dynamics_updater_loop, daemon=True)
-    market_thread.start()
-
-    # 3. Start high-frequency fast-track progress sweeper thread (Option B)
-    fast_sweeper_thread = threading.Thread(target=run_fast_track_progress_sweeper_loop, daemon=True)
-    fast_sweeper_thread.start()
-
-    # 4. Start Element Market NFT volume detector thread (Option D)
-    element_sweeper_thread = threading.Thread(target=run_element_nft_volume_sweeper_loop, daemon=True)
-    element_sweeper_thread.start()
-
-    # 5. Start Stealth Factory & Proxy Clone Watcher thread (Option E)
-    proxy_factory_thread = threading.Thread(target=run_proxy_factory_watcher_loop, daemon=True)
-    proxy_factory_thread.start()
-
-    # 6. Start HTTP server on main thread
+    start_background_workers()
     start_server(port=port)

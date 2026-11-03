@@ -13,3 +13,7 @@ video_assets/*.mp4
 video_assets/*.jpg
 video_assets/*.png
 
+data/
+*.db
+*.db-wal
+*.db-shm

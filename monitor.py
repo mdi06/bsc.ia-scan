@@ -3111,17 +3111,27 @@ def sync_cloud_history() -> List[Dict[str, Any]]:
 
 
 def load_history() -> List[Dict[str, Any]]:
-    cloud_items = sync_cloud_history()
-    if cloud_items:
-        items = cloud_items
-    elif os.path.exists(HISTORY_FILE):
-        try:
-            with open(HISTORY_FILE, "r") as f:
-                items = json.load(f)
-        except Exception:
-            items = []
-    else:
+    items = []
+    try:
+        from db import db
+        db_items = db.get_all_projects()
+        if db_items:
+            items = db_items
+    except Exception:
         items = []
+
+    if not items:
+        cloud_items = sync_cloud_history()
+        if cloud_items:
+            items = cloud_items
+        elif os.path.exists(HISTORY_FILE):
+            try:
+                with open(HISTORY_FILE, "r") as f:
+                    items = json.load(f)
+            except Exception:
+                items = []
+        else:
+            items = []
     
     # Filter out pure system/infrastructure contracts
     items = [x for x in items if not is_system_infra(x)]
@@ -3165,6 +3175,14 @@ def save_history(history: List[Dict[str, Any]]):
                 seen.add(c)
                 final_list.append(item)
 
+        # 1. Primary: Save to Database (Supabase / SQLite in WAL mode)
+        try:
+            from db import db
+            db.upsert_projects(final_list)
+        except Exception:
+            pass
+
+        # 2. Maintain history.json for backwards compatibility / local file inspection
         tmp_file = HISTORY_FILE + ".tmp"
         with open(tmp_file, "w") as f:
             json.dump(final_list, f, indent=2)

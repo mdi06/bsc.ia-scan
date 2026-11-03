@@ -1,0 +1,503 @@
+"""
+Storage & Database Modernization Layer for Agent ID Monitor.
+Supports:
+1. Supabase (Remote PostgreSQL via PostgREST REST API) - Perfect for Render Free (no data loss on reboot)
+2. SQLite (WAL Mode, Thread-Safe) - Native fallback for local development and offline environments
+"""
+
+import os
+import json
+import time
+import sqlite3
+import threading
+from typing import List, Dict, Any, Optional
+from pathlib import Path
+
+# Try importing httpx for Supabase REST calls; fallback to urllib if needed
+try:
+    import httpx
+    HAS_HTTPX = True
+except ImportError:
+    import urllib.request
+    import urllib.parse
+    HAS_HTTPX = False
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DEFAULT_DB_PATH = os.path.join(BASE_DIR, "data", "agent_monitor.db")
+HISTORY_FILE = os.path.join(BASE_DIR, "history.json")
+FAVORITES_FILE = os.path.join(BASE_DIR, "user_favorites.json")
+
+
+class DatabaseManager:
+    def __init__(self, db_path: Optional[str] = None):
+        self.supabase_url = os.getenv("SUPABASE_URL", "").strip().rstrip("/")
+        if self.supabase_url.endswith("/rest/v1"):
+            self.supabase_url = self.supabase_url[:-8].rstrip("/")
+        self.supabase_key = os.getenv("SUPABASE_KEY", os.getenv("SUPABASE_SERVICE_ROLE_KEY", os.getenv("SUPABASE_ANON_KEY", ""))).strip()
+        
+        self.mode = "supabase" if (self.supabase_url and self.supabase_key) else "sqlite"
+        self.db_path = db_path or os.getenv("DB_PATH", DEFAULT_DB_PATH)
+        
+        # Thread locks for in-memory and local SQLite operations
+        self._lock = threading.RLock()
+        self._cache_lock = threading.RLock()
+        
+        # In-memory fast cache: {contract_lower: project_dict}
+        self._projects_cache: Dict[str, Dict[str, Any]] = {}
+        self._cache_initialized = False
+        
+        # HTTP client for Supabase
+        if HAS_HTTPX and self.mode == "supabase":
+            self._client = httpx.Client(
+                base_url=self.supabase_url,
+                headers={
+                    "apikey": self.supabase_key,
+                    "Authorization": f"Bearer {self.supabase_key}",
+                    "Content-Type": "application/json",
+                    "Prefer": "return=representation"
+                },
+                timeout=15.0
+            )
+        else:
+            self._client = None
+
+        if self.mode == "sqlite":
+            self._init_sqlite()
+        
+        # Auto-seed on startup if needed
+        self.seed_from_local_json()
+
+    # -------------------------------------------------------------------------
+    # SQLite Initialization & Connection
+    # -------------------------------------------------------------------------
+    def _init_sqlite(self):
+        Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
+        with self._lock:
+            conn = self._get_sqlite_connection()
+            try:
+                cur = conn.cursor()
+                # Enable WAL mode for zero-lock concurrent reads and writes
+                cur.execute("PRAGMA journal_mode = WAL;")
+                cur.execute("PRAGMA synchronous = NORMAL;")
+                cur.execute("PRAGMA busy_timeout = 5000;")
+                
+                # Projects table
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS projects (
+                        contract TEXT PRIMARY KEY,
+                        name TEXT,
+                        symbol TEXT,
+                        token_id TEXT,
+                        block INTEGER DEFAULT 0,
+                        progress REAL DEFAULT 0.0,
+                        holders INTEGER DEFAULT 0,
+                        status TEXT DEFAULT 'TRACKING',
+                        risk_level TEXT DEFAULT 'SAFE',
+                        risk_badge TEXT DEFAULT '🟢 Clean',
+                        sniper_ready INTEGER DEFAULT 0,
+                        is_proxy_clone INTEGER DEFAULT 0,
+                        score REAL DEFAULT 0.0,
+                        raw_data TEXT NOT NULL,
+                        detected_at TEXT,
+                        updated_at INTEGER DEFAULT 0
+                    );
+                """)
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_projects_block ON projects(block DESC);")
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_projects_progress ON projects(progress DESC);")
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_projects_sniper ON projects(sniper_ready);")
+                
+                # User Favorites table
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS user_favorites (
+                        wallet TEXT PRIMARY KEY,
+                        favorites TEXT NOT NULL,
+                        updated_at INTEGER DEFAULT 0
+                    );
+                """)
+                conn.commit()
+            finally:
+                conn.close()
+
+    def _get_sqlite_connection(self) -> sqlite3.Connection:
+        conn = sqlite3.connect(self.db_path, timeout=10.0, check_same_thread=False)
+        conn.row_factory = sqlite3.Row
+        return conn
+
+    # -------------------------------------------------------------------------
+    # Seeding & Migration
+    # -------------------------------------------------------------------------
+    def seed_from_local_json(self):
+        """Seeds SQLite / Supabase from history.json and user_favorites.json if DB is empty."""
+        count = self.get_project_count()
+        if count == 0 and os.path.exists(HISTORY_FILE):
+            try:
+                with open(HISTORY_FILE, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                if isinstance(data, list) and len(data) > 0:
+                    print(f"[{self.mode.upper()} DB] Auto-seeding {len(data)} projects from history.json...", flush=True)
+                    self.upsert_projects(data)
+            except Exception as e:
+                print(f"[⚠️ Seed Warning] Failed to seed from {HISTORY_FILE}: {e}", flush=True)
+
+        # Seed favorites if present
+        if os.path.exists(FAVORITES_FILE):
+            try:
+                with open(FAVORITES_FILE, "r", encoding="utf-8") as f:
+                    fav_data = json.load(f)
+                if isinstance(fav_data, dict):
+                    for wallet, entry in fav_data.items():
+                        if isinstance(entry, dict) and "favorites" in entry:
+                            self.save_favorites(wallet, entry["favorites"], entry.get("updated_at"))
+            except Exception as e:
+                print(f"[⚠️ Seed Warning] Failed to seed favorites: {e}", flush=True)
+
+    # -------------------------------------------------------------------------
+    # Projects CRUD Operations
+    # -------------------------------------------------------------------------
+    def get_project_count(self) -> int:
+        if self.mode == "supabase":
+            try:
+                if HAS_HTTPX and self._client:
+                    resp = self._client.get("/rest/v1/projects?select=contract", headers={"Range": "0-0", "Prefer": "count=exact"})
+                    content_range = resp.headers.get("content-range", "")
+                    if "/" in content_range:
+                        return int(content_range.split("/")[1])
+                return len(self.get_all_projects())
+            except Exception:
+                return len(self._projects_cache)
+
+        with self._lock:
+            conn = self._get_sqlite_connection()
+            try:
+                cur = conn.cursor()
+                cur.execute("SELECT COUNT(*) FROM projects")
+                row = cur.fetchone()
+                return row[0] if row else 0
+            except Exception:
+                return 0
+            finally:
+                conn.close()
+
+    def get_all_projects(self) -> List[Dict[str, Any]]:
+        """Returns all projects as dictionaries, sorted by block descending."""
+        with self._cache_lock:
+            if self._cache_initialized and self._projects_cache:
+                items = list(self._projects_cache.values())
+                items.sort(key=lambda x: x.get("block", 0) or 0, reverse=True)
+                return items
+
+        if self.mode == "supabase":
+            try:
+                if HAS_HTTPX and self._client:
+                    resp = self._client.get("/rest/v1/projects?select=*&order=block.desc")
+                    if resp.status_code == 200:
+                        records = resp.json()
+                        projects = []
+                        for r in records:
+                            raw = r.get("data") or {}
+                            if isinstance(raw, str):
+                                try:
+                                    raw = json.loads(raw)
+                                except Exception:
+                                    raw = {}
+                            raw["contract"] = r.get("contract", raw.get("contract", ""))
+                            projects.append(raw)
+                        with self._cache_lock:
+                            self._projects_cache = {p["contract"].lower(): p for p in projects if p.get("contract")}
+                            self._cache_initialized = True
+                        return projects
+            except Exception as e:
+                print(f"[⚠️ Supabase Read Error] {e}", flush=True)
+
+        # Fallback / SQLite
+        with self._lock:
+            conn = self._get_sqlite_connection()
+            try:
+                cur = conn.cursor()
+                cur.execute("SELECT raw_data FROM projects ORDER BY block DESC")
+                rows = cur.fetchall()
+                projects = []
+                for row in rows:
+                    try:
+                        p = json.loads(row["raw_data"])
+                        projects.append(p)
+                    except Exception:
+                        continue
+                with self._cache_lock:
+                    self._projects_cache = {p["contract"].lower(): p for p in projects if p.get("contract")}
+                    self._cache_initialized = True
+                return projects
+            finally:
+                conn.close()
+
+    def get_projects(
+        self,
+        limit: int = 100,
+        offset: int = 0,
+        search: Optional[str] = None,
+        status: Optional[str] = None,
+        sniper_ready: Optional[bool] = None,
+        min_progress: Optional[float] = None,
+        sort_by: str = "block",
+        order: str = "desc"
+    ) -> Dict[str, Any]:
+        """Queries projects with filtering, pagination, and sorting."""
+        all_projs = self.get_all_projects()
+        
+        filtered = all_projs
+        if search:
+            s = search.lower().strip()
+            filtered = [
+                p for p in filtered
+                if s in p.get("name", "").lower()
+                or s in p.get("symbol", "").lower()
+                or s in p.get("contract", "").lower()
+            ]
+
+        if status:
+            st = status.lower().strip()
+            filtered = [p for p in filtered if p.get("status", "").lower() == st]
+
+        if sniper_ready is not None:
+            filtered = [p for p in filtered if bool(p.get("sniper_ready")) == sniper_ready]
+
+        if min_progress is not None:
+            filtered = [p for p in filtered if float(p.get("progress") or 0.0) >= min_progress]
+
+        reverse = (order.lower() == "desc")
+        if sort_by == "progress":
+            filtered.sort(key=lambda x: float(x.get("progress") or 0.0), reverse=reverse)
+        elif sort_by == "holders":
+            filtered.sort(key=lambda x: int(x.get("holders") or 0), reverse=reverse)
+        elif sort_by == "score":
+            filtered.sort(key=lambda x: float(x.get("score") or 0.0), reverse=reverse)
+        else:
+            filtered.sort(key=lambda x: int(x.get("block") or 0), reverse=reverse)
+
+        total = len(filtered)
+        paginated = filtered[offset : offset + limit]
+        
+        return {
+            "success": True,
+            "total": total,
+            "count": len(paginated),
+            "offset": offset,
+            "limit": limit,
+            "projects": paginated
+        }
+
+    def get_project(self, contract: str) -> Optional[Dict[str, Any]]:
+        c = (contract or "").lower().strip()
+        if not c:
+            return None
+        with self._cache_lock:
+            if c in self._projects_cache:
+                return self._projects_cache[c]
+
+        all_p = self.get_all_projects()
+        with self._cache_lock:
+            return self._projects_cache.get(c)
+
+    def upsert_projects(self, projects: List[Dict[str, Any]]):
+        """Batch upserts projects into SQLite or Supabase and updates in-memory cache."""
+        if not projects:
+            return
+
+        clean_records = []
+        for p in projects:
+            contract = (p.get("contract") or "").lower().strip()
+            if not contract or not contract.startswith("0x"):
+                continue
+            clean_records.append(p)
+
+        if not clean_records:
+            return
+
+        now_ts = int(time.time())
+
+        # 1. Update in-memory cache immediately
+        with self._cache_lock:
+            for p in clean_records:
+                c = p["contract"].lower()
+                if c in self._projects_cache:
+                    self._projects_cache[c].update(p)
+                else:
+                    self._projects_cache[c] = dict(p)
+            self._cache_initialized = True
+
+        # 2. Supabase Cloud Sync
+        if self.mode == "supabase":
+            try:
+                rows = []
+                for p in clean_records:
+                    rows.append({
+                        "contract": p["contract"].lower(),
+                        "name": str(p.get("name", "")),
+                        "symbol": str(p.get("symbol", "")),
+                        "token_id": str(p.get("token_id", "")),
+                        "block": int(p.get("block") or 0),
+                        "progress": float(p.get("progress") or 0.0),
+                        "holders": int(p.get("holders") or 0),
+                        "status": str(p.get("status", "TRACKING")),
+                        "risk_level": str(p.get("risk_level", "SAFE")),
+                        "risk_badge": str(p.get("risk_badge", "🟢 Clean")),
+                        "sniper_ready": bool(p.get("sniper_ready", False)),
+                        "is_proxy_clone": bool(p.get("is_proxy_clone", False)),
+                        "score": float(p.get("score") or 0.0),
+                        "data": p,
+                        "detected_at": str(p.get("detected_at", "")),
+                        "updated_at": now_ts
+                    })
+                if HAS_HTTPX and self._client:
+                    # Supabase upsert requires Prefer: resolution=merge-duplicates
+                    resp = self._client.post(
+                        "/rest/v1/projects?on_conflict=contract",
+                        json=rows,
+                        headers={"Prefer": "resolution=merge-duplicates"}
+                    )
+                    if resp.status_code in (200, 201):
+                        return
+            except Exception as e:
+                print(f"[⚠️ Supabase Upsert Error] {e} - Falling back to local SQLite", flush=True)
+
+        # 3. SQLite Persistence (WAL Mode)
+        with self._lock:
+            conn = self._get_sqlite_connection()
+            try:
+                cur = conn.cursor()
+                payloads = []
+                for p in clean_records:
+                    payloads.append((
+                        p["contract"].lower(),
+                        p.get("name", ""),
+                        p.get("symbol", ""),
+                        p.get("token_id", ""),
+                        int(p.get("block") or 0),
+                        float(p.get("progress") or 0.0),
+                        int(p.get("holders") or 0),
+                        p.get("status", "TRACKING"),
+                        p.get("risk_level", "SAFE"),
+                        p.get("risk_badge", "🟢 Clean"),
+                        1 if p.get("sniper_ready") else 0,
+                        1 if p.get("is_proxy_clone") else 0,
+                        float(p.get("score") or 0.0),
+                        json.dumps(p),
+                        p.get("detected_at", ""),
+                        now_ts
+                    ))
+                cur.executemany("""
+                    INSERT INTO projects (
+                        contract, name, symbol, token_id, block, progress, holders,
+                        status, risk_level, risk_badge, sniper_ready, is_proxy_clone,
+                        score, raw_data, detected_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(contract) DO UPDATE SET
+                        name=excluded.name,
+                        symbol=excluded.symbol,
+                        token_id=excluded.token_id,
+                        block=excluded.block,
+                        progress=excluded.progress,
+                        holders=excluded.holders,
+                        status=excluded.status,
+                        risk_level=excluded.risk_level,
+                        risk_badge=excluded.risk_badge,
+                        sniper_ready=excluded.sniper_ready,
+                        is_proxy_clone=excluded.is_proxy_clone,
+                        score=excluded.score,
+                        raw_data=excluded.raw_data,
+                        detected_at=excluded.detected_at,
+                        updated_at=excluded.updated_at;
+                """, payloads)
+                conn.commit()
+            except Exception as e:
+                print(f"[⚠️ SQLite Upsert Error] {e}", flush=True)
+            finally:
+                conn.close()
+
+    def upsert_project(self, project: Dict[str, Any]):
+        self.upsert_projects([project])
+
+    # -------------------------------------------------------------------------
+    # User Favorites Operations
+    # -------------------------------------------------------------------------
+    def get_favorites(self, wallet: str) -> Dict[str, Any]:
+        w = (wallet or "").lower().strip()
+        if not w:
+            return {"wallet": "", "favorites": [], "updated_at": 0}
+
+        if self.mode == "supabase":
+            try:
+                if HAS_HTTPX and self._client:
+                    resp = self._client.get(f"/rest/v1/user_favorites?wallet=eq.{w}&select=*")
+                    if resp.status_code == 200:
+                        records = resp.json()
+                        if records:
+                            r = records[0]
+                            favs = r.get("favorites", [])
+                            if isinstance(favs, str):
+                                favs = json.loads(favs)
+                            return {
+                                "wallet": w,
+                                "favorites": favs,
+                                "updated_at": r.get("updated_at", 0)
+                            }
+            except Exception as e:
+                print(f"[⚠️ Supabase Favorites Error] {e}", flush=True)
+
+        with self._lock:
+            conn = self._get_sqlite_connection()
+            try:
+                cur = conn.cursor()
+                cur.execute("SELECT favorites, updated_at FROM user_favorites WHERE wallet = ?", (w,))
+                row = cur.fetchone()
+                if row:
+                    favs = json.loads(row["favorites"]) if row["favorites"] else []
+                    return {
+                        "wallet": w,
+                        "favorites": favs,
+                        "updated_at": row["updated_at"]
+                    }
+                return {"wallet": w, "favorites": [], "updated_at": 0}
+            finally:
+                conn.close()
+
+    def save_favorites(self, wallet: str, favorites: List[str], timestamp: Optional[int] = None) -> Dict[str, Any]:
+        w = (wallet or "").lower().strip()
+        clean_favs = [c.lower() for c in favorites if isinstance(c, str) and c.startswith("0x") and len(c) == 42]
+        clean_favs = list(dict.fromkeys(clean_favs))
+        ts = int(timestamp or time.time())
+
+        if self.mode == "supabase":
+            try:
+                if HAS_HTTPX and self._client:
+                    resp = self._client.post(
+                        "/rest/v1/user_favorites?on_conflict=wallet",
+                        json={"wallet": w, "favorites": clean_favs, "updated_at": ts},
+                        headers={"Prefer": "resolution=merge-duplicates"}
+                    )
+                    if resp.status_code in (200, 201):
+                        return {"wallet": w, "favorites": clean_favs, "updated_at": ts}
+            except Exception as e:
+                print(f"[⚠️ Supabase Save Favorites Error] {e}", flush=True)
+
+        with self._lock:
+            conn = self._get_sqlite_connection()
+            try:
+                cur = conn.cursor()
+                cur.execute("""
+                    INSERT INTO user_favorites (wallet, favorites, updated_at)
+                    VALUES (?, ?, ?)
+                    ON CONFLICT(wallet) DO UPDATE SET
+                        favorites=excluded.favorites,
+                        updated_at=excluded.updated_at;
+                """, (w, json.dumps(clean_favs), ts))
+                conn.commit()
+            finally:
+                conn.close()
+
+        return {"wallet": w, "favorites": clean_favs, "updated_at": ts}
+
+
+# Global Singleton Instance
+db = DatabaseManager()
+
