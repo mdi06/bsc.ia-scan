@@ -42,10 +42,12 @@ class DatabaseManager:
         self._lock = threading.RLock()
         self._cache_lock = threading.RLock()
         
-        # In-memory fast cache: {contract_lower: project_dict}
+        # In-memory fast cache: {contract_lower: project_dict} with 3s TTL for cross-process freshness
         self._projects_cache: Dict[str, Dict[str, Any]] = {}
         self._cache_initialized = False
-        
+        self._last_cache_time = 0.0
+        self._cache_ttl = 3.0  # seconds
+
         # Process-safe HTTP client state for Supabase
         self._client_instance = None
         self._client_pid = None
@@ -202,18 +204,22 @@ class DatabaseManager:
             finally:
                 conn.close()
 
-    def get_all_projects(self) -> List[Dict[str, Any]]:
-        """Returns all projects as dictionaries, sorted by block descending."""
+    def get_all_projects(self, force_refresh: bool = False) -> List[Dict[str, Any]]:
+        """Returns all projects as dictionaries, sorted by block descending.
+        Uses in-memory cache with 3s TTL to ensure updates from independent worker processes are reflected.
+        """
+        now = time.time()
         with self._cache_lock:
-            if self._cache_initialized and self._projects_cache:
+            if not force_refresh and self._cache_initialized and self._projects_cache and (now - self._last_cache_time < self._cache_ttl):
                 items = list(self._projects_cache.values())
                 items.sort(key=lambda x: x.get("block", 0) or 0, reverse=True)
                 return items
 
         if self.mode == "supabase":
             try:
-                if HAS_HTTPX and self._client:
-                    resp = self._client.get("/rest/v1/projects?select=*&order=block.desc")
+                client = self.client
+                if HAS_HTTPX and client:
+                    resp = client.get("/rest/v1/projects?select=*&order=block.desc")
                     if resp.status_code == 200:
                         records = resp.json()
                         projects = []
@@ -229,6 +235,7 @@ class DatabaseManager:
                         with self._cache_lock:
                             self._projects_cache = {p["contract"].lower(): p for p in projects if p.get("contract")}
                             self._cache_initialized = True
+                            self._last_cache_time = now
                         return projects
             except Exception as e:
                 print(f"[⚠️ Supabase Read Error] {e}", flush=True)
@@ -250,6 +257,7 @@ class DatabaseManager:
                 with self._cache_lock:
                     self._projects_cache = {p["contract"].lower(): p for p in projects if p.get("contract")}
                     self._cache_initialized = True
+                    self._last_cache_time = now
                 return projects
             finally:
                 conn.close()
@@ -348,6 +356,7 @@ class DatabaseManager:
                 else:
                     self._projects_cache[c] = dict(p)
             self._cache_initialized = True
+            self._last_cache_time = now_ts
 
         # 2. Supabase Cloud Sync
         if self.mode == "supabase":

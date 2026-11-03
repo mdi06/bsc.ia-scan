@@ -74,12 +74,17 @@ def test_process_safe_db_client():
 
 
 def test_async_enrichment_pool_non_blocking():
-    """Verifies worker background enrichment pool is operational."""
+    """Verifies worker background enrichment and candidate analysis pools are operational."""
     assert hasattr(worker, "enrichment_pool")
     assert hasattr(worker, "_enrich_contract_background")
+    assert hasattr(worker, "discovery_pool")
+    assert hasattr(worker, "_process_smart_money_candidate")
+    assert hasattr(worker, "_process_registry_candidate")
     # Submitting a dummy quick task completes asynchronously
     fut = worker.enrichment_pool.submit(lambda x: x * 2, 21)
     assert fut.result(timeout=2.0) == 42
+    fut2 = worker.discovery_pool.submit(lambda x: x + 10, 5)
+    assert fut2.result(timeout=2.0) == 15
 
 
 def test_save_history_delta_support():

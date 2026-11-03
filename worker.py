@@ -30,8 +30,9 @@ from typing import Optional, List, Dict, Any, Tuple
 
 history_lock = threading.Lock()
 
-# Non-blocking background worker pool for slow Web2 enrichment (GoPlus, DexScreener)
+# Non-blocking background worker pools for asynchronous candidate analysis & market enrichment
 enrichment_pool = concurrent.futures.ThreadPoolExecutor(max_workers=3, thread_name_prefix="AlphaEnricher")
+discovery_pool = concurrent.futures.ThreadPoolExecutor(max_workers=4, thread_name_prefix="CandidateAnalyzer")
 
 
 def _enrich_contract_background(rpc: monitor.BscRpcClient, contract_addr: str, deployer_addr: Optional[str], det: dict):
@@ -72,6 +73,185 @@ def _enrich_contract_background(rpc: monitor.BscRpcClient, contract_addr: str, d
         print(f"[⚠️ Background Enrichment Notice {contract_addr}] {e}", flush=True)
 
 
+def _process_smart_money_candidate(rpc, rcv, snd, aid, tx_h, b, tx_val, inp, wallet):
+    """Asynchronously analyzes a candidate contract discovered via smart wallet call."""
+    with history_lock:
+        history = monitor.load_history()
+        if any(item.get("contract", "").lower() == rcv.lower() for item in history):
+            return
+    try:
+        det = monitor.analyze_contract(rpc, rcv, wallet)
+        cls = det.get("classification", {})
+        if monitor.is_system_infra({"contract": rcv, "classification": cls, "name": det.get("name"), "symbol": det.get("symbol"), "max_supply": det.get("max_supply"), "total_minted": det.get("total_minted")}):
+            return
+
+        if len(inp) < 10 or inp in ("", "0x"):
+            mint_cd = "0x"
+            val_str = str(tx_val)
+            p_str = f"{tx_val/1e18:.4f} BNB" if tx_val > 0 else "⭐ FREE"
+            bnb_val = tx_val / 1e18
+            free_m = (tx_val == 0)
+        else:
+            base_cd = det.get("mint_calldata") if det.get("has_mint") else inp
+            mint_cd = monitor.replace_calldata_recipient(base_cd, wallet, original_sender=snd)
+            val_str = det.get("mint_value_wei") or str(tx_val)
+            p_str = det.get("mint_price_str") or (f"{tx_val/1e18:.4f} BNB" if tx_val > 0 else "⭐ FREE")
+            bnb_val = det.get("mint_price_bnb", 0.0) or (tx_val / 1e18)
+            free_m = det.get("has_free_mint", False)
+
+        new_entry = {
+            "block": b,
+            "contract": rcv,
+            "deployer": "",
+            "tx_hash": tx_h,
+            "name": det.get("name") or "New Drop",
+            "symbol": det.get("symbol") or "",
+            "standard": cls.get("standard", ""),
+            "icon": cls.get("icon", ""),
+            "is_paused": det.get("is_paused"),
+            "has_free_mint": free_m,
+            "mint_price_str": p_str,
+            "mint_price_bnb": bnb_val,
+            "mint_value_wei": val_str,
+            "max_supply": det.get("max_supply"),
+            "total_minted": det.get("total_minted", 0),
+            "score": 10,
+            "rating": "🌱 EARLY",
+            "lp_usd": 0,
+            "lp_wbnb": 0,
+            "token_symbol": det.get("symbol") or "",
+            "token_price_usd": 0,
+            "holders": 1,
+            "buys_24h": 1,
+            "buys_1h": 1,
+            "sells_24h": 0,
+            "volume_24h": 0.0,
+            "market_url": det.get("market_url", ""),
+            "pair_url": "",
+            "mint_calldata": mint_cd,
+            "signals": [f"Discovered via smart wallet {aid}"],
+            "detected_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "smart_wallets": [aid],
+            "smart_minters": [aid],
+            "has_refund": det.get("has_refund", False),
+            "security": {},
+            "risk_level": "SAFE",
+            "risk_badge": "🟢 Clean",
+            "risk_flags": [],
+            "sniper_ready": False,
+            "sniper_status": "TRACKING",
+            "sniper_badge": "⏳ Tracking",
+            "sniper_checklist": []
+        }
+        with history_lock:
+            history = monitor.load_history()
+            if not any(item.get("contract", "").lower() == rcv.lower() for item in history):
+                history.insert(0, new_entry)
+                monitor.save_history(history, delta=new_entry)
+                print(f"[🔥 NEW ALPHA DROP DISCOVERED] {det.get('name')} ({rcv}) via {aid}!", flush=True)
+
+        _enrich_contract_background(rpc, rcv, None, det)
+    except Exception as ex:
+        print(f"[⚠️ Smart Money Analysis Notice {rcv}] {ex}", flush=True)
+
+
+def _process_registry_candidate(rpc, tx_h, b, snd, tx_val, inp, wallet, known_infra):
+    """Asynchronously analyzes a candidate Block-0 contract referencing Agent ID registry."""
+    try:
+        rcpt = rpc.get_receipt(tx_h)
+        if not rcpt or int(rcpt.get("status", "0"), 16) != 1:
+            return
+        dep_addr = rcpt.get("contractAddress")
+        if not dep_addr:
+            for log in rcpt.get("logs", []):
+                log_addr = log.get("address")
+                if log_addr and len(log_addr) == 42 and log_addr.lower() not in known_infra:
+                    code = rpc.get_code(log_addr)
+                    if code and len(code) > 2 and monitor.AGENT_ID_BYTES in code:
+                        dep_addr = log_addr
+                        break
+
+        if not dep_addr:
+            return
+        dep_addr = dep_addr.lower()
+        with history_lock:
+            history = monitor.load_history()
+            if any(x.get("contract", "").lower() == dep_addr for x in history):
+                return
+
+        det = monitor.analyze_contract(rpc, dep_addr, wallet)
+        cls = det.get("classification", {})
+        if monitor.is_system_infra({"contract": dep_addr, "classification": cls, "name": det.get("name"), "symbol": det.get("symbol"), "max_supply": det.get("max_supply"), "total_minted": det.get("total_minted")}):
+            return
+
+        if len(inp) < 10 or inp in ("", "0x"):
+            mint_cd = "0x"
+            val_str = str(tx_val)
+            p_str = f"{tx_val/1e18:.4f} BNB" if tx_val > 0 else "⭐ FREE"
+            bnb_val = tx_val / 1e18
+            free_m = (tx_val == 0)
+        else:
+            base_cd = det.get("mint_calldata") if det.get("has_mint") else inp
+            mint_cd = monitor.replace_calldata_recipient(base_cd, wallet, original_sender=snd)
+            val_str = det.get("mint_value_wei") or str(tx_val)
+            p_str = det.get("mint_price_str") or (f"{tx_val/1e18:.4f} BNB" if tx_val > 0 else "⭐ FREE")
+            bnb_val = det.get("mint_price_bnb", 0.0) or (tx_val / 1e18)
+            free_m = det.get("has_free_mint", False)
+
+        new_entry = {
+            "block": b,
+            "contract": dep_addr,
+            "deployer": snd,
+            "tx_hash": tx_h,
+            "name": det.get("name") or "New Drop",
+            "symbol": det.get("symbol") or "",
+            "standard": cls.get("standard", ""),
+            "icon": cls.get("icon", ""),
+            "is_paused": det.get("is_paused"),
+            "has_free_mint": free_m,
+            "mint_price_str": p_str,
+            "mint_price_bnb": bnb_val,
+            "mint_value_wei": val_str,
+            "max_supply": det.get("max_supply"),
+            "total_minted": det.get("total_minted", 0),
+            "score": 10,
+            "rating": "🌱 EARLY",
+            "lp_usd": 0,
+            "lp_wbnb": 0,
+            "token_symbol": det.get("symbol") or "",
+            "token_price_usd": 0,
+            "holders": 1,
+            "buys_24h": 1,
+            "buys_1h": 1,
+            "sells_24h": 0,
+            "volume_24h": 0.0,
+            "market_url": det.get("market_url", ""),
+            "pair_url": "",
+            "mint_calldata": mint_cd,
+            "signals": ["Block-0 Agent ID Registry Drop"],
+            "detected_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "has_refund": det.get("has_refund", False),
+            "security": {},
+            "risk_level": "SAFE",
+            "risk_badge": "🟢 Clean",
+            "risk_flags": [],
+            "sniper_ready": False,
+            "sniper_status": "TRACKING",
+            "sniper_badge": "⏳ Tracking",
+            "sniper_checklist": []
+        }
+        with history_lock:
+            history = monitor.load_history()
+            if not any(x.get("contract", "").lower() == dep_addr for x in history):
+                history.insert(0, new_entry)
+                monitor.save_history(history, delta=new_entry)
+                print(f"[🚨 BLOCK-0 AGENT ID DROP] {det.get('name')} ({dep_addr}) deployed by {snd}!", flush=True)
+
+        _enrich_contract_background(rpc, dep_addr, snd, det)
+    except Exception as e:
+        print(f"[⚠️ Registry Candidate Notice {tx_h}] {e}", flush=True)
+
+
 def run_discovery_loop():
     """Continuous 24/7 headless discovery scanning BSC blocks for smart money & registry drops."""
     print("[🚀 Worker Engine] Initializing 24/7 Autonomous Scanner...", flush=True)
@@ -93,6 +273,7 @@ def run_discovery_loop():
 
     last_block = rpc.get_block_number() - 1
     processed_txs = set()
+    queued_candidates = set()
 
     print(f"[🚀 Worker Engine] Loaded {len(history)} historical drops and {len(smart_wallets)} smart wallets.", flush=True)
     print(f"[📡 Worker Engine] Starting live listener from block #{last_block}...", flush=True)
@@ -156,172 +337,25 @@ def run_discovery_loop():
                                         item["mint_calldata"] = monitor.replace_calldata_recipient(inp, wallet, original_sender=snd)
                                     monitor.save_history(history, delta=item)
                                     print(f"[🧠 Smart Money Inflow] {aid} called {item.get('name')} ({rcv})", flush=True)
-                        if not matching:
-                            try:
-                                det = monitor.analyze_contract(rpc, rcv, wallet)
-                                cls = det.get("classification", {})
-                                if not monitor.is_system_infra({"contract": rcv, "classification": cls, "name": det.get("name"), "symbol": det.get("symbol"), "max_supply": det.get("max_supply"), "total_minted": det.get("total_minted")}):
-                                    if len(inp) < 10 or inp in ("", "0x"):
-                                        mint_cd = "0x"
-                                        val_str = str(tx_val)
-                                        p_str = f"{tx_val/1e18:.4f} BNB" if tx_val > 0 else "⭐ FREE"
-                                        bnb_val = tx_val / 1e18
-                                        free_m = (tx_val == 0)
-                                    else:
-                                        base_cd = det.get("mint_calldata") if det.get("has_mint") else inp
-                                        mint_cd = monitor.replace_calldata_recipient(base_cd, wallet, original_sender=snd)
-                                        val_str = det.get("mint_value_wei") or str(tx_val)
-                                        p_str = det.get("mint_price_str") or (f"{tx_val/1e18:.4f} BNB" if tx_val > 0 else "⭐ FREE")
-                                        bnb_val = det.get("mint_price_bnb", 0.0) or (tx_val / 1e18)
-                                        free_m = det.get("has_free_mint", False)
-
-                                    new_entry = {
-                                        "block": b,
-                                        "contract": rcv,
-                                        "deployer": "",
-                                        "tx_hash": tx_h,
-                                        "name": det.get("name") or "New Drop",
-                                        "symbol": det.get("symbol") or "",
-                                        "standard": cls.get("standard", ""),
-                                        "icon": cls.get("icon", ""),
-                                        "is_paused": det.get("is_paused"),
-                                        "has_free_mint": free_m,
-                                        "mint_price_str": p_str,
-                                        "mint_price_bnb": bnb_val,
-                                        "mint_value_wei": val_str,
-                                        "max_supply": det.get("max_supply"),
-                                        "total_minted": det.get("total_minted", 0),
-                                        "score": 10,
-                                        "rating": "🌱 EARLY",
-                                        "lp_usd": 0,
-                                        "lp_wbnb": 0,
-                                        "token_symbol": det.get("symbol") or "",
-                                        "token_price_usd": 0,
-                                        "holders": 1,
-                                        "buys_24h": 1,
-                                        "buys_1h": 1,
-                                        "sells_24h": 0,
-                                        "volume_24h": 0.0,
-                                        "market_url": det.get("market_url", ""),
-                                        "pair_url": "",
-                                        "mint_calldata": mint_cd,
-                                        "signals": [f"Discovered via smart wallet {aid}"],
-                                        "detected_at": time.strftime("%Y-%m-%d %H:%M:%S"),
-                                        "smart_wallets": [aid],
-                                        "smart_minters": [aid],
-                                        "has_refund": det.get("has_refund", False),
-                                        "security": {},
-                                        "risk_level": "SAFE",
-                                        "risk_badge": "🟢 Clean",
-                                        "risk_flags": [],
-                                        "sniper_ready": False,
-                                        "sniper_status": "TRACKING",
-                                        "sniper_badge": "⏳ Tracking",
-                                        "sniper_checklist": []
-                                    }
-                                    with history_lock:
-                                        history = monitor.load_history()
-                                        history.insert(0, new_entry)
-                                        monitor.save_history(history, delta=new_entry)
-                                    print(f"[🔥 NEW ALPHA DROP DISCOVERED] {det.get('name')} ({rcv}) via {aid}!", flush=True)
-
-                                    # Asynchronously enrich candidate with GoPlus & DexScreener in worker pool
-                                    enrichment_pool.submit(_enrich_contract_background, rpc, rcv, None, det)
-                            except Exception as ex:
-                                print(f"[⚠️ Analysis Error] {ex}", flush=True)
+                        if not matching and rcv not in queued_candidates:
+                            queued_candidates.add(rcv)
+                            # Offload analysis to worker pool: never block the block loop
+                            discovery_pool.submit(_process_smart_money_candidate, rpc, rcv, snd, aid, tx_h, b, tx_val, inp, wallet)
 
                     # 2. Block-0 Agent ID Registry Reference Scanner
-                    if monitor.AGENT_ID_BYTES in inp:
-                        try:
-                            rcpt = rpc.get_receipt(tx_h)
-                            if rcpt and int(rcpt.get("status", "0"), 16) == 1:
-                                dep_addr = rcpt.get("contractAddress")
-                                if not dep_addr:
-                                    cand = tx.get("to")
-                                    if cand and len(cand) == 42 and cand.startswith("0x") and cand.lower() not in known_infra:
-                                        code = rpc.get_code(cand)
-                                        if code and len(code) > 2:
-                                            dep_addr = cand
-
-                                if dep_addr:
-                                    dep_addr = dep_addr.lower()
-                                    with history_lock:
-                                        history = monitor.load_history()
-                                        if not any(x.get("contract", "").lower() == dep_addr for x in history):
-                                            det = monitor.analyze_contract(rpc, dep_addr, wallet)
-                                            cls = det.get("classification", {})
-                                            if not monitor.is_system_infra({"contract": dep_addr, "classification": cls, "name": det.get("name"), "symbol": det.get("symbol"), "max_supply": det.get("max_supply"), "total_minted": det.get("total_minted")}):
-                                                if len(inp) < 10 or inp in ("", "0x"):
-                                                    mint_cd = "0x"
-                                                    val_str = str(tx_val)
-                                                    p_str = f"{tx_val/1e18:.4f} BNB" if tx_val > 0 else "⭐ FREE"
-                                                    bnb_val = tx_val / 1e18
-                                                    free_m = (tx_val == 0)
-                                                else:
-                                                    base_cd = det.get("mint_calldata") if det.get("has_mint") else inp
-                                                    mint_cd = monitor.replace_calldata_recipient(base_cd, wallet, original_sender=snd)
-                                                    val_str = det.get("mint_value_wei") or str(tx_val)
-                                                    p_str = det.get("mint_price_str") or (f"{tx_val/1e18:.4f} BNB" if tx_val > 0 else "⭐ FREE")
-                                                    bnb_val = det.get("mint_price_bnb", 0.0) or (tx_val / 1e18)
-                                                    free_m = det.get("has_free_mint", False)
-
-                                                new_entry = {
-                                                    "block": b,
-                                                    "contract": dep_addr,
-                                                    "deployer": snd,
-                                                    "tx_hash": tx_h,
-                                                    "name": det.get("name") or "New Drop",
-                                                    "symbol": det.get("symbol") or "",
-                                                    "standard": cls.get("standard", ""),
-                                                    "icon": cls.get("icon", ""),
-                                                    "is_paused": det.get("is_paused"),
-                                                    "has_free_mint": free_m,
-                                                    "mint_price_str": p_str,
-                                                    "mint_price_bnb": bnb_val,
-                                                    "mint_value_wei": val_str,
-                                                    "max_supply": det.get("max_supply"),
-                                                    "total_minted": det.get("total_minted", 0),
-                                                    "score": 10,
-                                                    "rating": "🌱 EARLY",
-                                                    "lp_usd": 0,
-                                                    "lp_wbnb": 0,
-                                                    "token_symbol": det.get("symbol") or "",
-                                                    "token_price_usd": 0,
-                                                    "holders": 1,
-                                                    "buys_24h": 1,
-                                                    "buys_1h": 1,
-                                                    "sells_24h": 0,
-                                                    "volume_24h": 0.0,
-                                                    "market_url": det.get("market_url", ""),
-                                                    "pair_url": "",
-                                                    "mint_calldata": mint_cd,
-                                                    "signals": ["Block-0 Agent ID Registry Drop"],
-                                                    "detected_at": time.strftime("%Y-%m-%d %H:%M:%S"),
-                                                    "has_refund": det.get("has_refund", False),
-                                                    "security": {},
-                                                    "risk_level": "SAFE",
-                                                    "risk_badge": "🟢 Clean",
-                                                    "risk_flags": [],
-                                                    "sniper_ready": False,
-                                                    "sniper_status": "TRACKING",
-                                                    "sniper_badge": "⏳ Tracking",
-                                                    "sniper_checklist": []
-                                                }
-                                                history.insert(0, new_entry)
-                                                monitor.save_history(history, delta=new_entry)
-                                                print(f"[🚨 BLOCK-0 AGENT ID DROP] {det.get('name')} ({dep_addr}) deployed by {snd}!", flush=True)
-
-                                                # Asynchronously enrich candidate with GoPlus & DexScreener
-                                                enrichment_pool.submit(_enrich_contract_background, rpc, dep_addr, snd, det)
-                        except Exception as e:
-                            print(f"[⚠️ Tx Error] {e}", flush=True)
+                    if monitor.AGENT_ID_BYTES in inp and tx_h not in queued_candidates:
+                        queued_candidates.add(tx_h)
+                        # Offload registry deployment analysis to worker pool
+                        discovery_pool.submit(_process_registry_candidate, rpc, tx_h, b, snd, tx_val, inp, wallet, known_infra)
 
                 # Update last_block after each successfully inspected block
                 last_block = b
 
-                # Periodic cleanup of processed transactions set
+                # Periodic cleanup of processed sets
                 if len(processed_txs) > 10000:
                     processed_txs.clear()
+                if len(queued_candidates) > 5000:
+                    queued_candidates.clear()
 
         except Exception as e:
             print(f"[⚠️ Engine Loop Error] {e}", flush=True)
