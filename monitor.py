@@ -562,6 +562,30 @@ def is_launchpad_factory(code: str, contract_addr: str = "") -> Tuple[bool, Opti
     return False, None
 
 
+def is_proxy_contract(rpc: BscRpcClient, contract_addr: str) -> Tuple[bool, Optional[str], Optional[str]]:
+    """Checks if a contract address is an EIP-1167, EIP-1967, or Beacon proxy."""
+    try:
+        code = rpc.get_code(contract_addr)
+        if not code or len(code) <= 2:
+            return False, None, None
+        full_code, proxy_type, impl_addr = resolve_full_bytecode(rpc, contract_addr, code)
+        is_proxy = proxy_type is not None
+        return is_proxy, proxy_type, impl_addr
+    except Exception:
+        return False, None, None
+
+
+def detect_factory_pattern(rpc: BscRpcClient, contract_addr: str) -> Tuple[bool, Optional[str]]:
+    """Checks if a contract address is a recognized launchpad / token factory."""
+    try:
+        code = rpc.get_code(contract_addr)
+        if not code or len(code) <= 2:
+            return False, None
+        return is_launchpad_factory(code, contract_addr)
+    except Exception:
+        return False, None
+
+
 def analyze_contract(rpc: BscRpcClient, contract_addr: str, wallet_addr: str) -> Dict[str, Any]:
     classification = classify_asset_type(rpc, contract_addr)
 
