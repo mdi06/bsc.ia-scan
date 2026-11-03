@@ -28,7 +28,7 @@ import monitor
 from db import db
 from typing import Optional, List, Dict, Any, Tuple
 
-history_lock = threading.Lock()
+history_lock = threading.RLock()
 
 # Shared in-memory drop cache inside worker process (eliminates redundant DB reads)
 SHARED_HISTORY = None
@@ -298,7 +298,12 @@ def run_discovery_loop():
         "0x13f4ea83d0bd40e75c8222255bc855a974568dd4"
     }
 
-    last_block = rpc.get_block_number() - 1
+    cur = rpc.get_block_number()
+    while cur is None:
+        print("[⚠️ Worker Engine] Waiting for valid BSC block from RPC...", flush=True)
+        time.sleep(2.0)
+        cur = rpc.get_block_number()
+    last_block = cur - 1
     processed_txs = set()
     queued_candidates = set()
 
@@ -330,6 +335,10 @@ def run_discovery_loop():
                     block = rpc.get_block(b, full_tx=True)
                 except Exception as e:
                     print(f"[⚠️ Block Fetch Notice #{b}] {e}", flush=True)
+                    last_block = b
+                    continue
+
+                if not block or "transactions" not in block:
                     last_block = b
                     continue
 

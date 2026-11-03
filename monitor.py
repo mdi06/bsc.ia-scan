@@ -203,9 +203,14 @@ class BscRpcClient:
                 continue
         return None
 
-    def get_block_number(self) -> int:
+    def get_block_number(self) -> Optional[int]:
         res = self.call("eth_blockNumber", [])
-        return int(res, 16)
+        if res:
+            try:
+                return int(res, 16)
+            except Exception:
+                return None
+        return None
 
     def get_block(self, block_num: int, full_tx: bool = True) -> Dict[str, Any]:
         return self.call("eth_getBlockByNumber", [hex(block_num), full_tx]) or {}

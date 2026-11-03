@@ -39,7 +39,7 @@ run_element_nft_volume_sweeper_loop = worker.run_element_nft_volume_sweeper_loop
 fast_sweep_contract = worker.fast_sweep_contract
 
 history_lock = worker.history_lock
-favorites_lock = threading.Lock()
+favorites_lock = threading.RLock()
 FAVORITES_FILE = os.path.join(os.path.dirname(__file__), "user_favorites.json")
 
 

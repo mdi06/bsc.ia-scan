@@ -239,9 +239,9 @@ class DatabaseManager:
 
                     # 2. Only fetch delta (rows updated since last sync) or initial full load
                     if not self._cache_initialized or not self._projects_cache or force_refresh:
-                        query_path = "/rest/v1/projects?select=*&order=block.desc"
+                        query_path = "/rest/v1/projects?select=*&order=block.desc&limit=10000"
                     else:
-                        query_path = f"/rest/v1/projects?updated_at=gte.{self._last_synced_updated_at}&select=*"
+                        query_path = f"/rest/v1/projects?updated_at=gte.{self._last_synced_updated_at}&select=*&limit=10000"
 
                     resp = client.get(query_path)
                     if resp.status_code == 200:
