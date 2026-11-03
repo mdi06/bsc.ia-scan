@@ -78,15 +78,22 @@ function scheduleCloudFavoritesSync(wallet) {
   }, 600);
 }
 
+const BACKEND_URL = 'https://agent-id-backend.onrender.com';
+
 async function syncFavoritesFromCloud(wallet) {
   if (!wallet) return;
   try {
     let res = null;
     try {
-      res = await fetch(`https://agent-id-monitor.fly.dev/api/favorites?wallet=${wallet.toLowerCase()}&_t=${Date.now()}`);
-      if (!res.ok) throw new Error('Fly fetch failed');
+      res = await fetch(`${BACKEND_URL}/api/favorites?wallet=${wallet.toLowerCase()}&_t=${Date.now()}`);
+      if (!res.ok) throw new Error('Render fetch failed');
     } catch (e) {
-      res = await fetch(`/api/favorites?wallet=${wallet.toLowerCase()}&_t=${Date.now()}`);
+      try {
+        res = await fetch(`https://agent-id-monitor.fly.dev/api/favorites?wallet=${wallet.toLowerCase()}&_t=${Date.now()}`);
+        if (!res.ok) throw new Error('Fly fetch failed');
+      } catch (e2) {
+        res = await fetch(`/api/favorites?wallet=${wallet.toLowerCase()}&_t=${Date.now()}`);
+      }
     }
     if (res && res.ok) {
       const data = await res.json();
@@ -126,13 +133,24 @@ async function pushFavoritesToCloud(wallet) {
     };
     let ok = false;
     try {
-      const res = await fetch('https://agent-id-monitor.fly.dev/api/favorites', {
+      const res = await fetch(`${BACKEND_URL}/api/favorites`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
       });
       if (res.ok) ok = true;
     } catch (e) {}
+
+    if (!ok) {
+      try {
+        const resFly = await fetch('https://agent-id-monitor.fly.dev/api/favorites', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        if (resFly.ok) ok = true;
+      } catch (e) {}
+    }
 
     if (!ok) {
       const resLocal = await fetch('/api/favorites', {
@@ -2212,7 +2230,7 @@ function openWalletModal() {
             <div class="tile-value green">
               <span class="pulse-dot" style="margin-right: 4px;"></span>Active 24/7
             </div>
-            <div class="tile-sub">Fly.io real-time engine</div>
+            <div class="tile-sub">Render 24/7 engine</div>
           </div>
         </div>
 
@@ -2279,7 +2297,7 @@ function openSyncModal() {
       <div style="font-size: 12px; color: var(--text-dim); line-height: 1.6;">
         Your starred favorites and monitored tokens are bound to your wallet address:
         <code style="color: var(--color-cyan);">${activeWallet}</code>.
-        <br/>Watchlists automatically synchronize between desktop and mobile browsers via the 24/7 Fly.io cloud engine.
+        <br/>Watchlists automatically synchronize between desktop and mobile browsers via the 24/7 Render cloud engine.
       </div>
 
       <div class="qr-container">
@@ -2296,7 +2314,7 @@ function openSyncModal() {
 
       <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 14px; font-size: 11px; padding: 8px 12px; background: rgba(0, 255, 136, 0.06); border: 1px solid rgba(0, 255, 136, 0.2); border-radius: 4px;">
         <span>Cloud Sync Status:</span>
-        <strong style="color: var(--color-green);">🟢 Synced (Fly.io 24/7 Engine)</strong>
+        <strong style="color: var(--color-green);">🟢 Synced (Render 24/7 Engine)</strong>
       </div>
     </div>
   `;
@@ -2394,17 +2412,23 @@ async function pollLatestBlock() {
   document.getElementById('latestBlock').textContent = 'Live (BSC 56)';
 }
 
-// Fetch drops from 24/7 Fly.io cloud scanner with local fallback
+// Fetch drops from 24/7 Render cloud scanner with fallback
 async function fetchDrops() {
   try {
     let res;
-    let source = 'Fly.io';
+    let source = 'Render';
     try {
-      res = await fetch(`https://agent-id-monitor.fly.dev/history.json?_t=${Date.now()}`, { cache: 'no-store' });
-      if (!res.ok) throw new Error('Fly fetch failed');
+      res = await fetch(`${BACKEND_URL}/history.json?_t=${Date.now()}`, { cache: 'no-store' });
+      if (!res.ok) throw new Error('Render fetch failed');
     } catch (e) {
-      source = 'Local Cache';
-      res = await fetch(`history.json?_t=${Date.now()}`, { cache: 'no-store' });
+      try {
+        res = await fetch(`https://agent-id-monitor.fly.dev/history.json?_t=${Date.now()}`, { cache: 'no-store' });
+        if (!res.ok) throw new Error('Fly fetch failed');
+        source = 'Fly.io';
+      } catch (e2) {
+        source = 'Local Cache';
+        res = await fetch(`history.json?_t=${Date.now()}`, { cache: 'no-store' });
+      }
     }
     allDrops = await res.json();
 

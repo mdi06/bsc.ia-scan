@@ -8,5 +8,8 @@ __pycache__/
 
 .vercel
 *.mp4
-video_assets/
+video_assets/*.wav
+video_assets/*.mp4
+video_assets/*.jpg
+video_assets/*.png
 
