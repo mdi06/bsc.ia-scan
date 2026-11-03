@@ -58,6 +58,13 @@ class AgentIdServerHandler(SimpleHTTPRequestHandler):
 
     def do_GET(self):
         parsed = urllib.parse.urlparse(self.path)
+        if parsed.path in ("/healthz", "/health"):
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(b'{"status":"ok","service":"agent-id-backend"}')
+            return
+
         if parsed.path in ("/api/favorites", "/favorites"):
             qs = urllib.parse.parse_qs(parsed.query)
             wallet = (qs.get("wallet", [""])[0] or "").lower().strip()

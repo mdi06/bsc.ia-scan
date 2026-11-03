@@ -7,3 +7,6 @@ __pycache__/
 .env
 
 .vercel
+*.mp4
+video_assets/
+
