@@ -24,7 +24,7 @@
   <meta name="twitter:description" content="Real-time autonomous discovery engine tracking 5,000 smart wallets, instant honeypot audits, and new .ai agent deployments on BNB Chain.">
   <meta name="twitter:image" content="https://agent-id-monitor.vercel.app/og-preview.png?v=2">
 
-  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="style.css?v=2.4">
   <link rel="icon" type="image/svg+xml" href="icon.svg">
   <link rel="apple-touch-icon" href="/thumbnail-square.png">
 
@@ -62,7 +62,7 @@
             </svg>
           </span>
           <div class="suite-title-wrap">
-            <strong class="suite-title-text">BNB CHAIN .AI AGENT ID SUITE</strong>
+            <strong class="suite-title-text"><span class="desktop-only">BNB CHAIN .AI AGENT ID SUITE</span><span class="mobile-only">BNB .AI AGENT ID</span></strong>
             <span class="meta-item registry-meta" title="Official Space ID / Binance .ai Agent ID Registry: 0x60B9262456dE011F7d15a54CdD8c48bAaa8B022F"><code>0x60B9...022F</code></span>
           </div>
         </div>
@@ -87,7 +87,7 @@
             </button>
             <button id="connectWalletBtn" class="connect-wallet-btn" aria-label="Connect Web3 Wallet" title="Connect MetaMask, Binance Web3 Wallet, or Rabby for live portfolio sync">
               <span class="wallet-icon">👛</span>
-              <span class="wallet-label" id="walletBtnLabel">Connect Wallet</span>
+              <span class="wallet-label" id="walletBtnLabel"><span class="desktop-only">Connect Wallet</span><span class="mobile-only">Connect</span></span>
             </button>
           </div>
         </div>
@@ -99,13 +99,13 @@
         <div class="nav-primary-row">
           <div class="tabs" role="tablist">
             <button class="tab-btn active" id="tabRadar" data-tab="RADAR" role="tab" aria-selected="true">
-              1: 📡 Live Radar (<span id="radarCount">0</span>)
+              <span class="desktop-only">1: 📡 Live Radar</span><span class="mobile-only">📡 Radar</span> (<span id="radarCount">0</span>)
             </button>
             <button class="tab-btn" id="tabSmart" data-tab="SMART" role="tab" aria-selected="false">
-              2: 🧠 Smart Alpha (<span id="smartCount">0</span>)
+              <span class="desktop-only">2: 🧠 Smart Alpha</span><span class="mobile-only">🧠 Alpha</span> (<span id="smartCount">0</span>)
             </button>
             <button class="tab-btn" id="tabPortfolio" data-tab="PORTFOLIO" role="tab" aria-selected="false">
-              3: 🎒 My Portfolio (<span id="portfolioCount">0</span>)
+              <span class="desktop-only">3: 🎒 My Portfolio</span><span class="mobile-only">🎒 Portfolio</span> (<span id="portfolioCount">0</span>)
             </button>
           </div>
 
@@ -328,7 +328,7 @@
   <!-- Toast Notifications for New Drops (ARIA live region) -->
   <div id="toastContainer" class="toast-container" aria-live="polite" aria-atomic="true"></div>
 
-  <script src="app.js"></script>
+  <script src="app.js?v=2.4"></script>
 </body>
 </html>
 

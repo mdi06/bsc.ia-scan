@@ -1963,14 +1963,14 @@ function updateWalletButtonUI() {
     btn.innerHTML = `
       <span class="wallet-dot"></span>
       <span class="wallet-label">${shortAddr}</span>
-      <span class="wallet-badge-bnb">${userNativeBnbBalance.toFixed(3)} BNB</span>
+      <span class="wallet-badge-bnb desktop-only">${userNativeBnbBalance.toFixed(3)} BNB</span>
     `;
     btn.title = `Connected (${walletProviderName}): ${connectedWallet} - Click for account details`;
   } else {
     btn.classList.remove('connected');
     btn.innerHTML = `
       <span class="wallet-icon">👛</span>
-      <span class="wallet-label">Connect Wallet</span>
+      <span class="wallet-label"><span class="desktop-only">Connect Wallet</span><span class="mobile-only">Connect</span></span>
     `;
     btn.title = 'Connect MetaMask, Binance Web3 Wallet, or Rabby for live portfolio sync';
   }

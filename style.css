@@ -25,6 +25,12 @@
   padding: 0;
 }
 
+html, body {
+  overflow-x: hidden;
+  max-width: 100vw;
+  width: 100%;
+}
+
 body {
   background-color: var(--bg-dark);
   color: var(--text-primary);
@@ -32,7 +38,6 @@ body {
   font-size: 13px;
   line-height: 1.45;
   min-height: 100vh;
-  overflow-x: hidden;
   -webkit-font-smoothing: antialiased;
 }
 
@@ -1356,41 +1361,57 @@ tbody tr.selected {
   .suite-header {
     padding: 8px 10px;
     gap: 6px;
+    max-width: 100vw;
+    box-sizing: border-box;
+    overflow-x: hidden;
   }
 
   .suite-title-row {
     flex-direction: column;
     align-items: stretch;
     gap: 6px;
+    width: 100%;
   }
 
   .suite-brand {
     display: flex;
     align-items: center;
-    justify-content: space-between;
+    justify-content: flex-start;
+    gap: 8px;
     width: 100%;
+    min-width: 0;
   }
 
   .suite-title-wrap {
+    display: flex;
+    align-items: center;
     gap: 6px;
+    min-width: 0;
+    flex: 1;
+    overflow: hidden;
   }
 
   .suite-title-text {
-    font-size: 13px;
+    font-size: clamp(10.5px, 3.2vw, 13px);
     letter-spacing: 0.3px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   .suite-meta {
     display: flex;
     flex-direction: row;
-    flex-wrap: nowrap;
+    flex-wrap: wrap;
     align-items: center;
     justify-content: space-between;
-    gap: 6px;
+    gap: 6px 8px;
     font-size: 10px;
     padding-top: 6px;
     border-top: 1px solid var(--border-dim);
     width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
   }
 
   .suite-telemetry {
@@ -1403,7 +1424,7 @@ tbody tr.selected {
   .suite-actions-group {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 5px;
     margin-left: auto;
     flex-shrink: 0;
   }
@@ -1430,9 +1451,17 @@ tbody tr.selected {
   }
 
   .connect-wallet-btn {
-    padding: 3px 8px;
+    padding: 3px 6px;
     font-size: 10px;
-    gap: 4px;
+    gap: 3px;
+    max-width: 110px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .wallet-badge-bnb {
+    display: none !important;
   }
 
   /* Segmented full-width tabs & compact controls */
@@ -1445,19 +1474,24 @@ tbody tr.selected {
     flex-direction: column;
     align-items: stretch;
     gap: 6px;
+    width: 100%;
   }
 
   .tabs {
     display: flex;
     width: 100%;
+    gap: 4px;
   }
 
   .tab-btn {
-    flex: 1;
+    flex: 1 1 0;
+    min-width: 0;
     text-align: center;
-    padding: 6px 4px;
+    padding: 6px 2px;
     font-size: 11px;
     white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   .search-sort-group {
@@ -1533,38 +1567,45 @@ tbody tr.selected {
     min-width: 100%;
   }
 
-  /* Horizontal swipe stats carousel */
+  /* Mobile Stats Banner: 2-Row Stack with Horizontal Scroll (Collision-Free) */
   .stats-banner {
     display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 6px;
+    padding: 6px 8px;
+    height: auto;
+    min-height: 0;
+    max-height: none;
+    border-radius: 6px;
+    border: 1px solid var(--border-dim);
+    background: var(--bg-surface-elevated);
+    box-sizing: border-box;
+    width: 100%;
+  }
+
+  .stats-macro-group {
+    display: flex;
+    flex-direction: row;
     align-items: center;
     overflow-x: auto;
     flex-wrap: nowrap;
     -webkit-overflow-scrolling: touch;
     scroll-snap-type: x mandatory;
-    gap: 8px;
-    padding: 5px 8px;
-    height: 44px;
-    min-height: 44px;
-    max-height: 44px;
+    gap: 6px;
+    width: 100%;
     scrollbar-width: none;
-    border-radius: 4px;
-    border: 1px solid var(--border-dim);
-    background: var(--bg-surface-elevated);
-    box-sizing: border-box;
+    padding-bottom: 2px;
   }
-  .stats-banner::-webkit-scrollbar {
+  .stats-macro-group::-webkit-scrollbar {
     display: none;
-  }
-
-  .stats-macro-group {
-    display: contents; /* Unwraps children so each card is an individual snap-item in the carousel */
   }
 
   .stat-card {
     flex: 0 0 auto;
     scroll-snap-align: start;
     min-width: max-content;
-    height: 32px;
+    height: 30px;
     background: #08151c;
     padding: 4px 8px;
     border-radius: 4px;
@@ -1579,9 +1620,27 @@ tbody tr.selected {
   }
 
   .stat-card.gainer-card {
+    width: 100%;
+    min-height: 32px;
+    height: auto;
+    background: rgba(255, 215, 0, 0.06);
+    border: 1px solid rgba(255, 215, 0, 0.3);
+    padding: 5px 8px;
+    border-radius: 4px;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    overflow-x: auto;
     flex-wrap: nowrap;
-    gap: 8px;
+    -webkit-overflow-scrolling: touch;
+    gap: 6px;
+    white-space: nowrap;
+    scrollbar-width: none;
     cursor: pointer;
+    box-sizing: border-box;
+  }
+  .stat-card.gainer-card::-webkit-scrollbar {
+    display: none;
   }
 
   .stat-sep {
@@ -1743,6 +1802,8 @@ tbody tr.selected {
     font-size: 15px;
     font-weight: 700;
     color: var(--text-white);
+    min-width: 0;
+    word-break: break-word;
   }
 
   .col-project .sym {
@@ -1758,6 +1819,8 @@ tbody tr.selected {
     display: flex !important;
     align-items: center;
     font-size: 10.5px;
+    min-width: 0;
+    overflow: hidden;
   }
 
   .col-safety {
@@ -1766,6 +1829,8 @@ tbody tr.selected {
     display: flex !important;
     align-items: center;
     font-size: 10.5px;
+    min-width: 0;
+    overflow: hidden;
   }
 
   .col-interest {
@@ -1774,6 +1839,8 @@ tbody tr.selected {
     display: flex !important;
     align-items: center;
     font-size: 10.5px;
+    min-width: 0;
+    overflow: hidden;
   }
 
   /* Row 4: Full width Progress Bar */
@@ -1782,6 +1849,7 @@ tbody tr.selected {
     grid-row: 4;
     width: 100%;
     margin: 2px 0;
+    min-width: 0;
   }
 
   .progress-cell {
@@ -1789,6 +1857,7 @@ tbody tr.selected {
     display: flex;
     align-items: center;
     gap: 6px;
+    min-width: 0;
   }
 
   .prog-tag {
@@ -1796,11 +1865,12 @@ tbody tr.selected {
     width: 65px;
     font-size: 10px;
     font-weight: 700;
+    flex-shrink: 0;
   }
 
   .prog-bar-container {
     flex-grow: 1;
-    min-width: 40px;
+    min-width: 30px;
     height: 6px;
     background: rgba(255, 255, 255, 0.08);
     border-radius: 3px;
@@ -1811,6 +1881,7 @@ tbody tr.selected {
     font-size: 10px;
     white-space: nowrap;
     color: var(--text-dim);
+    flex-shrink: 0;
   }
 
   /* Rows 5 & 6: 2x2 Financial & Liquidity Matrix */
@@ -1824,6 +1895,8 @@ tbody tr.selected {
     padding: 5px 8px;
     font-size: 11px;
     min-height: 42px;
+    min-width: 0;
+    overflow: hidden;
   }
 
   /* Modern Web Guidance: Accessible Label Injection via data-label pseudo-element */
