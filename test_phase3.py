@@ -87,14 +87,18 @@ def test_async_enrichment_pool_non_blocking():
     assert fut2.result(timeout=2.0) == 15
 
 
-def test_save_history_delta_support():
+def test_save_history_delta_support(tmp_path):
     """Verifies monitor.save_history supports delta updates without rewriting whole table."""
     import monitor
     test_hist = [
         {"contract": "0x1111111111111111111111111111111111111111", "name": "Delta Test 1", "block": 100},
         {"contract": "0x2222222222222222222222222222222222222222", "name": "Delta Test 2", "block": 101}
     ]
-    # Saving with delta=test_hist[0] should execute cleanly
-    monitor.save_history(test_hist, delta=test_hist[0])
+    orig_file = monitor.HISTORY_FILE
+    try:
+        monitor.HISTORY_FILE = str(tmp_path / "test_history.json")
+        monitor.save_history(test_hist, delta=test_hist[0])
+    finally:
+        monitor.HISTORY_FILE = orig_file
 
 

@@ -46,7 +46,10 @@ class DatabaseManager:
         self._projects_cache: Dict[str, Dict[str, Any]] = {}
         self._cache_initialized = False
         self._last_cache_time = 0.0
+        self._last_synced_updated_at = 0
         self._cache_ttl = 3.0  # seconds
+        self._cached_json_bytes: Optional[bytes] = None
+        self._cache_dirty = True
 
         # Process-safe HTTP client state for Supabase
         self._client_instance = None
@@ -206,7 +209,7 @@ class DatabaseManager:
 
     def get_all_projects(self, force_refresh: bool = False) -> List[Dict[str, Any]]:
         """Returns all projects as dictionaries, sorted by block descending.
-        Uses in-memory cache with 3s TTL to ensure updates from independent worker processes are reflected.
+        Uses in-memory cache with incremental delta sync to avoid memory churn and re-allocations.
         """
         now = time.time()
         with self._cache_lock:
@@ -219,48 +222,114 @@ class DatabaseManager:
             try:
                 client = self.client
                 if HAS_HTTPX and client:
-                    resp = client.get("/rest/v1/projects?select=*&order=block.desc")
+                    # 1. Quick 40-byte timestamp check if cache already holds data
+                    if not force_refresh and self._cache_initialized and self._projects_cache:
+                        check_resp = client.get("/rest/v1/projects?select=updated_at&order=updated_at.desc&limit=1")
+                        if check_resp.status_code == 200:
+                            top_records = check_resp.json()
+                            if top_records:
+                                latest_ts = int(top_records[0].get("updated_at") or 0)
+                                if latest_ts <= self._last_synced_updated_at:
+                                    # Zero new drops or updates: return existing in-memory cache with zero allocation
+                                    with self._cache_lock:
+                                        self._last_cache_time = now
+                                        items = list(self._projects_cache.values())
+                                        items.sort(key=lambda x: x.get("block", 0) or 0, reverse=True)
+                                        return items
+
+                    # 2. Only fetch delta (rows updated since last sync) or initial full load
+                    if not self._cache_initialized or not self._projects_cache or force_refresh:
+                        query_path = "/rest/v1/projects?select=*&order=block.desc"
+                    else:
+                        query_path = f"/rest/v1/projects?updated_at=gte.{self._last_synced_updated_at}&select=*"
+
+                    resp = client.get(query_path)
                     if resp.status_code == 200:
                         records = resp.json()
-                        projects = []
-                        for r in records:
-                            raw = r.get("data") or {}
-                            if isinstance(raw, str):
-                                try:
-                                    raw = json.loads(raw)
-                                except Exception:
-                                    raw = {}
-                            raw["contract"] = r.get("contract", raw.get("contract", ""))
-                            projects.append(raw)
                         with self._cache_lock:
-                            self._projects_cache = {p["contract"].lower(): p for p in projects if p.get("contract")}
+                            max_ts = self._last_synced_updated_at
+                            for r in records:
+                                raw = r.get("data") or {}
+                                if isinstance(raw, str):
+                                    try:
+                                        raw = json.loads(raw)
+                                    except Exception:
+                                        raw = {}
+                                c = (r.get("contract") or raw.get("contract", "")).lower()
+                                if c:
+                                    raw["contract"] = c
+                                    self._projects_cache[c] = raw
+                                ts = int(r.get("updated_at") or 0)
+                                if ts > max_ts:
+                                    max_ts = ts
+                            self._last_synced_updated_at = max_ts
                             self._cache_initialized = True
+                            self._cache_dirty = True
                             self._last_cache_time = now
-                        return projects
+                            items = list(self._projects_cache.values())
+                            items.sort(key=lambda x: x.get("block", 0) or 0, reverse=True)
+                            return items
             except Exception as e:
                 print(f"[⚠️ Supabase Read Error] {e}", flush=True)
 
-        # Fallback / SQLite
+        # Fallback / SQLite with incremental check
         with self._lock:
             conn = self._get_sqlite_connection()
             try:
                 cur = conn.cursor()
-                cur.execute("SELECT raw_data FROM projects ORDER BY block DESC")
-                rows = cur.fetchall()
-                projects = []
-                for row in rows:
-                    try:
-                        p = json.loads(row["raw_data"])
-                        projects.append(p)
-                    except Exception:
-                        continue
+                if not force_refresh and self._cache_initialized and self._projects_cache:
+                    cur.execute("SELECT MAX(updated_at) FROM projects")
+                    row = cur.fetchone()
+                    latest_ts = row[0] if row and row[0] is not None else 0
+                    if latest_ts <= self._last_synced_updated_at:
+                        with self._cache_lock:
+                            self._last_cache_time = now
+                            items = list(self._projects_cache.values())
+                            items.sort(key=lambda x: x.get("block", 0) or 0, reverse=True)
+                            return items
+
+                if not self._cache_initialized or not self._projects_cache or force_refresh:
+                    cur.execute("SELECT raw_data, updated_at FROM projects ORDER BY block DESC")
+                    rows = cur.fetchall()
+                else:
+                    cur.execute("SELECT raw_data, updated_at FROM projects WHERE updated_at >= ?", (self._last_synced_updated_at,))
+                    rows = cur.fetchall()
+
                 with self._cache_lock:
-                    self._projects_cache = {p["contract"].lower(): p for p in projects if p.get("contract")}
+                    max_ts = self._last_synced_updated_at
+                    for row in rows:
+                        try:
+                            p = json.loads(row["raw_data"])
+                            c = (p.get("contract") or "").lower()
+                            if c:
+                                self._projects_cache[c] = p
+                            ts = row["updated_at"] or 0
+                            if ts > max_ts:
+                                max_ts = ts
+                        except Exception:
+                            continue
+                    self._last_synced_updated_at = max_ts
                     self._cache_initialized = True
+                    self._cache_dirty = True
                     self._last_cache_time = now
-                return projects
+                    items = list(self._projects_cache.values())
+                    items.sort(key=lambda x: x.get("block", 0) or 0, reverse=True)
+                    return items
             finally:
                 conn.close()
+
+    def get_history_json_bytes(self) -> bytes:
+        """Returns pre-encoded, minified UTF-8 JSON bytes of all projects.
+        Caches the bytes in memory to avoid repetitive json.dumps allocations during HTTP requests.
+        """
+        self.get_all_projects()
+        with self._cache_lock:
+            if not self._cached_json_bytes or self._cache_dirty:
+                items = list(self._projects_cache.values())
+                items.sort(key=lambda x: x.get("block", 0) or 0, reverse=True)
+                self._cached_json_bytes = json.dumps(items, separators=(',', ':')).encode("utf-8")
+                self._cache_dirty = False
+            return self._cached_json_bytes
 
     def get_projects(
         self,
@@ -356,7 +425,10 @@ class DatabaseManager:
                 else:
                     self._projects_cache[c] = dict(p)
             self._cache_initialized = True
+            self._cache_dirty = True
             self._last_cache_time = now_ts
+            if now_ts > self._last_synced_updated_at:
+                self._last_synced_updated_at = now_ts
 
         # 2. Supabase Cloud Sync
         if self.mode == "supabase":

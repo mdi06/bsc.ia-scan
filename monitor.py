@@ -3188,10 +3188,10 @@ def save_history(history: List[Dict[str, Any]], delta: Optional[Any] = None):
         except Exception:
             pass
 
-        # 2. Maintain history.json for backwards compatibility / local file inspection
+        # 2. Maintain history.json for backwards compatibility / local file inspection (compact minified)
         tmp_file = HISTORY_FILE + ".tmp"
-        with open(tmp_file, "w") as f:
-            json.dump(final_list, f, indent=2)
+        with open(tmp_file, "w", encoding="utf-8") as f:
+            json.dump(final_list, f, separators=(',', ':'))
         os.replace(tmp_file, HISTORY_FILE)
     except Exception:
         pass

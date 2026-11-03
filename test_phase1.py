@@ -100,54 +100,60 @@ def test_db_favorites_crud(temp_db):
     assert retrieved["updated_at"] == 1730001111
 
 
-def test_fastapi_endpoints():
+def test_fastapi_endpoints(tmp_path):
     """Tests the modernized FastAPI application using TestClient."""
-    client = TestClient(app)
+    import monitor
+    orig_file = monitor.HISTORY_FILE
+    try:
+        monitor.HISTORY_FILE = str(tmp_path / "test_history.json")
+        client = TestClient(app)
 
-    # 1. Health check
-    res = client.get("/healthz")
-    assert res.status_code == 200
-    data = res.json()
-    assert data["status"] == "ok"
-    assert "db_mode" in data
-    assert "project_count" in data
+        # 1. Health check
+        res = client.get("/healthz")
+        assert res.status_code == 200
+        data = res.json()
+        assert data["status"] == "ok"
+        assert "db_mode" in data
+        assert "project_count" in data
 
-    # 2. Virtual history.json endpoint
-    res_hist = client.get("/history.json")
-    assert res_hist.status_code == 200
-    hist_data = res_hist.json()
-    assert isinstance(hist_data, list)
-    assert len(hist_data) > 0
+        # 2. Virtual history.json endpoint
+        res_hist = client.get("/history.json")
+        assert res_hist.status_code == 200
+        hist_data = res_hist.json()
+        assert isinstance(hist_data, list)
+        assert len(hist_data) > 0
 
-    # 3. /api/projects with query filtering
-    res_proj = client.get("/api/projects?limit=5&sort_by=block&order=desc")
-    assert res_proj.status_code == 200
-    proj_data = res_proj.json()
-    assert proj_data["success"] is True
-    assert proj_data["count"] <= 5
-    assert len(proj_data["projects"]) <= 5
+        # 3. /api/projects with query filtering
+        res_proj = client.get("/api/projects?limit=5&sort_by=block&order=desc")
+        assert res_proj.status_code == 200
+        proj_data = res_proj.json()
+        assert proj_data["success"] is True
+        assert proj_data["count"] <= 5
+        assert len(proj_data["projects"]) <= 5
 
-    # 4. /api/favorites validation (invalid wallet)
-    res_bad = client.get("/api/favorites?wallet=invalid")
-    assert res_bad.status_code == 400
+        # 4. /api/favorites validation (invalid wallet)
+        res_bad = client.get("/api/favorites?wallet=invalid")
+        assert res_bad.status_code == 400
 
-    # 5. /api/favorites valid flow
-    test_wallet = "0x8888888888888888888888888888888888888888"
-    post_fav = client.post("/api/favorites", json={
-        "wallet": test_wallet,
-        "favorites": ["0x105d904d64520d9bcefb66af936c2cce59037777"]
-    })
-    assert post_fav.status_code == 200
-    assert post_fav.json()["success"] is True
+        # 5. /api/favorites valid flow
+        test_wallet = "0x8888888888888888888888888888888888888888"
+        post_fav = client.post("/api/favorites", json={
+            "wallet": test_wallet,
+            "favorites": ["0x105d904d64520d9bcefb66af936c2cce59037777"]
+        })
+        assert post_fav.status_code == 200
+        assert post_fav.json()["success"] is True
 
-    get_fav = client.get(f"/api/favorites?wallet={test_wallet}")
-    assert get_fav.status_code == 200
-    assert get_fav.json()["favorites"] == ["0x105d904d64520d9bcefb66af936c2cce59037777"]
+        get_fav = client.get(f"/api/favorites?wallet={test_wallet}")
+        assert get_fav.status_code == 200
+        assert get_fav.json()["favorites"] == ["0x105d904d64520d9bcefb66af936c2cce59037777"]
 
-    # 6. /api/sync
-    sync_res = client.post("/api/sync", json=[
-        {"contract": "0x3333333333333333333333333333333333333333", "name": "Sync Test", "block": 50000000}
-    ])
-    assert sync_res.status_code == 200
-    assert sync_res.json()["success"] is True
+        # 6. /api/sync
+        sync_res = client.post("/api/sync", json=[
+            {"contract": "0x3333333333333333333333333333333333333333", "name": "Sync Test", "block": 50000000}
+        ])
+        assert sync_res.status_code == 200
+        assert sync_res.json()["success"] is True
+    finally:
+        monitor.HISTORY_FILE = orig_file
 

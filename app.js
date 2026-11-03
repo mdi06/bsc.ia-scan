@@ -1344,11 +1344,11 @@ function renderTable() {
       <td class="col-type">${stdBadge}</td>
       <td class="col-safety">${safeBadge}</td>
       <td class="col-interest">${intBadge}</td>
-      <td class="col-holders">${cellHolders}</td>
-      <td class="col-lp">${lpStr}</td>
+      <td class="col-holders" data-label="${isPort ? 'HOLDINGS' : 'HOLDERS'}"><span class="cell-val">${cellHolders}</span></td>
+      <td class="col-lp" data-label="LIQUIDITY"><span class="cell-val">${lpStr}</span></td>
       <td class="col-progress">${progBar}</td>
-      <td class="col-price">${priceStr}</td>
-      <td class="col-floor">${cellFloor}</td>
+      <td class="col-price" data-label="MINT"><span class="cell-val">${priceStr}</span></td>
+      <td class="col-floor" data-label="FLOOR"><span class="cell-val">${cellFloor}</span></td>
       <td class="col-action">${actBtn}</td>
     `;
     tbody.appendChild(tr);
@@ -2531,25 +2531,71 @@ async function pollLatestBlock() {
   document.getElementById('latestBlock').textContent = 'Live (BSC 56)';
 }
 
-// Fetch drops from 24/7 Render cloud scanner with fallback
+// Strict timeout fetch helper to guarantee cold-boot backends never freeze initial UI
+async function fetchWithTimeout(url, options = {}, timeoutMs = 3500) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, { ...options, signal: controller.signal });
+    return res;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// Fetch drops from 24/7 Render cloud scanner with resilient local fast-path
 async function fetchDrops() {
   try {
+    // Fast path: On initial load, immediately populate from local history.json (<30ms)
+    // so mobile/desktop users see the complete market table instantly with zero white/blank space.
+    if (isInitialLoad && (!allDrops || allDrops.length === 0)) {
+      try {
+        const localRes = await fetchWithTimeout(`history.json?_t=${Date.now()}`, { cache: 'no-store' }, 2000);
+        if (localRes.ok) {
+          const localDrops = await localRes.json();
+          if (Array.isArray(localDrops) && localDrops.length > 0) {
+            allDrops = localDrops;
+            allDrops.forEach(drop => {
+              const c = (drop.contract || '').toLowerCase();
+              if (c) knownContracts.add(c);
+              if (isSniperReady(drop) && c) knownSniperReady.add(c);
+            });
+            const smartDrops = allDrops.filter(d => (d.smart_wallets && d.smart_wallets.length > 0) || (d.smart_minters && d.smart_minters.length > 0));
+            const rEl = document.getElementById('radarCount');
+            if (rEl) rEl.textContent = allDrops.length;
+            const sEl = document.getElementById('smartCount');
+            if (sEl) sEl.textContent = smartDrops.length;
+            renderStats(allDrops);
+            renderTable();
+            const timeStr = new Date().toLocaleTimeString();
+            const syncEl = document.getElementById('syncTime');
+            if (syncEl) syncEl.textContent = `Synced ${timeStr}`;
+          }
+        }
+      } catch (err) {
+        console.warn('Initial fast cache load bypassed:', err);
+      }
+    }
+
     let res;
     let source = 'Render';
     try {
-      res = await fetch(`${BACKEND_URL}/history.json?_t=${Date.now()}`, { cache: 'no-store' });
+      res = await fetchWithTimeout(`${BACKEND_URL}/history.json?_t=${Date.now()}`, { cache: 'no-store' }, 3500);
       if (!res.ok) throw new Error('Render fetch failed');
     } catch (e) {
       try {
-        res = await fetch(`https://agent-id-monitor.fly.dev/history.json?_t=${Date.now()}`, { cache: 'no-store' });
+        res = await fetchWithTimeout(`https://agent-id-monitor.fly.dev/history.json?_t=${Date.now()}`, { cache: 'no-store' }, 3500);
         if (!res.ok) throw new Error('Fly fetch failed');
         source = 'Fly.io';
       } catch (e2) {
         source = 'Local Cache';
-        res = await fetch(`history.json?_t=${Date.now()}`, { cache: 'no-store' });
+        res = await fetchWithTimeout(`history.json?_t=${Date.now()}`, { cache: 'no-store' }, 3500);
       }
     }
-    allDrops = await res.json();
+    const freshDrops = await res.json();
+    if (Array.isArray(freshDrops) && freshDrops.length > 0) {
+      allDrops = freshDrops;
+    }
 
     // Check for newly discovered markets
     const newlyFound = [];

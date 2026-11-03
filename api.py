@@ -15,7 +15,7 @@ import json
 from typing import Optional, List
 from fastapi import FastAPI, Query, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 import uvicorn
 
@@ -38,6 +38,26 @@ app.add_middleware(
 )
 
 
+def run_api_memory_guard():
+    """Periodically trims heap memory and runs garbage collection in the API process."""
+    import gc
+    while True:
+        time.sleep(300)
+        gc.collect()
+        try:
+            import ctypes
+            ctypes.CDLL("libc.so.6").malloc_trim(0)
+        except Exception:
+            pass
+
+
+@app.on_event("startup")
+def startup_event():
+    import threading
+    t = threading.Thread(target=run_api_memory_guard, daemon=True, name="ApiMemoryGuard")
+    t.start()
+
+
 @app.get("/healthz")
 @app.get("/health")
 def health_check():
@@ -51,10 +71,11 @@ def health_check():
 
 @app.get("/history.json")
 def get_virtual_history_json():
-    """Virtual high-speed endpoint serving full cached project list (eliminates 1MB disk read)."""
-    projects = db.get_all_projects()
-    return JSONResponse(
-        content=projects,
+    """Virtual high-speed endpoint serving full pre-encoded JSON bytes (0 serialization allocations)."""
+    data = db.get_history_json_bytes()
+    return Response(
+        content=data,
+        media_type="application/json",
         headers={"Cache-Control": "no-cache, no-store, must-revalidate"}
     )
 

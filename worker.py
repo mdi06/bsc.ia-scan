@@ -30,9 +30,36 @@ from typing import Optional, List, Dict, Any, Tuple
 
 history_lock = threading.Lock()
 
-# Non-blocking background worker pools for asynchronous candidate analysis & market enrichment
+# Shared in-memory drop cache inside worker process (eliminates redundant DB reads)
+SHARED_HISTORY = None
+_last_shared_history_time = 0.0
+
+def get_shared_history(force_refresh: bool = False) -> List[Dict[str, Any]]:
+    global SHARED_HISTORY, _last_shared_history_time
+    now = time.time()
+    with history_lock:
+        if force_refresh or SHARED_HISTORY is None or (now - _last_shared_history_time > 15.0):
+            SHARED_HISTORY = monitor.load_history()
+            _last_shared_history_time = now
+        return SHARED_HISTORY
+
+# Reusable thread pools for worker tasks
 enrichment_pool = concurrent.futures.ThreadPoolExecutor(max_workers=3, thread_name_prefix="AlphaEnricher")
-discovery_pool = concurrent.futures.ThreadPoolExecutor(max_workers=4, thread_name_prefix="CandidateAnalyzer")
+discovery_pool = concurrent.futures.ThreadPoolExecutor(max_workers=3, thread_name_prefix="CandidateAnalyzer")
+fast_sweep_pool = concurrent.futures.ThreadPoolExecutor(max_workers=3, thread_name_prefix="FastSweeper")
+
+
+def run_memory_guard_loop():
+    """Periodically trims heap memory and calls gc.collect() every 5m to prevent RSS fragmentation."""
+    import gc
+    while True:
+        time.sleep(300)
+        gc.collect()
+        try:
+            import ctypes
+            ctypes.CDLL("libc.so.6").malloc_trim(0)
+        except Exception:
+            pass
 
 
 def _enrich_contract_background(rpc: monitor.BscRpcClient, contract_addr: str, deployer_addr: Optional[str], det: dict):
@@ -40,7 +67,7 @@ def _enrich_contract_background(rpc: monitor.BscRpcClient, contract_addr: str, d
     try:
         mkt = monitor.analyze_market_interest(rpc, contract_addr, deployer_addr, det)
         with history_lock:
-            history = monitor.load_history()
+            history = get_shared_history()
             for item in history:
                 if item.get("contract", "").lower() == contract_addr.lower():
                     item["score"] = mkt.get("score", item.get("score", 0))
@@ -76,7 +103,7 @@ def _enrich_contract_background(rpc: monitor.BscRpcClient, contract_addr: str, d
 def _process_smart_money_candidate(rpc, rcv, snd, aid, tx_h, b, tx_val, inp, wallet):
     """Asynchronously analyzes a candidate contract discovered via smart wallet call."""
     with history_lock:
-        history = monitor.load_history()
+        history = get_shared_history()
         if any(item.get("contract", "").lower() == rcv.lower() for item in history):
             return
     try:
@@ -144,7 +171,7 @@ def _process_smart_money_candidate(rpc, rcv, snd, aid, tx_h, b, tx_val, inp, wal
             "sniper_checklist": []
         }
         with history_lock:
-            history = monitor.load_history()
+            history = get_shared_history()
             if not any(item.get("contract", "").lower() == rcv.lower() for item in history):
                 history.insert(0, new_entry)
                 monitor.save_history(history, delta=new_entry)
@@ -175,7 +202,7 @@ def _process_registry_candidate(rpc, tx_h, b, snd, tx_val, inp, wallet, known_in
             return
         dep_addr = dep_addr.lower()
         with history_lock:
-            history = monitor.load_history()
+            history = get_shared_history()
             if any(x.get("contract", "").lower() == dep_addr for x in history):
                 return
 
@@ -241,7 +268,7 @@ def _process_registry_candidate(rpc, tx_h, b, snd, tx_val, inp, wallet, known_in
             "sniper_checklist": []
         }
         with history_lock:
-            history = monitor.load_history()
+            history = get_shared_history()
             if not any(x.get("contract", "").lower() == dep_addr for x in history):
                 history.insert(0, new_entry)
                 monitor.save_history(history, delta=new_entry)
@@ -259,7 +286,7 @@ def run_discovery_loop():
 
     rpc = monitor.BscRpcClient(monitor.RPC_ENDPOINTS)
     wallet = monitor.DEFAULT_WALLET
-    history = monitor.load_history()
+    history = get_shared_history()
     smart_wallets = monitor.load_smart_wallets()
 
     known_infra = {
@@ -324,7 +351,7 @@ def run_discovery_loop():
                     if snd in smart_wallets and rcv and rcv not in known_infra and (len(inp) >= 10 or tx_val > 0):
                         aid = smart_wallets[snd]
                         with history_lock:
-                            history = monitor.load_history()
+                            history = get_shared_history()
                             matching = [item for item in history if item.get("contract", "").lower() == rcv]
                             if matching:
                                 item = matching[0]
@@ -415,7 +442,7 @@ def run_fast_track_progress_sweeper_loop():
     while True:
         try:
             with history_lock:
-                history = monitor.load_history()
+                history = get_shared_history()
 
             if not history:
                 time.sleep(15)
@@ -459,9 +486,8 @@ def run_fast_track_progress_sweeper_loop():
                 sniper_alerts = []
                 changed_items = []
 
-                with concurrent.futures.ThreadPoolExecutor(max_workers=6) as executor:
-                    futures = [executor.submit(fast_sweep_contract, rpc, it) for it in sweep_targets]
-                    for fut in concurrent.futures.as_completed(futures):
+                futures = [fast_sweep_pool.submit(fast_sweep_contract, rpc, it) for it in sweep_targets]
+                for fut in concurrent.futures.as_completed(futures):
                         try:
                             c_addr, minted, supply, holders, changed = fut.result()
                             if not c_addr or not changed:
@@ -534,7 +560,7 @@ def run_market_dynamics_updater_loop():
     while True:
         try:
             with history_lock:
-                history = monitor.load_history()
+                history = get_shared_history()
 
             if not history:
                 time.sleep(20)
@@ -674,7 +700,7 @@ def run_element_nft_volume_sweeper_loop():
     while True:
         try:
             with history_lock:
-                history = monitor.load_history()
+                history = get_shared_history()
 
             if not history:
                 time.sleep(60)
@@ -780,7 +806,7 @@ def run_proxy_factory_watcher_loop():
 
                             if is_proxy or is_fac:
                                 with history_lock:
-                                    history = monitor.load_history()
+                                    history = get_shared_history()
                                     existing = [x for x in history if x.get("contract", "").lower() == cand.lower()]
                                     if existing:
                                         ex_item = existing[0]
@@ -850,7 +876,7 @@ def run_proxy_factory_watcher_loop():
                                         "factory_badge": fac_badge
                                     }
                                     with history_lock:
-                                        history = monitor.load_history()
+                                        history = get_shared_history()
                                         if not any(x.get("contract", "").lower() == cand.lower() for x in history):
                                             history.insert(0, new_entry)
                                             monitor.save_history(history, delta=new_entry)
@@ -874,7 +900,8 @@ def start_worker():
         (run_market_dynamics_updater_loop, "MarketUpdater"),
         (run_fast_track_progress_sweeper_loop, "FastSweeper"),
         (run_element_nft_volume_sweeper_loop, "ElementSweeper"),
-        (run_proxy_factory_watcher_loop, "ProxyWatcher")
+        (run_proxy_factory_watcher_loop, "ProxyWatcher"),
+        (run_memory_guard_loop, "MemoryGuard")
     ]
     threads = []
     for fn, name in task_specs:
