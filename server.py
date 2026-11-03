@@ -228,6 +228,11 @@ def run_decoupled_system(port=8080):
 
 
 if __name__ == "__main__":
+    try:
+        multiprocessing.set_start_method("spawn", force=False)
+    except RuntimeError:
+        pass
+
     port = int(os.environ.get("PORT", 8080))
 
     if "--worker-only" in sys.argv:

@@ -26,8 +26,50 @@ import urllib.parse
 
 import monitor
 from db import db
+from typing import Optional, List, Dict, Any, Tuple
 
 history_lock = threading.Lock()
+
+# Non-blocking background worker pool for slow Web2 enrichment (GoPlus, DexScreener)
+enrichment_pool = concurrent.futures.ThreadPoolExecutor(max_workers=3, thread_name_prefix="AlphaEnricher")
+
+
+def _enrich_contract_background(rpc: monitor.BscRpcClient, contract_addr: str, deployer_addr: Optional[str], det: dict):
+    """Enriches newly discovered drop with GoPlus security & DexScreener metrics asynchronously."""
+    try:
+        mkt = monitor.analyze_market_interest(rpc, contract_addr, deployer_addr, det)
+        with history_lock:
+            history = monitor.load_history()
+            for item in history:
+                if item.get("contract", "").lower() == contract_addr.lower():
+                    item["score"] = mkt.get("score", item.get("score", 0))
+                    item["rating"] = mkt.get("rating", item.get("rating", "🌱 EARLY"))
+                    item["lp_usd"] = mkt.get("lp_usd", 0)
+                    item["lp_wbnb"] = mkt.get("lp_wbnb", 0)
+                    if mkt.get("token_symbol"):
+                        item["token_symbol"] = mkt["token_symbol"]
+                    item["token_price_usd"] = mkt.get("token_price_usd", 0)
+                    item["holders"] = max(item.get("holders", 1), mkt.get("holders", 1))
+                    item["buys_24h"] = max(item.get("buys_24h", 0), mkt.get("buys_24h", 0))
+                    item["buys_1h"] = max(item.get("buys_1h", 0), mkt.get("buys_1h", 0))
+                    item["sells_24h"] = mkt.get("sells_24h", 0)
+                    item["volume_24h"] = mkt.get("volume_24h", 0.0)
+                    if mkt.get("pair_url"):
+                        item["pair_url"] = mkt["pair_url"]
+                    if mkt.get("security"):
+                        item["security"] = mkt["security"]
+                    item["risk_level"] = mkt.get("risk_level", "SAFE")
+                    item["risk_badge"] = mkt.get("risk_badge", "🟢 Clean")
+                    item["risk_flags"] = mkt.get("risk_flags", [])
+                    item["sniper_ready"] = mkt.get("sniper_ready", False)
+                    item["sniper_status"] = mkt.get("sniper_status", "TRACKING")
+                    item["sniper_badge"] = mkt.get("sniper_badge", "⏳ Tracking")
+                    item["sniper_checklist"] = mkt.get("sniper_checklist", [])
+                    monitor.save_history(history, delta=item)
+                    print(f"[🧠 Alpha Drop Enriched] {item.get('name')} ({contract_addr}) Score: {item['score']} | {item['risk_badge']}", flush=True)
+                    break
+    except Exception as e:
+        print(f"[⚠️ Background Enrichment Notice {contract_addr}] {e}", flush=True)
 
 
 def run_discovery_loop():
@@ -58,9 +100,18 @@ def run_discovery_loop():
     while True:
         try:
             curr_block = rpc.get_block_number()
+            if curr_block is None:
+                time.sleep(1.0)
+                continue
+
             if curr_block <= last_block:
                 time.sleep(1.0)
                 continue
+
+            # Fast catch-up if scanner was lagging behind real-time
+            if curr_block - last_block > 30:
+                print(f"[📡 Fast Catch-Up] Scanner was {curr_block - last_block} blocks behind. Jumping to #{curr_block - 10}...", flush=True)
+                last_block = curr_block - 10
 
             # Process up to 10 blocks per tick to prevent starvation without skipping
             blocks_to_process = min(curr_block - last_block, 10)
@@ -71,6 +122,7 @@ def run_discovery_loop():
                     block = rpc.get_block(b, full_tx=True)
                 except Exception as e:
                     print(f"[⚠️ Block Fetch Notice #{b}] {e}", flush=True)
+                    last_block = b
                     continue
 
                 txs = block.get("transactions", [])
@@ -102,14 +154,13 @@ def run_discovery_loop():
                                     item["smart_minters"] = list(cur_sm)
                                     if (not item.get("mint_calldata") or item.get("mint_calldata") in ("0x", "0x1249c58b")) and len(inp) >= 10:
                                         item["mint_calldata"] = monitor.replace_calldata_recipient(inp, wallet, original_sender=snd)
-                                    monitor.save_history(history)
+                                    monitor.save_history(history, delta=item)
                                     print(f"[🧠 Smart Money Inflow] {aid} called {item.get('name')} ({rcv})", flush=True)
                         if not matching:
                             try:
                                 det = monitor.analyze_contract(rpc, rcv, wallet)
                                 cls = det.get("classification", {})
                                 if not monitor.is_system_infra({"contract": rcv, "classification": cls, "name": det.get("name"), "symbol": det.get("symbol"), "max_supply": det.get("max_supply"), "total_minted": det.get("total_minted")}):
-                                    mkt = monitor.analyze_market_interest(rpc, rcv, None, det, history=history)
                                     if len(inp) < 10 or inp in ("", "0x"):
                                         mint_cd = "0x"
                                         val_str = str(tx_val)
@@ -140,37 +191,42 @@ def run_discovery_loop():
                                         "mint_value_wei": val_str,
                                         "max_supply": det.get("max_supply"),
                                         "total_minted": det.get("total_minted", 0),
-                                        "score": mkt.get("score", 0),
-                                        "rating": mkt.get("rating", "N/A"),
-                                        "lp_usd": mkt.get("lp_usd", 0),
-                                        "lp_wbnb": mkt.get("lp_wbnb", 0),
-                                        "token_symbol": mkt.get("token_symbol", ""),
-                                        "token_price_usd": mkt.get("token_price_usd", 0),
-                                        "holders": mkt.get("holders", 1),
-                                        "buys_24h": mkt.get("buys_24h", 1),
-                                        "buys_1h": mkt.get("buys_1h", 1),
-                                        "sells_24h": mkt.get("sells_24h", 0),
-                                        "volume_24h": mkt.get("volume_24h", 0.0),
+                                        "score": 10,
+                                        "rating": "🌱 EARLY",
+                                        "lp_usd": 0,
+                                        "lp_wbnb": 0,
+                                        "token_symbol": det.get("symbol") or "",
+                                        "token_price_usd": 0,
+                                        "holders": 1,
+                                        "buys_24h": 1,
+                                        "buys_1h": 1,
+                                        "sells_24h": 0,
+                                        "volume_24h": 0.0,
                                         "market_url": det.get("market_url", ""),
-                                        "pair_url": mkt.get("pair_url", ""),
+                                        "pair_url": "",
                                         "mint_calldata": mint_cd,
-                                        "signals": mkt.get("signals", [f"Discovered via smart wallet {aid}"]),
+                                        "signals": [f"Discovered via smart wallet {aid}"],
                                         "detected_at": time.strftime("%Y-%m-%d %H:%M:%S"),
                                         "smart_wallets": [aid],
                                         "smart_minters": [aid],
                                         "has_refund": det.get("has_refund", False),
-                                        "security": mkt.get("security", {}),
-                                        "risk_level": mkt.get("risk_level", "SAFE"),
-                                        "risk_badge": mkt.get("risk_badge", "🟢 Clean"),
-                                        "risk_flags": mkt.get("risk_flags", []),
-                                        "sniper_ready": mkt.get("sniper_ready", False),
-                                        "sniper_status": mkt.get("sniper_status", "TRACKING"),
-                                        "sniper_badge": mkt.get("sniper_badge", "⏳ Tracking"),
-                                        "sniper_checklist": mkt.get("sniper_checklist", [])
+                                        "security": {},
+                                        "risk_level": "SAFE",
+                                        "risk_badge": "🟢 Clean",
+                                        "risk_flags": [],
+                                        "sniper_ready": False,
+                                        "sniper_status": "TRACKING",
+                                        "sniper_badge": "⏳ Tracking",
+                                        "sniper_checklist": []
                                     }
-                                    history.insert(0, new_entry)
-                                    monitor.save_history(history)
+                                    with history_lock:
+                                        history = monitor.load_history()
+                                        history.insert(0, new_entry)
+                                        monitor.save_history(history, delta=new_entry)
                                     print(f"[🔥 NEW ALPHA DROP DISCOVERED] {det.get('name')} ({rcv}) via {aid}!", flush=True)
+
+                                    # Asynchronously enrich candidate with GoPlus & DexScreener in worker pool
+                                    enrichment_pool.submit(_enrich_contract_background, rpc, rcv, None, det)
                             except Exception as ex:
                                 print(f"[⚠️ Analysis Error] {ex}", flush=True)
 
@@ -195,8 +251,6 @@ def run_discovery_loop():
                                             det = monitor.analyze_contract(rpc, dep_addr, wallet)
                                             cls = det.get("classification", {})
                                             if not monitor.is_system_infra({"contract": dep_addr, "classification": cls, "name": det.get("name"), "symbol": det.get("symbol"), "max_supply": det.get("max_supply"), "total_minted": det.get("total_minted")}):
-                                                mkt = monitor.analyze_market_interest(rpc, dep_addr, None, det, history=history)
-
                                                 if len(inp) < 10 or inp in ("", "0x"):
                                                     mint_cd = "0x"
                                                     val_str = str(tx_val)
@@ -227,43 +281,47 @@ def run_discovery_loop():
                                                     "mint_value_wei": val_str,
                                                     "max_supply": det.get("max_supply"),
                                                     "total_minted": det.get("total_minted", 0),
-                                                    "score": mkt.get("score", 0),
-                                                    "rating": mkt.get("rating", "N/A"),
-                                                    "lp_usd": mkt.get("lp_usd", 0),
-                                                    "lp_wbnb": mkt.get("lp_wbnb", 0),
-                                                    "token_symbol": mkt.get("token_symbol", ""),
-                                                    "token_price_usd": mkt.get("token_price_usd", 0),
-                                                    "holders": mkt.get("holders", 1),
-                                                    "buys_24h": mkt.get("buys_24h", 1),
-                                                    "buys_1h": mkt.get("buys_1h", 1),
-                                                    "sells_24h": mkt.get("sells_24h", 0),
-                                                    "volume_24h": mkt.get("volume_24h", 0.0),
+                                                    "score": 10,
+                                                    "rating": "🌱 EARLY",
+                                                    "lp_usd": 0,
+                                                    "lp_wbnb": 0,
+                                                    "token_symbol": det.get("symbol") or "",
+                                                    "token_price_usd": 0,
+                                                    "holders": 1,
+                                                    "buys_24h": 1,
+                                                    "buys_1h": 1,
+                                                    "sells_24h": 0,
+                                                    "volume_24h": 0.0,
                                                     "market_url": det.get("market_url", ""),
-                                                    "pair_url": mkt.get("pair_url", ""),
+                                                    "pair_url": "",
                                                     "mint_calldata": mint_cd,
-                                                    "signals": mkt.get("signals", ["Block-0 Agent ID Registry Drop"]),
+                                                    "signals": ["Block-0 Agent ID Registry Drop"],
                                                     "detected_at": time.strftime("%Y-%m-%d %H:%M:%S"),
                                                     "has_refund": det.get("has_refund", False),
-                                                    "security": mkt.get("security", {}),
-                                                    "risk_level": mkt.get("risk_level", "SAFE"),
-                                                    "risk_badge": mkt.get("risk_badge", "🟢 Clean"),
-                                                    "risk_flags": mkt.get("risk_flags", []),
-                                                    "sniper_ready": mkt.get("sniper_ready", False),
-                                                    "sniper_status": mkt.get("sniper_status", "TRACKING"),
-                                                    "sniper_badge": mkt.get("sniper_badge", "⏳ Tracking"),
-                                                    "sniper_checklist": mkt.get("sniper_checklist", [])
+                                                    "security": {},
+                                                    "risk_level": "SAFE",
+                                                    "risk_badge": "🟢 Clean",
+                                                    "risk_flags": [],
+                                                    "sniper_ready": False,
+                                                    "sniper_status": "TRACKING",
+                                                    "sniper_badge": "⏳ Tracking",
+                                                    "sniper_checklist": []
                                                 }
                                                 history.insert(0, new_entry)
-                                                monitor.save_history(history)
+                                                monitor.save_history(history, delta=new_entry)
                                                 print(f"[🚨 BLOCK-0 AGENT ID DROP] {det.get('name')} ({dep_addr}) deployed by {snd}!", flush=True)
+
+                                                # Asynchronously enrich candidate with GoPlus & DexScreener
+                                                enrichment_pool.submit(_enrich_contract_background, rpc, dep_addr, snd, det)
                         except Exception as e:
                             print(f"[⚠️ Tx Error] {e}", flush=True)
+
+                # Update last_block after each successfully inspected block
+                last_block = b
 
                 # Periodic cleanup of processed transactions set
                 if len(processed_txs) > 10000:
                     processed_txs.clear()
-
-            last_block = end_block
 
         except Exception as e:
             print(f"[⚠️ Engine Loop Error] {e}", flush=True)
@@ -365,6 +423,7 @@ def run_fast_track_progress_sweeper_loop():
             if sweep_targets:
                 updates_count = 0
                 sniper_alerts = []
+                changed_items = []
 
                 with concurrent.futures.ThreadPoolExecutor(max_workers=6) as executor:
                     futures = [executor.submit(fast_sweep_contract, rpc, it) for it in sweep_targets]
@@ -408,13 +467,14 @@ def run_fast_track_progress_sweeper_loop():
                                         sniper_alerts.append(it)
 
                                     updates_count += 1
+                                    changed_items.append(it)
                                     break
                         except Exception:
                             pass
 
                 if updates_count > 0:
                     with history_lock:
-                        monitor.save_history(history)
+                        monitor.save_history(history, delta=changed_items)
                     print(f"[⚡ Fast-Track Sweeper] Updated on-chain progress for {updates_count} contracts.", flush=True)
 
                 for alert_item in sniper_alerts:
@@ -472,9 +532,11 @@ def run_market_dynamics_updater_loop():
                 time.sleep(0.5)
 
             updated_count = 0
+            changed_items = []
             for item in history:
                 c = (item.get("contract") or "").lower()
                 pair = dex_updates.get(c)
+                item_changed = False
 
                 if pair:
                     try:
@@ -500,6 +562,7 @@ def run_market_dynamics_updater_loop():
                         item["buys_1h"] = int(h1.get("buys") or 0)
 
                         updated_count += 1
+                        item_changed = True
                     except Exception:
                         pass
                 else:
@@ -512,6 +575,7 @@ def run_market_dynamics_updater_loop():
                             item["lp_wbnb"] = wbnb_reserve
                             item["lp_usd"] = wbnb_reserve * 705.0
                             updated_count += 1
+                            item_changed = True
                     except Exception:
                         pass
 
@@ -553,9 +617,12 @@ def run_market_dynamics_updater_loop():
                 except Exception:
                     pass
 
+                if item_changed:
+                    changed_items.append(item)
+
             if updated_count > 0:
                 with history_lock:
-                    monitor.save_history(history)
+                    monitor.save_history(history, delta=changed_items)
                 print(f"[📈 Market Engine] Synced live market & mint metrics for {updated_count} contracts.", flush=True)
 
         except Exception as e:
@@ -617,13 +684,14 @@ def run_element_nft_volume_sweeper_loop():
                             item["signals"] = list(set((item.get("signals") or []) + [eva["signal"]]))
 
                         updated_count += 1
+                        changed_items.append(item)
                 except Exception:
                     pass
                 time.sleep(1.0)
 
             if updated_count > 0:
                 with history_lock:
-                    monitor.save_history(history)
+                    monitor.save_history(history, delta=changed_items)
                 print(f"[💎 Element NFT Sweeper] Synced secondary volume/floor for {updated_count} NFT drops.", flush=True)
 
         except Exception as e:
@@ -693,14 +761,13 @@ def run_proxy_factory_watcher_loop():
                                             ex_item["factory_badge"] = fac_badge
                                             changed = True
                                         if changed:
-                                            monitor.save_history(history)
+                                            monitor.save_history(history, delta=ex_item)
                                             print(f"[🧩 PROXY / FACTORY UPDATED] {ex_item.get('name')} ({cand}) Proxy: {proxy_type} | Factory: {fac_badge}", flush=True)
                                         continue
 
                                 det = monitor.analyze_contract(rpc, cand, monitor.DEFAULT_WALLET)
                                 cls = det.get("classification", {})
                                 if not monitor.is_system_infra({"contract": cand, "classification": cls, "name": det.get("name"), "symbol": det.get("symbol"), "max_supply": det.get("max_supply"), "total_minted": det.get("total_minted")}):
-                                    mkt = monitor.analyze_market_interest(rpc, cand, None, det, history=history)
                                     new_entry = {
                                         "block": b,
                                         "contract": cand,
@@ -717,31 +784,31 @@ def run_proxy_factory_watcher_loop():
                                         "mint_value_wei": det.get("mint_value_wei", "0"),
                                         "max_supply": det.get("max_supply"),
                                         "total_minted": det.get("total_minted", 0),
-                                        "score": mkt.get("score", 0),
-                                        "rating": mkt.get("rating", "N/A"),
-                                        "lp_usd": mkt.get("lp_usd", 0),
-                                        "lp_wbnb": mkt.get("lp_wbnb", 0),
-                                        "token_symbol": mkt.get("token_symbol", ""),
-                                        "token_price_usd": mkt.get("token_price_usd", 0),
-                                        "holders": mkt.get("holders", 1),
-                                        "buys_24h": mkt.get("buys_24h", 0),
-                                        "buys_1h": mkt.get("buys_1h", 0),
-                                        "sells_24h": mkt.get("sells_24h", 0),
-                                        "volume_24h": mkt.get("volume_24h", 0.0),
+                                        "score": 10,
+                                        "rating": "🌱 EARLY",
+                                        "lp_usd": 0,
+                                        "lp_wbnb": 0,
+                                        "token_symbol": det.get("symbol") or "",
+                                        "token_price_usd": 0,
+                                        "holders": 1,
+                                        "buys_24h": 0,
+                                        "buys_1h": 0,
+                                        "sells_24h": 0,
+                                        "volume_24h": 0.0,
                                         "market_url": det.get("market_url", ""),
-                                        "pair_url": mkt.get("pair_url", ""),
+                                        "pair_url": "",
                                         "mint_calldata": det.get("mint_calldata", "0x1249c58b"),
-                                        "signals": mkt.get("signals", [f"Factory Clone: {proxy_type or 'Proxy'} via {fac_badge or 'Factory'}"]),
+                                        "signals": [f"Factory Clone: {proxy_type or 'Proxy'} via {fac_badge or 'Factory'}"],
                                         "detected_at": time.strftime("%Y-%m-%d %H:%M:%S"),
                                         "has_refund": det.get("has_refund", False),
-                                        "security": mkt.get("security", {}),
-                                        "risk_level": mkt.get("risk_level", "SAFE"),
-                                        "risk_badge": mkt.get("risk_badge", "🟢 Clean"),
-                                        "risk_flags": mkt.get("risk_flags", []),
-                                        "sniper_ready": mkt.get("sniper_ready", False),
-                                        "sniper_status": mkt.get("sniper_status", "TRACKING"),
-                                        "sniper_badge": mkt.get("sniper_badge", "⏳ Tracking"),
-                                        "sniper_checklist": mkt.get("sniper_checklist", []),
+                                        "security": {},
+                                        "risk_level": "SAFE",
+                                        "risk_badge": "🟢 Clean",
+                                        "risk_flags": [],
+                                        "sniper_ready": False,
+                                        "sniper_status": "TRACKING",
+                                        "sniper_badge": "⏳ Tracking",
+                                        "sniper_checklist": [],
                                         "is_proxy_clone": proxy_type is not None,
                                         "proxy_type": proxy_type,
                                         "master_implementation": impl_addr,
@@ -752,8 +819,11 @@ def run_proxy_factory_watcher_loop():
                                         history = monitor.load_history()
                                         if not any(x.get("contract", "").lower() == cand.lower() for x in history):
                                             history.insert(0, new_entry)
-                                            monitor.save_history(history)
+                                            monitor.save_history(history, delta=new_entry)
                                             print(f"[🧩 NEW PROXY CLONE DETECTED] {new_entry['name']} ({cand}) [{proxy_type}] Master: {impl_addr}", flush=True)
+
+                                            # Offload market interest enrichment to background pool
+                                            enrichment_pool.submit(_enrich_contract_background, rpc, cand, snd, det)
 
                 last_block = curr_block
         except Exception as e:
@@ -763,22 +833,31 @@ def run_proxy_factory_watcher_loop():
 
 
 def start_worker():
-    """Starts all 5 background worker threads in this isolated producer process."""
+    """Starts all 5 background worker threads in this isolated producer process with auto-healing supervision."""
     print("[⚙️ Worker Process] Starting all 5 autonomous discovery & sweeper loops...", flush=True)
-    threads = [
-        threading.Thread(target=run_discovery_loop, name="DiscoveryLoop", daemon=True),
-        threading.Thread(target=run_market_dynamics_updater_loop, name="MarketUpdater", daemon=True),
-        threading.Thread(target=run_fast_track_progress_sweeper_loop, name="FastSweeper", daemon=True),
-        threading.Thread(target=run_element_nft_volume_sweeper_loop, name="ElementSweeper", daemon=True),
-        threading.Thread(target=run_proxy_factory_watcher_loop, name="ProxyWatcher", daemon=True)
+    task_specs = [
+        (run_discovery_loop, "DiscoveryLoop"),
+        (run_market_dynamics_updater_loop, "MarketUpdater"),
+        (run_fast_track_progress_sweeper_loop, "FastSweeper"),
+        (run_element_nft_volume_sweeper_loop, "ElementSweeper"),
+        (run_proxy_factory_watcher_loop, "ProxyWatcher")
     ]
-    for t in threads:
+    threads = []
+    for fn, name in task_specs:
+        t = threading.Thread(target=fn, name=name, daemon=True)
         t.start()
+        threads.append(t)
 
-    # Keep worker process alive
+    # Supervise worker threads and restart any that crash
     try:
         while True:
-            time.sleep(1.0)
+            time.sleep(5.0)
+            for idx, (fn, name) in enumerate(task_specs):
+                if not threads[idx].is_alive():
+                    print(f"[⚠️ Worker Supervisor] Thread '{name}' died! Auto-restarting...", flush=True)
+                    new_t = threading.Thread(target=fn, name=name, daemon=True)
+                    new_t.start()
+                    threads[idx] = new_t
     except (KeyboardInterrupt, SystemExit):
         print("[⚙️ Worker Process] Stopping worker...", flush=True)
 

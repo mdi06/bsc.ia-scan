@@ -46,26 +46,50 @@ class DatabaseManager:
         self._projects_cache: Dict[str, Dict[str, Any]] = {}
         self._cache_initialized = False
         
-        # HTTP client for Supabase
-        if HAS_HTTPX and self.mode == "supabase":
-            self._client = httpx.Client(
-                base_url=self.supabase_url,
-                headers={
-                    "apikey": self.supabase_key,
-                    "Authorization": f"Bearer {self.supabase_key}",
-                    "Content-Type": "application/json",
-                    "Prefer": "return=representation"
-                },
-                timeout=15.0
-            )
-        else:
-            self._client = None
+        # Process-safe HTTP client state for Supabase
+        self._client_instance = None
+        self._client_pid = None
 
         if self.mode == "sqlite":
             self._init_sqlite()
         
         # Auto-seed on startup if needed
         self.seed_from_local_json()
+
+    @property
+    def client(self) -> Optional["httpx.Client"]:
+        """Process-safe and thread-safe httpx.Client provider.
+        Automatically recreates a fresh client if invoked in a newly forked child process.
+        """
+        if self.mode != "supabase" or not HAS_HTTPX:
+            return None
+        cur_pid = os.getpid()
+        with self._lock:
+            if getattr(self, "_client_pid", None) != cur_pid or getattr(self, "_client_instance", None) is None:
+                old = getattr(self, "_client_instance", None)
+                if old is not None:
+                    try:
+                        old.close()
+                    except Exception:
+                        pass
+                self._client_instance = httpx.Client(
+                    base_url=self.supabase_url,
+                    headers={
+                        "apikey": self.supabase_key,
+                        "Authorization": f"Bearer {self.supabase_key}",
+                        "Content-Type": "application/json",
+                        "Prefer": "return=representation"
+                    },
+                    timeout=httpx.Timeout(10.0, connect=5.0, read=10.0, write=10.0),
+                    limits=httpx.Limits(max_keepalive_connections=10, max_connections=20)
+                )
+                self._client_pid = cur_pid
+            return self._client_instance
+
+    @property
+    def _client(self):
+        """Backward compatibility for any references to self._client."""
+        return self.client
 
     # -------------------------------------------------------------------------
     # SQLite Initialization & Connection
@@ -348,14 +372,24 @@ class DatabaseManager:
                         "detected_at": str(p.get("detected_at", "")),
                         "updated_at": now_ts
                     })
-                if HAS_HTTPX and self._client:
+                client = self.client
+                if HAS_HTTPX and client:
                     # Supabase upsert requires Prefer: resolution=merge-duplicates
-                    resp = self._client.post(
-                        "/rest/v1/projects?on_conflict=contract",
-                        json=rows,
-                        headers={"Prefer": "resolution=merge-duplicates"}
-                    )
-                    if resp.status_code in (200, 201):
+                    # Batch in chunks of 50 to avoid request size limits and connection timeouts
+                    batch_size = 50
+                    all_ok = True
+                    for i in range(0, len(rows), batch_size):
+                        chunk = rows[i : i + batch_size]
+                        resp = client.post(
+                            "/rest/v1/projects?on_conflict=contract",
+                            json=chunk,
+                            headers={"Prefer": "resolution=merge-duplicates"}
+                        )
+                        if resp.status_code not in (200, 201):
+                            all_ok = False
+                            print(f"[⚠️ Supabase Chunk Error] HTTP {resp.status_code}: {resp.text[:120]}", flush=True)
+                            break
+                    if all_ok:
                         return
             except Exception as e:
                 print(f"[⚠️ Supabase Upsert Error] {e} - Falling back to local SQLite", flush=True)

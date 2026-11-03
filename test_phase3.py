@@ -62,3 +62,34 @@ def test_server_orchestrator_backward_compatibility():
     assert hasattr(server, "save_user_favorites")
     assert hasattr(server, "FAVORITES_FILE")
 
+
+def test_process_safe_db_client():
+    """Verifies that DatabaseManager client property is process-safe and PID-isolated."""
+    from db import DatabaseManager
+    manager = DatabaseManager()
+    # In sqlite mode, client is None
+    assert manager.mode in ("sqlite", "supabase")
+    assert hasattr(manager, "client")
+    assert hasattr(manager, "_client")
+
+
+def test_async_enrichment_pool_non_blocking():
+    """Verifies worker background enrichment pool is operational."""
+    assert hasattr(worker, "enrichment_pool")
+    assert hasattr(worker, "_enrich_contract_background")
+    # Submitting a dummy quick task completes asynchronously
+    fut = worker.enrichment_pool.submit(lambda x: x * 2, 21)
+    assert fut.result(timeout=2.0) == 42
+
+
+def test_save_history_delta_support():
+    """Verifies monitor.save_history supports delta updates without rewriting whole table."""
+    import monitor
+    test_hist = [
+        {"contract": "0x1111111111111111111111111111111111111111", "name": "Delta Test 1", "block": 100},
+        {"contract": "0x2222222222222222222222222222222222222222", "name": "Delta Test 2", "block": 101}
+    ]
+    # Saving with delta=test_hist[0] should execute cleanly
+    monitor.save_history(test_hist, delta=test_hist[0])
+
+

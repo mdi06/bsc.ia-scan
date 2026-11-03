@@ -3164,7 +3164,7 @@ def load_history() -> List[Dict[str, Any]]:
     return items
 
 
-def save_history(history: List[Dict[str, Any]]):
+def save_history(history: List[Dict[str, Any]], delta: Optional[Any] = None):
     try:
         clean_history = [x for x in history if not is_system_infra(x)]
         seen = set()
@@ -3178,7 +3178,13 @@ def save_history(history: List[Dict[str, Any]]):
         # 1. Primary: Save to Database (Supabase / SQLite in WAL mode)
         try:
             from db import db
-            db.upsert_projects(final_list)
+            if delta is not None:
+                if isinstance(delta, dict):
+                    db.upsert_projects([delta])
+                elif isinstance(delta, list):
+                    db.upsert_projects(delta)
+            else:
+                db.upsert_projects(final_list)
         except Exception:
             pass
 
