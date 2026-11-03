@@ -31421,5 +31421,10 @@
     "current_multiplier": 0.0,
     "mint_cost_usd": 0.0,
     "secondary_price_usd": 0.0
+  },
+  {
+    "contract": "0x3333333333333333333333333333333333333333",
+    "name": "Sync Test",
+    "block": 50000000
   }
 ]

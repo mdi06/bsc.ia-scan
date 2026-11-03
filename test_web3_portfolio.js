@@ -80,7 +80,14 @@ console.log('✔ evaluatePortfolioExit Element NFT Surge: PASS');
 console.log('All Web3 Portfolio unit tests passed successfully!');
 
 // 6. Test Wallet-Bound Storage Scoping
-const { getFavoritesStorageKey, setWatchOnlyWallet, disconnectWallet } = require('./app.js');
+const {
+  getFavoritesStorageKey,
+  setWatchOnlyWallet,
+  disconnectWallet,
+  MULTICALL3_ADDRESS,
+  encodeMulticall3Aggregate3,
+  decodeMulticall3Aggregate3
+} = require('./app.js');
 
 assert.strictEqual(getFavoritesStorageKey(), 'agent_id_favorites', 'Default key should be guest favorites');
 setWatchOnlyWallet('0xa15bb4aedc1b3426159c3cacf8548cf09506a20a');
@@ -88,3 +95,42 @@ assert.strictEqual(getFavoritesStorageKey(), 'agent_id_favorites_0xa15bb4aedc1b3
 disconnectWallet();
 assert.strictEqual(getFavoritesStorageKey(), 'agent_id_favorites', 'Key should revert to guest on disconnect');
 console.log('✔ Wallet-Bound Storage Scoping & Reset: PASS');
+
+// 7. Test Multicall3 ABI Encoding & Decoding (Phase 2 Optimization)
+assert.strictEqual(MULTICALL3_ADDRESS.toLowerCase(), '0xca11bde05977b3631167028862be2a173976ca11', 'Must match canonical Multicall3 contract');
+
+const testCalls = [
+  { target: MULTICALL3_ADDRESS, allowFailure: true, callData: '0x4d2301cc' + pad32('0xa15BB4AEdC1b3426159C3cACf8548Cf09506A20a') },
+  { target: tokenAddr, allowFailure: true, callData: '0x70a08231' + pad32('0xa15BB4AEdC1b3426159C3cACf8548Cf09506A20a') }
+];
+
+const encoded = encodeMulticall3Aggregate3(testCalls);
+assert(encoded.startsWith('0x82ad56cb'), 'Must start with aggregate3 selector 0x82ad56cb');
+assert(encoded.length > 200, 'Must contain packed Call3 structs');
+console.log('✔ encodeMulticall3Aggregate3: PASS');
+
+// Test decoding valid response with 1 success and 1 simulated revert failure
+const mockHex = '0x' +
+  pad32(32) + // offset to Result[]
+  pad32(2) +  // count = 2
+  pad32(64) + // offset to item 0 (2 words = 64 bytes)
+  pad32(192) + // offset to item 1 (64 + 128 = 192 bytes)
+  // Item 0: success=true, balance=1000000000000000000 (1 ether)
+  pad32(1) +  // success: true
+  pad32(64) + // offset to returnData
+  pad32(32) + // length: 32 bytes
+  pad32(1000000000000000000n) +
+  // Item 1: success=false (revert isolation)
+  pad32(0) +  // success: false
+  pad32(64) + // offset to returnData
+  pad32(0) +  // length: 0 bytes
+  '';
+
+const decoded = decodeMulticall3Aggregate3(mockHex);
+assert.strictEqual(decoded.length, 2, 'Should decode exactly 2 results');
+assert.strictEqual(decoded[0].success, true, 'Item 0 must be success');
+assert.strictEqual(BigInt(decoded[0].returnData), 1000000000000000000n, 'Item 0 returnData must match 1 ETH');
+assert.strictEqual(decoded[1].success, false, 'Item 1 must isolate revert (success: false)');
+console.log('✔ decodeMulticall3Aggregate3 with revert isolation: PASS');
+
+console.log('🎉 All Web3 & Multicall3 tests verified successfully!');

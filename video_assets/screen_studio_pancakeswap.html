@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Screen Studio - PancakeSwap V2 Take-Profit</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      width: 1920px;
+      height: 1080px;
+      background: #02070c;
+      overflow: hidden;
+      position: relative;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      user-select: none;
+    }
+
+    /* Ambient background gradient & soft edge glow - Screen Studio style */
+    .bg-gradient {
+      position: absolute;
+      inset: 0;
+      background: radial-gradient(circle at 20% 25%, rgba(240, 185, 11, 0.15) 0%, transparent 45%),
+                  radial-gradient(circle at 80% 75%, rgba(0, 240, 255, 0.14) 0%, transparent 45%),
+                  radial-gradient(circle at 50% 50%, rgba(20, 24, 10, 0.45) 0%, transparent 70%);
+      pointer-events: none;
+    }
+    .bg-grid {
+      position: absolute;
+      inset: 0;
+      background-image: 
+        linear-gradient(rgba(240, 185, 11, 0.035) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(240, 185, 11, 0.035) 1px, transparent 1px);
+      background-size: 40px 40px;
+      pointer-events: none;
+    }
+
+    /* Virtual Camera Stage */
+    #camera-stage {
+      position: absolute;
+      left: 0;
+      top: 0;
+      width: 1920px;
+      height: 1080px;
+      transform-origin: 0 0;
+      will-change: transform;
+    }
+
+    /* macOS Window Container */
+    .window-container {
+      position: absolute;
+      left: 200px;
+      top: 90px;
+      width: 1520px;
+      height: 900px;
+      background: #040c12;
+      border-radius: 16px;
+      box-shadow: 0 35px 110px rgba(0, 0, 0, 0.9), 0 0 0 1px rgba(255, 255, 255, 0.12);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    /* macOS Window Titlebar */
+    .window-titlebar {
+      height: 42px;
+      background: #07131d;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      display: flex;
+      align-items: center;
+      padding: 0 16px;
+      position: relative;
+    }
+    .window-dots {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .dot {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+    }
+    .dot-red { background: #ff5f56; border: 1px solid #e0443e; }
+    .dot-yellow { background: #ffbd2e; border: 1px solid #dea123; }
+    .dot-green { background: #27c93f; border: 1px solid #1aab29; }
+
+    .window-urlbar {
+      position: absolute;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 440px;
+      height: 26px;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 7px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      font-size: 12px;
+      font-family: monospace;
+      color: #94a3b8;
+    }
+    .url-lock {
+      font-size: 11px;
+      color: #f0b90b;
+    }
+
+    /* App Frame */
+    .app-frame {
+      flex: 1;
+      width: 100%;
+      height: calc(100% - 42px);
+      border: none;
+      background: #03080c;
+    }
+
+    /* Custom Floating Mouse Cursor */
+    #cursor-wrapper {
+      position: absolute;
+      left: 0;
+      top: 0;
+      pointer-events: none;
+      z-index: 999999;
+      transform-origin: 3px 3px;
+    }
+    .cursor-svg {
+      width: 26px;
+      height: 26px;
+      filter: drop-shadow(0 3px 8px rgba(0, 0, 0, 0.6));
+    }
+    .click-ripple {
+      position: absolute;
+      left: 3px;
+      top: 3px;
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      border: 2px solid rgba(240, 185, 11, 0.9);
+      transform: translate(-50%, -50%) scale(0);
+      opacity: 0;
+      pointer-events: none;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="bg-gradient"></div>
+  <div class="bg-grid"></div>
+
+  <!-- Virtual Camera Stage -->
+  <div id="camera-stage">
+    <div class="window-container">
+      <div class="window-titlebar">
+        <div class="window-dots">
+          <div class="dot dot-red"></div>
+          <div class="dot dot-yellow"></div>
+          <div class="dot dot-green"></div>
+        </div>
+        <div class="window-urlbar">
+          <span class="url-lock">🔒</span> agent-id-monitor.vercel.app
+        </div>
+      </div>
+      <iframe class="app-frame" id="appIframe" src="http://127.0.0.1:8099/index.html"></iframe>
+    </div>
+
+    <!-- Animated High-DPI Cursor -->
+    <div id="cursor-wrapper">
+      <svg class="cursor-svg" viewBox="0 0 24 24" fill="none">
+        <path d="M3 2L19 14L11.5 15.5L8 22L3 2Z" fill="#ffffff" stroke="#111111" stroke-width="1.8" stroke-linejoin="round"/>
+      </svg>
+      <div class="click-ripple" id="clickRipple"></div>
+    </div>
+  </div>
+
+  <script>
+    // Smoothstep interpolation
+    function smoothstep(min, max, value) {
+      const x = Math.max(0, Math.min(1, (value - min) / (max - min)));
+      return x * x * (3 - 2 * x);
+    }
+    function lerp(a, b, t) {
+      return a + (b - a) * t;
+    }
+
+    const stage = document.getElementById("camera-stage");
+    const cursor = document.getElementById("cursor-wrapper");
+    const ripple = document.getElementById("clickRipple");
+    const iframe = document.getElementById("appIframe");
+
+    // Camera keyframe trajectory
+    // [time, scale, focusX, focusY]
+    const cameraKeyframes = [
+      [0.0,  1.0,   960, 540], // Wide establishing shot
+      [1.6,  1.0,   960, 540], // Start zoom
+      [3.0,  1.48,  760, 520], // Zoom in on AVESAKE row (Row 5: LP $8,777)
+      [3.8,  1.48,  760, 520], // Hold click
+      [4.6,  1.42,  960, 580], // Pan to center PancakeSwap Take-Profit section
+      [7.2,  1.42,  960, 580], // Focus on PancakeSwap 1-Click Exit & CLI
+      [8.0,  1.42,  960, 480], // Click close modal
+      [9.0,  1.52,  720, 240], // Pan to Tab 3 (My Portfolio)
+      [11.2, 1.52,  720, 240], // Portfolio active with Take-Profit triggers
+      [12.4, 1.0,   960, 540], // Smooth zoom out to wide
+      [14.5, 1.0,   960, 540]  // Final rest
+    ];
+
+    // Cursor keyframe trajectory
+    // [time, cursorX, cursorY, isClicking]
+    const cursorKeyframes = [
+      [0.0,  1400, 750, false],
+      [1.5,  1100, 620, false],
+      [2.5,  680,  520, false], // Over AVESAKE Row (BEP-20 / LP $8,777)
+      [3.1,  680,  520, true],  // Click AVESAKE Row
+      [3.4,  680,  520, false],
+      [4.6,  850,  660, false], // Over "🥞 1-Click Swap on PancakeSwap ↗"
+      [5.4,  850,  660, false], // Pause on PancakeSwap button
+      [6.1,  1160, 715, false], // Over "Copy Exit CLI" button
+      [6.4,  1160, 715, true],  // Click "Copy Exit CLI"
+      [6.7,  1160, 715, false],
+      [7.4,  1130, 240, false], // Move to "Close" button
+      [7.7,  1130, 240, true],  // Click Close
+      [8.0,  1130, 240, false],
+      [8.8,  720,  235, false], // Over "3: 🎒 My Portfolio" Tab
+      [9.1,  720,  235, true],  // Click Portfolio Tab
+      [9.4,  720,  235, false],
+      [10.4, 600,  310, false], // Inspect Portfolio Exit Signals
+      [11.6, 760,  450, false], // Hover across Portfolio holdings
+      [13.0, 960,  600, false], // Glide to center rest
+      [14.5, 960,  600, false]
+    ];
+
+    function evaluateTrajectory(keyframes, t) {
+      if (t <= keyframes[0][0]) return keyframes[0].slice(1);
+      if (t >= keyframes[keyframes.length - 1][0]) return keyframes[keyframes.length - 1].slice(1);
+
+      for (let i = 0; i < keyframes.length - 1; i++) {
+        const k0 = keyframes[i];
+        const k1 = keyframes[i + 1];
+        if (t >= k0[0] && t <= k1[0]) {
+          const progress = smoothstep(k0[0], k1[0], t);
+          const result = [];
+          for (let j = 1; j < k0.length; j++) {
+            if (typeof k0[j] === 'boolean') {
+              result.push(k0[j] || (k1[j] && progress > 0.85));
+            } else {
+              result.push(lerp(k0[j], k1[j], progress));
+            }
+          }
+          return result;
+        }
+      }
+      return keyframes[0].slice(1);
+    }
+
+    // App state triggers
+    let tokenRowTriggered = false;
+    let scrolledModal = false;
+    let copyTriggered = false;
+    let closeTriggered = false;
+    let portfolioTabTriggered = false;
+
+    window.setVideoTime = function(t) {
+      // 1. Evaluate Camera Position
+      const [scale, focusX, focusY] = evaluateTrajectory(cameraKeyframes, t);
+      const transX = 960 - (focusX * scale);
+      const transY = 540 - (focusY * scale);
+      stage.style.transform = `translate(${transX.toFixed(2)}px, ${transY.toFixed(2)}px) scale(${scale.toFixed(3)})`;
+
+      // 2. Evaluate Cursor Position & Click
+      const [curX, curY, isClick] = evaluateTrajectory(cursorKeyframes, t);
+      cursor.style.transform = `translate(${curX.toFixed(1)}px, ${curY.toFixed(1)}px)`;
+
+      if (isClick) {
+        cursor.style.transform += ` scale(0.88)`;
+        ripple.style.opacity = "1";
+        ripple.style.transform = "translate(-50%, -50%) scale(2.6)";
+        ripple.style.borderColor = "rgba(240, 185, 11, 0.9)";
+      } else {
+        ripple.style.opacity = "0";
+        ripple.style.transform = "translate(-50%, -50%) scale(0)";
+      }
+
+      // 3. Iframe state triggers
+      try {
+        const doc = iframe.contentWindow && iframe.contentWindow.document;
+        const win = iframe.contentWindow;
+        if (!doc || !win) return;
+
+        // At t = 3.1s: Click AVESAKE row (row 5)
+        if (t >= 3.1 && t < 7.7 && !tokenRowTriggered) {
+          tokenRowTriggered = true;
+          closeTriggered = false;
+          const rows = doc.querySelectorAll('#tableBody tr');
+          for (const r of rows) {
+            if (r.innerText.includes('AVESAKE')) {
+              r.click();
+              break;
+            }
+          }
+        }
+
+        // At t = 4.0s: Smoothly scroll modal down to the PancakeSwap Take-Profit section!
+        if (t >= 4.0 && t < 7.7) {
+          const mc = doc.getElementById('modalContent');
+          if (mc) {
+            const scrollProgress = smoothstep(4.0, 4.8, t);
+            mc.scrollTop = Math.round(scrollProgress * 420);
+          }
+        }
+
+        // At t = 6.4s: Click "Copy Exit CLI" button
+        if (t >= 6.4 && !copyTriggered) {
+          copyTriggered = true;
+          const btns = doc.querySelectorAll('.copy-btn');
+          // Click the exit CLI copy button
+          if (btns.length > 0) {
+            const lastBtn = btns[btns.length - 1];
+            if (lastBtn) lastBtn.click();
+          }
+        }
+
+        // At t = 7.7s: Close modal
+        if (t >= 7.7 && !closeTriggered) {
+          closeTriggered = true;
+          tokenRowTriggered = false;
+          const modal = doc.getElementById('inspectModal');
+          if (modal && modal.open) modal.close();
+        }
+
+        // At t = 9.1s: Click "3: 🎒 My Portfolio" Tab & trigger demo wallet
+        if (t >= 9.1 && !portfolioTabTriggered) {
+          portfolioTabTriggered = true;
+          const tabPort = doc.getElementById('tabPortfolio');
+          if (tabPort) tabPort.click();
+          // Also set watch-only wallet for live portfolio display
+          setTimeout(() => {
+            if (win.setWatchOnlyWallet) {
+              win.setWatchOnlyWallet('0x6827d403df6b07ba405a6cfe0305dbd0fc727f55');
+            }
+          }, 150);
+        }
+
+        // Reset if rewound
+        if (t < 2.5) {
+          tokenRowTriggered = false;
+          copyTriggered = false;
+          closeTriggered = false;
+          portfolioTabTriggered = false;
+          const tabRadar = doc.getElementById('tabRadar');
+          if (tabRadar && !tabRadar.classList.contains('active')) tabRadar.click();
+          const modal = doc.getElementById('inspectModal');
+          if (modal && modal.open) modal.close();
+        }
+      } catch (e) {
+        // loading
+      }
+    };
+  </script>
+</body>
+</html>
+

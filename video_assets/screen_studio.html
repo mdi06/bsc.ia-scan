@@ -209,49 +209,49 @@
     // Dynamic keyframe generator based on real DOM geometry
     function getDynamicTrajectories() {
       // 1. Precise positions of elements inside iframe
-      const [r2X, r2Y] = getIframeElementCoords('#tableBody tr:nth-child(2) td:nth-child(3)', [600, 520], -40, 0);
+      const [r2X, r2Y] = getIframeElementCoords('#tableBody tr:nth-child(2) td:nth-child(3)', [560, 520]);
       const [favX, favY] = getIframeElementCoords('.modal-fav-btn', [1120, 240]);
       const [closeX, closeY] = getIframeElementCoords('#inspectModal .modal-close-btn', [1240, 240]);
       const [smartX, smartY] = getIframeElementCoords('#tabSmart', [520, 218]);
       const [bannerX, bannerY] = getIframeElementCoords('#topProfitBanner', [720, 340]);
 
-      // Dynamic Camera trajectory
+      // Dynamic Camera trajectory: perfectly centered and balanced framing
       const cameraKeyframes = [
         [0.0,  1.0,   960, 540],     // Wide establishing shot
         [1.6,  1.0,   960, 540],     // Start smooth zoom
-        [3.0,  1.45,  r2X + 60, r2Y], // Frame Row 2
-        [3.8,  1.45,  r2X + 60, r2Y], // Hold
-        [4.6,  1.32,  960, 540],     // Pan to modal
-        [6.8,  1.32,  960, 540],     // Inspecting modal
-        [7.6,  1.32,  960, 540],     // Modal close
-        [8.5,  1.50,  smartX, smartY + 40], // Pan to Smart Alpha tab
-        [10.4, 1.50,  smartX, smartY + 40], // Hold on Smart Alpha
-        [11.2, 1.40,  bannerX, bannerY],    // Pan across profit banner
-        [12.4, 1.0,   960, 540],     // Smooth pull out
+        [2.7,  1.26,  900, r2Y],     // Frame Row 2 elegantly (centered horizontally)
+        [3.4,  1.26,  900, r2Y],     // Hold on Row 2 click
+        [4.2,  1.24,  960, 540],     // Smooth transition to centered modal
+        [6.8,  1.24,  960, 540],     // Inspecting modal
+        [7.5,  1.24,  960, 540],     // Close modal click
+        [8.3,  1.32,  760, smartY + 80], // Smoothly focus on Tab bar & top table
+        [10.4, 1.32,  760, smartY + 80], // Hold on Smart Alpha view
+        [11.2, 1.22,  bannerX, bannerY + 20], // Pan across profit banner
+        [12.4, 1.0,   960, 540],     // Smooth pull out to full window
         [14.0, 1.0,   960, 540]      // Rest
       ];
 
-      // Dynamic Cursor trajectory (snaps exactly to buttons)
+      // Dynamic Cursor trajectory (snaps exactly to buttons with visible tactile clicks)
       const cursorKeyframes = [
         [0.0,  1400, 750, false],
         [1.5,  1050, 640, false],
-        [2.5,  r2X,  r2Y, false],   // Arrive over Row 2
-        [3.1,  r2X,  r2Y, true],    // Click Row 2
-        [3.4,  r2X,  r2Y, false],
-        [4.3,  820,  470, false],   // Scroll down to Security analysis
-        [5.2,  820,  690, false],   // Scroll down to Smart Money stats
-        [6.1,  favX, favY, false],  // Hover directly over "★ Favorite"
-        [6.4,  favX, favY, true],   // Click Favorite
+        [2.6,  r2X + 60, r2Y, false],   // Arrive directly on Row 2 project name
+        [3.0,  r2X + 60, r2Y, true],    // Click Row 2
+        [3.3,  r2X + 60, r2Y, false],   // Release
+        [4.2,  860,  460, false],        // Glide over Security analysis in modal
+        [5.2,  860,  660, false],        // Glide over Smart Money stats
+        [6.1,  favX, favY, false],       // Hover directly over "★ Favorite"
+        [6.4,  favX, favY, true],        // Click Favorite (modal switches to "+ Favorited")
         [6.7,  favX, favY, false],
-        [7.2,  closeX, closeY, false], // Hover directly over "✕ [ESC]"
-        [7.5,  closeX, closeY, true],  // Click Close
-        [7.8,  closeX, closeY, false],
-        [8.4,  smartX, smartY, false], // Hover directly over "2: Smart Alpha"
-        [8.7,  smartX, smartY, true],  // Click Smart Alpha Tab
-        [9.0,  smartX, smartY, false],
-        [10.2, bannerX, bannerY, false], // Glide over profit banner
-        [11.5, 760, 480, false],    // Glide across table
-        [12.8, 960, 620, false],    // Centered rest
+        [7.1,  closeX, closeY, false],   // Hover directly over "✕ [ESC]" Close button
+        [7.3,  closeX, closeY, true],    // Click Close
+        [7.5,  closeX, closeY, false],   // Release click
+        [8.3,  smartX, smartY, false],   // Hover directly over "2: Smart Alpha"
+        [8.6,  smartX, smartY, true],    // Click Smart Alpha Tab
+        [8.9,  smartX, smartY, false],
+        [10.0, bannerX, bannerY, false], // Glide over Top Profit banner
+        [11.4, 820, 520, false],         // Glide across alpha table
+        [12.8, 960, 620, false],         // Centered rest
         [14.0, 960, 620, false]
       ];
 
@@ -319,8 +319,8 @@
         const doc = iframe.contentWindow && iframe.contentWindow.document;
         if (!doc) return;
 
-        // At t = 3.1s: Click row 2 to open modal
-        if (t >= 3.1 && t < 7.5 && !row2Triggered) {
+        // At t = 3.0s: Click row 2 to open modal
+        if (t >= 3.0 && t < 7.4 && !row2Triggered) {
           row2Triggered = true;
           closeTriggered = false;
           const rows = doc.querySelectorAll('#tableBody tr');
@@ -334,16 +334,16 @@
           if (favBtn) favBtn.click();
         }
 
-        // At t = 7.5s: Close modal
-        if (t >= 7.5 && !closeTriggered) {
+        // At t = 7.4s: Close modal
+        if (t >= 7.4 && !closeTriggered) {
           closeTriggered = true;
           row2Triggered = false;
           const modal = doc.getElementById('inspectModal');
           if (modal && modal.open) modal.close();
         }
 
-        // At t = 8.7s: Click Smart Alpha Tab
-        if (t >= 8.7 && !smartTabTriggered) {
+        // At t = 8.6s: Click Smart Alpha Tab
+        if (t >= 8.6 && !smartTabTriggered) {
           smartTabTriggered = true;
           const tabSmart = doc.getElementById('tabSmart');
           if (tabSmart) tabSmart.click();

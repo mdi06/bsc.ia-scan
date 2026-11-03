@@ -1,0 +1,984 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      width: 1920px;
+      height: 1080px;
+      background: #03080c;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      color: #e2e8f0;
+      position: relative;
+      overflow: hidden;
+      user-select: none;
+    }
+
+    /* Ambient cyber glow backgrounds */
+    .bg-glow-cyan {
+      position: absolute;
+      width: 900px;
+      height: 900px;
+      border-radius: 50%;
+      background: radial-gradient(circle, rgba(0, 240, 255, 0.18) 0%, rgba(0, 240, 255, 0) 70%);
+      top: -200px;
+      left: 510px;
+      pointer-events: none;
+    }
+    .bg-glow-gold {
+      position: absolute;
+      width: 800px;
+      height: 800px;
+      border-radius: 50%;
+      background: radial-gradient(circle, rgba(240, 185, 11, 0.15) 0%, rgba(240, 185, 11, 0) 70%);
+      bottom: -200px;
+      right: 200px;
+      pointer-events: none;
+    }
+    .grid-lines {
+      position: absolute;
+      inset: 0;
+      background-image: 
+        linear-gradient(rgba(0, 240, 255, 0.05) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(0, 240, 255, 0.05) 1px, transparent 1px);
+      background-size: 48px 48px;
+      pointer-events: none;
+    }
+
+    /* Persistent Top HUD */
+    .top-hud {
+      position: absolute;
+      top: 36px;
+      left: 60px;
+      right: 60px;
+      height: 72px;
+      background: rgba(8, 20, 32, 0.82);
+      border: 1px solid rgba(0, 240, 255, 0.28);
+      border-radius: 18px;
+      backdrop-filter: blur(12px);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 32px;
+      z-index: 100;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5), inset 0 0 15px rgba(0, 240, 255, 0.08);
+    }
+    .hud-left {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+    .hud-logo {
+      width: 44px;
+      height: 44px;
+      border-radius: 12px;
+      background: #081824;
+      border: 1.5px solid #00f0ff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 0 15px rgba(0, 240, 255, 0.4);
+    }
+    .hud-title {
+      font-size: 20px;
+      font-weight: 800;
+      letter-spacing: 0.5px;
+      color: #fff;
+    }
+    .hud-title span {
+      color: #f0b90b;
+    }
+    .hud-reg {
+      font-size: 13px;
+      font-family: monospace;
+      color: #64748b;
+      background: rgba(255,255,255,0.06);
+      padding: 4px 10px;
+      border-radius: 6px;
+      border: 1px solid rgba(255,255,255,0.1);
+    }
+    .hud-center {
+      display: flex;
+      align-items: center;
+      gap: 20px;
+      font-size: 15px;
+      font-family: monospace;
+    }
+    .hud-block {
+      color: #38bdf8;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .hud-block-num {
+      color: #fff;
+      font-weight: 700;
+    }
+    .hud-pulse {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: #00ff88;
+      box-shadow: 0 0 12px #00ff88;
+    }
+    .hud-right {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+    .hud-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 14px;
+      border-radius: 20px;
+      font-size: 13px;
+      font-weight: 700;
+    }
+    .pill-green {
+      background: rgba(0, 255, 136, 0.15);
+      border: 1px solid rgba(0, 255, 136, 0.4);
+      color: #00ff88;
+    }
+    .pill-gold {
+      background: rgba(240, 185, 11, 0.15);
+      border: 1px solid rgba(240, 185, 11, 0.4);
+      color: #f0b90b;
+    }
+
+    /* Kinetic Subtitles (Bottom Center) */
+    .subtitle-bar {
+      position: absolute;
+      bottom: 40px;
+      left: 100px;
+      right: 100px;
+      height: 80px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 100;
+      pointer-events: none;
+    }
+    .sub-pill {
+      background: rgba(3, 10, 16, 0.92);
+      border: 2px solid rgba(0, 240, 255, 0.4);
+      box-shadow: 0 10px 40px rgba(0, 0, 0, 0.8), 0 0 30px rgba(0, 240, 255, 0.25);
+      padding: 12px 36px;
+      border-radius: 40px;
+      font-size: 28px;
+      font-weight: 800;
+      letter-spacing: 0.5px;
+      color: #ffffff;
+      text-transform: uppercase;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      backdrop-filter: blur(16px);
+    }
+    .sub-pill .gold {
+      color: #f0b90b;
+      text-shadow: 0 0 16px rgba(240, 185, 11, 0.6);
+    }
+    .sub-pill .cyan {
+      color: #00f0ff;
+      text-shadow: 0 0 16px rgba(0, 240, 255, 0.6);
+    }
+    .sub-pill .green {
+      color: #00ff88;
+      text-shadow: 0 0 16px rgba(0, 255, 136, 0.6);
+    }
+
+    /* Scene Containers */
+    .scene {
+      position: absolute;
+      top: 130px;
+      bottom: 130px;
+      left: 80px;
+      right: 80px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      opacity: 0;
+      transform: scale(0.96);
+      transition: none; /* Controlled deterministically by JS */
+      pointer-events: none;
+    }
+    .scene.active {
+      opacity: 1;
+      transform: scale(1);
+    }
+
+    /* Scene 1: The Radar & Block 0 */
+    .radar-circle-wrap {
+      position: relative;
+      width: 440px;
+      height: 440px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 24px;
+    }
+    .radar-ring {
+      position: absolute;
+      border-radius: 50%;
+      border: 1.5px solid rgba(0, 240, 255, 0.25);
+    }
+    .radar-ring-1 { width: 440px; height: 440px; border-color: rgba(0, 240, 255, 0.35); }
+    .radar-ring-2 { width: 310px; height: 310px; border-style: dashed; }
+    .radar-ring-3 { width: 180px; height: 180px; }
+    .radar-ring-4 { width: 60px; height: 60px; background: rgba(0, 240, 255, 0.1); border-color: #00f0ff; }
+    .radar-crosshair-h {
+      position: absolute;
+      width: 440px;
+      height: 1px;
+      background: rgba(0, 240, 255, 0.3);
+    }
+    .radar-crosshair-v {
+      position: absolute;
+      height: 440px;
+      width: 1px;
+      background: rgba(0, 240, 255, 0.3);
+    }
+    .radar-sweep {
+      position: absolute;
+      width: 220px;
+      height: 220px;
+      top: 0;
+      left: 220px;
+      transform-origin: 0% 100%;
+      background: conic-gradient(from 180deg at 0% 100%, rgba(0, 240, 255, 0.45) 0deg, rgba(0, 240, 255, 0) 75deg);
+      border-bottom: 2px solid #00f0ff;
+    }
+    .radar-blip {
+      position: absolute;
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      background: #ff3366;
+      box-shadow: 0 0 25px #ff3366, 0 0 45px #ff3366;
+      top: 110px;
+      left: 310px;
+      opacity: 0;
+      transform: scale(0);
+    }
+
+    .alert-card {
+      width: 900px;
+      background: rgba(12, 24, 36, 0.94);
+      border: 2px solid #ff3366;
+      border-radius: 20px;
+      box-shadow: 0 0 50px rgba(255, 51, 102, 0.35), inset 0 0 20px rgba(255, 51, 102, 0.15);
+      padding: 24px 36px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      opacity: 0;
+      transform: translateY(25px);
+    }
+    .alert-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+      padding-bottom: 12px;
+    }
+    .alert-tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: rgba(255, 51, 102, 0.2);
+      color: #ff3366;
+      border: 1px solid #ff3366;
+      padding: 6px 14px;
+      border-radius: 8px;
+      font-weight: 800;
+      font-size: 15px;
+      letter-spacing: 0.8px;
+    }
+    .alert-time {
+      font-family: monospace;
+      color: #38bdf8;
+      font-size: 14px;
+    }
+    .alert-body {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .alert-project {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .alert-name {
+      font-size: 28px;
+      font-weight: 800;
+      color: #ffffff;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .alert-symbol {
+      background: rgba(240, 185, 11, 0.2);
+      color: #f0b90b;
+      border: 1px solid #f0b90b;
+      padding: 3px 10px;
+      border-radius: 6px;
+      font-size: 16px;
+      font-weight: 700;
+    }
+    .alert-addr {
+      font-family: monospace;
+      font-size: 15px;
+      color: #94a3b8;
+    }
+    .alert-metrics {
+      display: flex;
+      gap: 16px;
+    }
+    .metric-chip {
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 10px;
+      padding: 8px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .metric-label {
+      font-size: 11px;
+      color: #64748b;
+      text-transform: uppercase;
+      font-weight: 700;
+    }
+    .metric-val {
+      font-size: 16px;
+      font-weight: 800;
+      color: #00ff88;
+    }
+
+    /* Scene 2: 5,000 Smart Wallets & Instant Audit */
+    .scene-2-wrap {
+      display: flex;
+      gap: 40px;
+      width: 1300px;
+      height: 480px;
+      align-items: center;
+      justify-content: center;
+    }
+    .card-half {
+      flex: 1;
+      height: 100%;
+      background: rgba(10, 22, 34, 0.9);
+      border: 1.5px solid rgba(0, 240, 255, 0.3);
+      border-radius: 20px;
+      padding: 28px;
+      display: flex;
+      flex-direction: column;
+      box-shadow: 0 15px 40px rgba(0, 0, 0, 0.6), inset 0 0 20px rgba(0, 240, 255, 0.05);
+    }
+    .card-header-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+      padding-bottom: 16px;
+      margin-bottom: 20px;
+    }
+    .card-title-text {
+      font-size: 19px;
+      font-weight: 800;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .card-title-text.cyan { color: #00f0ff; }
+    .card-title-text.green { color: #00ff88; }
+    
+    .wallet-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid rgba(255, 255, 255, 0.07);
+      border-radius: 12px;
+      padding: 12px 18px;
+      margin-bottom: 12px;
+      font-family: monospace;
+    }
+    .w-left {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .w-addr {
+      font-size: 15px;
+      font-weight: 700;
+      color: #ffffff;
+    }
+    .w-tag {
+      font-size: 12px;
+      color: #f0b90b;
+      font-family: sans-serif;
+      font-weight: 600;
+    }
+    .w-inflow {
+      font-size: 17px;
+      font-weight: 800;
+      color: #00ff88;
+      text-shadow: 0 0 10px rgba(0, 255, 136, 0.4);
+    }
+
+    .audit-score-box {
+      display: flex;
+      align-items: center;
+      gap: 24px;
+      background: rgba(0, 255, 136, 0.08);
+      border: 1px solid rgba(0, 255, 136, 0.3);
+      border-radius: 14px;
+      padding: 16px 20px;
+      margin-bottom: 20px;
+    }
+    .score-circle {
+      width: 72px;
+      height: 72px;
+      border-radius: 50%;
+      border: 4px solid #00ff88;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 24px;
+      font-weight: 900;
+      color: #00ff88;
+      box-shadow: 0 0 20px rgba(0, 255, 136, 0.4);
+    }
+    .score-desc {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .score-title {
+      font-size: 18px;
+      font-weight: 800;
+      color: #fff;
+    }
+    .score-sub {
+      font-size: 13px;
+      color: #94a3b8;
+    }
+    .audit-check-item {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 10px 14px;
+      background: rgba(255, 255, 255, 0.03);
+      border-radius: 10px;
+      margin-bottom: 10px;
+      font-size: 15px;
+      font-weight: 600;
+      color: #cbd5e1;
+    }
+    .check-icon {
+      color: #00ff88;
+      font-weight: 900;
+      font-size: 17px;
+    }
+
+    /* Scene 3: 1-Click Instant Sniper */
+    .scene-3-wrap {
+      width: 1100px;
+      background: rgba(8, 20, 32, 0.94);
+      border: 2px solid #f0b90b;
+      border-radius: 24px;
+      box-shadow: 0 0 60px rgba(240, 185, 11, 0.35), inset 0 0 25px rgba(240, 185, 11, 0.1);
+      padding: 32px 40px;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+    .sniper-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid rgba(240, 185, 11, 0.25);
+      padding-bottom: 16px;
+    }
+    .sniper-badge-pulse {
+      background: rgba(240, 185, 11, 0.2);
+      border: 1px solid #f0b90b;
+      color: #f0b90b;
+      padding: 6px 16px;
+      border-radius: 8px;
+      font-size: 15px;
+      font-weight: 800;
+      letter-spacing: 0.5px;
+    }
+    .terminal-console {
+      background: #02070b;
+      border: 1px solid rgba(0, 240, 255, 0.25);
+      border-radius: 14px;
+      padding: 20px;
+      font-family: monospace;
+      font-size: 15px;
+      line-height: 1.6;
+      color: #38bdf8;
+      min-height: 180px;
+    }
+    .term-line { margin-bottom: 6px; }
+    .term-prompt { color: #f0b90b; font-weight: 700; }
+    .term-success { color: #00ff88; font-weight: 700; }
+    .term-dim { color: #64748b; }
+
+    .sniper-btn-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 20px;
+      padding-top: 10px;
+    }
+    .sniper-action-btn {
+      flex: 1;
+      height: 64px;
+      border-radius: 16px;
+      background: linear-gradient(135deg, #f0b90b 0%, #ff9900 100%);
+      border: none;
+      color: #04090e;
+      font-size: 22px;
+      font-weight: 900;
+      letter-spacing: 0.5px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      box-shadow: 0 0 35px rgba(240, 185, 11, 0.5);
+    }
+    .sniper-action-btn.broadcasted {
+      background: linear-gradient(135deg, #00ff88 0%, #00b359 100%);
+      box-shadow: 0 0 40px rgba(0, 255, 136, 0.7);
+      color: #02070b;
+    }
+    .profit-badge {
+      background: rgba(0, 255, 136, 0.15);
+      border: 1.5px solid #00ff88;
+      color: #00ff88;
+      padding: 14px 28px;
+      border-radius: 16px;
+      font-size: 20px;
+      font-weight: 900;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      white-space: nowrap;
+    }
+
+    /* Scene 4: Full Suite & CTA */
+    .scene-4-wrap {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      text-align: center;
+      gap: 22px;
+      max-width: 1200px;
+    }
+    .hero-logo-box {
+      width: 110px;
+      height: 110px;
+      border-radius: 28px;
+      background: #081824;
+      border: 2.5px solid #00f0ff;
+      box-shadow: 0 0 50px rgba(0, 240, 255, 0.6), inset 0 0 20px rgba(0, 240, 255, 0.25);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .hero-title {
+      font-size: 56px;
+      font-weight: 900;
+      line-height: 1.1;
+      letter-spacing: -0.5px;
+      color: #fff;
+    }
+    .hero-title .gold {
+      background: linear-gradient(135deg, #f0b90b 0%, #ffde59 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    .hero-title .cyan {
+      background: linear-gradient(135deg, #00f0ff 0%, #38bdf8 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    .hero-subtitle {
+      font-size: 22px;
+      color: #94a3b8;
+      max-width: 800px;
+      line-height: 1.4;
+    }
+    .suite-cards-row {
+      display: flex;
+      gap: 24px;
+      margin-top: 10px;
+    }
+    .suite-card {
+      background: rgba(10, 22, 34, 0.85);
+      border: 1px solid rgba(0, 240, 255, 0.3);
+      border-radius: 16px;
+      padding: 16px 28px;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      box-shadow: 0 10px 25px rgba(0,0,0,0.4);
+    }
+    .suite-card-icon { font-size: 26px; }
+    .suite-card-info {
+      display: flex;
+      flex-direction: column;
+      text-align: left;
+      gap: 2px;
+    }
+    .suite-card-name { font-size: 16px; font-weight: 800; color: #fff; }
+    .suite-card-desc { font-size: 13px; color: #38bdf8; font-family: monospace; }
+
+    .cta-banner {
+      margin-top: 10px;
+      display: flex;
+      align-items: center;
+      gap: 32px;
+      background: rgba(240, 185, 11, 0.12);
+      border: 1.5px solid rgba(240, 185, 11, 0.5);
+      border-radius: 18px;
+      padding: 14px 36px;
+      box-shadow: 0 0 35px rgba(240, 185, 11, 0.2);
+    }
+    .cta-link {
+      font-size: 19px;
+      font-weight: 800;
+      font-family: monospace;
+      color: #ffffff;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .cta-link span { color: #f0b90b; }
+  </style>
+</head>
+<body>
+
+  <!-- Background Ambience -->
+  <div class="bg-glow-cyan"></div>
+  <div class="bg-glow-gold"></div>
+  <div class="grid-lines" id="gridBg"></div>
+
+  <!-- Persistent Top HUD -->
+  <div class="top-hud">
+    <div class="hud-left">
+      <div class="hud-logo">
+        <svg width="28" height="28" viewBox="0 0 28 28" fill="none">
+          <polygon points="14,3 24,8.5 24,19.5 14,25 4,19.5 4,8.5" stroke="#f0b90b" stroke-width="2" fill="#081824"/>
+          <circle cx="14" cy="14" r="5" stroke="#00f0ff" stroke-width="1.5"/>
+          <circle cx="14" cy="14" r="2.5" fill="#00ff88"/>
+        </svg>
+      </div>
+      <div class="hud-title">BNB CHAIN <span>.AI SUITE</span></div>
+      <div class="hud-reg">0x60B9...022F</div>
+    </div>
+    <div class="hud-center">
+      <div class="hud-pulse"></div>
+      <div class="hud-block">BSC BLOCK: <span class="hud-block-num" id="liveBlock">#42,891,402</span></div>
+      <div class="hud-block" style="color: #64748b;">│</div>
+      <div class="hud-block" style="color: #00ff88;">LATENCY: <strong>0.3s (BLOCK 0)</strong></div>
+    </div>
+    <div class="hud-right">
+      <div class="hud-pill pill-green">● 24/7 AUTONOMOUS</div>
+      <div class="hud-pill pill-gold">🧠 5K SMART WALLETS</div>
+    </div>
+  </div>
+
+  <!-- SCENE 1: BLOCK 0 RADAR -->
+  <div class="scene" id="scene1">
+    <div class="radar-circle-wrap">
+      <div class="radar-ring radar-ring-1"></div>
+      <div class="radar-ring radar-ring-2"></div>
+      <div class="radar-ring radar-ring-3"></div>
+      <div class="radar-ring radar-ring-4"></div>
+      <div class="radar-crosshair-h"></div>
+      <div class="radar-crosshair-v"></div>
+      <div class="radar-sweep" id="radarSweep"></div>
+      <div class="radar-blip" id="radarBlip"></div>
+    </div>
+
+    <div class="alert-card" id="alertCard">
+      <div class="alert-header">
+        <div class="alert-tag">🚨 NEW .AI CONTRACT DETECTED AT BLOCK 0</div>
+        <div class="alert-time">TX: 0x81b4...e319 • BLOCK #42,891,402</div>
+      </div>
+      <div class="alert-body">
+        <div class="alert-project">
+          <div class="alert-name">
+            CatMouse Animals <span class="alert-symbol">$ANIMAL</span>
+          </div>
+          <div class="alert-addr">Contract: 0x2bbb897fbdeaa1b30f53a8014facdc3a7e1882db</div>
+        </div>
+        <div class="alert-metrics">
+          <div class="metric-chip">
+            <span class="metric-label">Target Registry</span>
+            <span class="metric-val" style="color:#f0b90b;">Space ID .ai (0x60B9)</span>
+          </div>
+          <div class="metric-chip">
+            <span class="metric-label">Fair Mint</span>
+            <span class="metric-val">ELIGIBLE (FREE)</span>
+          </div>
+          <div class="metric-chip">
+            <span class="metric-label">Sniper Status</span>
+            <span class="metric-val" style="color:#38bdf8;">⚡ READY TO SNIPE</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SCENE 2: 5,000 SMART WALLETS & INSTANT AUDIT -->
+  <div class="scene" id="scene2">
+    <div class="scene-2-wrap">
+      <!-- Left: Smart Wallets -->
+      <div class="card-half">
+        <div class="card-header-bar">
+          <div class="card-title-text cyan">
+            <span>🧠</span> SMART MONEY INFLOW (5K WALLETS)
+          </div>
+          <span class="hud-pill pill-gold" style="font-size:11px;">5M NET: +98.7 BNB</span>
+        </div>
+        <div class="wallet-row" id="wRow1">
+          <div class="w-left">
+            <span class="w-addr">0x71a4...e92f</span>
+            <span class="w-tag">👑 Top 1% High-Win Caller</span>
+          </div>
+          <span class="w-inflow">+48.5 BNB</span>
+        </div>
+        <div class="wallet-row" id="wRow2">
+          <div class="w-left">
+            <span class="w-addr">0x3c20...7b84</span>
+            <span class="w-tag">🐋 Alpha Whale (12x Average ROI)</span>
+          </div>
+          <span class="w-inflow">+32.0 BNB</span>
+        </div>
+        <div class="wallet-row" id="wRow3">
+          <div class="w-left">
+            <span class="w-addr">0x19fa...844a</span>
+            <span class="w-tag">⚡ Automated MEV Searcher</span>
+          </div>
+          <span class="w-inflow">+18.2 BNB</span>
+        </div>
+      </div>
+
+      <!-- Right: Anti-Rug & Honeypot Audit -->
+      <div class="card-half">
+        <div class="card-header-bar">
+          <div class="card-title-text green">
+            <span>🛡️</span> AUTOMATED SAFETY AUDIT
+          </div>
+          <span class="hud-pill pill-green" style="font-size:11px;">REAL-TIME SIMULATION</span>
+        </div>
+        <div class="audit-score-box">
+          <div class="score-circle">98</div>
+          <div class="score-desc">
+            <span class="score-title">SAFETY RATING: LOW RISK</span>
+            <span class="score-sub">Full Bytecode & Liquidity Verification Passed</span>
+          </div>
+        </div>
+        <div class="audit-check-item">
+          <span class="check-icon">✔</span> Honeypot Simulation: PASSED (0% Buy / 0% Sell Tax)
+        </div>
+        <div class="audit-check-item">
+          <span class="check-icon">✔</span> Liquidity Pool: 100% LOCKED ON PANCAKESWAP
+        </div>
+        <div class="audit-check-item">
+          <span class="check-icon">✔</span> Contract Ownership: RENOUNCED / NO BLACKLIST
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SCENE 3: 1-CLICK INSTANT SNIPER -->
+  <div class="scene" id="scene3">
+    <div class="scene-3-wrap">
+      <div class="sniper-header">
+        <div class="card-title-text gold" style="font-size:22px; color:#f0b90b;">
+          <span>⚡</span> 1-CLICK INSTANT SNIPER ENGINE
+        </div>
+        <div class="sniper-badge-pulse" id="sniperStatusBadge">SIMULATION READY</div>
+      </div>
+
+      <div class="terminal-console" id="sniperTerm">
+        <div class="term-line"><span class="term-prompt">agent-id-suite@bsc:~$</span> baw contract-call --contract 0x2bbb...82db --method mint() --simulate</div>
+        <div class="term-line term-dim">[+] Connecting to BSC Mainnet via Fast-RPC...</div>
+        <div class="term-line">[+] Simulating transaction on block fork #42,891,402...</div>
+        <div class="term-line term-success">[✔] DRY-RUN SUCCESS: 0 Reverts | Gas Estimate: 142,380 ($0.08)</div>
+        <div class="term-line term-success">[✔] Allocation Confirmed: 5,000 $ANIMAL (Free Mint)</div>
+        <div class="term-line" id="termBroadcastLine" style="opacity:0;"><span class="term-prompt">⚡ BROADCASTING TX TO BSC MEMPOOL...</span> <span class="term-success">CONFIRMED IN BLOCK #42,891,403!</span></div>
+      </div>
+
+      <div class="sniper-btn-row">
+        <button class="sniper-action-btn" id="sniperBtn">
+          <span>⚡ EXECUTE INSTANT SNIPE</span>
+        </button>
+        <div class="profit-badge" id="profitBadge">
+          <span>🏆 +340% SPIKE DETECTED</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SCENE 4: FULL SUITE & CTA -->
+  <div class="scene" id="scene4">
+    <div class="scene-4-wrap">
+      <div class="hero-logo-box">
+        <svg width="60" height="60" viewBox="0 0 28 28" fill="none">
+          <polygon points="14,3 24,8.5 24,19.5 14,25 4,19.5 4,8.5" stroke="#f0b90b" stroke-width="2" fill="#081824"/>
+          <circle cx="14" cy="14" r="6" stroke="#00f0ff" stroke-width="1.5" stroke-dasharray="2 2"/>
+          <circle cx="14" cy="14" r="3" fill="#00ff88"/>
+        </svg>
+      </div>
+      <div class="hero-title">
+        BNB CHAIN <span class="gold">.AI AGENT ID</span> <span class="cyan">SUITE</span>
+      </div>
+      <div class="hero-subtitle">
+        The ultimate 24/7 autonomous discovery engine tracking 5,000 smart wallets, instant honeypot audits, and stealth .ai fair-mints.
+      </div>
+
+      <div class="suite-cards-row">
+        <div class="suite-card">
+          <span class="suite-card-icon">📡</span>
+          <div class="suite-card-info">
+            <span class="suite-card-name">Live Web Radar</span>
+            <span class="suite-card-desc">agent-id-monitor.vercel.app</span>
+          </div>
+        </div>
+        <div class="suite-card">
+          <span class="suite-card-icon">💻</span>
+          <div class="suite-card-info">
+            <span class="suite-card-name">Interactive TUI Terminal</span>
+            <span class="suite-card-desc">python3 monitor.py live</span>
+          </div>
+        </div>
+        <div class="suite-card">
+          <span class="suite-card-icon">🎯</span>
+          <div class="suite-card-info">
+            <span class="suite-card-name">1-Click Sniper</span>
+            <span class="suite-card-desc">Instant On-Chain Dry-Runs</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="cta-banner">
+        <div class="cta-link">
+          <span>⭐ GITHUB:</span> github.com/mdi06/bsc.ia-scan
+        </div>
+        <div style="color: rgba(255,255,255,0.2);">│</div>
+        <div class="cta-link">
+          <span>🌐 LIVE DEMO:</span> agent-id-monitor.vercel.app
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Dynamic Kinetic Subtitle Bar -->
+  <div class="subtitle-bar">
+    <div class="sub-pill" id="subPill">
+      <!-- Injected dynamically -->
+    </div>
+  </div>
+
+  <script>
+    // Deterministic Frame Controller
+    window.setVideoTime = function(t) {
+      // 1. Grid background animation
+      const gridBg = document.getElementById("gridBg");
+      const offset = (t * 24) % 48;
+      gridBg.style.backgroundPosition = `0px ${offset}px`;
+
+      // 2. BSC Block Height tick
+      const baseBlock = 42891402;
+      const currentBlock = baseBlock + Math.floor(t / 3.0);
+      document.getElementById("liveBlock").innerText = "#" + currentBlock.toLocaleString();
+
+      // Elements
+      const s1 = document.getElementById("scene1");
+      const s2 = document.getElementById("scene2");
+      const s3 = document.getElementById("scene3");
+      const s4 = document.getElementById("scene4");
+      const subPill = document.getElementById("subPill");
+
+      // Reset active scenes
+      s1.classList.remove("active");
+      s2.classList.remove("active");
+      s3.classList.remove("active");
+      s4.classList.remove("active");
+
+      // SCENE 1: 0.0s - 4.5s
+      if (t < 4.5) {
+        s1.classList.add("active");
+        const sweepAngle = (t * 260) % 360;
+        document.getElementById("radarSweep").style.transform = `rotate(${sweepAngle}deg)`;
+
+        const blip = document.getElementById("radarBlip");
+        const alertCard = document.getElementById("alertCard");
+
+        if (t >= 1.6) {
+          blip.style.opacity = "1";
+          blip.style.transform = "scale(1)";
+          alertCard.style.opacity = "1";
+          alertCard.style.transform = "translateY(0px)";
+        } else {
+          blip.style.opacity = "0";
+          blip.style.transform = "scale(0)";
+          alertCard.style.opacity = "0";
+          alertCard.style.transform = "translateY(25px)";
+        }
+
+        subPill.innerHTML = `STEALTH .AI MINTS HAPPEN IN SECONDS. <span class="gold">CATCH THEM AT BLOCK 0.</span>`;
+      }
+      // SCENE 2: 4.5s - 9.0s
+      else if (t < 9.0) {
+        s2.classList.add("active");
+        subPill.innerHTML = `TRACK <span class="cyan">5,000 SMART WALLETS</span>. INSTANT <span class="green">HONEYPOT AUDIT</span>.`;
+      }
+      // SCENE 3: 9.0s - 13.5s
+      else if (t < 13.5) {
+        s3.classList.add("active");
+        const btn = document.getElementById("sniperBtn");
+        const broadcastLine = document.getElementById("termBroadcastLine");
+        const statusBadge = document.getElementById("sniperStatusBadge");
+
+        if (t >= 11.2) {
+          btn.classList.add("broadcasted");
+          btn.innerHTML = `<span>✔ SNIPE BROADCAST CONFIRMED!</span>`;
+          broadcastLine.style.opacity = "1";
+          statusBadge.innerText = "CONFIRMED ON-CHAIN";
+          statusBadge.style.color = "#00ff88";
+          statusBadge.style.borderColor = "#00ff88";
+          statusBadge.style.background = "rgba(0, 255, 136, 0.2)";
+        } else {
+          btn.classList.remove("broadcasted");
+          btn.innerHTML = `<span>⚡ EXECUTE INSTANT SNIPE</span>`;
+          broadcastLine.style.opacity = "0";
+          statusBadge.innerText = "SIMULATION READY";
+          statusBadge.style.color = "#f0b90b";
+          statusBadge.style.borderColor = "#f0b90b";
+          statusBadge.style.background = "rgba(240, 185, 11, 0.2)";
+        }
+
+        subPill.innerHTML = `1-CLICK <span class="gold">ON-CHAIN SNIPER</span>. SIMULATE & EXECUTE <span class="cyan">FIRST</span>.`;
+      }
+      // SCENE 4: 13.5s - 18.0s
+      else {
+        s4.classList.add("active");
+        subPill.innerHTML = `WEB & TERMINAL SUITE. <span class="gold">DOMINATE BNB CHAIN TODAY</span>.`;
+      }
+    };
+  </script>
+</body>
+</html>
+

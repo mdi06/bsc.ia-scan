@@ -759,6 +759,68 @@ function buildPancakeSwapSellCalldata(tokenAddr, amountWei, recipientWallet, min
   return `0x${selector}${p0}${p1}${p2}${p3}${p4}${p5}${p6}${p7}`;
 }
 
+// Canonical Multicall3 Contract Address on BSC (same address across all EVM chains)
+const MULTICALL3_ADDRESS = '0xcA11bde05977b3631167028862bE2a173976CA11';
+
+// ABI Encoder for Multicall3.aggregate3(Call3[] calls) (Selector: 0x82ad56cb)
+function encodeMulticall3Aggregate3(calls) {
+  const selector = '82ad56cb';
+  const offsetCalls = pad32(32);
+  const countCalls = pad32(calls.length);
+  const structOffsets = [];
+  const structBodies = [];
+  let currentOffset = calls.length * 32;
+
+  for (let i = 0; i < calls.length; i++) {
+    const { target, allowFailure, callData } = calls[i];
+    structOffsets.push(pad32(currentOffset));
+    const cBytes = (callData.startsWith('0x') ? callData.slice(2) : callData);
+    const cLen = Math.floor(cBytes.length / 2);
+    const padLen = (cLen % 32 !== 0) ? (32 - (cLen % 32)) : 0;
+    const paddedCBytes = cBytes + '00'.repeat(padLen);
+
+    const body = pad32(target) + pad32(allowFailure ? 1 : 0) + pad32(96) + pad32(cLen) + paddedCBytes;
+    structBodies.push(body);
+    currentOffset += Math.floor(body.length / 2);
+  }
+
+  return `0x${selector}${offsetCalls}${countCalls}${structOffsets.join('')}${structBodies.join('')}`;
+}
+
+// ABI Decoder for Multicall3.aggregate3 returns (Result[] returnData)
+function decodeMulticall3Aggregate3(hexStr) {
+  if (!hexStr || hexStr === '0x') return [];
+  const clean = hexStr.startsWith('0x') ? hexStr.slice(2) : hexStr;
+  if (clean.length < 128) return [];
+
+  const count = parseInt(clean.slice(64, 128), 16);
+  if (isNaN(count) || count <= 0) return [];
+
+  const results = [];
+  for (let i = 0; i < count; i++) {
+    const offsetHex = clean.slice(128 + i * 64, 128 + (i + 1) * 64);
+    const relOffset = parseInt(offsetHex, 16);
+    const itemCharIndex = 128 + relOffset * 2;
+
+    const successHex = clean.slice(itemCharIndex, itemCharIndex + 64);
+    const success = (parseInt(successHex, 16) === 1);
+
+    const dataOffsetHex = clean.slice(itemCharIndex + 64, itemCharIndex + 128);
+    const dataOffset = parseInt(dataOffsetHex, 16);
+
+    const dataLenCharIndex = itemCharIndex + dataOffset * 2;
+    const dataLenHex = clean.slice(dataLenCharIndex, dataLenCharIndex + 64);
+    const dataLen = parseInt(dataLenHex, 16);
+
+    const returnDataHex = clean.slice(dataLenCharIndex + 64, dataLenCharIndex + 64 + dataLen * 2);
+    results.push({
+      success,
+      returnData: returnDataHex ? `0x${returnDataHex}` : '0x'
+    });
+  }
+  return results;
+}
+
 // Evaluate Take-Profit / Stop-Loss Exit Conviction for Portfolio Holdings
 function evaluatePortfolioExit(item, bnbPriceUsd = 705.0) {
   const contract = (item.contract || '').toLowerCase();
@@ -1914,7 +1976,7 @@ function updateWalletButtonUI() {
   }
 }
 
-// 100% Dynamic On-Chain Portfolio Scanner (Native BNB + 348 drops batching)
+// 100% Dynamic On-Chain Portfolio Scanner (Native BNB + 348+ drops via Multicall3)
 async function scanUserPortfolio(walletAddr, force = false) {
   if (!walletAddr || isScanningPortfolio) return;
   isScanningPortfolio = true;
@@ -1926,19 +1988,119 @@ async function scanUserPortfolio(walletAddr, force = false) {
   if (rescanBtn) rescanBtn.classList.add('connecting');
 
   const tsEl = hasDom ? document.getElementById('portScanTimestamp') : null;
-  if (tsEl) tsEl.textContent = 'Scanning on-chain BSC...';
+  if (tsEl) tsEl.textContent = 'Scanning on-chain BSC (Multicall3)...';
 
   try {
-    // 1. Native Gas Balance (BNB)
+    const contracts = [];
+    const seen = new Set();
+    allDrops.forEach(d => {
+      const c = (d.contract || '').toLowerCase();
+      if (c && c.startsWith('0x') && c.length === 42 && !seen.has(c)) {
+        seen.add(c);
+        contracts.push(c);
+      }
+    });
+
+    userOwnedContracts.clear();
+
+    const cleanWallet = walletAddr.replace('0x', '').toLowerCase().padStart(64, '0');
+    const balanceCalldata = '0x70a08231' + cleanWallet;
+    const ethBalanceCalldata = '0x4d2301cc' + cleanWallet;
+
+    // Multicall3: 1 Single Network Roundtrip for Native BNB + all 348+ token balances
+    let multicallSucceeded = false;
     try {
-      const bnbHex = await sendRpcCall('eth_getBalance', [walletAddr, 'latest']);
-      if (bnbHex && bnbHex !== '0x') {
-        userNativeBnbBalance = Number(BigInt(bnbHex)) / 1e18;
-      } else {
+      const calls = [
+        { target: MULTICALL3_ADDRESS, allowFailure: true, callData: ethBalanceCalldata }
+      ];
+      for (let i = 0; i < contracts.length; i++) {
+        calls.push({
+          target: contracts[i],
+          allowFailure: true,
+          callData: balanceCalldata
+        });
+      }
+
+      const encoded = encodeMulticall3Aggregate3(calls);
+      const rawResult = await sendRpcCall('eth_call', [{ to: MULTICALL3_ADDRESS, data: encoded }, 'latest']);
+
+      if (rawResult && rawResult !== '0x') {
+        const decoded = decodeMulticall3Aggregate3(rawResult);
+        if (decoded && decoded.length === calls.length) {
+          multicallSucceeded = true;
+
+          // 1. Native BNB balance from Call 0
+          const bnbRes = decoded[0];
+          if (bnbRes && bnbRes.success && bnbRes.returnData && bnbRes.returnData !== '0x') {
+            try {
+              const bnbWei = BigInt(bnbRes.returnData);
+              userNativeBnbBalance = Number(bnbWei) / 1e18;
+            } catch (e) {
+              userNativeBnbBalance = 0.0;
+            }
+          } else {
+            userNativeBnbBalance = 0.0;
+          }
+
+          // 2. Token balances from Calls 1..N
+          for (let i = 0; i < contracts.length; i++) {
+            const tokenRes = decoded[i + 1];
+            const c = contracts[i];
+            if (tokenRes && tokenRes.success && tokenRes.returnData && tokenRes.returnData !== '0x' && !/^0x0+$/.test(tokenRes.returnData)) {
+              try {
+                const raw = BigInt(tokenRes.returnData);
+                if (raw > 0n) {
+                  userOwnedContracts.set(c, raw);
+                }
+              } catch (e) {}
+            }
+          }
+        }
+      }
+    } catch (mcErr) {
+      console.warn('Multicall3 query error, triggering fallback:', mcErr);
+    }
+
+    // Graceful fallback to legacy JSON-RPC batches if Multicall3 fails
+    if (!multicallSucceeded) {
+      try {
+        const bnbHex = await sendRpcCall('eth_getBalance', [walletAddr, 'latest']);
+        if (bnbHex && bnbHex !== '0x') {
+          userNativeBnbBalance = Number(BigInt(bnbHex)) / 1e18;
+        } else {
+          userNativeBnbBalance = 0.0;
+        }
+      } catch (e) {
         userNativeBnbBalance = 0.0;
       }
-    } catch (e) {
-      console.warn('Native BNB query error:', e);
+
+      const chunks = [];
+      for (let i = 0; i < contracts.length; i += 60) {
+        chunks.push(contracts.slice(i, i + 60));
+      }
+
+      await Promise.all(chunks.map(async (chunk) => {
+        const batch = chunk.map((c, idx) => ({
+          jsonrpc: '2.0',
+          id: idx + 1,
+          method: 'eth_call',
+          params: [{ to: c, data: balanceCalldata }, 'latest']
+        }));
+        const results = await sendRpcBatch(batch);
+        if (Array.isArray(results)) {
+          results.forEach((res, idx) => {
+            const c = chunk[idx];
+            if (res && res.result && res.result !== '0x' && !/^0x0+$/.test(res.result)) {
+              try {
+                const raw = BigInt(res.result);
+                if (raw > 0n) {
+                  userOwnedContracts.set(c, raw);
+                }
+              } catch (e) {}
+            }
+          });
+        }
+      }));
     }
 
     nativeBnbItem = {
@@ -1955,49 +2117,6 @@ async function scanUserPortfolio(walletAddr, force = false) {
       holders: 1500000,
       is_nft: false
     };
-
-    // 2. Query all contract balances in parallel batches of 60
-    const contracts = [];
-    const seen = new Set();
-    allDrops.forEach(d => {
-      const c = (d.contract || '').toLowerCase();
-      if (c && c.startsWith('0x') && c.length === 42 && !seen.has(c)) {
-        seen.add(c);
-        contracts.push(c);
-      }
-    });
-
-    const cleanWallet = walletAddr.replace('0x', '').toLowerCase().padStart(64, '0');
-    const calldata = '0x70a08231' + cleanWallet;
-    const chunks = [];
-    for (let i = 0; i < contracts.length; i += 60) {
-      chunks.push(contracts.slice(i, i + 60));
-    }
-
-    userOwnedContracts.clear();
-
-    await Promise.all(chunks.map(async (chunk) => {
-      const batch = chunk.map((c, idx) => ({
-        jsonrpc: '2.0',
-        id: idx + 1,
-        method: 'eth_call',
-        params: [{ to: c, data: calldata }, 'latest']
-      }));
-      const results = await sendRpcBatch(batch);
-      if (Array.isArray(results)) {
-        results.forEach((res, idx) => {
-          const c = chunk[idx];
-          if (res && res.result && res.result !== '0x' && !/^0x0+$/.test(res.result)) {
-            try {
-              const raw = BigInt(res.result);
-              if (raw > 0n) {
-                userOwnedContracts.set(c, raw);
-              }
-            } catch (e) {}
-          }
-        });
-      }
-    }));
 
     // Re-hydrate allDrops balances
     allDrops.forEach(drop => {
@@ -2824,7 +2943,10 @@ if (typeof module !== 'undefined' && module.exports) {
     loadFavoritesForActiveWallet,
     saveFavorites,
     PANCAKE_ROUTER_V2,
-    WBNB_ADDRESS
+    WBNB_ADDRESS,
+    MULTICALL3_ADDRESS,
+    encodeMulticall3Aggregate3,
+    decodeMulticall3Aggregate3
   };
 }
 
