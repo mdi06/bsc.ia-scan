@@ -2532,7 +2532,7 @@ async function pollLatestBlock() {
 }
 
 // Strict timeout fetch helper to guarantee cold-boot backends never freeze initial UI
-async function fetchWithTimeout(url, options = {}, timeoutMs = 3500) {
+async function fetchWithTimeout(url, options = {}, timeoutMs = 12000) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -2550,7 +2550,7 @@ async function fetchDrops() {
     // so mobile/desktop users see the complete market table instantly with zero white/blank space.
     if (isInitialLoad && (!allDrops || allDrops.length === 0)) {
       try {
-        const localRes = await fetchWithTimeout(`history.json?_t=${Date.now()}`, { cache: 'no-store' }, 2000);
+        const localRes = await fetchWithTimeout(`history.json?_t=${Date.now()}`, { cache: 'no-store' }, 4000);
         if (localRes.ok) {
           const localDrops = await localRes.json();
           if (Array.isArray(localDrops) && localDrops.length > 0) {
@@ -2580,16 +2580,16 @@ async function fetchDrops() {
     let res;
     let source = 'Render';
     try {
-      res = await fetchWithTimeout(`${BACKEND_URL}/history.json?_t=${Date.now()}`, { cache: 'no-store' }, 3500);
+      res = await fetchWithTimeout(`${BACKEND_URL}/history.json?_t=${Date.now()}`, { cache: 'no-store' }, 12000);
       if (!res.ok) throw new Error('Render fetch failed');
     } catch (e) {
       try {
-        res = await fetchWithTimeout(`https://agent-id-monitor.fly.dev/history.json?_t=${Date.now()}`, { cache: 'no-store' }, 3500);
+        res = await fetchWithTimeout(`https://agent-id-monitor.fly.dev/history.json?_t=${Date.now()}`, { cache: 'no-store' }, 6000);
         if (!res.ok) throw new Error('Fly fetch failed');
         source = 'Fly.io';
       } catch (e2) {
         source = 'Local Cache';
-        res = await fetchWithTimeout(`history.json?_t=${Date.now()}`, { cache: 'no-store' }, 3500);
+        res = await fetchWithTimeout(`history.json?_t=${Date.now()}`, { cache: 'no-store' }, 6000);
       }
     }
     const freshDrops = await res.json();
