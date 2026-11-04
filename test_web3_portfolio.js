@@ -4,6 +4,7 @@ const {
   buildPancakeSwapSellCalldata,
   evaluatePortfolioExit,
   buildMintTxParams,
+  getInjectedProvider,
   PANCAKE_ROUTER_V2,
   WBNB_ADDRESS
 } = require('./app.js');
@@ -159,5 +160,21 @@ assert.throws(() => {
   buildMintTxParams('0xinvalid', '0x', '0', userWallet);
 }, /Invalid contract address/);
 console.log('✔ buildMintTxParams (Address Validation Guard): PASS');
+
+// 9. Test Injected Provider Isolation (Prevent Rabby hijacking Binance requests)
+global.window = {
+  ethereum: { isRabby: true }
+};
+assert.strictEqual(getInjectedProvider('binance'), null, 'Must NOT fall back to Rabby when Binance is explicitly requested');
+assert.strictEqual(getInjectedProvider('rabby'), global.window.ethereum, 'Must return Rabby provider');
+
+// With Binance extension present
+global.window = {
+  binance: { isBinance: true },
+  ethereum: { isRabby: true }
+};
+assert.strictEqual(getInjectedProvider('binance'), global.window.binance, 'Must return Binance provider when present');
+assert.strictEqual(getInjectedProvider('rabby'), global.window.ethereum, 'Must return Rabby provider when requested');
+console.log('✔ getInjectedProvider Isolation & Anti-Hijack Guard: PASS');
 
 console.log('🎉 All Web3 & Multicall3 tests verified successfully!');

@@ -1894,29 +1894,59 @@ async function sendRpcBatch(batch) {
 function getInjectedProvider(preferred = 'auto') {
   if (typeof window === 'undefined') return null;
 
-  if (preferred === 'binance' && (window.binance || window.binancew3w)) {
+  // 1. Explicit Binance Web3 Wallet Request
+  if (preferred === 'binance') {
+    if (window.binance || window.binancew3w) {
+      return window.binance || window.binancew3w;
+    }
+    if (window.ethereum) {
+      if (Array.isArray(window.ethereum.providers) && window.ethereum.providers.length > 0) {
+        const p = window.ethereum.providers.find(x => x.isBinance);
+        if (p) return p;
+      } else if (window.ethereum.isBinance) {
+        return window.ethereum;
+      }
+    }
+    // Do NOT silently fall back to Rabby or MetaMask when Binance is specifically requested
+    return null;
+  }
+
+  // 2. Explicit Rabby Wallet Request
+  if (preferred === 'rabby') {
+    if (window.ethereum) {
+      if (Array.isArray(window.ethereum.providers) && window.ethereum.providers.length > 0) {
+        const p = window.ethereum.providers.find(x => x.isRabby);
+        if (p) return p;
+      } else if (window.ethereum.isRabby) {
+        return window.ethereum;
+      }
+    }
+    if (window.rabby) return window.rabby;
+    return null;
+  }
+
+  // 3. Explicit MetaMask Request
+  if (preferred === 'metamask') {
+    if (window.ethereum) {
+      if (Array.isArray(window.ethereum.providers) && window.ethereum.providers.length > 0) {
+        const p = window.ethereum.providers.find(x => x.isMetaMask && !x.isRabby && !x.isBinance);
+        if (p) return p;
+      } else if (window.ethereum.isMetaMask && !window.ethereum.isRabby && !window.ethereum.isBinance) {
+        return window.ethereum;
+      }
+    }
+    return null;
+  }
+
+  // 4. Auto-Detect Injected Provider
+  if (window.binance || window.binancew3w) {
     return window.binance || window.binancew3w;
   }
   if (window.ethereum) {
     if (Array.isArray(window.ethereum.providers) && window.ethereum.providers.length > 0) {
-      if (preferred === 'rabby') {
-        const p = window.ethereum.providers.find(x => x.isRabby);
-        if (p) return p;
-      }
-      if (preferred === 'binance') {
-        const p = window.ethereum.providers.find(x => x.isBinance);
-        if (p) return p;
-      }
-      if (preferred === 'metamask') {
-        const p = window.ethereum.providers.find(x => x.isMetaMask && !x.isRabby);
-        if (p) return p;
-      }
       return window.ethereum.providers[0];
     }
     return window.ethereum;
-  }
-  if (window.binance || window.binancew3w) {
-    return window.binance || window.binancew3w;
   }
   return null;
 }
@@ -1925,7 +1955,22 @@ function getInjectedProvider(preferred = 'auto') {
 async function connectWeb3(providerType = 'auto') {
   const provider = getInjectedProvider(providerType);
   if (!provider) {
-    alert('No Web3 Wallet detected! Please install MetaMask, Binance Web3 Wallet, or Rabby extension, or use Watch-Only mode.');
+    if (providerType === 'binance') {
+      alert(
+        "🟡 Binance Web3 Wallet extension was not detected in this browser!\n\n" +
+        "Rabby Wallet is currently active and overriding window.ethereum.\n\n" +
+        "To connect your Binance Agentic Wallet:\n" +
+        "• Option 1: Install the official Binance Wallet extension from Chrome Web Store.\n" +
+        "• Option 2: Open this site inside the Binance Mobile App (Web3 tab ➔ Discover ➔ type agent-id-monitor.vercel.app).\n" +
+        "• Option 3: Export your Binance Web3 key and import it into Rabby/MetaMask (same BSC address)."
+      );
+    } else if (providerType === 'metamask') {
+      alert("🦊 MetaMask was not detected (or Rabby is currently overriding it). Check your browser extensions.");
+    } else if (providerType === 'rabby') {
+      alert("🐰 Rabby Wallet extension was not detected in this browser!");
+    } else {
+      alert("No Web3 Wallet detected! Please install MetaMask, Binance Web3 Wallet, or Rabby extension, or use Watch-Only mode.");
+    }
     return false;
   }
 
@@ -1943,9 +1988,13 @@ async function connectWeb3(providerType = 'auto') {
     connectedWallet = account;
 
     let provName = 'Web3 Wallet';
-    if (provider.isRabby) provName = 'Rabby';
-    else if (provider.isBinance || window.binance) provName = 'Binance Web3';
-    else if (provider.isMetaMask) provName = 'MetaMask';
+    if (provider.isRabby) {
+      provName = 'Rabby';
+    } else if (provider.isBinance || provider === window.binance || provider === window.binancew3w) {
+      provName = 'Binance Web3';
+    } else if (provider.isMetaMask) {
+      provName = 'MetaMask';
+    }
     walletProviderName = provName;
 
     // Check & switch to BSC Mainnet (56 / 0x38)
@@ -3521,7 +3570,8 @@ if (typeof module !== 'undefined' && module.exports) {
     requestNotificationPermission,
     sendDesktopNotification,
     buildMintTxParams,
-    executeWeb3Mint
+    executeWeb3Mint,
+    getInjectedProvider
   };
 }
 
