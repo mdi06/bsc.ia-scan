@@ -204,4 +204,73 @@ assert(mockContent.innerHTML.includes('Binance Web3 Discover'), 'Must explain Di
 assert(mockContent.innerHTML.includes('wallet-back-btn'), 'Must have back button');
 console.log('✔ handleBinanceWalletClick Native In-Modal QR Fallback: PASS');
 
+// Test Live Smart Stream Ticker Engine
+const { renderSmartStreamTicker, openInspectModalByContract } = require('./app');
+
+const mockTickerTrack = { innerHTML: '' };
+let inspectedContract = null;
+global.openModal = (target) => {
+  inspectedContract = target.contract;
+};
+
+const mockInspectModal = { showModal: () => {}, close: () => {} };
+const mockInspectContent = { innerHTML: '' };
+
+global.document.getElementById = (id) => {
+  if (id === 'walletModal') return mockModal;
+  if (id === 'walletModalContent') return mockContent;
+  if (id === 'tickerTrack') return mockTickerTrack;
+  if (id === 'inspectModal') return mockInspectModal;
+  if (id === 'modalContent') return mockInspectContent;
+  return null;
+};
+
+const sampleDrops = [
+  {
+    name: 'Lazabit',
+    symbol: 'LAZABIT',
+    contract: '0x1111111111111111111111111111111111111111',
+    smart_wallets: ['0x68271234567890abcdef1234567890abcdef1234'],
+    total_minted: 500,
+    max_supply: 1000,
+    detected_at: '2026-11-04 16:42:01',
+    block: 100
+  },
+  {
+    name: 'MSN Core',
+    symbol: 'MSN',
+    contract: '0x2222222222222222222222222222222222222222',
+    smart_wallets: ['wallet1.ai', 'wallet2.ai', 'wallet3.ai'],
+    total_minted: 200,
+    max_supply: 1000,
+    detected_at: '2026-11-04 16:41:15',
+    block: 99
+  },
+  {
+    name: 'Raisin',
+    symbol: 'RAISIN',
+    contract: '0x3333333333333333333333333333333333333333',
+    smart_wallets: [],
+    total_minted: 1000,
+    max_supply: 1000,
+    detected_at: '2026-11-04 16:39:50',
+    block: 98
+  }
+];
+
+renderSmartStreamTicker(sampleDrops);
+assert(mockTickerTrack.innerHTML.length > 0, 'Ticker track must be populated');
+assert(mockTickerTrack.innerHTML.includes('0x6827...1234'), 'Must format long smart wallet address');
+assert(mockTickerTrack.innerHTML.includes('3 Smart Wallets'), 'Must format multi-wallet entry');
+assert(mockTickerTrack.innerHTML.includes('Sold Out (100% cap filled)'), 'Must flag sold out token');
+assert(mockTickerTrack.innerHTML.includes('tag-smart'), 'Must have tag-smart badge');
+assert(mockTickerTrack.innerHTML.includes('tag-snipe'), 'Must have tag-snipe badge');
+console.log('✔ renderSmartStreamTicker Populates Infinite Ticker Tape: PASS');
+
+// Test openInspectModalByContract
+global.allDrops = sampleDrops;
+openInspectModalByContract('0x2222222222222222222222222222222222222222');
+assert(mockInspectContent.innerHTML.includes('0x2222222222222222222222222222222222222222'), 'Must populate modal content for matching contract');
+console.log('✔ openInspectModalByContract Target Resolution: PASS');
+
 console.log('🎉 All Web3 & Multicall3 tests verified successfully!');

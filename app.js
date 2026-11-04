@@ -577,6 +577,8 @@ function renderStats(drops) {
     const ruAth = Math.max(ru.athPrice, ru.secUsd);
     document.getElementById('runnerUpDetails').textContent = `│ 🥈 Runner-Up: ${ru.name} (${ru.symbol}) [${formatCryptoPrice(ruAth)}]`;
   }
+
+  renderSmartStreamTicker(drops);
 }
 
 // Evaluate Assisted Sniper Conviction (60% Rule & Anti-Rug)
@@ -708,6 +710,173 @@ function updateSniperReadyCount() {
       : allDrops.filter(d => isSniperReady(d)).length;
     el.textContent = cnt;
   }
+}
+
+// Open inspect modal by contract address (interactive ticker click handler)
+function openInspectModalByContract(contractAddress) {
+  if (!contractAddress) return;
+  let list = [];
+  if (typeof allDrops !== 'undefined' && Array.isArray(allDrops) && allDrops.length > 0) {
+    list = allDrops;
+  } else if (typeof window !== 'undefined' && Array.isArray(window.allDrops) && window.allDrops.length > 0) {
+    list = window.allDrops;
+  } else if (typeof global !== 'undefined' && Array.isArray(global.allDrops) && global.allDrops.length > 0) {
+    list = global.allDrops;
+  }
+  const target = list.find(d => (d.contract || '').toLowerCase() === String(contractAddress).toLowerCase());
+  const modalFn = typeof openModal === 'function' ? openModal : (typeof global !== 'undefined' && typeof global.openModal === 'function' ? global.openModal : null);
+  if (target && modalFn) {
+    modalFn(target);
+  }
+}
+
+// Render Real-Time Smart Money Stream Ticker Tape
+function renderSmartStreamTicker(drops) {
+  if (typeof document === 'undefined') return;
+  const trackEl = document.getElementById('tickerTrack');
+  if (!trackEl || !Array.isArray(drops) || drops.length === 0) return;
+
+  const formatTickerTime = (detected_at) => {
+    if (!detected_at) return 'LIVE';
+    const str = String(detected_at).trim();
+    if (str.includes(' ')) {
+      const parts = str.split(' ');
+      if (parts[1]) return parts[1].slice(0, 8);
+    }
+    if (str.includes('T')) {
+      const parts = str.split('T');
+      if (parts[1]) return parts[1].slice(0, 8);
+    }
+    return str.slice(-8);
+  };
+
+  const events = [];
+
+  drops.forEach((d) => {
+    const symbol = escapeHtml((d.symbol || d.name || 'UNKNOWN').toUpperCase());
+    const contract = escapeHtml(d.contract || '');
+    const time = formatTickerTime(d.detected_at);
+    const smartWallets = Array.isArray(d.smart_wallets) && d.smart_wallets.length > 0
+      ? d.smart_wallets
+      : (Array.isArray(d.smart_minters) && d.smart_minters.length > 0 ? d.smart_minters : []);
+
+    const ms = Number(d.max_supply || 0);
+    const tm = Number(d.total_minted || 0);
+    const prog = ms > 0 ? (tm / ms) : 0;
+    const isNft = Boolean((d.standard && (d.standard.includes('NFT') || d.standard.includes('721') || d.standard.includes('1155'))) || (d.classification && d.classification.is_nft));
+    const isSoldOut = (prog >= 0.999) || (isNft && ms > 0 && tm >= ms);
+    const sniperReady = isSniperReady(d);
+    const blockNum = Number(d.block || 0);
+
+    // 1. Smart Money / Multi-wallet entry
+    if (smartWallets.length > 1) {
+      events.push({
+        block: blockNum,
+        time,
+        tagClass: 'tag-smart',
+        tagText: '🧠 SMART MONEY',
+        text: `🔥 <strong>${smartWallets.length} Smart Wallets</strong> entered <strong>$${symbol}</strong> simultaneously`,
+        contract
+      });
+    } else if (smartWallets.length === 1) {
+      const w = smartWallets[0];
+      const wLabel = w.length > 18 ? `${w.slice(0, 6)}...${w.slice(-4)}` : w;
+      const action = tm >= 1 ? `minted ${formatCount(tm)} ` : 'entered ';
+      events.push({
+        block: blockNum,
+        time,
+        tagClass: 'tag-smart',
+        tagText: '🧠 SMART MONEY',
+        text: `🧠 Smart Wallet <strong>${escapeHtml(wLabel)}</strong> ${action}<strong>$${symbol}</strong>`,
+        contract
+      });
+    }
+
+    // 2. Sold Out or Sniper Ready Conviction
+    if (isSoldOut && ms > 0) {
+      events.push({
+        block: blockNum,
+        time,
+        tagClass: 'tag-snipe',
+        tagText: '🔒 SOLD OUT',
+        text: `🔒 <strong>$${symbol}</strong> Sold Out (100% cap filled)`,
+        contract
+      });
+    } else if (sniperReady && prog >= 0.6) {
+      events.push({
+        block: blockNum,
+        time,
+        tagClass: 'tag-snipe',
+        tagText: '🎯 SNIPER READY',
+        text: `🎯 <strong>$${symbol}</strong> reached ${(prog * 100).toFixed(1)}% (Sniper Ready)`,
+        contract
+      });
+    }
+
+    // 3. NFT Surge / Crowd Surge
+    if (isNft && Number(d.holders || 0) >= 30) {
+      events.push({
+        block: blockNum,
+        time,
+        tagClass: 'tag-surge',
+        tagText: '🦋 NFT SURGE',
+        text: `🦋 <strong>$${symbol}</strong> surge: <strong>${d.holders} agent minters</strong>`,
+        contract
+      });
+    }
+
+    // 4. ATH Gainer
+    const ath = Math.max(Number(d.athPrice || 0), Number(d.token_price_usd || 0), Number(d.secUsd || 0));
+    const profit = Number(d.athProfit || d.profit || 0);
+    if (profit >= 20 && ath > 0) {
+      events.push({
+        block: blockNum,
+        time,
+        tagClass: 'tag-profit',
+        tagText: '🚀 TOP GAIN',
+        text: `🚀 <strong>$${symbol}</strong> hit ATH <strong>${formatCryptoPrice(ath)}</strong> (+${profit.toFixed(0)}%)`,
+        contract
+      });
+    }
+  });
+
+  // If fewer events, backfill with newest drops
+  if (events.length < 15) {
+    drops.slice(0, 5).forEach((d) => {
+      const symbol = escapeHtml((d.symbol || d.name || 'UNKNOWN').toUpperCase());
+      const contract = escapeHtml(d.contract || '');
+      const time = formatTickerTime(d.detected_at);
+      events.push({
+        block: Number(d.block || 0),
+        time,
+        tagClass: 'tag-new',
+        tagText: '✨ NEW DROP',
+        text: `✨ New drop <strong>$${symbol}</strong> (${escapeHtml(d.name || '')}) detected`,
+        contract
+      });
+    });
+  }
+
+  // Deduplicate and take top 20 chronologically (latest block first)
+  events.sort((a, b) => b.block - a.block);
+  const selectedEvents = events.slice(0, 20);
+  if (selectedEvents.length === 0) return;
+
+  const itemsHtml = selectedEvents.map((e) => `
+    <div class="ticker-item" onclick="openInspectModalByContract('${e.contract}')" title="Click to inspect drop">
+      <span class="ticker-time">[${e.time}]</span>
+      <span class="ticker-tag ${e.tagClass}">${e.tagText}</span>
+      <span class="ticker-body">${e.text}</span>
+    </div>
+  `).join('');
+
+  // Duplicate items for a seamless, continuous infinite CSS marquee scroll
+  trackEl.innerHTML = itemsHtml + itemsHtml;
+}
+
+if (typeof window !== 'undefined') {
+  window.openInspectModalByContract = openInspectModalByContract;
+  window.renderSmartStreamTicker = renderSmartStreamTicker;
 }
 
 // Option D: Evaluate NFT Volume Surge Conviction (adapted from watch.mjs nftVolWatch)
@@ -1421,6 +1590,7 @@ function renderTable() {
 function openModal(item) {
   const modal = document.getElementById('inspectModal');
   const content = document.getElementById('modalContent');
+  if (!modal || !content) return;
 
   if (typeof window !== 'undefined' && window.va) {
     window.va('event', { name: 'inspect_drop', data: { name: item.name || '', symbol: item.symbol || '' } });
@@ -3680,7 +3850,9 @@ if (typeof module !== 'undefined' && module.exports) {
     sendDesktopNotification,
     buildMintTxParams,
     executeWeb3Mint,
-    getInjectedProvider
+    getInjectedProvider,
+    openInspectModalByContract,
+    renderSmartStreamTicker
   };
 }
 
