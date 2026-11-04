@@ -197,11 +197,10 @@ global.window = {
   ethereum: { isRabby: true } // Rabby is active, no Binance desktop extension
 };
 
-// Clicking Binance Web3 should NOT pop an alert; it must render the QR code modal
+// Clicking Binance Web3 should NOT pop an alert; it must render the QR code & Discover guide modal
 handleBinanceWalletClick();
-assert(mockContent.innerHTML.includes('Binance Web3 Mobile Scan'), 'Modal title must be Binance Web3 Mobile Scan');
-assert(mockContent.innerHTML.includes('api.qrserver.com'), 'Must render QR code image');
-assert(mockContent.innerHTML.includes('Open <strong>Binance App</strong> on your phone'), 'Must render 3-step instructions');
+assert(mockContent.innerHTML.includes('Connect Binance Agentic Wallet'), 'Modal title must be Connect Binance Agentic Wallet');
+assert(mockContent.innerHTML.includes('Binance Web3 Discover'), 'Must explain Discover flow');
 assert(mockContent.innerHTML.includes('wallet-back-btn'), 'Must have back button');
 console.log('✔ handleBinanceWalletClick Native In-Modal QR Fallback: PASS');
 

@@ -2803,7 +2803,7 @@ function openWalletModal() {
   else modal.setAttribute('open', '');
 }
 
-// Binance Web3 Mobile App QR Connect Modal
+// Binance Web3 Mobile App & Connection Guide Modal
 function openBinanceQrModal() {
   const modal = document.getElementById('walletModal');
   const content = document.getElementById('walletModalContent');
@@ -2818,38 +2818,63 @@ function openBinanceQrModal() {
         <div class="modal-title wallet-card-title">
           <button class="wallet-back-btn" onclick="openWalletModal()">← Back</button>
           <span class="wallet-title-icon" style="margin-left: 8px;">🟡</span>
-          <span>Binance Web3 Mobile Scan</span>
+          <span>Connect Binance Agentic Wallet</span>
         </div>
         <button class="modal-close-btn" onclick="document.getElementById('walletModal').close ? document.getElementById('walletModal').close() : document.getElementById('walletModal').removeAttribute('open')">✕ [ESC]</button>
       </div>
 
-      <div class="wallet-connect-body" style="text-align: center; padding: 18px 16px;">
-        <div style="font-size: 13px; color: var(--text-dim); margin-bottom: 16px; line-height: 1.5;">
-          Connect your native <strong style="color: #F0B90B;">Binance Web3 Agentic Wallet</strong> directly by scanning this QR code:
+      <div class="wallet-connect-body" style="text-align: center; padding: 16px 14px;">
+        <!-- Informative note explaining why the in-app scanner fails on URLs -->
+        <div style="background: rgba(234, 179, 8, 0.1); border: 1px solid rgba(234, 179, 8, 0.3); border-radius: 6px; padding: 10px 12px; margin-bottom: 16px; font-size: 12px; line-height: 1.5; text-align: left; color: #F0B90B;">
+          <strong>ℹ️ Why did the Binance Scanner say "Invalid QR Code"?</strong><br/>
+          The <code>[ - ]</code> scan icon in the Binance App is strictly a crypto payment / WalletConnect scanner that rejects website links. Use <strong>Method 1</strong> to open this terminal directly in the Binance DApp browser!
         </div>
 
-        <div style="background: #ffffff; padding: 10px; border-radius: 8px; display: inline-block; box-shadow: 0 0 24px rgba(240, 185, 11, 0.25); border: 2px solid #F0B90B; margin: 0 auto 16px auto;">
-          <img src="${qrApiUrl}" alt="Binance Web3 QR Scan" style="width: 200px; height: 200px; display: block;" onerror="this.parentElement.innerHTML='<div style=\\'color:#000; padding:40px 20px; font-size:12px; font-weight:bold;\\'>Scan: ${currentOrigin}</div>'" />
+        <!-- Method 1: Binance Web3 Discover (Native Mobile DApp Browser) -->
+        <div style="background: rgba(240, 185, 11, 0.05); border: 1px solid rgba(240, 185, 11, 0.3); border-radius: 8px; padding: 14px; margin-bottom: 14px; text-align: left;">
+          <div style="font-weight: 700; color: #F0B90B; font-size: 13px; margin-bottom: 8px;">
+            📱 Method 1: Open in Binance Web3 Discover (Recommended)
+          </div>
+          <div style="font-size: 12px; color: var(--text-dim); line-height: 1.6; margin-bottom: 10px;">
+            1. Open <strong>Binance App</strong> ➔ tap <strong>Web3</strong> tab at the top.<br/>
+            2. Tap <strong>Discover</strong> (compass icon 🧭 at bottom).<br/>
+            3. Paste this link in the top search bar & press enter:
+          </div>
+          <div style="display: flex; gap: 8px;">
+            <input type="text" id="binanceDappUrlInput" readonly value="${currentOrigin}" style="flex: 1; background: #03080c; border: 1px solid var(--border-color); color: var(--color-cyan); padding: 8px 10px; border-radius: 4px; font-family: monospace; font-size: 12px;" />
+            <button class="wallet-switch-submit" onclick="navigator.clipboard.writeText('${currentOrigin}'); this.textContent='✓ Copied!'; setTimeout(()=>this.textContent='Copy', 1500);" style="padding: 0 16px;">Copy</button>
+          </div>
+          <div style="font-size: 11px; color: var(--color-green); margin-top: 6px;">
+            🟢 Inside Discover, your .ai Agentic Wallet is automatically injected with 1-Click Mint authorization!
+          </div>
         </div>
 
-        <div class="binance-qr-steps" style="display: flex; flex-direction: column; gap: 8px; max-width: 360px; margin: 0 auto 18px auto; text-align: left; font-size: 12px; background: rgba(240, 185, 11, 0.06); border: 1px solid rgba(240, 185, 11, 0.25); border-radius: 6px; padding: 12px 14px;">
-          <div style="display: flex; align-items: center; gap: 10px;">
-            <span style="background: #F0B90B; color: #000; font-weight: bold; border-radius: 50%; width: 22px; height: 22px; display: inline-flex; align-items: center; justify-content: center; font-size: 11px; flex-shrink: 0;">1</span>
-            <span>Open <strong>Binance App</strong> on your phone</span>
+        <!-- Method 2: Camera QR Scan (Standard Safari / Chrome) -->
+        <div style="background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 8px; padding: 12px; margin-bottom: 14px;">
+          <div style="font-size: 12px; color: var(--text-dim); margin-bottom: 8px;">
+            Or scan with your phone's <strong>Standard Camera</strong> (Safari / Chrome):
           </div>
-          <div style="display: flex; align-items: center; gap: 10px;">
-            <span style="background: #F0B90B; color: #000; font-weight: bold; border-radius: 50%; width: 22px; height: 22px; display: inline-flex; align-items: center; justify-content: center; font-size: 11px; flex-shrink: 0;">2</span>
-            <span>Switch to <strong>Web3</strong> tab at the top</span>
-          </div>
-          <div style="display: flex; align-items: center; gap: 10px;">
-            <span style="background: #F0B90B; color: #000; font-weight: bold; border-radius: 50%; width: 22px; height: 22px; display: inline-flex; align-items: center; justify-content: center; font-size: 11px; flex-shrink: 0;">3</span>
-            <span>Tap <strong>Scan [ - ]</strong> in top-right corner to open & mint</span>
+          <div style="background: #ffffff; padding: 8px; border-radius: 6px; display: inline-block; margin-bottom: 6px;">
+            <img src="${qrApiUrl}" alt="Standard Camera QR" style="width: 140px; height: 140px; display: block;" />
           </div>
         </div>
 
-        <div class="wallet-switch-card" style="margin-top: 10px; text-align: left;">
+        <!-- Method 3: Desktop Import via Rabby -->
+        <div style="background: rgba(0, 240, 255, 0.05); border: 1px solid rgba(0, 240, 255, 0.2); border-radius: 8px; padding: 12px 14px; margin-bottom: 14px; text-align: left;">
+          <div style="font-weight: 700; color: var(--color-cyan); font-size: 12px; margin-bottom: 6px;">
+            💻 Prefer Desktop? Use in Rabby directly:
+          </div>
+          <div style="font-size: 11px; color: var(--text-dim); line-height: 1.5;">
+            In Binance App: <strong>Web3 ➔ Settings ➔ Wallet Management ➔ Export Key</strong>.<br/>
+            In Rabby Desktop: <strong>Add Account ➔ Import Private Key</strong>.<br/>
+            You can then 1-click mint directly from desktop using your official Agentic address!
+          </div>
+        </div>
+
+        <!-- Method 4: Watch-Only Auditor Mode -->
+        <div class="wallet-switch-card" style="margin-top: 6px; text-align: left;">
           <div class="wallet-switch-header">
-            <span class="switch-title">👁️ Or Sync Desktop via Watch-Only Auditor:</span>
+            <span class="switch-title">👁️ Watch-Only Auditor (Audit Holdings):</span>
           </div>
           <div class="wallet-switch-bar">
             <span class="switch-icon">🤖</span>
