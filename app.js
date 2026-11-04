@@ -1456,6 +1456,12 @@ function openModal(item) {
   const sellCalldata = !isNft ? buildPancakeSwapSellCalldata(cAddr, rawHeldWei, userWallet) : '';
   const sellCliSnippet = !isNft ? `baw contract-call preview --binanceChainId 56 --from ${userWallet} --to ${PANCAKE_ROUTER_V2} --value 0 --inputData ${sellCalldata} --json` : '';
 
+  const mintBnbNum = Number(item.mint_price_bnb || 0);
+  const isFree = item.has_free_mint || mintBnbNum === 0 || valWei === '0';
+  const mintCostLabel = isFree ? 'FREE MINT' : `${mintBnbNum.toFixed(4)} BNB (~$${(mintBnbNum * bnbPrice).toFixed(2)})`;
+  const isSoldOut = Boolean(item.max_supply && item.total_minted && Number(item.total_minted) >= Number(item.max_supply));
+  const isRiskContract = Boolean((item.risk_badge && (item.risk_badge.includes('🚨') || item.risk_badge.includes('Fund Drain') || item.risk_badge.includes('Honeypot'))) || item.risk_level === 'RUG' || (item.security && item.security.is_fund_drain));
+
   content.innerHTML = `
     <div class="modal-header">
       <div class="modal-title">🔍 ${name} (${sym}) - Deep Dive Inspection</div>
@@ -1569,6 +1575,46 @@ function openModal(item) {
         ${item.website ? `<a href="${item.website}" target="_blank" rel="noopener" class="modal-btn btn-bscscan">🌐 Website</a>` : ''}
         ${item.twitter ? `<a href="${item.twitter}" target="_blank" rel="noopener" class="modal-btn btn-bscscan">🐦 Twitter / X</a>` : ''}
       </div>
+    </div>
+
+    <div class="modal-section mint-action-section" style="${isSoldOut ? 'opacity: 0.85;' : (isReady ? 'border-color: rgba(74, 222, 128, 0.5); box-shadow: 0 0 15px rgba(74, 222, 128, 0.1);' : 'border-color: rgba(0, 240, 255, 0.4);')}">
+      <div class="modal-section-title" style="display: flex; justify-content: space-between; align-items: center;">
+        <span style="color: var(--color-cyan); font-weight: 700; display: inline-flex; align-items: center; gap: 6px;">
+          ⚡ 1-Click Web3 Direct Mint
+        </span>
+        <span class="badge ${isSoldOut ? 'badge-dim' : (isFree ? 'badge-green' : 'badge-yellow')}" style="font-size: 11px; font-weight: 700;">
+          ${isSoldOut ? '🔒 SOLD OUT (100%)' : mintCostLabel}
+        </span>
+      </div>
+
+      <div class="mint-summary-row" style="display: flex; justify-content: space-between; align-items: center; margin: 8px 0; font-size: 12px; flex-wrap: wrap; gap: 8px;">
+        <div><span class="dim">Mint Cost:</span> <strong style="color: ${isFree ? 'var(--color-green)' : 'var(--color-yellow)'};">${mintCostLabel}</strong></div>
+        <div><span class="dim">Progress:</span> <strong>${formatCount(item.total_minted)}</strong> / ${formatCount(item.max_supply) || '∞'}</div>
+        <div><span class="dim">Calldata:</span> <code>${calldata.slice(0, 10)}${calldata.length > 10 ? '...' : ''}</code></div>
+      </div>
+
+      ${isRiskContract ? `
+        <div class="mint-risk-warning" style="background: rgba(239, 68, 68, 0.12); border: 1px solid var(--color-red); border-radius: 6px; padding: 8px 12px; margin: 8px 0; font-size: 11px; color: #ff8888; display: flex; align-items: center; gap: 8px;">
+          <span>🚨</span>
+          <span><strong>Risk Warning:</strong> Contract is flagged for elevated risk (${escapeHtml(item.risk_badge || item.risk_level)}). Verify bytecode before signing.</span>
+        </div>
+      ` : ''}
+
+      ${isSoldOut ? `
+        <div style="display: flex; gap: 10px; margin-top: 8px;">
+          <a href="${mktUrl}" target="_blank" rel="noopener" class="web3-mint-btn sold-out" style="text-align: center; text-decoration: none; display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%;">
+            <span>🔒 Sold Out (100% Capped) ➔ Trade on Secondary Market</span>
+          </a>
+        </div>
+      ` : `
+        <div class="mint-btn-container" style="margin-top: 8px;">
+          <button id="modalMintBtn" class="web3-mint-btn" onclick="executeWeb3Mint('${cAddr}', '${calldata}', '${valWei}', '${escapeHtml(name)}')">
+            <span class="mint-icon">⚡</span>
+            <span id="modalMintBtnText">${connectedWallet ? `1-Click Mint (${mintCostLabel})` : `👛 Connect Wallet & Mint (${mintCostLabel})`}</span>
+          </button>
+        </div>
+        <div id="modalMintStatus" class="mint-status-box" style="display: none; margin-top: 10px;"></div>
+      `}
     </div>
 
     <div class="modal-section">
@@ -1955,6 +2001,168 @@ async function connectWeb3(providerType = 'auto') {
     return false;
   }
 }
+
+// Build EVM transaction parameters for 1-Click Web3 Direct Minting
+function buildMintTxParams(contractAddress, rawCalldata, valueWei, fromWallet) {
+  if (!contractAddress || typeof contractAddress !== 'string' || !contractAddress.startsWith('0x') || contractAddress.length !== 42) {
+    throw new Error('Invalid contract address');
+  }
+
+  const isRecv = !rawCalldata || rawCalldata === '0x' || rawCalldata === 'recv';
+  let calldata = isRecv ? '0x' : rawCalldata;
+
+  // Dynamic recipient injection if calldata supports it (e.g., 0x836a1040)
+  if (!isRecv && calldata.startsWith('0x836a1040') && calldata.length >= 138 && fromWallet) {
+    const cleanW = fromWallet.replace('0x', '').padStart(40, '0').toLowerCase();
+    calldata = calldata.slice(0, 74) + '000000000000000000000000' + cleanW + calldata.slice(138);
+  }
+
+  // Convert valueWei to 0x-hex string
+  let valHex = '0x0';
+  if (valueWei && valueWei !== '0' && valueWei !== 0) {
+    try {
+      const bn = BigInt(valueWei);
+      valHex = '0x' + bn.toString(16);
+    } catch (e) {
+      valHex = '0x0';
+    }
+  }
+
+  const tx = {
+    to: contractAddress.toLowerCase(),
+    data: calldata,
+    value: valHex
+  };
+
+  if (fromWallet) {
+    tx.from = fromWallet.toLowerCase();
+  }
+
+  return tx;
+}
+
+// 1-Click Web3 Mint Execution (MetaMask, Binance Web3 Wallet, Rabby, EIP-1193)
+async function executeWeb3Mint(contractAddress, rawCalldata, valueWei, name = 'Drop') {
+  const btn = document.getElementById('modalMintBtn');
+  const statusBox = document.getElementById('modalMintStatus');
+
+  const updateStatus = (html, display = 'block') => {
+    if (statusBox) {
+      statusBox.innerHTML = html;
+      statusBox.style.display = display;
+    }
+  };
+
+  try {
+    // 1. Injected Provider Check
+    let provider = getInjectedProvider();
+    if (!provider) {
+      openWalletModal();
+      return;
+    }
+
+    // 2. Ensure Wallet Connected
+    if (!connectedWallet) {
+      if (btn) btn.innerHTML = '<span class="spinner"></span> <span>Connecting Wallet...</span>';
+      updateStatus('<div class="mint-status-info">👛 Please connect your Web3 wallet to proceed...</div>');
+      const ok = await connectWeb3();
+      if (!ok || !connectedWallet) {
+        if (btn) btn.innerHTML = '<span>⚡ 1-Click Mint</span>';
+        updateStatus('<div class="mint-status-warning">⚠️ Wallet connection required to mint.</div>');
+        return;
+      }
+      provider = getInjectedProvider();
+    }
+
+    // 3. Switch network to BSC Mainnet (56 / 0x38)
+    try {
+      const chainId = await provider.request({ method: 'eth_chainId' });
+      if (chainId !== '0x38' && parseInt(chainId, 16) !== 56) {
+        updateStatus('<div class="mint-status-info">🌐 Switching wallet to BSC Mainnet (Chain 56)...</div>');
+        await provider.request({
+          method: 'wallet_switchEthereumChain',
+          params: [{ chainId: '0x38' }]
+        });
+      }
+    } catch (switchErr) {
+      console.warn('Network switch warning:', switchErr);
+    }
+
+    // 4. Build standard EVM tx parameters
+    const txParams = buildMintTxParams(contractAddress, rawCalldata, valueWei, connectedWallet);
+
+    // 5. Update UI to awaiting user signature state
+    if (btn) {
+      btn.disabled = true;
+      btn.classList.add('confirming');
+      btn.innerHTML = `<span class="spinner"></span> <span>Awaiting Wallet Signature...</span>`;
+    }
+    updateStatus(`<div class="mint-status-pending">⏳ Confirm transaction in <strong>${walletProviderName || 'your wallet'}</strong>...</div>`);
+
+    // 6. Dispatch transaction via standard EIP-1193 eth_sendTransaction
+    const txHash = await provider.request({
+      method: 'eth_sendTransaction',
+      params: [txParams]
+    });
+
+    if (!txHash) throw new Error('No transaction hash returned from wallet');
+
+    // 7. Success State
+    playMarketAlertSound();
+    console.log(`%c[🎉 WEB3 MINT SUCCESS]`, 'color: #00ff88; font-weight: bold;', { name, contract: contractAddress, txHash });
+
+    if (btn) {
+      btn.classList.remove('confirming');
+      btn.classList.add('success');
+      btn.innerHTML = `<span>✔ Mint Submitted!</span>`;
+    }
+
+    updateStatus(`
+      <div class="mint-status-success">
+        <span class="status-icon" style="font-size: 18px;">🚀</span>
+        <div>
+          <strong style="color: var(--color-green);">Transaction Broadcasted to BSC!</strong><br/>
+          <a href="https://bscscan.com/tx/${txHash}" target="_blank" rel="noopener" style="color: var(--color-cyan); text-decoration: underline; font-family: monospace; font-size: 11px;">
+            ${txHash.slice(0, 10)}...${txHash.slice(-8)} ↗ (View on BscScan)
+          </a>
+        </div>
+      </div>
+    `);
+
+    showToast('🚀 MINT BROADCASTED', `Mint transaction submitted for ${name}!`, '⚡');
+
+    // Auto-favorite the newly minted contract so it appears in Favorites tab
+    toggleFavorite(contractAddress, null, true);
+
+  } catch (err) {
+    console.error('Web3 Mint failed:', err);
+    const isUserRejection = (err && (err.code === 4001 || err.code === 'ACTION_REJECTED' || (err.message && err.message.toLowerCase().includes('user rejected'))));
+
+    if (btn) {
+      btn.disabled = false;
+      btn.classList.remove('confirming');
+      btn.classList.add('error');
+      btn.innerHTML = isUserRejection ? '<span>⚠️ Signature Cancelled</span>' : '<span>❌ Mint Failed</span>';
+    }
+
+    if (isUserRejection) {
+      updateStatus('<div class="mint-status-warning">⚠️ Transaction was rejected in your wallet.</div>');
+    } else {
+      const errMsg = (err && err.message) ? err.message.split('\n')[0].slice(0, 100) : 'Transaction failed';
+      updateStatus(`<div class="mint-status-error">❌ ${escapeHtml(errMsg)}</div>`);
+    }
+
+    // Reset button state after 3 seconds
+    setTimeout(() => {
+      if (btn) {
+        btn.classList.remove('error');
+        btn.disabled = false;
+        btn.innerHTML = `<span>⚡ 1-Click Mint</span>`;
+      }
+    }, 3000);
+  }
+}
+if (typeof window !== 'undefined') window.executeWeb3Mint = executeWeb3Mint;
 
 // Watch-Only Mode (Inspect Any BSC Address Without Private Key)
 function setWatchOnlyWallet(addr) {
@@ -3245,7 +3453,9 @@ if (typeof module !== 'undefined' && module.exports) {
     loadMoreDrops,
     pollDeltaFeed,
     requestNotificationPermission,
-    sendDesktopNotification
+    sendDesktopNotification,
+    buildMintTxParams,
+    executeWeb3Mint
   };
 }
 

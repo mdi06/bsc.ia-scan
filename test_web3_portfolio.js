@@ -3,6 +3,7 @@ const {
   pad32,
   buildPancakeSwapSellCalldata,
   evaluatePortfolioExit,
+  buildMintTxParams,
   PANCAKE_ROUTER_V2,
   WBNB_ADDRESS
 } = require('./app.js');
@@ -132,5 +133,31 @@ assert.strictEqual(decoded[0].success, true, 'Item 0 must be success');
 assert.strictEqual(BigInt(decoded[0].returnData), 1000000000000000000n, 'Item 0 returnData must match 1 ETH');
 assert.strictEqual(decoded[1].success, false, 'Item 1 must isolate revert (success: false)');
 console.log('✔ decodeMulticall3Aggregate3 with revert isolation: PASS');
+
+// 8. Test 1-Click Web3 Direct Mint Tx Builder
+const testTarget = '0x8b710e45d38fd55e2d198d2295c0a0d24ebfd64c';
+const freeTx = buildMintTxParams(testTarget, '0x1249c58b', '0', userWallet);
+assert.strictEqual(freeTx.to, testTarget.toLowerCase(), 'Must point to target contract');
+assert.strictEqual(freeTx.data, '0x1249c58b', 'Must retain calldata');
+assert.strictEqual(freeTx.value, '0x0', 'Free mint value must be 0x0');
+assert.strictEqual(freeTx.from, userWallet.toLowerCase(), 'Must specify from user wallet');
+console.log('✔ buildMintTxParams (Free Mint): PASS');
+
+const pricedTx = buildMintTxParams(testTarget, '0xa0712d680000000000000000000000000000000000000000000000000000000000000001', '2400000000000000', userWallet);
+assert.strictEqual(pricedTx.value, '0x886c98b760000', 'Value must correctly encode 2400000000000000 wei in hex');
+assert(pricedTx.data.startsWith('0xa0712d68'), 'Must retain mint(1) selector');
+console.log('✔ buildMintTxParams (Priced 0.0024 BNB Mint): PASS');
+
+// Test recipient address injection in 0x836a1040
+const raw836 = '0x836a1040000000000000000000000000000000000000000000000000000000000000000100000000000000000000000011111111111111111111111111111111111111110000000000000000000000000000000000000000000000000000000000000002';
+const injTx = buildMintTxParams(testTarget, raw836, '0', userWallet);
+assert(injTx.data.toLowerCase().includes(userWallet.slice(2).toLowerCase()), 'Must inject connected wallet into recipient slot');
+console.log('✔ buildMintTxParams (Recipient Dynamic Injection): PASS');
+
+// Test safety error on invalid address
+assert.throws(() => {
+  buildMintTxParams('0xinvalid', '0x', '0', userWallet);
+}, /Invalid contract address/);
+console.log('✔ buildMintTxParams (Address Validation Guard): PASS');
 
 console.log('🎉 All Web3 & Multicall3 tests verified successfully!');

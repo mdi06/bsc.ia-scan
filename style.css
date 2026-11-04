@@ -2843,3 +2843,112 @@ tbody tr.selected {
   box-shadow: 0 0 20px rgba(0, 240, 255, 0.4);
   transform: translateY(-1px);
 }
+
+/* 1-Click Web3 Direct Minting in Modal */
+.mint-action-section {
+  background: rgba(0, 240, 255, 0.04);
+  border: 1px solid rgba(0, 240, 255, 0.35);
+  border-radius: 8px;
+  padding: 14px 16px;
+  margin-bottom: 14px;
+}
+
+.web3-mint-btn {
+  width: 100%;
+  padding: 13px 20px;
+  background: linear-gradient(135deg, rgba(0, 240, 255, 0.22) 0%, rgba(0, 255, 136, 0.22) 100%);
+  border: 1px solid var(--color-cyan);
+  border-radius: 6px;
+  color: #ffffff;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.5px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  box-shadow: 0 4px 18px rgba(0, 240, 255, 0.25), inset 0 0 10px rgba(0, 240, 255, 0.15);
+  transition: all 0.2s ease;
+}
+
+.web3-mint-btn:hover:not(:disabled) {
+  background: linear-gradient(135deg, rgba(0, 240, 255, 0.38) 0%, rgba(0, 255, 136, 0.38) 100%);
+  border-color: #00ff88;
+  box-shadow: 0 6px 25px rgba(0, 255, 136, 0.35), inset 0 0 15px rgba(0, 255, 136, 0.25);
+  transform: translateY(-1px);
+}
+
+.web3-mint-btn:active:not(:disabled) {
+  transform: translateY(1px);
+  box-shadow: 0 2px 10px rgba(0, 240, 255, 0.2);
+}
+
+.web3-mint-btn.confirming {
+  background: rgba(240, 185, 11, 0.2);
+  border-color: var(--color-yellow);
+  color: var(--color-yellow);
+  animation: pulse-border 1.5s infinite;
+  cursor: wait;
+}
+
+.web3-mint-btn.success {
+  background: rgba(74, 222, 128, 0.25);
+  border-color: var(--color-green);
+  color: var(--color-green);
+}
+
+.web3-mint-btn.error {
+  background: rgba(239, 68, 68, 0.25);
+  border-color: var(--color-red);
+  color: var(--color-red);
+}
+
+.web3-mint-btn.sold-out {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: var(--border-dim);
+  color: var(--text-dim);
+  box-shadow: none;
+  cursor: default;
+}
+
+.mint-status-box {
+  border-radius: 6px;
+  padding: 10px 14px;
+  font-size: 12px;
+  background: rgba(8, 24, 36, 0.85);
+  border: 1px solid var(--border-dim);
+}
+
+.mint-status-info {
+  color: var(--color-cyan);
+}
+
+.mint-status-pending {
+  color: var(--color-yellow);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.mint-status-success {
+  color: var(--color-green);
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.mint-status-warning {
+  color: var(--color-yellow);
+}
+
+.mint-status-error {
+  color: var(--color-red);
+}
+
+@keyframes pulse-border {
+  0% { box-shadow: 0 0 5px rgba(240, 185, 11, 0.3); }
+  50% { box-shadow: 0 0 20px rgba(240, 185, 11, 0.6); }
+  100% { box-shadow: 0 0 5px rgba(240, 185, 11, 0.3); }
+}
