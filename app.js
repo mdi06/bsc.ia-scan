@@ -2824,12 +2824,6 @@ function openBinanceQrModal() {
       </div>
 
       <div class="wallet-connect-body" style="text-align: center; padding: 16px 14px;">
-        <!-- Informative note explaining why the in-app scanner fails on URLs -->
-        <div style="background: rgba(234, 179, 8, 0.1); border: 1px solid rgba(234, 179, 8, 0.3); border-radius: 6px; padding: 10px 12px; margin-bottom: 16px; font-size: 12px; line-height: 1.5; text-align: left; color: #F0B90B;">
-          <strong>ℹ️ Why did the Binance Scanner say "Invalid QR Code"?</strong><br/>
-          The <code>[ - ]</code> scan icon in the Binance App is strictly a crypto payment / WalletConnect scanner that rejects website links. Use <strong>Method 1</strong> to open this terminal directly in the Binance DApp browser!
-        </div>
-
         <!-- Method 1: Binance Web3 Discover (Native Mobile DApp Browser) -->
         <div style="background: rgba(240, 185, 11, 0.05); border: 1px solid rgba(240, 185, 11, 0.3); border-radius: 8px; padding: 14px; margin-bottom: 14px; text-align: left;">
           <div style="font-weight: 700; color: #F0B90B; font-size: 13px; margin-bottom: 8px;">
