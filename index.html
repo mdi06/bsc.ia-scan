@@ -271,6 +271,11 @@
             <!-- Dynamic Rows Injected by app.js -->
           </tbody>
         </table>
+        <div id="loadMoreWrap" class="load-more-wrap" style="text-align: center; padding: 20px 0; display: none;">
+          <button id="loadMoreBtn" class="load-more-btn" onclick="loadMoreDrops()">
+            <span>⬇️ Load Older Drops (<span id="loadedCount">0</span> of <span id="totalAvailableCount">0</span>)</span>
+          </button>
+        </div>
       </div>
     </main>
 

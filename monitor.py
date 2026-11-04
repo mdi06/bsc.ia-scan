@@ -3838,7 +3838,7 @@ def build_interactive_dashboard(
         if has_ref:
             ref_str = f"🛡️ VERIFIED REFUND ({', '.join(ref_methods[:2])})"
             m_text.append(f"   ▫ Bytecode Refund:   {ref_str}\n", style="bold green")
-        elif item.get("mint_price_bnb", 0) > 0.001 or int(item.get("mint_value_wei", "0") or 0) > 0:
+        elif (item.get("mint_price_bnb") or 0) > 0.001 or int(item.get("mint_value_wei") or 0) > 0:
             m_text.append("   ▫ Bytecode Refund:   ⚠️ NO REFUND MECHANISM (Capital at risk if unfilled)\n", style="bold yellow")
         else:
             m_text.append("   ▫ Bytecode Refund:   N/A (Free Mint / Gas Only)\n", style="dim")

@@ -469,7 +469,7 @@ def run_fast_track_progress_sweeper_loop():
                 if not monitor.is_system_infra(x)
                 and (
                     not x.get("max_supply")
-                    or (x.get("total_minted", 0) or 0) < x.get("max_supply")
+                    or (x.get("total_minted") or 0) < (x.get("max_supply") or 0)
                 )
             ]
 
@@ -642,7 +642,7 @@ def run_market_dynamics_updater_loop():
                         item_changed = True
                     except Exception:
                         pass
-                elif item.get("total_minted", 0) > 0 or item.get("smart_wallets") or item.get("score", 0) > 0:
+                elif (item.get("total_minted") or 0) > 0 or item.get("smart_wallets") or (item.get("score") or 0) > 0:
                     try:
                         pair_addr = monitor.get_pair_address(rpc, monitor.PANCAKE_FACTORY_V2, c, monitor.WBNB_ADDRESS)
                         if pair_addr:

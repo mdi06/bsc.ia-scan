@@ -218,12 +218,42 @@ function updateFavPillCount() {
   favEl.textContent = count;
 }
 
-// Audio Alert & Discovery Tracking
+// Audio Alert, Discovery Tracking & Feed State
 let audioCtx = null;
 let soundEnabled = (typeof localStorage !== 'undefined') ? (localStorage.getItem('agent_sound_alerts') !== 'false') : false;
 const knownContracts = new Set();
 const knownSniperReady = new Set();
 let isInitialLoad = true;
+let latestKnownBlock = 0;
+let globalStats = null;
+let isLoadingMore = false;
+let hasMoreDrops = true;
+
+// Native Browser / Desktop Push Notification System
+function requestNotificationPermission() {
+  if (typeof window !== 'undefined' && 'Notification' in window) {
+    if (Notification.permission === 'default') {
+      Notification.requestPermission().catch(() => {});
+    }
+  }
+}
+if (typeof window !== 'undefined') window.requestNotificationPermission = requestNotificationPermission;
+
+function sendDesktopNotification(title, body) {
+  if (typeof window === 'undefined' || !('Notification' in window)) return;
+  if (Notification.permission === 'granted') {
+    try {
+      new Notification(title, {
+        body: body,
+        icon: 'icon.svg',
+        badge: 'icon.svg'
+      });
+    } catch (e) {
+      // Safe fallback on strict mobile browsers
+    }
+  }
+}
+if (typeof window !== 'undefined') window.sendDesktopNotification = sendDesktopNotification;
 
 // Safe HTML escaping helper
 function escapeHtml(str) {
@@ -297,6 +327,11 @@ function showNewMarketToast(item) {
     </div>
   `;
   container.appendChild(toast);
+
+  sendDesktopNotification(
+    '🚨 New .ai Agent ID Drop!',
+    `${item.name || 'New Contract'} (${item.symbol || ''}) at Block ${blkStr}`
+  );
 
   // Auto-dismiss after 5s
   setTimeout(() => {
@@ -666,7 +701,9 @@ function updateSniperReadyCount() {
   if (typeof document === 'undefined') return;
   const el = document.getElementById('sniperReadyCount');
   if (el) {
-    const cnt = allDrops.filter(d => isSniperReady(d)).length;
+    const cnt = (globalStats && globalStats.sniper_ready !== undefined)
+      ? globalStats.sniper_ready
+      : allDrops.filter(d => isSniperReady(d)).length;
     el.textContent = cnt;
   }
 }
@@ -719,7 +756,9 @@ function updateNftSurgeCount() {
   if (typeof document === 'undefined') return;
   const el = document.getElementById('nftSurgeCount');
   if (el) {
-    const cnt = allDrops.filter(d => Boolean(d.is_nft_surge)).length;
+    const cnt = (globalStats && globalStats.nft_surge !== undefined)
+      ? globalStats.nft_surge
+      : allDrops.filter(d => Boolean(d.is_nft_surge)).length;
     el.textContent = cnt;
   }
 }
@@ -728,7 +767,9 @@ function updateProxyCount() {
   if (typeof document === 'undefined') return;
   const el = document.getElementById('proxyCount');
   if (el) {
-    const cnt = allDrops.filter(d => Boolean(d.is_proxy_clone)).length;
+    const cnt = (globalStats && globalStats.proxy !== undefined)
+      ? globalStats.proxy
+      : allDrops.filter(d => Boolean(d.is_proxy_clone)).length;
     el.textContent = cnt;
   }
 }
@@ -1092,7 +1133,11 @@ function renderTable() {
   updateSniperReadyCount();
   updateNftSurgeCount();
   updateProxyCount();
-  document.getElementById('footerCount').textContent = `Showing ${filtered.length} of ${allDrops.length} collections`;
+  const totalDisplay = globalStats ? globalStats.total : allDrops.length;
+  const footerCountEl = document.getElementById('footerCount');
+  if (footerCountEl) {
+    footerCountEl.textContent = `Showing ${filtered.length} of ${totalDisplay} collections`;
+  }
 
   if (filtered.length === 0) {
     const tr = document.createElement('tr');
@@ -1353,6 +1398,20 @@ function renderTable() {
     `;
     tbody.appendChild(tr);
   });
+
+  // Update pagination button visibility and progress
+  const loadMoreWrap = document.getElementById('loadMoreWrap');
+  if (loadMoreWrap) {
+    if (activeTab === 'RADAR' && activeFilter === 'ALL' && !searchQuery && hasMoreDrops) {
+      loadMoreWrap.style.display = 'block';
+      const loadedCountEl = document.getElementById('loadedCount');
+      const totalAvailEl = document.getElementById('totalAvailableCount');
+      if (loadedCountEl) loadedCountEl.textContent = allDrops.length;
+      if (totalAvailEl) totalAvailEl.textContent = globalStats ? globalStats.total : allDrops.length;
+    } else {
+      loadMoreWrap.style.display = 'none';
+    }
+  }
 }
 
 // Modal Inspection Dialog
@@ -2543,14 +2602,169 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = 12000) {
   }
 }
 
-// Fetch drops from 24/7 Render cloud scanner with resilient local fast-path
+// High-speed real-time delta polling state
+let isPollingDelta = false;
+let deltaPollTimer = null;
+
+// Real-Time Delta Polling (< 200 bytes per request, polls every 4 seconds)
+async function pollDeltaFeed() {
+  if (isPollingDelta || !latestKnownBlock) return;
+  isPollingDelta = true;
+
+  try {
+    const res = await fetchWithTimeout(
+      `${BACKEND_URL}/api/feed?since_block=${latestKnownBlock}&_t=${Date.now()}`,
+      { cache: 'no-store' },
+      4000
+    );
+    if (!res.ok) return;
+    const data = await res.json();
+
+    if (data && data.stats) {
+      globalStats = data.stats;
+      const rEl = document.getElementById('radarCount');
+      if (rEl) rEl.textContent = globalStats.total;
+      const sEl = document.getElementById('smartCount');
+      if (sEl) sEl.textContent = globalStats.smart;
+      updateSniperReadyCount();
+      updateNftSurgeCount();
+      updateProxyCount();
+    }
+
+    if (data && data.projects && data.projects.length > 0) {
+      const newlyFound = [];
+      data.projects.forEach(drop => {
+        const c = (drop.contract || '').toLowerCase();
+        if (c && !knownContracts.has(c)) {
+          knownContracts.add(c);
+          newlyFound.push(drop);
+          drop._isNew = true;
+        }
+      });
+
+      if (newlyFound.length > 0) {
+        console.log(`%c[🚨 REAL-TIME DELTA DETECTED]`, 'color: #00ff88; font-weight: bold;', newlyFound);
+        // Prepend new drops to the front of allDrops
+        allDrops.unshift(...newlyFound);
+
+        // Advance latest known block
+        if (data.latest_block) {
+          latestKnownBlock = data.latest_block;
+        } else if (newlyFound[0].block) {
+          latestKnownBlock = newlyFound[0].block;
+        }
+
+        playMarketAlertSound();
+        newlyFound.slice(0, 3).forEach(drop => showNewMarketToast(drop));
+
+        // Check for sniper ready in new drops
+        newlyFound.forEach(drop => {
+          const c = (drop.contract || '').toLowerCase();
+          const ready = isSniperReady(drop);
+          if (ready && c && !knownSniperReady.has(c)) {
+            knownSniperReady.add(c);
+            const ms = Number(drop.max_supply || 0);
+            const tm = Number(drop.total_minted || 0);
+            const pct = ms > 0 ? (tm / ms * 100).toFixed(0) : '60+';
+            showToast('🎯 SNIPER READY ALERT', `${drop.name || 'Drop'} reached ${pct}% progress (Passed 60% rule)`, '🎯');
+          }
+        });
+
+        // Re-hydrate user balances if wallet connected
+        if (connectedWallet && userOwnedContracts.size > 0) {
+          allDrops.forEach(drop => {
+            const c = (drop.contract || '').toLowerCase();
+            const raw = userOwnedContracts.get(c);
+            if (raw && raw > 0n) {
+              const std = String(drop.standard || '');
+              const isNft = std.includes('721') || std.includes('NFT') || Boolean(drop.is_nft);
+              let dec = 18;
+              if (std.includes('8 decimals')) dec = 8;
+              drop.user_balance = isNft ? Number(raw) : (Number(raw) / (10 ** dec));
+              drop.user_balance_wei = raw;
+            }
+          });
+          updatePortfolioBannerUI();
+        }
+
+        renderStats(allDrops);
+        renderTable();
+
+        const timeStr = new Date().toLocaleTimeString();
+        const syncEl = document.getElementById('syncTime');
+        if (syncEl) syncEl.textContent = `Synced ${timeStr}`;
+      } else if (data.latest_block && data.latest_block > latestKnownBlock) {
+        latestKnownBlock = data.latest_block;
+      }
+    } else if (data && data.latest_block && data.latest_block > latestKnownBlock) {
+      latestKnownBlock = data.latest_block;
+    }
+  } catch (err) {
+    // Delta poll is resilient; silent fallback on minor network hitch
+  } finally {
+    isPollingDelta = false;
+  }
+}
+
+function startDeltaPolling() {
+  if (deltaPollTimer) clearInterval(deltaPollTimer);
+  deltaPollTimer = setInterval(pollDeltaFeed, 4000);
+}
+
+// Load older drops when user scrolls or clicks Load More button
+async function loadMoreDrops() {
+  if (isLoadingMore || !hasMoreDrops) return;
+  isLoadingMore = true;
+  const btn = document.getElementById('loadMoreBtn');
+  if (btn) btn.innerHTML = '<span>⏳ Loading Older Drops...</span>';
+
+  try {
+    const offset = allDrops.length;
+    let res;
+    try {
+      res = await fetchWithTimeout(`${BACKEND_URL}/api/feed?limit=150&offset=${offset}&_t=${Date.now()}`, { cache: 'no-store' }, 8000);
+      if (!res.ok) throw new Error('Render load more failed');
+    } catch (e) {
+      res = await fetchWithTimeout(`https://agent-id-backend.onrender.com/api/feed?limit=150&offset=${offset}&_t=${Date.now()}`, { cache: 'no-store' }, 8000);
+    }
+
+    if (!res.ok) throw new Error('Failed to load more');
+    const data = await res.json();
+    if (data && data.projects && data.projects.length > 0) {
+      data.projects.forEach(p => {
+        const c = (p.contract || '').toLowerCase();
+        if (c) knownContracts.add(c);
+        if (isSniperReady(p) && c) knownSniperReady.add(c);
+        allDrops.push(p);
+      });
+      hasMoreDrops = Boolean(data.has_more);
+      if (data.stats) globalStats = data.stats;
+      renderTable();
+    } else {
+      hasMoreDrops = false;
+      const wrap = document.getElementById('loadMoreWrap');
+      if (wrap) wrap.style.display = 'none';
+    }
+  } catch (err) {
+    console.error('Failed to load more drops:', err);
+  } finally {
+    isLoadingMore = false;
+    if (btn) {
+      const tot = globalStats ? globalStats.total : allDrops.length;
+      btn.innerHTML = `<span>⬇️ Load Older Drops (<span id="loadedCount">${allDrops.length}</span> of <span id="totalAvailableCount">${tot}</span>)</span>`;
+    }
+  }
+}
+if (typeof window !== 'undefined') window.loadMoreDrops = loadMoreDrops;
+
+// Fetch drops from 24/7 Render cloud scanner using lightweight initial feed (/api/feed?limit=150)
 async function fetchDrops() {
   try {
-    // Fast path: On initial load, immediately populate from local history.json (<30ms)
+    // Fast path: On initial load, immediately populate from local feed_snapshot.json (<20ms)
     // so mobile/desktop users see the complete market table instantly with zero white/blank space.
     if (isInitialLoad && (!allDrops || allDrops.length === 0)) {
       try {
-        const localRes = await fetchWithTimeout(`history.json?_t=${Date.now()}`, { cache: 'no-store' }, 4000);
+        const localRes = await fetchWithTimeout(`feed_snapshot.json?_t=${Date.now()}`, { cache: 'no-store' }, 2000);
         if (localRes.ok) {
           const localDrops = await localRes.json();
           if (Array.isArray(localDrops) && localDrops.length > 0) {
@@ -2560,11 +2774,6 @@ async function fetchDrops() {
               if (c) knownContracts.add(c);
               if (isSniperReady(drop) && c) knownSniperReady.add(c);
             });
-            const smartDrops = allDrops.filter(d => (d.smart_wallets && d.smart_wallets.length > 0) || (d.smart_minters && d.smart_minters.length > 0));
-            const rEl = document.getElementById('radarCount');
-            if (rEl) rEl.textContent = allDrops.length;
-            const sEl = document.getElementById('smartCount');
-            if (sEl) sEl.textContent = smartDrops.length;
             renderStats(allDrops);
             renderTable();
             const timeStr = new Date().toLocaleTimeString();
@@ -2573,28 +2782,46 @@ async function fetchDrops() {
           }
         }
       } catch (err) {
-        console.warn('Initial fast cache load bypassed:', err);
+        console.warn('Initial fast snapshot bypassed:', err);
       }
     }
 
     let res;
-    let source = 'Render';
+    let source = 'Render Feed';
     try {
-      res = await fetchWithTimeout(`${BACKEND_URL}/history.json?_t=${Date.now()}`, { cache: 'no-store' }, 12000);
-      if (!res.ok) throw new Error('Render fetch failed');
+      res = await fetchWithTimeout(`${BACKEND_URL}/api/feed?limit=150&_t=${Date.now()}`, { cache: 'no-store' }, 8000);
+      if (!res.ok) throw new Error('Render /api/feed failed');
     } catch (e) {
       try {
-        res = await fetchWithTimeout(`https://agent-id-monitor.fly.dev/history.json?_t=${Date.now()}`, { cache: 'no-store' }, 6000);
-        if (!res.ok) throw new Error('Fly fetch failed');
-        source = 'Fly.io';
+        res = await fetchWithTimeout(`https://agent-id-backend.onrender.com/api/feed?limit=150&_t=${Date.now()}`, { cache: 'no-store' }, 8000);
+        if (!res.ok) throw new Error('Render direct /api/feed failed');
       } catch (e2) {
-        source = 'Local Cache';
-        res = await fetchWithTimeout(`history.json?_t=${Date.now()}`, { cache: 'no-store' }, 6000);
+        try {
+          res = await fetchWithTimeout(`${BACKEND_URL}/history.json?_t=${Date.now()}`, { cache: 'no-store' }, 8000);
+          source = 'History Fallback';
+        } catch (e3) {
+          source = 'Local Snapshot';
+          res = await fetchWithTimeout(`feed_snapshot.json?_t=${Date.now()}`, { cache: 'no-store' }, 4000);
+        }
       }
     }
-    const freshDrops = await res.json();
-    if (Array.isArray(freshDrops) && freshDrops.length > 0) {
+
+    const payload = await res.json();
+    let freshDrops = [];
+    if (Array.isArray(payload)) {
+      freshDrops = payload;
+    } else if (payload && Array.isArray(payload.projects)) {
+      freshDrops = payload.projects;
+      if (payload.stats) globalStats = payload.stats;
+      hasMoreDrops = Boolean(payload.has_more);
+      if (payload.latest_block) latestKnownBlock = payload.latest_block;
+    }
+
+    if (freshDrops.length > 0) {
       allDrops = freshDrops;
+      if (!latestKnownBlock && allDrops[0] && allDrops[0].block) {
+        latestKnownBlock = allDrops[0].block;
+      }
     }
 
     // Check for newly discovered markets
@@ -2643,9 +2870,16 @@ async function fetchDrops() {
     }
     isInitialLoad = false;
 
-    const smartDrops = allDrops.filter(d => (d.smart_wallets && d.smart_wallets.length > 0) || (d.smart_minters && d.smart_minters.length > 0));
-    document.getElementById('radarCount').textContent = allDrops.length;
-    document.getElementById('smartCount').textContent = smartDrops.length;
+    // Header Counters with Global Pre-Calculated Stats
+    const rEl = document.getElementById('radarCount');
+    if (rEl) rEl.textContent = globalStats ? globalStats.total : allDrops.length;
+    const sEl = document.getElementById('smartCount');
+    if (sEl) {
+      sEl.textContent = globalStats ? globalStats.smart : allDrops.filter(d => (d.smart_wallets && d.smart_wallets.length > 0) || (d.smart_minters && d.smart_minters.length > 0)).length;
+    }
+    updateSniperReadyCount();
+    updateNftSurgeCount();
+    updateProxyCount();
 
     // Re-hydrate user balances if wallet is connected
     if (connectedWallet && userOwnedContracts.size > 0) {
@@ -2682,6 +2916,10 @@ async function fetchDrops() {
       'color: #00ff88; font-weight: bold;',
       `Loaded ${allDrops.length} drops from ${source} at ${timeStr}`
     );
+
+    // Initialize 4-second real-time delta polling for instant updates
+    startDeltaPolling();
+
   } catch (err) {
     console.error('Failed to load drops:', err);
   }
@@ -2773,6 +3011,7 @@ async function init() {
         soundEnabled = !soundEnabled;
         localStorage.setItem('agent_sound_alerts', soundEnabled ? 'true' : 'false');
         updateSoundBtn();
+        requestNotificationPermission();
         if (soundEnabled) {
           playMarketAlertSound(); // play quick preview chime
         }
@@ -2789,19 +3028,29 @@ async function init() {
       footerDonate.addEventListener('click', () => copyDonationAddress(footerDonate, 'footer'));
     }
 
-    // Unlock Web Audio context on user's first click or keystroke anywhere
+    // Unlock Web Audio context & request push notifications on user's first click or keystroke anywhere
     const unlockAudio = () => {
       if (audioCtx && audioCtx.state === 'suspended') {
         audioCtx.resume();
       }
+      requestNotificationPermission();
     };
     document.addEventListener('click', unlockAudio, { once: true });
     document.addEventListener('keydown', unlockAudio, { once: true });
 
     await fetchDrops();
 
-    // Auto-refresh from cloud scanner every 15 seconds
-    setInterval(fetchDrops, 15000);
+    // Background sync every 60s to refresh volume/liquidity metrics (delta feed handles new drops every 4s)
+    setInterval(fetchDrops, 60000);
+
+    // Infinite scroll: automatically load older drops as user scrolls down
+    window.addEventListener('scroll', () => {
+      if (activeTab === 'RADAR' && activeFilter === 'ALL' && !searchQuery && hasMoreDrops && !isLoadingMore) {
+        if (window.innerHeight + window.scrollY >= document.body.offsetHeight - 600) {
+          loadMoreDrops();
+        }
+      }
+    }, { passive: true });
 
     // Tab buttons
     document.querySelectorAll('.tab-btn').forEach(btn => {
@@ -2992,7 +3241,11 @@ if (typeof module !== 'undefined' && module.exports) {
     WBNB_ADDRESS,
     MULTICALL3_ADDRESS,
     encodeMulticall3Aggregate3,
-    decodeMulticall3Aggregate3
+    decodeMulticall3Aggregate3,
+    loadMoreDrops,
+    pollDeltaFeed,
+    requestNotificationPermission,
+    sendDesktopNotification
   };
 }
 

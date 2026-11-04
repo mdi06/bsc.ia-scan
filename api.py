@@ -12,7 +12,7 @@ import os
 import sys
 import time
 import json
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 from fastapi import FastAPI, Query, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
@@ -78,6 +78,77 @@ def get_virtual_history_json():
         media_type="application/json",
         headers={"Cache-Control": "no-cache, no-store, must-revalidate"}
     )
+
+
+@app.get("/api/feed")
+def get_feed(
+    limit: int = Query(150, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+    since_block: Optional[int] = Query(None),
+    filter: Optional[str] = Query(None)
+):
+    """
+    Lightweight, high-speed feed endpoint for initial UI render (< 50ms) and delta updates.
+    Returns the newest drops, total counts, and filter stats in a tiny payload (< 100 KB).
+    """
+    all_projs = db.get_all_projects()
+    total = len(all_projs)
+    latest_block = all_projs[0].get("block") if all_projs else None
+
+    # Pre-calculated filter stats so frontend doesn't need all 10,000 drops just to show counts
+    smart_count = sum(1 for d in all_projs if (d.get("smart_wallets") or d.get("smart_minters")))
+    sniper_ready_count = sum(1 for d in all_projs if d.get("sniper_ready"))
+    proxy_count = sum(1 for d in all_projs if d.get("is_proxy_clone"))
+    nft_surge_count = sum(1 for d in all_projs if d.get("is_nft_surge"))
+
+    stats = {
+        "total": total,
+        "smart": smart_count,
+        "sniper_ready": sniper_ready_count,
+        "proxy": proxy_count,
+        "nft_surge": nft_surge_count,
+        "latest_block": latest_block
+    }
+
+    if since_block is not None:
+        # Delta mode: only return drops created after this block!
+        delta = [p for p in all_projs if int(p.get("block") or 0) > since_block]
+        return {
+            "success": True,
+            "mode": "delta",
+            "total": total,
+            "count": len(delta),
+            "latest_block": latest_block,
+            "projects": delta,
+            "stats": stats
+        }
+
+    # Filter target list if requested
+    target_list = all_projs
+    if filter == "smart":
+        target_list = [d for d in all_projs if (d.get("smart_wallets") or d.get("smart_minters"))]
+    elif filter == "sniper_ready":
+        target_list = [d for d in all_projs if d.get("sniper_ready")]
+    elif filter == "proxy":
+        target_list = [d for d in all_projs if d.get("is_proxy_clone")]
+    elif filter == "nft_surge":
+        target_list = [d for d in all_projs if d.get("is_nft_surge")]
+
+    target_total = len(target_list)
+    paginated = target_list[offset : offset + limit]
+    return {
+        "success": True,
+        "mode": "feed",
+        "total": total,
+        "filter_total": target_total,
+        "count": len(paginated),
+        "offset": offset,
+        "limit": limit,
+        "has_more": (offset + limit) < target_total,
+        "latest_block": latest_block,
+        "projects": paginated,
+        "stats": stats
+    }
 
 
 @app.get("/api/projects")

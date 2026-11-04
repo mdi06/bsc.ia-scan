@@ -2815,3 +2815,31 @@ tbody tr.selected {
     gap: 10px;
   }
 }
+
+.load-more-wrap {
+  text-align: center;
+  padding: 24px 0;
+  width: 100%;
+}
+
+.load-more-btn {
+  background: rgba(8, 24, 36, 0.9);
+  border: 1px solid rgba(0, 240, 255, 0.35);
+  color: var(--color-cyan);
+  padding: 12px 28px;
+  border-radius: 8px;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.4);
+}
+
+.load-more-btn:hover {
+  background: rgba(0, 240, 255, 0.15);
+  border-color: var(--color-cyan);
+  box-shadow: 0 0 20px rgba(0, 240, 255, 0.4);
+  transform: translateY(-1px);
+}

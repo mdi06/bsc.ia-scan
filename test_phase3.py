@@ -102,3 +102,37 @@ def test_save_history_delta_support(tmp_path):
         monitor.HISTORY_FILE = orig_file
 
 
+def test_api_feed_endpoint():
+    """Verifies /api/feed provides lightweight paginated and delta feeds with stats."""
+    client = TestClient(api.app)
+
+    # 1. Paginated feed mode
+    res = client.get("/api/feed?limit=5")
+    assert res.status_code == 200
+    data = res.json()
+    assert data["success"] is True
+    assert data["mode"] == "feed"
+    assert "stats" in data
+    assert "total" in data
+    assert "projects" in data
+    assert len(data["projects"]) <= 5
+
+    # 2. Delta mode
+    latest_b = data.get("latest_block")
+    if latest_b:
+        res_delta = client.get(f"/api/feed?since_block={latest_b}")
+        assert res_delta.status_code == 200
+        delta_data = res_delta.json()
+        assert delta_data["mode"] == "delta"
+        assert delta_data["count"] == 0
+        assert delta_data["projects"] == []
+
+    # 3. Filter mode
+    res_filter = client.get("/api/feed?limit=5&filter=proxy")
+    assert res_filter.status_code == 200
+    filter_data = res_filter.json()
+    assert filter_data["success"] is True
+    assert "filter_total" in filter_data
+
+
+
