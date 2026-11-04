@@ -1128,6 +1128,7 @@ function getFilteredDrops() {
 function renderTable() {
   if (typeof document === 'undefined') return;
   const tbody = document.getElementById('tableBody');
+  if (!tbody) return;
   tbody.innerHTML = '';
   const filtered = getFilteredDrops();
 
@@ -1951,25 +1952,29 @@ function getInjectedProvider(preferred = 'auto') {
   return null;
 }
 
+// Binance Web3 Wallet Click Handler (direct connection if injected, otherwise native in-modal QR connect)
+function handleBinanceWalletClick() {
+  const provider = getInjectedProvider('binance');
+  if (provider) {
+    connectWeb3('binance');
+  } else {
+    openBinanceQrModal();
+  }
+}
+
 // Web3 Wallet Connect Method
 async function connectWeb3(providerType = 'auto') {
   const provider = getInjectedProvider(providerType);
   if (!provider) {
     if (providerType === 'binance') {
-      alert(
-        "🟡 Binance Web3 Wallet extension was not detected in this browser!\n\n" +
-        "Rabby Wallet is currently active and overriding window.ethereum.\n\n" +
-        "To connect your Binance Agentic Wallet:\n" +
-        "• Option 1: Install the official Binance Wallet extension from Chrome Web Store.\n" +
-        "• Option 2: Open this site inside the Binance Mobile App (Web3 tab ➔ Discover ➔ type agent-id-monitor.vercel.app).\n" +
-        "• Option 3: Export your Binance Web3 key and import it into Rabby/MetaMask (same BSC address)."
-      );
+      openBinanceQrModal();
+      return false;
     } else if (providerType === 'metamask') {
-      alert("🦊 MetaMask was not detected (or Rabby is currently overriding it). Check your browser extensions.");
+      alert("🦊 MetaMask was not detected (or another extension is overriding it). Check your browser extensions or use Binance Web3 / Watch-Only.");
     } else if (providerType === 'rabby') {
       alert("🐰 Rabby Wallet extension was not detected in this browser!");
     } else {
-      alert("No Web3 Wallet detected! Please install MetaMask, Binance Web3 Wallet, or Rabby extension, or use Watch-Only mode.");
+      openBinanceQrModal();
     }
     return false;
   }
@@ -2615,10 +2620,10 @@ function openWalletModal() {
               <span class="provider-name">MetaMask</span>
               <span class="provider-badge">Injected</span>
             </div>
-            <div class="provider-card" onclick="connectWeb3('binance')">
+            <div class="provider-card" onclick="handleBinanceWalletClick()">
               <span class="provider-icon">🟡</span>
               <span class="provider-name">Binance Web3</span>
-              <span class="provider-badge">BNB Chain</span>
+              <span class="provider-badge">QR / Injected</span>
             </div>
             <div class="provider-card" onclick="connectWeb3('rabby')">
               <span class="provider-icon">🐰</span>
@@ -2630,6 +2635,13 @@ function openWalletModal() {
               <span class="provider-name">Auto Detect</span>
               <span class="provider-badge">EIP-1193</span>
             </div>
+          </div>
+
+          <div style="margin-top: 14px; text-align: center;">
+            <button class="wallet-action-btn" onclick="openBinanceQrModal()" style="width: 100%; border: 1px dashed rgba(240, 185, 11, 0.45); background: rgba(240, 185, 11, 0.08); color: #F0B90B; padding: 10px 14px; font-weight: 700; cursor: pointer; border-radius: 6px; display: flex; align-items: center; justify-content: center; gap: 8px; transition: all 0.2s ease;">
+              <span>📱</span>
+              <span>Scan QR with Binance Mobile Web3 App</span>
+            </button>
           </div>
 
           <div class="wallet-switch-card">
@@ -2678,6 +2690,9 @@ function openWalletModal() {
             <div class="wallet-hero-meta">
               <span class="wallet-hero-tag provider-tag">${walletProviderName}</span>
               <span class="wallet-hero-tag network-tag">🟢 BSC Chain ID: 56</span>
+              <span class="wallet-hero-tag ${isAgenticWallet ? 'badge-green' : 'badge-yellow'}" style="font-weight: 700;">
+                ${isAgenticWallet ? '🤖 Agentic (.ai Owner)' : '👤 Non-Agentic (No .ai NFT)'}
+              </span>
             </div>
             <div class="wallet-addr-action-row">
               <span class="wallet-addr-display" title="${connectedWallet}">${shortAddr}</span>
@@ -2691,6 +2706,15 @@ function openWalletModal() {
             <div class="wallet-addr-full">
               <code>${connectedWallet}</code>
             </div>
+            ${!isAgenticWallet ? `
+              <div style="margin-top: 12px; font-size: 11px; line-height: 1.5; color: var(--color-yellow); background: rgba(234, 179, 8, 0.08); border: 1px solid rgba(234, 179, 8, 0.25); border-radius: 6px; padding: 8px 12px; text-align: left;">
+                ℹ️ <strong>Standard Wallet:</strong> This address does not hold a Space ID <code>.ai</code> Agent ID NFT. You can track portfolios and trade on DEXs, but <em>Agent ID Exclusive</em> bonding curve drops require an <code>.ai</code> domain.
+              </div>
+            ` : `
+              <div style="margin-top: 12px; font-size: 11px; line-height: 1.5; color: var(--color-green); background: rgba(0, 255, 136, 0.08); border: 1px solid rgba(0, 255, 136, 0.25); border-radius: 6px; padding: 8px 12px; text-align: left;">
+                🤖 <strong>Agent ID Verified:</strong> On-chain verification confirms this wallet owns an active <code>.ai</code> Agent ID NFT. Authorized for 1-Click Exclusive Bonding Curve Mints!
+              </div>
+            `}
           </div>
         </div>
 
@@ -2774,6 +2798,68 @@ function openWalletModal() {
       </div>
     `;
   }
+
+  if (typeof modal.showModal === 'function') modal.showModal();
+  else modal.setAttribute('open', '');
+}
+
+// Binance Web3 Mobile App QR Connect Modal
+function openBinanceQrModal() {
+  const modal = document.getElementById('walletModal');
+  const content = document.getElementById('walletModalContent');
+  if (!modal || !content) return;
+
+  const currentOrigin = (typeof window !== 'undefined' && window.location.origin) ? window.location.origin : 'https://agent-id-monitor.vercel.app';
+  const qrApiUrl = `https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(currentOrigin)}&bgcolor=ffffff&color=03080c&margin=6`;
+
+  content.innerHTML = `
+    <div class="wallet-card-container">
+      <div class="modal-header wallet-card-header">
+        <div class="modal-title wallet-card-title">
+          <button class="wallet-back-btn" onclick="openWalletModal()">← Back</button>
+          <span class="wallet-title-icon" style="margin-left: 8px;">🟡</span>
+          <span>Binance Web3 Mobile Scan</span>
+        </div>
+        <button class="modal-close-btn" onclick="document.getElementById('walletModal').close ? document.getElementById('walletModal').close() : document.getElementById('walletModal').removeAttribute('open')">✕ [ESC]</button>
+      </div>
+
+      <div class="wallet-connect-body" style="text-align: center; padding: 18px 16px;">
+        <div style="font-size: 13px; color: var(--text-dim); margin-bottom: 16px; line-height: 1.5;">
+          Connect your native <strong style="color: #F0B90B;">Binance Web3 Agentic Wallet</strong> directly by scanning this QR code:
+        </div>
+
+        <div style="background: #ffffff; padding: 10px; border-radius: 8px; display: inline-block; box-shadow: 0 0 24px rgba(240, 185, 11, 0.25); border: 2px solid #F0B90B; margin: 0 auto 16px auto;">
+          <img src="${qrApiUrl}" alt="Binance Web3 QR Scan" style="width: 200px; height: 200px; display: block;" onerror="this.parentElement.innerHTML='<div style=\\'color:#000; padding:40px 20px; font-size:12px; font-weight:bold;\\'>Scan: ${currentOrigin}</div>'" />
+        </div>
+
+        <div class="binance-qr-steps" style="display: flex; flex-direction: column; gap: 8px; max-width: 360px; margin: 0 auto 18px auto; text-align: left; font-size: 12px; background: rgba(240, 185, 11, 0.06); border: 1px solid rgba(240, 185, 11, 0.25); border-radius: 6px; padding: 12px 14px;">
+          <div style="display: flex; align-items: center; gap: 10px;">
+            <span style="background: #F0B90B; color: #000; font-weight: bold; border-radius: 50%; width: 22px; height: 22px; display: inline-flex; align-items: center; justify-content: center; font-size: 11px; flex-shrink: 0;">1</span>
+            <span>Open <strong>Binance App</strong> on your phone</span>
+          </div>
+          <div style="display: flex; align-items: center; gap: 10px;">
+            <span style="background: #F0B90B; color: #000; font-weight: bold; border-radius: 50%; width: 22px; height: 22px; display: inline-flex; align-items: center; justify-content: center; font-size: 11px; flex-shrink: 0;">2</span>
+            <span>Switch to <strong>Web3</strong> tab at the top</span>
+          </div>
+          <div style="display: flex; align-items: center; gap: 10px;">
+            <span style="background: #F0B90B; color: #000; font-weight: bold; border-radius: 50%; width: 22px; height: 22px; display: inline-flex; align-items: center; justify-content: center; font-size: 11px; flex-shrink: 0;">3</span>
+            <span>Tap <strong>Scan [ - ]</strong> in top-right corner to open & mint</span>
+          </div>
+        </div>
+
+        <div class="wallet-switch-card" style="margin-top: 10px; text-align: left;">
+          <div class="wallet-switch-header">
+            <span class="switch-title">👁️ Or Sync Desktop via Watch-Only Auditor:</span>
+          </div>
+          <div class="wallet-switch-bar">
+            <span class="switch-icon">🤖</span>
+            <input type="text" id="binanceSyncInput" placeholder="Paste BSC wallet or e.g. huys.ai" />
+            <button class="wallet-switch-submit" onclick="const a = document.getElementById('binanceSyncInput').value.trim(); if(a) setWatchOnlyWallet(a);">Sync</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
 
   if (typeof modal.showModal === 'function') modal.showModal();
   else modal.setAttribute('open', '');
@@ -2883,6 +2969,8 @@ async function tryAutoReconnect() {
 // Expose Web3 functions on window for inline handlers
 if (typeof window !== 'undefined') {
   window.openWalletModal = openWalletModal;
+  window.openBinanceQrModal = openBinanceQrModal;
+  window.handleBinanceWalletClick = handleBinanceWalletClick;
   window.openSyncModal = openSyncModal;
   window.connectWeb3 = connectWeb3;
   window.disconnectWallet = disconnectWallet;
@@ -3550,6 +3638,8 @@ if (typeof module !== 'undefined' && module.exports) {
     computeStats,
     openHallOfFameModal,
     openWalletModal,
+    openBinanceQrModal,
+    handleBinanceWalletClick,
     openSyncModal,
     connectWeb3,
     disconnectWallet,

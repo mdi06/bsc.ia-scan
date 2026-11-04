@@ -5,6 +5,8 @@ const {
   evaluatePortfolioExit,
   buildMintTxParams,
   getInjectedProvider,
+  openBinanceQrModal,
+  handleBinanceWalletClick,
   PANCAKE_ROUTER_V2,
   WBNB_ADDRESS
 } = require('./app.js');
@@ -176,5 +178,31 @@ global.window = {
 assert.strictEqual(getInjectedProvider('binance'), global.window.binance, 'Must return Binance provider when present');
 assert.strictEqual(getInjectedProvider('rabby'), global.window.ethereum, 'Must return Rabby provider when requested');
 console.log('✔ getInjectedProvider Isolation & Anti-Hijack Guard: PASS');
+
+// 10. Test Binance Web3 QR Modal & Anti-Alert Click Handler
+const mockContent = { innerHTML: '' };
+const mockModal = {
+  showModal: () => {},
+  setAttribute: () => {}
+};
+global.document = {
+  getElementById: (id) => {
+    if (id === 'walletModal') return mockModal;
+    if (id === 'walletModalContent') return mockContent;
+    return null;
+  }
+};
+global.window = {
+  location: { origin: 'https://agent-id-monitor.vercel.app' },
+  ethereum: { isRabby: true } // Rabby is active, no Binance desktop extension
+};
+
+// Clicking Binance Web3 should NOT pop an alert; it must render the QR code modal
+handleBinanceWalletClick();
+assert(mockContent.innerHTML.includes('Binance Web3 Mobile Scan'), 'Modal title must be Binance Web3 Mobile Scan');
+assert(mockContent.innerHTML.includes('api.qrserver.com'), 'Must render QR code image');
+assert(mockContent.innerHTML.includes('Open <strong>Binance App</strong> on your phone'), 'Must render 3-step instructions');
+assert(mockContent.innerHTML.includes('wallet-back-btn'), 'Must have back button');
+console.log('✔ handleBinanceWalletClick Native In-Modal QR Fallback: PASS');
 
 console.log('🎉 All Web3 & Multicall3 tests verified successfully!');

@@ -1284,7 +1284,7 @@ def is_system_infra(item: Dict[str, Any]) -> bool:
     cat = item.get("classification", {}).get("category") if isinstance(item.get("classification"), dict) else None
     name = str(item.get("name") or "")
     has_m = item.get("has_mint")
-    has_supp = item.get("max_supply") is not None or (item.get("total_minted") is not None and item.get("total_minted") > 0)
+    has_supp = item.get("max_supply") is not None or ((item.get("total_minted") or 0) > 0)
     sym = str(item.get("symbol") or "").strip()
     if ("Custom" in std or cat == "CUSTOM") and (name in ("Unknown", "New Contract", "") or not sym) and not has_supp and not has_m:
         return True
@@ -1474,27 +1474,34 @@ def evaluate_sniper_ready(item: Dict[str, Any]) -> Dict[str, Any]:
 
     # Final verdict
     if is_paused:
-        return {"is_ready": False, "status": "PAUSED", "badge": "⏸️ Paused", "prog": prog, "checklist": checklist}
-    if risk == "RUG" or is_drained:
-        return {"is_ready": False, "status": "RUG_RISK", "badge": "🚨 Rug Risk", "prog": prog, "checklist": checklist}
-    if is_serial:
-        return {"is_ready": False, "status": "SERIAL_DEV", "badge": "🚨 Serial Dev", "prog": prog, "checklist": checklist}
-    if is_token and lp >= 500:
-        return {"is_ready": False, "status": "GRADUATED_TO_DEX", "badge": "📈 On DEX", "prog": prog, "checklist": checklist}
-    if is_paid and not has_ref:
-        return {"is_ready": False, "status": "NO_REFUND", "badge": "⚠️ No Refund", "prog": prog, "checklist": checklist}
-    if is_sold_out:
-        return {"is_ready": False, "status": "SOLD_OUT", "badge": "🛑 Sold Out", "prog": prog, "checklist": checklist}
-    if prog_pass:
-        return {"is_ready": True, "status": "SNIPER_READY", "badge": "🎯 Snipe Ready", "prog": prog, "checklist": checklist}
+        res = {"is_ready": False, "status": "PAUSED", "badge": "⏸️ Paused", "prog": prog, "checklist": checklist}
+    elif risk == "RUG" or is_drained:
+        res = {"is_ready": False, "status": "RUG_RISK", "badge": "🚨 Rug Risk", "prog": prog, "checklist": checklist}
+    elif is_serial:
+        res = {"is_ready": False, "status": "SERIAL_DEV", "badge": "🚨 Serial Dev", "prog": prog, "checklist": checklist}
+    elif is_token and lp >= 500:
+        res = {"is_ready": False, "status": "GRADUATED_TO_DEX", "badge": "📈 On DEX", "prog": prog, "checklist": checklist}
+    elif is_paid and not has_ref:
+        res = {"is_ready": False, "status": "NO_REFUND", "badge": "⚠️ No Refund", "prog": prog, "checklist": checklist}
+    elif is_sold_out:
+        res = {"is_ready": False, "status": "SOLD_OUT", "badge": "🛑 Sold Out", "prog": prog, "checklist": checklist}
+    elif prog_pass:
+        res = {"is_ready": True, "status": "SNIPER_READY", "badge": "🎯 Snipe Ready", "prog": prog, "checklist": checklist}
+    else:
+        res = {
+            "is_ready": False,
+            "status": "TRACKING",
+            "badge": f"⏳ Track ({prog*100:.0f}%)" if prog > 0 else "⏳ Tracking",
+            "prog": prog,
+            "checklist": checklist
+        }
+    res["sniper_ready"] = res["is_ready"]
+    res["sniper_status"] = res["status"]
+    res["sniper_badge"] = res["badge"]
+    res["sniper_checklist"] = res["checklist"]
+    return res
 
-    return {
-        "is_ready": False,
-        "status": "TRACKING",
-        "badge": f"⏳ Track ({prog*100:.0f}%)" if prog > 0 else "⏳ Tracking",
-        "prog": prog,
-        "checklist": checklist
-    }
+evaluate_sniper_readiness = evaluate_sniper_ready
 
 
 def filter_and_sort_projects(history: List[Dict[str, Any]], active_filter: str, sort_mode: str) -> List[Dict[str, Any]]:
@@ -1539,7 +1546,7 @@ def filter_and_sort_projects(history: List[Dict[str, Any]], active_filter: str, 
         filtered.append(item)
 
     if sort_mode == "HEAT":
-        filtered.sort(key=lambda x: x.get("score", 0), reverse=True)
+        filtered.sort(key=lambda x: (x.get("score") or 0), reverse=True)
     elif sort_mode == "PROFIT":
         def get_profit_val(x):
             ath_p = float(x.get("ath_profit_usd") or 0.0)
@@ -1551,18 +1558,18 @@ def filter_and_sort_projects(history: List[Dict[str, Any]], active_filter: str, 
     elif sort_mode == "SMART":
         filtered.sort(key=lambda x: len(x.get("smart_wallets") or x.get("smart_minters") or []), reverse=True)
     elif sort_mode == "VELOCITY":
-        filtered.sort(key=lambda x: x.get("velocity_ppm", 0.0), reverse=True)
+        filtered.sort(key=lambda x: float(x.get("velocity_ppm") or 0.0), reverse=True)
     elif sort_mode == "PROGRESS":
         def get_prog(x):
             ms = x.get("max_supply")
             tm = x.get("total_minted") or 0
-            return (float(tm) / ms) if ms and ms > 0 else 0.0
+            return (float(tm) / ms) if (ms and (float(ms) if str(ms).replace('.','',1).isdigit() else 0) > 0) else 0.0
         filtered.sort(key=get_prog, reverse=True)
     elif sort_mode == "SAFETY":
         rank = {"SAFE": 0, "MED": 1, "HIGH": 2, "RUG": 3}
         filtered.sort(key=lambda x: rank.get(x.get("risk_level", "MED"), 1))
     else:  # "NEWEST"
-        filtered.sort(key=lambda x: x.get("block", 0), reverse=True)
+        filtered.sort(key=lambda x: int(x.get("block") or 0), reverse=True)
 
     return filtered
 
@@ -2165,7 +2172,7 @@ def print_interest_report(stats: Dict[str, Any]):
     else:
         print(f"• {C_BOLD}DEX Secondary Liquidity:{C_RESET} {C_YELLOW}No DEX Pool detected yet{C_RESET}")
 
-    if stats.get("percent_claimed") > 0:
+    if (stats.get("percent_claimed") or 0) > 0:
         print(f"• {C_BOLD}Mint Progress:{C_RESET} {stats['percent_claimed']:.1f}% claimed")
 
     print(f"• {C_BOLD}Recent Mints (last ~2k blocks):{C_RESET} {stats['recent_mints']} mints")
