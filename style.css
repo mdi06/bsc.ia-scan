@@ -619,32 +619,8 @@ body {
 .stats-macro-group {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  width: 100%;
-  box-sizing: border-box;
+  gap: 18px;
   flex-wrap: wrap;
-  gap: 16px;
-}
-
-.stats-macro-group .stat-card:first-child {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.stats-macro-group .stat-card:nth-of-type(2) {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.stats-macro-group .stat-card:last-child {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 8px;
 }
 
 .stat-card {
@@ -690,7 +666,10 @@ body {
   background: rgba(255, 215, 0, 0.05);
   transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   user-select: none;
-  display: flex;
+  display: inline-flex;
+  width: fit-content;
+  max-width: 100%;
+  box-sizing: border-box;
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
