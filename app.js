@@ -16,6 +16,8 @@ let connectedWallet = null;
 let walletProviderName = null;
 let isScanningPortfolio = false;
 let userNativeBnbBalance = 0.0;
+let isAgenticWallet = false;
+const AGENT_ID_REGISTRY = '0x60b9262456de011f7d15a54cdd8c48baaa8b022f';
 let userOwnedContracts = new Map(); // contract.toLowerCase() -> BigInt(rawBalance)
 let nativeBnbItem = null;
 let cloudSyncStatus = 'offline';
@@ -1600,6 +1602,18 @@ function openModal(item) {
         </div>
       ` : ''}
 
+      ${connectedWallet && !isAgenticWallet ? `
+        <div class="agentic-status-warning" style="background: rgba(240, 185, 11, 0.08); border: 1px dashed rgba(240, 185, 11, 0.4); border-radius: 6px; padding: 8px 12px; margin: 8px 0; font-size: 11px; color: var(--color-yellow); display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap;">
+          <span>ℹ️ <strong>Non-Agentic Wallet:</strong> If this drop is an Agent ID exclusive launch, it requires an active <code>.ai</code> Agent ID to mint.</span>
+          <a href="https://web3.binance.com/en/dev-docs/products/agentic-wallet/ai-pro#came-from-the-agent-id-campaign" target="_blank" rel="noopener" style="color: var(--color-cyan); text-decoration: underline;">Claim .ai in Binance App ↗</a>
+        </div>
+      ` : (connectedWallet && isAgenticWallet ? `
+        <div class="agentic-status-success" style="background: rgba(0, 240, 255, 0.08); border: 1px solid rgba(0, 240, 255, 0.3); border-radius: 6px; padding: 6px 12px; margin: 8px 0; font-size: 11px; color: var(--color-cyan); display: flex; align-items: center; gap: 8px;">
+          <span>🤖</span>
+          <span><strong>Agentic Wallet Active:</strong> Your wallet holds a verified <code>.ai</code> Agent ID on BSC. Eligible for exclusive inner-market minting.</span>
+        </div>
+      ` : '')}
+
       ${isSoldOut ? `
         <div style="display: flex; gap: 10px; margin-top: 8px;">
           <a href="${mktUrl}" target="_blank" rel="noopener" class="web3-mint-btn sold-out" style="text-align: center; text-decoration: none; display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%;">
@@ -2091,7 +2105,43 @@ async function executeWeb3Mint(contractAddress, rawCalldata, valueWei, name = 'D
     // 4. Build standard EVM tx parameters
     const txParams = buildMintTxParams(contractAddress, rawCalldata, valueWei, connectedWallet);
 
-    // 5. Update UI to awaiting user signature state
+    // 5. Pre-flight simulation to catch reverts (e.g. NoAgentId, insufficient balance, cap reached) BEFORE broadcasting
+    try {
+      await provider.request({
+        method: 'eth_call',
+        params: [txParams, 'latest']
+      });
+    } catch (simErr) {
+      console.warn('Pre-flight simulation reverted:', simErr);
+      const errStr = String(simErr?.message || simErr?.data || JSON.stringify(simErr) || '');
+      if (errStr.includes('0xf947691f') || errStr.toLowerCase().includes('noagentid')) {
+        updateStatus(`
+          <div class="mint-status-error" style="line-height: 1.5; padding: 10px 12px; background: rgba(239, 68, 68, 0.1); border: 1px solid var(--color-red); border-radius: 6px;">
+            <strong>🚨 On-Chain Gate: NoAgentId (0xf947691f)</strong><br/>
+            This project is an <em>Agent ID Exclusive launch</em> and strictly requires an active <code>.ai</code> Agent ID to mint during the bonding curve phase.<br/>
+            <span style="font-size: 11px; color: var(--color-yellow);">Your wallet does not hold a .ai Agent ID. We stopped the transaction before broadcast to save you from losing gas fees!</span>
+          </div>
+        `);
+        if (btn) {
+          btn.disabled = false;
+          btn.classList.remove('confirming');
+          btn.classList.add('error');
+          btn.innerHTML = '<span>⚠️ Requires .ai Agent ID</span>';
+        }
+        return;
+      }
+      if (errStr.includes('insufficient funds') || errStr.includes('exceeds balance')) {
+        updateStatus('<div class="mint-status-error">❌ Insufficient BNB balance for mint value + gas.</div>');
+        if (btn) {
+          btn.disabled = false;
+          btn.classList.remove('confirming');
+          btn.innerHTML = '<span>❌ Insufficient BNB</span>';
+        }
+        return;
+      }
+    }
+
+    // 6. Update UI to awaiting user signature state
     if (btn) {
       btn.disabled = true;
       btn.classList.add('confirming');
@@ -2192,6 +2242,7 @@ function disconnectWallet() {
   connectedWallet = null;
   walletProviderName = null;
   userNativeBnbBalance = 0.0;
+  isAgenticWallet = false;
   userOwnedContracts.clear();
   nativeBnbItem = null;
 
@@ -2227,12 +2278,14 @@ function updateWalletButtonUI() {
   if (connectedWallet) {
     btn.classList.add('connected');
     const shortAddr = `${connectedWallet.slice(0, 6)}...${connectedWallet.slice(-4)}`;
+    const agentBadge = isAgenticWallet ? `<span class="badge badge-cyan" style="font-size:9px; padding: 2px 5px; font-weight:800; box-shadow: 0 0 8px rgba(0,240,255,0.4);" title="Verified .ai Agent ID Owner">🤖 AGENTIC</span>` : '';
     btn.innerHTML = `
-      <span class="wallet-dot"></span>
+      <span class="wallet-dot ${isAgenticWallet ? 'agentic' : ''}"></span>
       <span class="wallet-label">${shortAddr}</span>
+      ${agentBadge}
       <span class="wallet-badge-bnb desktop-only">${userNativeBnbBalance.toFixed(3)} BNB</span>
     `;
-    btn.title = `Connected (${walletProviderName}): ${connectedWallet} - Click for account details`;
+    btn.title = `Connected (${walletProviderName}): ${connectedWallet} ${isAgenticWallet ? '[Verified Agentic .ai Wallet]' : '[Standard Wallet]'} - Click for account details`;
   } else {
     btn.classList.remove('connected');
     btn.innerHTML = `
@@ -2278,7 +2331,8 @@ async function scanUserPortfolio(walletAddr, force = false) {
     let multicallSucceeded = false;
     try {
       const calls = [
-        { target: MULTICALL3_ADDRESS, allowFailure: true, callData: ethBalanceCalldata }
+        { target: MULTICALL3_ADDRESS, allowFailure: true, callData: ethBalanceCalldata },
+        { target: AGENT_ID_REGISTRY, allowFailure: true, callData: balanceCalldata }
       ];
       for (let i = 0; i < contracts.length; i++) {
         calls.push({
@@ -2309,9 +2363,21 @@ async function scanUserPortfolio(walletAddr, force = false) {
             userNativeBnbBalance = 0.0;
           }
 
-          // 2. Token balances from Calls 1..N
+          // 2. Agent ID Registry ownership from Call 1
+          const agentRes = decoded[1];
+          if (agentRes && agentRes.success && agentRes.returnData && agentRes.returnData !== '0x' && !/^0x0+$/.test(agentRes.returnData)) {
+            try {
+              isAgenticWallet = (BigInt(agentRes.returnData) > 0n);
+            } catch (e) {
+              isAgenticWallet = false;
+            }
+          } else {
+            isAgenticWallet = false;
+          }
+
+          // 3. Token balances from Calls 2..N
           for (let i = 0; i < contracts.length; i++) {
-            const tokenRes = decoded[i + 1];
+            const tokenRes = decoded[i + 2];
             const c = contracts[i];
             if (tokenRes && tokenRes.success && tokenRes.returnData && tokenRes.returnData !== '0x' && !/^0x0+$/.test(tokenRes.returnData)) {
               try {
