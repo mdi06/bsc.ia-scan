@@ -1623,17 +1623,39 @@ def filter_and_sort_projects(history: List[Dict[str, Any]], active_filter: str, 
     return filtered
 
 
+EXCLUDED_PEGS_SYMBOLS = {
+    "BTCB", "WBTC", "BTC", "ETH", "WETH", "WBNB", "BNB", "USDT", "USDC", "BUSD",
+    "DAI", "TUSD", "FDUSD", "CAKE", "U", "OSK", "FIST"
+}
+
+EXCLUDED_PEGS_CONTRACTS = {
+    "0x7130d2a12b9bcbfae4f2634d864a1ee1ce3ead9c",  # BTCB
+    "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c",  # WBNB
+    "0x55d398326f99059ff775485246999027b3197955",  # USDT
+    "0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d",  # USDC
+    "0xe9e7cea3dedca5984780bafc599bd69add087d56",  # BUSD
+    "0x2170ed0880ac9a755fd29b2688956bd959f933f8",  # ETH (Binance-Peg)
+    "0x14016e85a25a55f2e084741d69d9d82361f38e2b",  # DAI
+    "0x0e09fabb73bd3ade0a17ecc321fd13a19e81ce82"   # CAKE
+}
+
+SYNTHETIC_EQUITY_SYMBOLS = {
+    "TSLAB", "AAPLB", "MSFTB", "METAB", "SPCXB", "NVDA", "AMZNB", "GOOGLB", "MRNAB", "SOXSB"
+}
+
+
 def update_post_mint_profit_metrics(item: Dict[str, Any], bnb_price: float = 705.0) -> Dict[str, Any]:
     """
     Computes and updates post-mint profit and ATH metrics on an item.
     Tracks persistent high-water mark (ATH price, ATH net profit, and ATH multiple).
-    Filters out pegged crypto assets (BTCB, WBNB, USDT, USDC, BUSD) and system infra.
+    Filters out pegged crypto assets (BTCB, WBNB, USDT, USDC, BUSD), synthetic stocks, and system infra.
     """
     c = (item.get("contract") or "").lower()
     sym = (item.get("symbol") or "").upper()
     is_pegged = (
-        c in ("0x7130d2a12b9bcbfae4f2634d864a1ee1ce3ead9c", "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c", "0x55d398326f99059ff775485246999027b3197955")
-        or sym in ("BTCB", "WBNB", "USDT", "USDC", "BUSD")
+        c in EXCLUDED_PEGS_CONTRACTS
+        or sym in EXCLUDED_PEGS_SYMBOLS
+        or sym in SYNTHETIC_EQUITY_SYMBOLS
     )
     if is_pegged or is_system_infra(item):
         return {
@@ -1652,9 +1674,40 @@ def update_post_mint_profit_metrics(item: Dict[str, Any], bnb_price: float = 705
     tk_usd = float(item.get("token_price_usd") or item.get("market_price_usd") or 0.0)
     sec_usd = fl_usd if fl_usd > 0 else (fl_bnb * bnb_price if fl_bnb > 0 else tk_usd)
 
+    # Micro-wei / scam price distortion guard: reject astronomical prices (> $1000) or micro-wei supplies
+    tm_val = float(item.get("total_minted") or 0.0)
+    lp_val = float(item.get("lp_usd") or 0.0)
+    if sec_usd > 1000.0 or (0.0 < tm_val < 1e-6) or (0.0 < lp_val < 5.0 and sec_usd > 5.0):
+        return {
+            "sec_usd": 0.0,
+            "mint_usd": 0.0,
+            "profit": 0.0,
+            "ath_price_usd": 0.0,
+            "ath_profit_usd": 0.0,
+            "ath_multiplier": 0.0,
+            "is_sold": False,
+            "is_free": False
+        }
+
     p_str = str(item.get("mint_price_str") or "").upper()
     v_wei = int(item.get("mint_value_wei") or 0)
-    is_free = bool(item.get("has_free_mint") or "FREE" in p_str or (v_wei == 0 and float(item.get("mint_price_bnb") or 0) == 0.0 and "PAID" not in p_str and "DEX" not in p_str))
+    has_free_flag = bool(item.get("has_free_mint"))
+    has_calldata = bool(item.get("mint_calldata"))
+    is_free = bool(has_free_flag or "FREE" in p_str or (v_wei == 0 and float(item.get("mint_price_bnb") or 0) == 0.0 and "PAID" not in p_str and "DEX" not in p_str and "TBD" not in p_str))
+
+    # If mint price is unknown (TBD) and not verified free or with calldata, cannot claim 0 mint cost
+    if "TBD" in p_str and not has_free_flag and not has_calldata:
+        return {
+            "sec_usd": 0.0,
+            "mint_usd": 0.0,
+            "profit": 0.0,
+            "ath_price_usd": 0.0,
+            "ath_profit_usd": 0.0,
+            "ath_multiplier": 0.0,
+            "is_sold": False,
+            "is_free": False
+        }
+
     mint_usd = 0.0 if is_free else ((v_wei / 1e18 * bnb_price) if v_wei > 0 else (float(item.get("mint_price_bnb") or 0) * bnb_price))
     profit = (sec_usd - mint_usd) if sec_usd > 0 else 0.0
 

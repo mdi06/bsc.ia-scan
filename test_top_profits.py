@@ -229,6 +229,93 @@ class TestTopProfits(unittest.TestCase):
         self.assertIn(".hof-table", css)
         print("[HTML/CSS TEST] Verified: topGainerBanner, hallOfFameModal, PROFIT sort options in index.html & style.css")
 
+    def test_07_scam_micro_pool_and_synthetic_stock_exclusion(self):
+        """Verifies that PrinterAi, The Bank, Binance-Peg ETH, and synthetic stocks (TSLAB, AAPLB) are strictly rejected."""
+        mock_printer = {
+            "name": "PrinterAi",
+            "symbol": "PRINT",
+            "contract": "0xd0523ce816e2b404db5633d181572cded33d7fa9",
+            "token_price_usd": 100000000000004.0,
+            "lp_usd": 0.0002,
+            "total_minted": 1.82e-15,
+            "mint_price_str": "FREE"
+        }
+        mock_bank = {
+            "name": "The Bank",
+            "symbol": "BANK",
+            "contract": "0xc5a5f6337bd9d1ee1a7367a804fce07094956922",
+            "token_price_usd": 99749.99,
+            "lp_usd": 0.0,
+            "total_minted": 4.24e-16,
+            "mint_price_str": "FREE"
+        }
+        mock_eth = {
+            "name": "Ethereum Token",
+            "symbol": "ETH",
+            "contract": "0x2170ed0880ac9a755fd29b2688956bd959f933f8",
+            "token_price_usd": 2422.08,
+            "mint_price_str": "FREE"
+        }
+        mock_tsla = {
+            "name": "Tesla, Inc.",
+            "symbol": "TSLAB",
+            "contract": "0x5b1910eaad6450e50f816082aa078c41f10c292f",
+            "token_price_usd": 398.52,
+            "mint_price_str": "TBD"
+        }
+
+        # Check Python monitor profit calculation
+        prof_p = monitor.update_post_mint_profit_metrics(mock_printer)
+        prof_b = monitor.update_post_mint_profit_metrics(mock_bank)
+        prof_e = monitor.update_post_mint_profit_metrics(mock_eth)
+        prof_t = monitor.update_post_mint_profit_metrics(mock_tsla)
+
+        self.assertEqual(prof_p["sec_usd"], 0.0, "PrinterAi astronomical fake price must be filtered to 0")
+        self.assertEqual(prof_p["profit"], 0.0)
+        self.assertEqual(prof_b["sec_usd"], 0.0, "The Bank empty pool manipulation must be filtered to 0")
+        self.assertEqual(prof_b["profit"], 0.0)
+        self.assertEqual(prof_e["sec_usd"], 0.0, "Binance-Peg ETH must be excluded from post-mint profits")
+        self.assertEqual(prof_e["profit"], 0.0)
+        self.assertEqual(prof_t["sec_usd"], 0.0, "Synthetic stock TSLAB must be excluded from post-mint profits")
+        self.assertEqual(prof_t["profit"], 0.0)
+
+        # Check compute_market_cap_stats leaderboard
+        history = [mock_printer, mock_bank, mock_eth, mock_tsla, self.mock_free_mint]
+        stats = monitor.compute_market_cap_stats(history, bnb_price=705.0)
+        top_sym = stats["top_gainer"]["symbol"] if stats["top_gainer"] else None
+        self.assertEqual(top_sym, "ABOT", f"ABOT should be top gainer, got {top_sym}")
+
+        # Check Node.js app.js parity
+        node_script = """
+        const app = require('./app.js');
+        const printer = { symbol: 'PRINT', contract: '0xd0523ce816e2b404db5633d181572cded33d7fa9', token_price_usd: 1e14, lp_usd: 0.0002, total_minted: 1.82e-15, mint_price_str: 'FREE' };
+        const bank = { symbol: 'BANK', contract: '0xc5a5f6337bd9d1ee1a7367a804fce07094956922', token_price_usd: 99749.99, lp_usd: 0.0, total_minted: 4.24e-16, mint_price_str: 'FREE' };
+        const eth = { symbol: 'ETH', contract: '0x2170ed0880ac9a755fd29b2688956bd959f933f8', token_price_usd: 2422.08, mint_price_str: 'FREE' };
+        const tsla = { symbol: 'TSLAB', contract: '0x5b1910eaad6450e50f816082aa078c41f10c292f', token_price_usd: 398.52, mint_price_str: 'TBD' };
+
+        console.log(JSON.stringify({
+          printerValid: app.isValidTopMarketItem(printer),
+          bankValid: app.isValidTopMarketItem(bank),
+          ethValid: app.isValidTopMarketItem(eth),
+          tslaValid: app.isValidTopMarketItem(tsla),
+          printerProfit: app.computeItemProfit(printer).profit,
+          bankProfit: app.computeItemProfit(bank).profit,
+          ethProfit: app.computeItemProfit(eth).profit,
+          tslaProfit: app.computeItemProfit(tsla).profit
+        }));
+        """
+        res = subprocess.run(["node", "-e", node_script], capture_output=True, text=True, check=True)
+        js_data = json.loads(res.stdout.strip())
+        self.assertFalse(js_data["printerValid"])
+        self.assertFalse(js_data["bankValid"])
+        self.assertFalse(js_data["ethValid"])
+        self.assertFalse(js_data["tslaValid"])
+        self.assertEqual(js_data["printerProfit"], 0)
+        self.assertEqual(js_data["bankProfit"], 0)
+        self.assertEqual(js_data["ethProfit"], 0)
+        self.assertEqual(js_data["tslaProfit"], 0)
+        print("[SCAM & SYNTH EXCLUSION TEST] Verified: PrinterAi ($100T), The Bank, ETH, and TSLAB 100% blocked!")
+
 
 if __name__ == "__main__":
     unittest.main()

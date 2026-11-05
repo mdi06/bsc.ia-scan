@@ -424,11 +424,32 @@ function formatCryptoPrice(val, isNet = false) {
   return `${sign}$${cleanStr}`;
 }
 
+// Known major pegged / Layer-1 tokens and synthetic equities on BSC
+const EXCLUDED_PEGS_SYMBOLS = new Set([
+  'BTCB', 'WBTC', 'BTC', 'ETH', 'WETH', 'WBNB', 'BNB', 'USDT', 'USDC', 'BUSD', 
+  'DAI', 'TUSD', 'FDUSD', 'CAKE', 'U', 'OSK', 'FIST'
+]);
+
+const EXCLUDED_PEGS_CONTRACTS = new Set([
+  '0x7130d2a12b9bcbfae4f2634d864a1ee1ce3ead9c', // BTCB
+  '0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c', // WBNB
+  '0x55d398326f99059ff775485246999027b3197955', // USDT
+  '0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d', // USDC
+  '0xe9e7cea3dedca5984780bafc599bd69add087d56', // BUSD
+  '0x2170ed0880ac9a755fd29b2688956bd959f933f8', // ETH (Binance-Peg)
+  '0x14016e85a25a55f2e084741d69d9d82361f38e2b', // DAI
+  '0x0e09fabb73bd3ade0a17ecc321fd13a19e81ce82'  // CAKE
+]);
+
+const SYNTHETIC_EQUITY_SYMBOLS = new Set([
+  'TSLAB', 'AAPLB', 'MSFTB', 'METAB', 'SPCXB', 'NVDA', 'AMZNB', 'GOOGLB', 'MRNAB', 'SOXSB'
+]);
+
 // Compute Individual Project Profit and Maintain ATH High-Water Mark
 function computeItemProfit(item, bnbPriceUsd = bnbPrice) {
   const c = String(item.contract || '').toLowerCase();
   const sym = String(item.symbol || '').toUpperCase();
-  const isPegged = c === '0x7130d2a12b9bcbfae4f2634d864a1ee1ce3ead9c' || c === '0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c' || c === '0x55d398326f99059ff775485246999027b3197955' || ['BTCB', 'WBNB', 'USDT', 'USDC', 'BUSD'].includes(sym);
+  const isPegged = EXCLUDED_PEGS_CONTRACTS.has(c) || EXCLUDED_PEGS_SYMBOLS.has(sym) || SYNTHETIC_EQUITY_SYMBOLS.has(sym);
   if (isPegged) {
     return { secUsd: 0, mintUsd: 0, profit: 0, athProfit: 0, athPrice: 0, multiplier: 0, isSold: false, isFree: false };
   }
@@ -438,9 +459,23 @@ function computeItemProfit(item, bnbPriceUsd = bnbPrice) {
   const tkUsd = Number(item.token_price_usd || item.market_price_usd || 0);
   const secUsd = flUsd > 0 ? flUsd : (flBnb > 0 ? flBnb * bnbPriceUsd : tkUsd);
 
+  // Micro-pool / scam price distortion guard: reject astronomical prices (> $1000) or micro-wei supplies
+  const tmVal = Number(item.total_minted || 0);
+  const lpVal = Number(item.lp_usd || 0);
+  if (secUsd > 1000.0 || (tmVal > 0 && tmVal < 1e-6) || (lpVal > 0 && lpVal < 5.0 && secUsd > 5.0)) {
+    return { secUsd: 0, mintUsd: 0, profit: 0, athProfit: 0, athPrice: 0, multiplier: 0, isSold: false, isFree: false };
+  }
+
   const pStr = String(item.mint_price_str || '').toUpperCase();
   const vWei = Number(item.mint_value_wei || 0);
-  const isFree = Boolean(item.has_free_mint || pStr.includes('FREE') || (vWei === 0 && Number(item.mint_price_bnb || 0) === 0 && !pStr.includes('PAID') && !pStr.includes('DEX') && !pStr.includes('TBD')));
+  const hasFreeFlag = Boolean(item.has_free_mint);
+  const isFree = Boolean(hasFreeFlag || pStr.includes('FREE') || (vWei === 0 && Number(item.mint_price_bnb || 0) === 0 && !pStr.includes('PAID') && !pStr.includes('DEX') && !pStr.includes('TBD')));
+  
+  // If mint price is unknown (TBD) and not verified free or with calldata, cannot claim 0 mint cost
+  if (pStr.includes('TBD') && !hasFreeFlag && !item.mint_calldata) {
+    return { secUsd: 0, mintUsd: 0, profit: 0, athProfit: 0, athPrice: 0, multiplier: 0, isSold: false, isFree: false };
+  }
+
   const mintUsd = isFree ? 0 : (vWei > 0 ? (vWei / 1e18) * bnbPriceUsd : Number(item.mint_price_bnb || 0) * bnbPriceUsd);
   const profit = secUsd > 0 ? (secUsd - mintUsd) : 0;
 
@@ -655,10 +690,31 @@ function getBaselineTopGainers() {
 }
 
 function isValidTopMarketItem(item) {
+  if (!item) return false;
+  const c = String(item.contract || '').toLowerCase();
   const sym = String(item.symbol || '').toUpperCase();
-  if (['BTCB', 'WBNB', 'USDT', 'USDC', 'BUSD', 'U', 'OSK', 'FIST'].includes(sym)) return false;
+  if (EXCLUDED_PEGS_CONTRACTS.has(c) || EXCLUDED_PEGS_SYMBOLS.has(sym) || SYNTHETIC_EQUITY_SYMBOLS.has(sym)) {
+    return false;
+  }
   const pStr = String(item.mint_price_str || (item.item && item.item.mint_price_str) || '').toUpperCase();
   if (pStr.includes('DEX TRADED')) return false;
+
+  const hasFree = Boolean(item.has_free_mint || (item.item && item.item.has_free_mint));
+  const hasCalldata = Boolean(item.mint_calldata || (item.item && item.item.mint_calldata));
+  if (pStr.includes('TBD') && !hasFree && !hasCalldata) return false;
+
+  const flUsd = Number(item.floor_price_usd || (item.item && item.item.floor_price_usd) || 0);
+  const tkUsd = Number(item.token_price_usd || item.market_price_usd || item.secUsd || (item.item && item.item.token_price_usd) || 0);
+  const secUsd = flUsd > 0 ? flUsd : tkUsd;
+
+  if (secUsd > 1000.0) return false;
+
+  const tm = Number(item.total_minted || (item.item && item.item.total_minted) || 0);
+  if (tm > 0 && tm < 1e-6) return false;
+
+  const lp = Number(item.lp_usd || (item.item && item.item.lp_usd) || 0);
+  if (lp > 0 && lp < 5.0 && secUsd > 5.0) return false;
+
   return true;
 }
 
@@ -670,6 +726,7 @@ function loadSavedTopGainers() {
         const parsed = JSON.parse(stored);
         if (Array.isArray(parsed) && parsed.length > 0) {
           savedTopGainers = parsed.filter(isValidTopMarketItem);
+          saveSavedTopGainers(); // Immediately persist sanitized list to purge corrupted entries
           if (savedTopGainers.length > 0) return;
         }
       }
@@ -679,7 +736,7 @@ function loadSavedTopGainers() {
   }
 
   // Fallback to baseline historical winners if storage is fresh/empty
-  savedTopGainers = getBaselineTopGainers();
+  savedTopGainers = getBaselineTopGainers().filter(isValidTopMarketItem);
   saveSavedTopGainers();
 }
 
@@ -5602,6 +5659,7 @@ if (typeof module !== 'undefined' && module.exports) {
     getInjectedProvider,
     openInspectModalByContract,
     renderSmartStreamTicker,
+    isValidTopMarketItem,
     updateSavedTopMarkets,
     loadSavedTopGainers,
     saveSavedTopGainers,
