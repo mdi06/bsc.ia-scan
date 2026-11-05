@@ -93,6 +93,15 @@ def _enrich_contract_background(rpc: monitor.BscRpcClient, contract_addr: str, d
                     item["sniper_status"] = mkt.get("sniper_status", "TRACKING")
                     item["sniper_badge"] = mkt.get("sniper_badge", "⏳ Tracking")
                     item["sniper_checklist"] = mkt.get("sniper_checklist", [])
+                    if mkt.get("dev_root"):
+                        item["dev_root"] = mkt["dev_root"]
+                    if mkt.get("cluster_devs"):
+                        item["cluster_devs"] = mkt["cluster_devs"]
+                    if mkt.get("cluster_n"):
+                        item["cluster_n"] = mkt["cluster_n"]
+                    if mkt.get("hold"):
+                        item["hold"] = mkt["hold"]
+                        item["holder_distribution"] = mkt["hold"]
                     monitor.save_history(history, delta=item)
                     print(f"[🧠 Alpha Drop Enriched] {item.get('name')} ({contract_addr}) Score: {item['score']} | {item['risk_badge']}", flush=True)
                     break
@@ -194,7 +203,7 @@ def _process_registry_candidate(rpc, tx_h, b, snd, tx_val, inp, wallet, known_in
                 log_addr = log.get("address")
                 if log_addr and len(log_addr) == 42 and log_addr.lower() not in known_infra:
                     code = rpc.get_code(log_addr)
-                    if code and len(code) > 2 and monitor.AGENT_ID_BYTES in code:
+                    if code and len(code) > 2 and monitor.matches_tracked_registry(code):
                         dep_addr = log_addr
                         break
 
@@ -294,6 +303,9 @@ def run_discovery_loop():
         monitor.WBNB_ADDRESS.lower(),
         monitor.USDT_ADDRESS.lower(),
         monitor.AGENT_ID_REGISTRY.lower(),
+        monitor.SPACE_ID_MASTER_REGISTRY.lower(),
+        monitor.FOUR_MEME_FACTORY.lower(),
+        monitor.FOUR_MEME_ROUTER.lower(),
         "0x10ed43c718714eb63d5aa57b78b54704e256024e",
         "0x13f4ea83d0bd40e75c8222255bc855a974568dd4"
     }
@@ -385,8 +397,8 @@ def run_discovery_loop():
                             # Offload analysis to worker pool: never block the block loop
                             discovery_pool.submit(_process_smart_money_candidate, rpc, rcv, snd, aid, tx_h, b, tx_val, inp, wallet)
 
-                    # 2. Block-0 Agent ID Registry Reference Scanner
-                    if monitor.AGENT_ID_BYTES in inp and tx_h not in queued_candidates:
+                    # 2. Block-0 Agent ID / Registry Reference Scanner
+                    if monitor.matches_tracked_registry(inp) and tx_h not in queued_candidates:
                         queued_candidates.add(tx_h)
                         # Offload registry deployment analysis to worker pool
                         discovery_pool.submit(_process_registry_candidate, rpc, tx_h, b, snd, tx_val, inp, wallet, known_infra)
@@ -583,10 +595,17 @@ def run_market_dynamics_updater_loop():
                 time.sleep(20)
                 continue
 
-            contracts_to_check = [
-                x for x in history
+            # Bandwidth Guard: Only query DexScreener for the newest 150 drops and contracts with active LP.
+            # Avoid querying thousands of old inactive/dead contracts every 30 seconds!
+            recent_drops = [
+                x for x in history[:150]
                 if not monitor.is_system_infra(x) and x.get("contract") and x["contract"].startswith("0x") and len(x["contract"]) == 42
             ]
+            active_old = [
+                x for x in history[150:]
+                if not monitor.is_system_infra(x) and (x.get("lp_usd", 0) > 0 or x.get("token_price_usd", 0) > 0)
+            ]
+            contracts_to_check = recent_drops + active_old
 
             batch_size = 30
             dex_updates = {}
@@ -705,7 +724,8 @@ def run_market_dynamics_updater_loop():
         except Exception as e:
             print(f"[⚠️ Market Engine Error] {e}", flush=True)
 
-        time.sleep(30)
+        # Sleep 90s between DexScreener sweeps to stay strictly within Render's free egress limits
+        time.sleep(90)
 
 
 def run_element_nft_volume_sweeper_loop():
@@ -793,6 +813,9 @@ def run_proxy_factory_watcher_loop():
         monitor.WBNB_ADDRESS.lower(),
         monitor.USDT_ADDRESS.lower(),
         monitor.AGENT_ID_REGISTRY.lower(),
+        monitor.SPACE_ID_MASTER_REGISTRY.lower(),
+        monitor.FOUR_MEME_FACTORY.lower(),
+        monitor.FOUR_MEME_ROUTER.lower(),
         "0x10ed43c718714eb63d5aa57b78b54704e256024e",
         "0x13f4ea83d0bd40e75c8222255bc855a974568dd4"
     }
@@ -821,7 +844,7 @@ def run_proxy_factory_watcher_loop():
 
                         # Check for proxy deploy / clone patterns
                         is_proxy_call = any(sig in inp for sig in ["0x5c19a95c", "0x3644e515", "0x5824c65a", "0x485cc955"])
-                        is_proxy_ref = monitor.AGENT_ID_BYTES in inp
+                        is_proxy_ref = monitor.matches_tracked_registry(inp)
 
                         if (is_proxy_call or is_proxy_ref) and rcv:
                             cand = rcv

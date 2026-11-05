@@ -46,6 +46,31 @@ except ImportError:
 AGENT_ID_REGISTRY = "0x60B9262456dE011F7d15a54CdD8c48bAaa8B022F"
 AGENT_ID_BYTES = "60b9262456de011f7d15a54cdd8c48baaa8b022f"
 
+# Space ID Master Registry (Name Service Layer on BSC)
+SPACE_ID_MASTER_REGISTRY = "0x08CEd32a7f3eeC915Ba84415e9C07a7286977956"
+SPACE_ID_MASTER_BYTES = "08ced32a7f3eec915ba84415e9c07a7286977956"
+
+# Four.meme Agent ID Launchpad & Factory
+FOUR_MEME_FACTORY = "0x5c952063c7fc8610FFDB798152D69F0B9550762b"
+FOUR_MEME_FACTORY_BYTES = "5c952063c7fc8610ffdb798152d69f0b9550762b"
+FOUR_MEME_ROUTER = "0xF251F83e40a78868FcfA3FA4599Dad6494E46034"
+FOUR_MEME_ROUTER_BYTES = "f251f83e40a78868fcfa3fa4599dad6494e46034"
+
+# Set of all tracked target registry & launchpad address byte-strings (lowercase hex without 0x)
+TRACKED_REGISTRY_BYTES = [
+    AGENT_ID_BYTES,
+    SPACE_ID_MASTER_BYTES,
+    FOUR_MEME_FACTORY_BYTES,
+    FOUR_MEME_ROUTER_BYTES,
+]
+
+def matches_tracked_registry(data_str: str) -> bool:
+    """Returns True if the given calldata or bytecode references any tracked registry or launchpad."""
+    if not data_str:
+        return False
+    d = data_str.lower()
+    return any(b in d for b in TRACKED_REGISTRY_BYTES)
+
 # Default BSC RPC Endpoints (with fallback)
 RPC_ENDPOINTS = [
     "https://bsc-rpc.publicnode.com",
@@ -79,7 +104,9 @@ BEACON_IMPL_SELECTOR = "0x5c60da1b"  # implementation()
 
 # Recognized Launchpad & Vault Factories
 VAULT_FACTORIES = [
-    "0x90497450f2a706f1951b5bdda52b4e5d16f34c06"  # Flap Vault Factory (AIDROP, etc.)
+    "0x90497450f2a706f1951b5bdda52b4e5d16f34c06",  # Flap Vault Factory (AIDROP, etc.)
+    FOUR_MEME_FACTORY.lower(),                       # Four.meme Token Factory / AMAP
+    FOUR_MEME_ROUTER.lower()                         # Four.meme Buy Router
 ]
 T_BEACON_UP = "0x1cf3b03a6cf19fa2baba4df148e9dcabedea7f8a5c07840e207e5c089be95d3e"   # BeaconUpgraded(address)
 T_UPGRADED = "0xbc7cd75a20ee27fd9adebab32041f755214dbc6bffa90cc0225b39da2e5c2d3b"    # Upgraded(address)
@@ -175,29 +202,51 @@ C_CYAN = "\033[36m"
 C_RED = "\033[31m"
 
 
+try:
+    import httpx
+    HAS_HTTPX = True
+except ImportError:
+    HAS_HTTPX = False
+
+
 class BscRpcClient:
     def __init__(self, endpoints: List[str]):
         self.endpoints = endpoints
         self.current_idx = 0
+        self._http_client = None
+        if HAS_HTTPX:
+            try:
+                self._http_client = httpx.Client(
+                    timeout=5.0,
+                    limits=httpx.Limits(max_keepalive_connections=10, max_connections=20)
+                )
+            except Exception:
+                self._http_client = None
 
     def call(self, method: str, params: list) -> Any:
-        payload = json.dumps({"jsonrpc": "2.0", "id": 1, "method": method, "params": params}).encode("utf-8")
+        payload_dict = {"jsonrpc": "2.0", "id": 1, "method": method, "params": params}
         headers = {"Content-Type": "application/json", "User-Agent": "Mozilla/5.0"}
-        
+
         for _ in range(len(self.endpoints)):
             rpc_url = self.endpoints[self.current_idx]
             try:
-                req = urllib.request.Request(rpc_url, data=payload, headers=headers)
-                with urllib.request.urlopen(req, timeout=4) as resp:
-                    data = json.loads(resp.read().decode("utf-8"))
-                    if "error" in data:
-                        err = data["error"]
-                        err_msg = str(err).lower()
-                        # Normal EVM reverts (e.g. function doesn't exist on contract)
-                        if "revert" in err_msg or "execution reverted" in err_msg:
-                            return None
-                        raise RuntimeError(data["error"])
-                    return data.get("result")
+                if self._http_client is not None:
+                    resp = self._http_client.post(rpc_url, json=payload_dict, headers=headers)
+                    data = resp.json()
+                else:
+                    payload = json.dumps(payload_dict).encode("utf-8")
+                    req = urllib.request.Request(rpc_url, data=payload, headers=headers)
+                    with urllib.request.urlopen(req, timeout=4) as resp:
+                        data = json.loads(resp.read().decode("utf-8"))
+
+                if "error" in data:
+                    err = data["error"]
+                    err_msg = str(err).lower()
+                    # Normal EVM reverts (e.g. function doesn't exist on contract)
+                    if "revert" in err_msg or "execution reverted" in err_msg:
+                        return None
+                    raise RuntimeError(data["error"])
+                return data.get("result")
             except Exception:
                 self.current_idx = (self.current_idx + 1) % len(self.endpoints)
                 continue
@@ -1757,6 +1806,17 @@ def analyze_market_interest(
         "recent_mints": 0,
         "unique_minters": 0,
         "percent_claimed": 0.0,
+        "dev_root": None,
+        "cluster_devs": 1,
+        "cluster_n": 1,
+        "hold": {
+            "dev": 0.0,
+            "insider": 0.0,
+            "smart": 0.0,
+            "sniper": 0.0,
+            "fresh": 0.0,
+            "public": 100.0
+        },
         "signals": []
     }
 
@@ -1771,6 +1831,15 @@ def analyze_market_interest(
     is_serial_dev = False
     serial_count = 1
     is_fresh_dev = False
+    dev_root = (details.get("dev_root") or details.get("root") or "").lower() or None
+    cluster_devs = 1
+    cluster_n = 1
+
+    if history is None:
+        try:
+            history = load_history()
+        except Exception:
+            history = []
 
     if deployer_addr:
         deployer_addr = deployer_addr.lower()
@@ -1785,11 +1854,6 @@ def analyze_market_interest(
             is_fresh_dev = True
 
         # Check for Serial Dev across history
-        if history is None:
-            try:
-                history = load_history()
-            except Exception:
-                history = []
         if history:
             prev_deps = [
                 h for h in history
@@ -1799,6 +1863,47 @@ def analyze_market_interest(
             serial_count = len(prev_deps) + 1
             if serial_count >= 3:
                 is_serial_dev = True
+
+            # If dev_root wasn't in details, inspect previous drops by this deployer
+            if not dev_root:
+                for h in prev_deps:
+                    r_cand = (h.get("dev_root") or h.get("root") or "").lower()
+                    if r_cand:
+                        dev_root = r_cand
+                        break
+
+    # If dev_root is still missing but deployer is known, default dev_root to deployer
+    if not dev_root and deployer_addr:
+        dev_root = deployer_addr
+
+    # Dev Funding Root & Cluster Tracing across history
+    if dev_root and history:
+        cluster_drops = [
+            h for h in history
+            if (h.get("dev_root") or h.get("root") or "").lower() == dev_root
+            or (h.get("deployer") or "").lower() == dev_root
+            or (deployer_addr and (h.get("deployer") or "").lower() == deployer_addr)
+        ]
+        unique_devs = set()
+        if deployer_addr:
+            unique_devs.add(deployer_addr)
+        if dev_root:
+            unique_devs.add(dev_root)
+        for h in cluster_drops:
+            d_addr = (h.get("deployer") or "").lower()
+            if d_addr:
+                unique_devs.add(d_addr)
+            r_addr = (h.get("dev_root") or h.get("root") or "").lower()
+            if r_addr:
+                unique_devs.add(r_addr)
+        cluster_devs = max(len(unique_devs), 1)
+        cluster_n = max(len(cluster_drops) + 1, cluster_devs, serial_count)
+    elif serial_count > 1:
+        cluster_n = serial_count
+
+    stats["dev_root"] = dev_root
+    stats["cluster_devs"] = cluster_devs
+    stats["cluster_n"] = cluster_n
 
     # 2. Identify associated token for liquidity analysis
     target_token = None
@@ -2023,6 +2128,91 @@ def analyze_market_interest(
         stats["risk_badge"] = "🚨 Fund Drain"
         signals.append("🚨 Funds drained to dev wallet, no DEX LP")
 
+    # E. Dev Funding Root & Cluster Check
+    sec["dev_root"] = dev_root
+    sec["cluster_devs"] = cluster_devs
+    sec["cluster_n"] = cluster_n
+    if cluster_devs >= 2 or cluster_n >= 3:
+        sec["is_dev_cluster"] = True
+        cluster_flag = f"🧬 Dev Cluster ({cluster_devs} linked devs, {cluster_n} drops)"
+        sec_flags.append(cluster_flag)
+        signals.append(f"🧬 Dev Cluster: {cluster_devs} linked devs, {cluster_n} drops launched")
+        if stats.get("risk_level") in ("SAFE", "LOW", None):
+            stats["risk_level"] = "HIGH" if (cluster_n >= 5 or cluster_devs >= 3) else "MED"
+            stats["risk_badge"] = "🧬 Dev Cluster"
+
+    # F. Holder Distribution Breakdown (Dev, Insider, Smart, Sniper, Fresh, Public)
+    raw_hold = details.get("hold") or details.get("holder_distribution") or {}
+    dev_pct = float(raw_hold.get("dev") if raw_hold.get("dev") is not None else details.get("dev_holding_pct", 0.0))
+    insider_pct = float(raw_hold.get("insider") if raw_hold.get("insider") is not None else details.get("insider_pct", 0.0))
+    smart_pct = float(raw_hold.get("smart") if raw_hold.get("smart") is not None else details.get("smart_pct", 0.0))
+    sniper_pct = float(raw_hold.get("sniper") if raw_hold.get("sniper") is not None else details.get("sniper_pct", 0.0))
+    fresh_pct = float(raw_hold.get("fresh") if raw_hold.get("fresh") is not None else details.get("fresh_pct", 0.0))
+    public_pct = float(raw_hold.get("public") if raw_hold.get("public") is not None else details.get("public_pct", 0.0))
+
+    if not raw_hold and not details.get("dev_holding_pct"):
+        if target_token and deployer_addr:
+            try:
+                bal_res = rpc.call_contract(target_token, "0x70a08231" + deployer_addr[2:].zfill(64))
+                if bal_res and len(bal_res) >= 66:
+                    dev_bal = int(bal_res[2:66], 16)
+                    sup_res = rpc.call_contract(target_token, "0x18160ddd")
+                    if sup_res and len(sup_res) >= 66:
+                        tot_sup = int(sup_res[2:66], 16)
+                        if tot_sup > 0:
+                            dev_pct = round((dev_bal / tot_sup) * 100.0, 1)
+            except Exception:
+                pass
+
+        sm_wallets = details.get("smart_wallets") or details.get("smart_minters") or []
+        holders_cnt = stats.get("holders", 0) or 1
+        if sm_wallets and holders_cnt > 0:
+            smart_pct = min(round((len(sm_wallets) / max(holders_cnt, 1)) * 100.0, 1), 30.0)
+
+        if stats.get("buys_1h", 0) > 40 and stats.get("percent_claimed", 0) > 60:
+            sniper_pct = 6.5
+        elif stats.get("percent_claimed", 0) >= 95:
+            sniper_pct = 4.0
+
+        if is_fresh_dev:
+            fresh_pct = 5.0
+
+        non_public = dev_pct + insider_pct + smart_pct + sniper_pct + fresh_pct
+        if non_public > 100.0:
+            factor = 100.0 / non_public
+            dev_pct = round(dev_pct * factor, 1)
+            insider_pct = round(insider_pct * factor, 1)
+            smart_pct = round(smart_pct * factor, 1)
+            sniper_pct = round(sniper_pct * factor, 1)
+            fresh_pct = round(fresh_pct * factor, 1)
+            public_pct = 0.0
+        else:
+            public_pct = round(100.0 - non_public, 1)
+
+    hold_dist = {
+        "dev": dev_pct,
+        "insider": insider_pct,
+        "smart": smart_pct,
+        "sniper": sniper_pct,
+        "fresh": fresh_pct,
+        "public": public_pct
+    }
+    stats["hold"] = hold_dist
+    stats["holder_distribution"] = hold_dist
+    sec["hold"] = hold_dist
+    sec["holder_distribution"] = hold_dist
+
+    if dev_pct > 10.0:
+        sec_flags.append(f"🚨 High Dev Holding ({dev_pct:.1f}% > 10%)")
+        signals.append(f"⚠️ Dev holds {dev_pct:.1f}% of circulating supply")
+        if stats.get("risk_level") in ("SAFE", "LOW", None):
+            stats["risk_level"] = "HIGH" if dev_pct >= 25.0 else "MED"
+            stats["risk_badge"] = "🚨 High Dev Share"
+    if insider_pct > 15.0:
+        sec_flags.append(f"⚠️ Insider Concentration ({insider_pct:.1f}%)")
+    if sniper_pct > 15.0:
+        sec_flags.append(f"⚠️ Heavy Sniper Allocation ({sniper_pct:.1f}%)")
+
     stats["risk_flags"] = sec_flags
     sec["risk_flags"] = sec_flags
     stats["security"] = sec
@@ -2178,6 +2368,22 @@ def print_interest_report(stats: Dict[str, Any]):
     print(f"• {C_BOLD}Recent Mints (last ~2k blocks):{C_RESET} {stats['recent_mints']} mints")
     print(f"• {C_BOLD}Unique Minters Detected:{C_RESET} {stats['unique_minters']} addresses")
     print(f"• {C_BOLD}Deployer Skin-in-the-Game:{C_RESET} {stats['deployer_balance_bnb']:.4f} BNB | Nonce: {stats['deployer_nonce']} txs")
+
+    dev_root = stats.get("dev_root")
+    c_devs = stats.get("cluster_devs", 1)
+    c_n = stats.get("cluster_n", 1)
+    if dev_root:
+        print(f"• {C_BOLD}Dev Funding Root:{C_RESET} {C_CYAN}{dev_root}{C_RESET}")
+    if c_devs >= 2 or c_n >= 3:
+        print(f"• {C_BOLD}Dev Cluster Audit:{C_RESET} {C_RED}🚨 Dev Cluster ({c_devs} linked devs, {c_n} drops launched){C_RESET}")
+    else:
+        print(f"• {C_BOLD}Dev Cluster Audit:{C_RESET} {C_GREEN}🟢 Single Deployer{C_RESET}")
+
+    hold = stats.get("hold") or stats.get("holder_distribution") or {}
+    if hold:
+        print(f"• {C_BOLD}Holder Distribution:{C_RESET} Dev: {hold.get('dev', 0.0):.1f}% | Insiders: {hold.get('insider', 0.0):.1f}% | Snipers: {hold.get('sniper', 0.0):.1f}% | Smart Agents: {hold.get('smart', 0.0):.1f}% | Public: {hold.get('public', 100.0):.1f}%")
+        if hold.get('dev', 0.0) > 10.0:
+            print(f"  {C_RED}🚨 High Dev Holding ({hold.get('dev', 0.0):.1f}% > 10% threshold){C_RESET}")
 
     if stats.get("signals"):
         print(f"• {C_BOLD}Key Signals:{C_RESET}")
@@ -3630,6 +3836,15 @@ def refresh_project_metrics(rpc: BscRpcClient, item: Dict[str, Any], wallet: str
                 item["risk_badge"] = mkt["risk_badge"]
             if mkt.get("risk_flags"):
                 item["risk_flags"] = mkt["risk_flags"]
+            if mkt.get("dev_root"):
+                item["dev_root"] = mkt["dev_root"]
+            if mkt.get("cluster_devs"):
+                item["cluster_devs"] = mkt["cluster_devs"]
+            if mkt.get("cluster_n"):
+                item["cluster_n"] = mkt["cluster_n"]
+            if mkt.get("hold"):
+                item["hold"] = mkt["hold"]
+                item["holder_distribution"] = mkt["hold"]
 
         # Update momentum & velocity metrics
         update_momentum_metrics(item)
@@ -3795,6 +4010,15 @@ def build_interactive_dashboard(
         m_text.append(f"PROJECT: {name} ({sym})\n\n", style="bold cyan")
         m_text.append(f"• Contract Address: {c_addr}\n", style="bold white")
         m_text.append(f"• Deployer Wallet:  {dep}\n", style="dim")
+        dev_root = item.get("dev_root") or (item.get("security") or {}).get("dev_root")
+        c_devs = item.get("cluster_devs") or (item.get("security") or {}).get("cluster_devs") or 1
+        c_n = item.get("cluster_n") or (item.get("security") or {}).get("cluster_n") or 1
+        if dev_root:
+            m_text.append(f"• Dev Funding Root: {dev_root}\n", style="cyan")
+        if c_devs >= 2 or c_n >= 3:
+            m_text.append(f"• Dev Cluster:      🚨 Dev Cluster ({c_devs} linked devs / {c_n} drops)\n", style="bold red")
+        else:
+            m_text.append("• Dev Cluster:      🟢 Single Deployer (1 drop)\n", style="dim")
         m_text.append(f"• Deployment Block: #{block}  |  Tx: {tx_h}\n", style="dim")
         m_text.append(f"• Asset Standard:   {icon} {std}\n", style="magenta")
         
@@ -3881,6 +4105,27 @@ def build_interactive_dashboard(
 
         if item.get("risk_flags"):
             m_text.append("   ▫ Audit Flags:       " + "  |  ".join(item["risk_flags"]) + "\n", style="yellow")
+
+        # Holder Distribution Breakdown
+        hold = item.get("hold") or item.get("holder_distribution") or (item.get("security") or {}).get("hold") or {}
+        if hold:
+            dev_h = hold.get("dev", 0.0)
+            ins_h = hold.get("insider", 0.0)
+            snp_h = hold.get("sniper", 0.0)
+            smt_h = hold.get("smart", 0.0)
+            frs_h = hold.get("fresh", 0.0)
+            pub_h = hold.get("public", 100.0)
+            m_text.append("\n• 📊 Holder Distribution Breakdown:\n", style="bold white")
+            m_text.append(f"   ▫ Dev: {dev_h:.1f}%", style="bold magenta" if dev_h <= 10 else "bold red")
+            m_text.append(f"  │  Insiders: {ins_h:.1f}%", style="yellow" if ins_h > 15 else "dim")
+            m_text.append(f"  │  Snipers: {snp_h:.1f}%", style="red" if snp_h > 15 else "dim")
+            m_text.append(f"  │  Smart: {smt_h:.1f}%", style="bold cyan")
+            m_text.append(f"  │  Fresh: {frs_h:.1f}%\n", style="bold yellow" if frs_h > 0 else "dim")
+            m_text.append(f"   ▫ Public Circulating: {pub_h:.1f}%\n", style="bold green")
+            if dev_h > 10.0:
+                m_text.append(f"   ▫ 🚨 ALERT: High Dev Holding ({dev_h:.1f}% > 10% threshold)\n", style="bold white on red")
+            if ins_h > 15.0:
+                m_text.append(f"   ▫ ⚠️ ALERT: Heavy Insider Concentration ({ins_h:.1f}%)\n", style="bold yellow")
 
         # Sniper Ready Conviction Evaluation (60% Rule & Anti-Rug)
         s_eval = evaluate_sniper_ready(item)
@@ -4574,7 +4819,7 @@ def run_live_monitor(rpc: BscRpcClient, wallet: str, plain: bool = False):
 
                         input_data = (tx.get("input") or "").lower()
                         # Fast in-memory check: ignores 99.999% of non-registry transactions instantly
-                        if AGENT_ID_BYTES not in input_data:
+                        if not matches_tracked_registry(input_data):
                             continue
 
                         rcpt = rpc.get_receipt(tx_hash)
@@ -4588,7 +4833,7 @@ def run_live_monitor(rpc: BscRpcClient, wallet: str, plain: bool = False):
                                 if log_addr:
                                     code = rpc.get_code(log_addr)
                                     full_c, _, _ = resolve_full_bytecode(rpc, log_addr, code)
-                                    if AGENT_ID_BYTES in (full_c or code or "").lower():
+                                    if matches_tracked_registry(full_c or code or ""):
                                         deployed_addr = log_addr
                                         break
 
@@ -4651,6 +4896,9 @@ def run_live_monitor(rpc: BscRpcClient, wallet: str, plain: bool = False):
         WBNB_ADDRESS.lower(),
         USDT_ADDRESS.lower(),
         AGENT_ID_REGISTRY.lower(),
+        SPACE_ID_MASTER_REGISTRY.lower(),
+        FOUR_MEME_FACTORY.lower(),
+        FOUR_MEME_ROUTER.lower(),
         "0x10ed43c718714eb63d5aa57b78b54704e256024e",
         "0x13f4ea83d0bd40e75c8222255bc855a974568dd4"
     }
@@ -4788,7 +5036,7 @@ def run_live_monitor(rpc: BscRpcClient, wallet: str, plain: bool = False):
                                     pass
 
                         # 2. Fast in-memory check: ignores 99.999% of non-registry transactions instantly
-                        if AGENT_ID_BYTES not in inp:
+                        if not matches_tracked_registry(inp):
                             continue
 
                         rcpt = rpc.get_receipt(tx_h)
@@ -4801,7 +5049,7 @@ def run_live_monitor(rpc: BscRpcClient, wallet: str, plain: bool = False):
                                 if log_addr:
                                     code = rpc.get_code(log_addr)
                                     full_c, _, _ = resolve_full_bytecode(rpc, log_addr, code)
-                                    if AGENT_ID_BYTES in (full_c or code or "").lower():
+                                    if matches_tracked_registry(full_c or code or ""):
                                         dep_addr = log_addr
                                         break
 
@@ -5991,8 +6239,8 @@ def inspect_contract(rpc: BscRpcClient, contract_addr: str, wallet: str):
         print(f"{C_RED}[!] Address has no bytecode on BSC.{C_RESET}")
         return
 
-    links_to_registry = AGENT_ID_BYTES in (full_code or code).lower()
-    print(f"• {C_BOLD}References .ai Agent ID Registry?{C_RESET} {C_GREEN if links_to_registry else C_RED}{links_to_registry}{C_RESET}")
+    links_to_registry = matches_tracked_registry(full_code or code)
+    print(f"• {C_BOLD}References Tracked Registry / Launchpad?{C_RESET} {C_GREEN if links_to_registry else C_RED}{links_to_registry}{C_RESET}")
     if proxy_type:
         print(f"• {C_BOLD}Proxy / Clone Pattern:{C_RESET} {C_CYAN}🧩 {proxy_type}{C_RESET} (Master: {impl_addr})")
 
@@ -6104,6 +6352,9 @@ def scan_smart_wallets(rpc: BscRpcClient, wallet: str, blocks: int = 200):
         WBNB_ADDRESS.lower(),
         USDT_ADDRESS.lower(),
         AGENT_ID_REGISTRY.lower(),
+        SPACE_ID_MASTER_REGISTRY.lower(),
+        FOUR_MEME_FACTORY.lower(),
+        FOUR_MEME_ROUTER.lower(),
         "0x10ed43c718714eb63d5aa57b78b54704e256024e",
         "0x13f4ea83d0bd40e75c8222255bc855a974568dd4"
     }
@@ -6333,6 +6584,40 @@ def scan_smart_wallets(rpc: BscRpcClient, wallet: str, blocks: int = 200):
             print(f"   Snipe Preview: baw contract-call preview --binanceChainId 56 --from {wallet} --to {d['contract']} --value {d['mint_value_wei']} --inputData {d['mint_calldata']} --json")
 
 
+def print_wallet_leaderboard(limit: int = 50, filter_mode: str = "ALL"):
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    seed_file = os.path.join(base_dir, "seeded_smart_hunters.json")
+    if not os.path.exists(seed_file):
+        print(f"{C_RED}[!] seeded_smart_hunters.json not found.{C_RESET}")
+        return
+    with open(seed_file, "r") as f:
+        hunters = json.load(f)
+    if filter_mode == "HIGH_WIN":
+        hunters = [h for h in hunters if h.get("winRate", 0) >= 50.0]
+    hunters.sort(key=lambda x: (x.get("wins", 0), x.get("winRate", 0)), reverse=True)
+    if RICH_AVAILABLE:
+        console = Console()
+        table = Table(title=f"🏆 Binance .ai Agent ID Smart Wallet Leaderboard ({len(hunters):,} Tracked Hunters)", box=box.ROUNDED)
+        table.add_column("#", justify="center", style="dim")
+        table.add_column("Agent ID (.ai)", style="bold cyan")
+        table.add_column("Win Rate", justify="center", style="bold green")
+        table.add_column("Wins / Mints", justify="center", style="bold yellow")
+        table.add_column("Top Winning Picks", style="white")
+        for idx, h in enumerate(hunters[:limit], 1):
+            rank_str = "🥇" if idx == 1 else ("🥈" if idx == 2 else ("🥉" if idx == 3 else f"#{idx}"))
+            wr = h.get("winRate", 0.0)
+            wr_style = "bold green" if wr >= 50 else ("bold yellow" if wr >= 30 else "dim")
+            wr_str = f"[{wr_style}]{wr:.1f}%[/{wr_style}]"
+            mints_str = f"{h.get('wins', 0)} / {h.get('mints', 0)}"
+            picks = ", ".join(h.get("topPicks", [])[:3])
+            table.add_row(rank_str, h.get("name", ""), wr_str, mints_str, picks)
+        console.print(table)
+    else:
+        print("\n--- 🏆 SMART WALLET LEADERBOARD ---")
+        for idx, h in enumerate(hunters[:limit], 1):
+            print(f"#{idx} {h.get('name')} | Win Rate: {h.get('winRate', 0):.1f}% | Wins: {h.get('wins', 0)}/{h.get('mints', 0)} | Top Picks: {', '.join(h.get('topPicks', []))}")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Binance .ai Agent ID Fair-Mint & Contract Monitor")
     subparsers = parser.add_subparsers(dest="command", help="Command to run")
@@ -6346,6 +6631,14 @@ def main():
 
     list_parser = subparsers.add_parser("list", help="Display live table of tracked projects")
     list_parser.add_argument("--wallet", default=DEFAULT_WALLET, help="Your Binance Agentic Wallet address")
+
+    leaderboard_parser = subparsers.add_parser("leaderboard", help="Display top Binance .ai smart wallet leaderboard in terminal")
+    leaderboard_parser.add_argument("--limit", type=int, default=50, help="Number of hunters to display (default: 50)")
+    leaderboard_parser.add_argument("--high-win", action="store_true", help="Filter for high win rate (>=50%)")
+
+    wallets_parser = subparsers.add_parser("wallets", help="Alias for leaderboard")
+    wallets_parser.add_argument("--limit", type=int, default=50, help="Number of hunters to display (default: 50)")
+    wallets_parser.add_argument("--high-win", action="store_true", help="Filter for high win rate (>=50%)")
 
     refresh_parser = subparsers.add_parser("refresh", help="Fetch fresh on-chain metrics for all tracked projects")
     refresh_parser.add_argument("--wallet", default=DEFAULT_WALLET, help="Your Binance Agentic Wallet address")
@@ -6382,6 +6675,9 @@ def main():
         list_projects(rpc, args.wallet)
     elif args.command == "inspect":
         inspect_contract(rpc, args.contract, args.wallet)
+    elif args.command in ("leaderboard", "wallets"):
+        mode = "HIGH_WIN" if getattr(args, "high_win", False) else "ALL"
+        print_wallet_leaderboard(limit=getattr(args, "limit", 50), filter_mode=mode)
     elif args.command in ("holdings", "my-nfts"):
         check_holdings(rpc, args.wallet)
     elif args.command == "scan-wallets":

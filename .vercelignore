@@ -1,0 +1,14 @@
+__pycache__/
+*.py
+*.pyc
+*.db*
+data/
+video_assets/
+Dockerfile
+fly.toml
+render.yaml
+requirements.txt
+scratch/
+test_*.py
+test_*.js
+.env*
