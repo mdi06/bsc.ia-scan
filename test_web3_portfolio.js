@@ -541,8 +541,8 @@ openModal(unmintedDrop);
 assert(mockInspectContent.innerHTML.includes('Primary Fair-Mint Phase'), 'Must display Primary Fair-Mint Phase badge');
 assert(mockInspectContent.innerHTML.includes('Zero Dev Pre-Mine'), 'Must clarify zero dev pre-mine');
 assert(mockInspectContent.innerHTML.includes('holder-dist-seg-unminted'), 'Must render unminted phase progress bar');
-assert(mockInspectContent.innerHTML.includes('Trace Inflow ↗'), 'Must link to BscScan inflow trace');
-assert(mockInspectContent.innerHTML.includes('Standalone Deployer'), 'Must mark unclustered deployer as standalone');
+assert(mockInspectContent.innerHTML.includes('Trace ↗'), 'Must link to BscScan inflow trace');
+assert(mockInspectContent.innerHTML.includes('Standalone (1 drop)'), 'Must mark unclustered deployer as standalone');
 console.log('✔ Feature 1 & 3b (Unminted Fair-Mint State & BscScan Inflow Tracing): PASS');
 
 // Test 7c: Dynamic Minted Distribution with Smart Money & Snipers

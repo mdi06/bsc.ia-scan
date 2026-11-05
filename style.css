@@ -1192,7 +1192,7 @@ tbody tr.selected {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  max-width: 68%;
+  max-width: 75%;
   text-align: right;
   display: inline-flex;
   align-items: center;

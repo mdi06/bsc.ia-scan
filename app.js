@@ -2843,7 +2843,7 @@ function openModal(item) {
     if (devRootAddr && devRootAddr.toLowerCase() !== deployerAddr.toLowerCase()) {
       devRootFormatted = `<a href="https://bscscan.com/address/${devRootAddr}" target="_blank" rel="noopener" style="color: var(--color-cyan); text-decoration: underline;" title="${devRootAddr}"><code>${devRootAddr.slice(0, 8)}...${devRootAddr.slice(-6)}</code> ↗</a> <span class="badge badge-red" style="font-size: 9px;">🚨 Funder</span>`;
     } else {
-      devRootFormatted = `<code>${deployerAddr.slice(0, 6)}...${deployerAddr.slice(-4)}</code> <a href="https://bscscan.com/address/${deployerAddr}#internaltx" target="_blank" rel="noopener" style="color: var(--color-cyan); text-decoration: underline; font-size: 10.5px; margin-left: 4px;" title="Inspect incoming gas funding transactions on BscScan">🔍 Trace Inflow ↗</a>`;
+      devRootFormatted = `<code>${deployerAddr.slice(0, 6)}...${deployerAddr.slice(-4)}</code> <a href="https://bscscan.com/address/${deployerAddr}#internaltx" target="_blank" rel="noopener" style="color: var(--color-cyan); text-decoration: underline; font-size: 10.5px; margin-left: 4px;" title="Inspect incoming gas funding transactions on BscScan">🔍 Trace ↗</a>`;
     }
   } else if (devRootAddr) {
     devRootFormatted = `<a href="https://bscscan.com/address/${devRootAddr}" target="_blank" rel="noopener" style="color: var(--color-cyan); text-decoration: underline;" title="${devRootAddr}"><code>${devRootAddr.slice(0, 8)}...${devRootAddr.slice(-6)}</code> ↗</a>`;
@@ -2854,7 +2854,7 @@ function openModal(item) {
     if (isCluster) {
       devSyndicateFormatted = `<span class="badge badge-red" style="font-weight: 700; font-size: 10px;">🚨 Dev Cluster (${clusterDevs} devs / ${clusterN} drops)</span>`;
     } else {
-      devSyndicateFormatted = `<span class="badge badge-dim" style="font-size: 10px;">🟢 Standalone Deployer (1 drop)</span>`;
+      devSyndicateFormatted = `<span class="badge badge-dim" style="font-size: 10px;">🟢 Standalone (1 drop)</span>`;
     }
   }
 
@@ -2872,8 +2872,8 @@ function openModal(item) {
       <div class="modal-grid">
         <div><span class="dim">Contract:</span> ${cAddrFormatted}</div>
         <div><span class="dim">Deployer:</span> ${deployerFormatted}</div>
-        <div><span class="dim">Dev Funding Root:</span> ${devRootFormatted}</div>
-        <div><span class="dim">Dev Syndicate:</span> ${devSyndicateFormatted}</div>
+        <div><span class="dim">Funding Root:</span> ${devRootFormatted}</div>
+        <div><span class="dim">Syndicate:</span> ${devSyndicateFormatted}</div>
         <div><span class="dim">Standard:</span> <strong>${std}</strong></div>
         <div><span class="dim">Deployment Block:</span> <code>#${item.block || 'N/A'}</code></div>
         <div><span class="dim">Total Minted:</span> <strong>${formatCount(item.total_minted)}</strong> / ${formatCount(item.max_supply) || '∞'}</div>
