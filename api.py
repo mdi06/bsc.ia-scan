@@ -12,9 +12,11 @@ import os
 import sys
 import time
 import json
+import hashlib
 from typing import Optional, List, Dict, Any
 from fastapi import FastAPI, Query, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 import uvicorn
@@ -27,6 +29,9 @@ app = FastAPI(
     version="2.0.0",
     description="High-performance async FastAPI backend powered by Supabase / SQLite WAL"
 )
+
+# GZip compression middleware: shrinks JSON/text responses by 80-90% to protect Render 5GB bandwidth
+app.add_middleware(GZipMiddleware, minimum_size=500)
 
 # CORS Middleware for Vercel, Render & cross-origin frontend
 app.add_middleware(
@@ -70,13 +75,19 @@ def health_check():
 
 
 @app.get("/history.json")
-def get_virtual_history_json():
-    """Virtual high-speed endpoint serving full pre-encoded JSON bytes (0 serialization allocations)."""
+def get_virtual_history_json(request: Request):
+    """Virtual high-speed endpoint serving full pre-encoded JSON bytes with 304 ETag caching."""
     data = db.get_history_json_bytes()
+    etag = f'"{hashlib.md5(data[:128] + str(len(data)).encode()).hexdigest()}"'
+    if request.headers.get("if-none-match") == etag:
+        return Response(status_code=304)
     return Response(
         content=data,
         media_type="application/json",
-        headers={"Cache-Control": "no-cache, no-store, must-revalidate"}
+        headers={
+            "Cache-Control": "public, max-age=120, stale-while-revalidate=300",
+            "ETag": etag
+        }
     )
 
 
@@ -167,6 +178,44 @@ def get_top_gainers():
         except Exception as e:
             return {"success": False, "error": str(e), "gainers": []}
     return {"success": True, "count": 0, "gainers": []}
+
+
+@app.get("/api/smart-hunters")
+def get_smart_hunters():
+    """
+    Dedicated endpoint returning top smart wallet hunters and win rates from cached persistent memory.
+    """
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    seed_file = os.path.join(base_dir, "seeded_smart_hunters.json")
+    if os.path.exists(seed_file):
+        try:
+            with open(seed_file, "r") as f:
+                data = json.load(f)
+            return {"success": True, "count": len(data), "hunters": data}
+        except Exception as e:
+            return {"success": False, "error": str(e), "hunters": []}
+    return {"success": True, "count": 0, "hunters": []}
+
+
+@app.get("/api/smart-drops")
+def get_smart_drops():
+    """
+    Dedicated endpoint returning historical smart money drops for instantaneous hunter activity tracking.
+    """
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    seed_file = os.path.join(base_dir, "seeded_smart_drops.json")
+    if os.path.exists(seed_file):
+        try:
+            with open(seed_file, "r") as f:
+                data = json.load(f)
+            return Response(
+                content=json.dumps(data),
+                media_type="application/json",
+                headers={"Cache-Control": "public, max-age=300"}
+            )
+        except Exception as e:
+            return JSONResponse({"success": False, "error": str(e), "drops": []}, status_code=500)
+    return JSONResponse({"success": True, "count": 0, "drops": []})
 
 
 @app.get("/api/projects")
