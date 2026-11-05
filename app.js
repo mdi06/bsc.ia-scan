@@ -522,7 +522,7 @@ function computeItemProfit(item, bnbPriceUsd = bnbPrice) {
 
 // Persistent Memory for Top Post-Mint Gainers & Hall of Fame Markets
 // Eliminates full 2k+ project scans; incrementally updates and saves top winners from incoming 150-drop batches.
-const SAVED_TOP_MARKETS_KEY = 'agent_id_saved_top_markets';
+const SAVED_TOP_MARKETS_KEY = 'agent_id_saved_top_markets_v2';
 let savedTopGainers = [];
 
 function getBaselineTopGainers() {
@@ -721,11 +721,15 @@ function isValidTopMarketItem(item) {
 function loadSavedTopGainers() {
   try {
     if (typeof localStorage !== 'undefined') {
+      // Clean up legacy poisoned cache keys
+      localStorage.removeItem('agent_id_saved_top_markets');
+      localStorage.removeItem('saved_top_markets_v1');
+
       const stored = localStorage.getItem(SAVED_TOP_MARKETS_KEY);
       if (stored) {
         const parsed = JSON.parse(stored);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          savedTopGainers = parsed.filter(isValidTopMarketItem);
+          savedTopGainers = parsed.filter(g => isValidTopMarketItem(g.item || g));
           saveSavedTopGainers(); // Immediately persist sanitized list to purge corrupted entries
           if (savedTopGainers.length > 0) return;
         }
@@ -736,7 +740,7 @@ function loadSavedTopGainers() {
   }
 
   // Fallback to baseline historical winners if storage is fresh/empty
-  savedTopGainers = getBaselineTopGainers().filter(isValidTopMarketItem);
+  savedTopGainers = getBaselineTopGainers().filter(g => isValidTopMarketItem(g.item || g));
   saveSavedTopGainers();
 }
 
@@ -775,6 +779,7 @@ function mergeTopGainersList(externalList) {
   let updated = false;
 
   externalList.forEach(item => {
+    if (!isValidTopMarketItem(item.item || item)) return;
     const c = String(item.contract || (item.item && item.item.contract) || '').toLowerCase();
     if (!c) return;
 
@@ -1540,7 +1545,9 @@ function computeStats(drops) {
   updateSavedTopMarkets(drops);
 
   const fillRatePct = cappedTotal > 0 ? (soldOutCount / cappedTotal) * 100 : 0;
-  const allGainers = [...savedTopGainers].sort((a, b) => Math.max(b.athProfit, b.profit) - Math.max(a.athProfit, a.profit));
+  const allGainers = [...savedTopGainers]
+    .filter(g => isValidTopMarketItem(g.item || g))
+    .sort((a, b) => Math.max(b.athProfit, b.profit) - Math.max(a.athProfit, a.profit));
   const soldGainers = allGainers.filter(g => g.isSold);
   const majorGainers = allGainers.filter(g => Math.max(g.athProfit, g.profit) >= 0.001);
 
@@ -3248,8 +3255,8 @@ function openHallOfFameModal(filterMode = 'ALL') {
     list = stats.majorGainers;
   }
 
-  // Strict non-zero guard: completely filter out any zero-price or zero-profit entries
-  list = list.filter(g => g.athPrice > 0 && (g.athProfit > 0 || g.profit > 0));
+  // Strict non-zero guard & validity check: completely filter out zero-price/profit entries and non-legit drops
+  list = list.filter(g => isValidTopMarketItem(g.item || g) && g.athPrice > 0 && (g.athProfit > 0 || g.profit > 0));
 
   let rowsHtml = '';
   if (!list || list.length === 0) {
