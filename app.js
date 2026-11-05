@@ -2655,79 +2655,6 @@ function renderTable() {
   }
 }
 
-// Modal Inspection Dialog
-function openModal(item) {
-  const modal = document.getElementById('inspectModal');
-  const content = document.getElementById('modalContent');
-  if (!modal || !content) return;
-
-  if (typeof window !== 'undefined' && window.va) {
-    window.va('event', { name: 'inspect_drop', data: { name: item.name || '', symbol: item.symbol || '' } });
-  }
-
-  const std = String(item.standard || 'ERC-721');
-  const isNft = std.includes('721') || std.includes('NFT');
-  const cAddr = item.contract || '';
-  const name = item.name || 'Unknown';
-  const sym = item.symbol || '';
-
-  const mktUrl = isNft
-    ? getElementUrl(name, cAddr)
-    : (item.market_url || `https://pancakeswap.finance/swap?outputCurrency=${cAddr}`);
-
-  const smList = item.smart_wallets || item.smart_minters || [];
-  const sEval = getSniperEval(item);
-  const isReady = sEval.is_ready;
-  const rawCd = item.mint_calldata;
-  const isRecv = !rawCd || rawCd === '0x' || rawCd === 'recv';
-  const userWallet = connectedWallet || '<YOUR_WALLET>';
-  let calldata = isRecv ? '0x' : rawCd;
-  if (!isRecv && calldata.startsWith('0x836a1040') && calldata.length >= 138) {
-    const cleanW = userWallet.replace('0x', '').padStart(40, '0');
-    calldata = calldata.slice(0, 74) + '000000000000000000000000' + cleanW + calldata.slice(138);
-  }
-  const valWei = item.mint_value_wei || '0';
-  const cliSnippet = `baw contract-call preview --binanceChainId 56 --from ${userWallet} --to ${cAddr} --value ${valWei} --inputData ${calldata} --json`;
-
-  const isFav = isFavorited(cAddr, item);
-  const favBtnClass = isFav ? 'modal-fav-btn starred' : 'modal-fav-btn';
-  const favBtnText = isFav ? '★ Favorited' : '☆ Add to Favorites';
-
-  const exitEval = evaluatePortfolioExit(item, bnbPrice);
-  const rawHeldWei = item.user_balance_wei || 1000000000000000000n;
-  const sellCalldata = !isNft ? buildPancakeSwapSellCalldata(cAddr, rawHeldWei, userWallet) : '';
-  const sellCliSnippet = !isNft ? `baw contract-call preview --binanceChainId 56 --from ${userWallet} --to ${PANCAKE_ROUTER_V2} --value 0 --inputData ${sellCalldata} --json` : '';
-
-  const mintBnbNum = Number(item.mint_price_bnb || 0);
-  const isFree = item.has_free_mint || mintBnbNum === 0 || valWei === '0';
-  const mintCostLabel = isFree ? 'FREE MINT' : `${mintBnbNum.toFixed(4)} BNB (~$${(mintBnbNum * bnbPrice).toFixed(2)})`;
-  const isSoldOut = Boolean(item.max_supply && item.total_minted && Number(item.total_minted) >= Number(item.max_supply));
-  const isRiskContract = Boolean((item.risk_badge && (item.risk_badge.includes('🚨') || item.risk_badge.includes('Fund Drain') || item.risk_badge.includes('Honeypot'))) || item.risk_level === 'RUG' || (item.security && item.security.is_fund_drain));
-
-  const ms = Number(item.max_supply || 0);
-  const tm = Number(item.total_minted || 0);
-  const lp = Number(item.lp_usd || 0);
-  const bondingGraduated = (lp >= 500) || Boolean(item.sniper_badge && item.sniper_badge.includes('DEX'));
-  let bondingPct = 0;
-  if (bondingGraduated) {
-    bondingPct = 100;
-  } else if (ms > 0) {
-    bondingPct = Math.min(100, Math.max(0, (tm / ms) * 100));
-  } else if (tm > 0) {
-    bondingPct = Math.min(99, Math.max(10, Math.log10(tm + 1) * 20));
-  }
-
-  const holdersCount = Number(item.holders || 0);
-  let whaleConcentrationBadge = '<span class="whale-alert-pill" style="background: rgba(74, 222, 128, 0.15); border: 1px solid var(--color-green); color: var(--color-green);">🟢 Distributed</span>';
-  let whaleConcentrationDesc = `Clean holder distribution across ${formatCount(holdersCount)} agent wallets. Low single-holder dump risk.`;
-  if (holdersCount > 0 && holdersCount < 30) {
-    whaleConcentrationBadge = '<span class="whale-alert-pill" style="background: rgba(239, 68, 68, 0.15); border: 1px solid var(--color-red); color: var(--color-red);">🚨 Extreme Whale Concentration (>50% Top 10)</span>';
-    whaleConcentrationDesc = `High dump risk: Supply is concentrated in only ${holdersCount} wallets. Early snipers hold outsized control.`;
-  } else if (holdersCount >= 30 && holdersCount < 100) {
-    whaleConcentrationBadge = '<span class="whale-alert-pill" style="background: rgba(250, 204, 21, 0.15); border: 1px solid var(--color-yellow); color: var(--color-yellow);">🟡 Moderate Distribution (25%-49% Top 10)</span>';
-    whaleConcentrationDesc = `Medium wallet clustering across ${holdersCount} wallets. Monitor large seller outflows.`;
-  }
-
 // Dynamic Holder Distribution Intelligence
 // Analyzes on-chain fair-mint state, smart money concentration, sniper allocation, and creator share
 function computeHolderDistribution(item) {
@@ -2808,6 +2735,79 @@ function computeHolderDistribution(item) {
     public: Number(publicHold.toFixed(1))
   };
 }
+
+// Modal Inspection Dialog
+function openModal(item) {
+  const modal = document.getElementById('inspectModal');
+  const content = document.getElementById('modalContent');
+  if (!modal || !content) return;
+
+  if (typeof window !== 'undefined' && window.va) {
+    window.va('event', { name: 'inspect_drop', data: { name: item.name || '', symbol: item.symbol || '' } });
+  }
+
+  const std = String(item.standard || 'ERC-721');
+  const isNft = std.includes('721') || std.includes('NFT');
+  const cAddr = item.contract || '';
+  const name = item.name || 'Unknown';
+  const sym = item.symbol || '';
+
+  const mktUrl = isNft
+    ? getElementUrl(name, cAddr)
+    : (item.market_url || `https://pancakeswap.finance/swap?outputCurrency=${cAddr}`);
+
+  const smList = item.smart_wallets || item.smart_minters || [];
+  const sEval = getSniperEval(item);
+  const isReady = sEval.is_ready;
+  const rawCd = item.mint_calldata;
+  const isRecv = !rawCd || rawCd === '0x' || rawCd === 'recv';
+  const userWallet = connectedWallet || '<YOUR_WALLET>';
+  let calldata = isRecv ? '0x' : rawCd;
+  if (!isRecv && calldata.startsWith('0x836a1040') && calldata.length >= 138) {
+    const cleanW = userWallet.replace('0x', '').padStart(40, '0');
+    calldata = calldata.slice(0, 74) + '000000000000000000000000' + cleanW + calldata.slice(138);
+  }
+  const valWei = item.mint_value_wei || '0';
+  const cliSnippet = `baw contract-call preview --binanceChainId 56 --from ${userWallet} --to ${cAddr} --value ${valWei} --inputData ${calldata} --json`;
+
+  const isFav = isFavorited(cAddr, item);
+  const favBtnClass = isFav ? 'modal-fav-btn starred' : 'modal-fav-btn';
+  const favBtnText = isFav ? '★ Favorited' : '☆ Add to Favorites';
+
+  const exitEval = evaluatePortfolioExit(item, bnbPrice);
+  const rawHeldWei = item.user_balance_wei || 1000000000000000000n;
+  const sellCalldata = !isNft ? buildPancakeSwapSellCalldata(cAddr, rawHeldWei, userWallet) : '';
+  const sellCliSnippet = !isNft ? `baw contract-call preview --binanceChainId 56 --from ${userWallet} --to ${PANCAKE_ROUTER_V2} --value 0 --inputData ${sellCalldata} --json` : '';
+
+  const mintBnbNum = Number(item.mint_price_bnb || 0);
+  const isFree = item.has_free_mint || mintBnbNum === 0 || valWei === '0';
+  const mintCostLabel = isFree ? 'FREE MINT' : `${mintBnbNum.toFixed(4)} BNB (~$${(mintBnbNum * bnbPrice).toFixed(2)})`;
+  const isSoldOut = Boolean(item.max_supply && item.total_minted && Number(item.total_minted) >= Number(item.max_supply));
+  const isRiskContract = Boolean((item.risk_badge && (item.risk_badge.includes('🚨') || item.risk_badge.includes('Fund Drain') || item.risk_badge.includes('Honeypot'))) || item.risk_level === 'RUG' || (item.security && item.security.is_fund_drain));
+
+  const ms = Number(item.max_supply || 0);
+  const tm = Number(item.total_minted || 0);
+  const lp = Number(item.lp_usd || 0);
+  const bondingGraduated = (lp >= 500) || Boolean(item.sniper_badge && item.sniper_badge.includes('DEX'));
+  let bondingPct = 0;
+  if (bondingGraduated) {
+    bondingPct = 100;
+  } else if (ms > 0) {
+    bondingPct = Math.min(100, Math.max(0, (tm / ms) * 100));
+  } else if (tm > 0) {
+    bondingPct = Math.min(99, Math.max(10, Math.log10(tm + 1) * 20));
+  }
+
+  const holdersCount = Number(item.holders || 0);
+  let whaleConcentrationBadge = '<span class="whale-alert-pill" style="background: rgba(74, 222, 128, 0.15); border: 1px solid var(--color-green); color: var(--color-green);">🟢 Distributed</span>';
+  let whaleConcentrationDesc = `Clean holder distribution across ${formatCount(holdersCount)} agent wallets. Low single-holder dump risk.`;
+  if (holdersCount > 0 && holdersCount < 30) {
+    whaleConcentrationBadge = '<span class="whale-alert-pill" style="background: rgba(239, 68, 68, 0.15); border: 1px solid var(--color-red); color: var(--color-red);">🚨 Extreme Whale Concentration (>50% Top 10)</span>';
+    whaleConcentrationDesc = `High dump risk: Supply is concentrated in only ${holdersCount} wallets. Early snipers hold outsized control.`;
+  } else if (holdersCount >= 30 && holdersCount < 100) {
+    whaleConcentrationBadge = '<span class="whale-alert-pill" style="background: rgba(250, 204, 21, 0.15); border: 1px solid var(--color-yellow); color: var(--color-yellow);">🟡 Moderate Distribution (25%-49% Top 10)</span>';
+    whaleConcentrationDesc = `Medium wallet clustering across ${holdersCount} wallets. Monitor large seller outflows.`;
+  }
 
   // Feature 1: Dev Funding Root & Cluster Metrics
   const devRootAddr = (item.dev_root || (item.security && item.security.dev_root) || '').trim();
@@ -4461,8 +4461,19 @@ function checkUrlParams() {
   }
   const qInspect = urlParams.get('inspect');
   if (qInspect) {
-    const tryInspect = (attempts = 0) => {
-      const target = (allDrops || []).find(d => (d.contract || '').toLowerCase() === qInspect.toLowerCase());
+    const tryInspect = async (attempts = 0) => {
+      let target = (allDrops || []).find(d => (d.contract || '').toLowerCase() === qInspect.toLowerCase());
+      if (!target && attempts >= 3) {
+        try {
+          const res = await fetch(`${BACKEND_URL}/api/projects?search=${qInspect}`);
+          if (res.ok) {
+            const data = await res.json();
+            if (data && data.projects && data.projects.length > 0) {
+              target = data.projects[0];
+            }
+          }
+        } catch (e) {}
+      }
       if (target) {
         openModal(target);
         if (urlParams.get('chart') === '1') {
@@ -4664,6 +4675,7 @@ async function pollDeltaFeed() {
 
         renderStats(allDrops);
         renderTable();
+        checkUrlParams();
 
         const timeStr = new Date().toLocaleTimeString();
         const syncEl = document.getElementById('syncTime');
@@ -4922,6 +4934,288 @@ async function fetchDrops() {
   }
 }
 
+// ========================================================
+// Manual Tab Sequence Customization & Drag-and-Drop
+// ========================================================
+const DEFAULT_PILLS_SEQUENCE = [
+  'ALL',
+  'LAUNCHPAD',
+  'SNIPER_READY',
+  'NFT_SURGE',
+  'PROXY',
+  'FAVORITES',
+  'FOLLOWED',
+  'FREE',
+  'SMART',
+  'pillSmartLeaderboard',
+  'LP',
+  'ACTIVE'
+];
+
+const PILL_SEQUENCE_STORAGE_KEY = 'agent_id_pills_sequence';
+
+let isDraggingPill = false;
+let justFinishedDrag = false;
+let draggedPill = null;
+
+function getPillKey(el) {
+  if (!el) return '';
+  return el.getAttribute('data-filter') || el.id || '';
+}
+
+function getPillElementByKey(key) {
+  if (!key) return null;
+  const container = document.getElementById('filterPillsContainer');
+  if (!container) return null;
+  return container.querySelector(`[data-filter="${key}"]`) || document.getElementById(key);
+}
+
+function getCurrentPillSequence() {
+  const container = document.getElementById('filterPillsContainer');
+  if (!container || !container.children) return [...DEFAULT_PILLS_SEQUENCE];
+  const seq = [];
+  Array.from(container.children).forEach(child => {
+    const key = getPillKey(child);
+    if (key) seq.push(key);
+  });
+  return seq.length > 0 ? seq : [...DEFAULT_PILLS_SEQUENCE];
+}
+
+function updateResetPillBtnVisibility(seq) {
+  const resetBtn = document.getElementById('resetPillOrderBtn');
+  if (!resetBtn) return;
+  const isDefault = JSON.stringify(seq || getCurrentPillSequence()) === JSON.stringify(DEFAULT_PILLS_SEQUENCE);
+  resetBtn.style.display = isDefault ? 'none' : 'inline-flex';
+}
+
+function savePillSequence(seq) {
+  try {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(PILL_SEQUENCE_STORAGE_KEY, JSON.stringify(seq));
+    }
+  } catch (e) {
+    console.warn('Failed to save pill sequence to localStorage:', e);
+  }
+  updateResetPillBtnVisibility(seq);
+}
+
+function loadSavedPillSequence() {
+  try {
+    if (typeof localStorage !== 'undefined') {
+      const saved = localStorage.getItem(PILL_SEQUENCE_STORAGE_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          const validSet = new Set(parsed);
+          const complete = [...parsed];
+          DEFAULT_PILLS_SEQUENCE.forEach(k => {
+            if (!validSet.has(k)) complete.push(k);
+          });
+          return complete;
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('Failed to parse saved pill sequence:', e);
+  }
+  return [...DEFAULT_PILLS_SEQUENCE];
+}
+
+function applyPillSequence(seq) {
+  const container = document.getElementById('filterPillsContainer');
+  if (!container) return;
+  const targetSeq = Array.isArray(seq) && seq.length > 0 ? seq : DEFAULT_PILLS_SEQUENCE;
+  
+  targetSeq.forEach(key => {
+    const el = getPillElementByKey(key);
+    if (el && el.parentNode === container) {
+      container.appendChild(el);
+    }
+  });
+
+  updateResetPillBtnVisibility(getCurrentPillSequence());
+}
+
+function resetPillSequence() {
+  try {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.removeItem(PILL_SEQUENCE_STORAGE_KEY);
+    }
+  } catch (e) {
+    console.warn('Failed to remove pill sequence from localStorage:', e);
+  }
+  applyPillSequence(DEFAULT_PILLS_SEQUENCE);
+  const modal = document.getElementById('reorderPillsModal');
+  if (modal && (modal.open || modal.hasAttribute('open'))) {
+    renderReorderModalList();
+  }
+}
+
+function openReorderModal() {
+  const modal = document.getElementById('reorderPillsModal');
+  if (!modal) return;
+  renderReorderModalList();
+  if (modal.showModal) {
+    modal.showModal();
+  } else {
+    modal.setAttribute('open', '');
+  }
+}
+
+function getPillDisplayLabel(el, key) {
+  if (!el) {
+    return key;
+  }
+  const clone = el.cloneNode(true);
+  const spans = clone.querySelectorAll('span');
+  spans.forEach(s => s.remove());
+  let txt = clone.textContent.replace(/\(\s*\)/g, '').trim();
+  if (!txt) txt = el.textContent.trim();
+  return txt;
+}
+
+function renderReorderModalList() {
+  const listEl = document.getElementById('reorderPillsList');
+  if (!listEl) return;
+  const currentSeq = getCurrentPillSequence();
+  listEl.innerHTML = '';
+  if (listEl.replaceChildren) {
+    listEl.replaceChildren();
+  }
+
+  currentSeq.forEach((key, index) => {
+    const el = getPillElementByKey(key);
+    const label = getPillDisplayLabel(el, key);
+    const isFirst = (index === 0);
+    const isLast = (index === currentSeq.length - 1);
+
+    const item = document.createElement('div');
+    item.className = 'reorder-item';
+    item.innerHTML = `
+      <div class="reorder-item-left">
+        <span class="reorder-item-idx">#${index + 1}</span>
+        <span class="reorder-item-name">${label}</span>
+      </div>
+      <div class="reorder-item-actions">
+        <button class="reorder-btn" title="Move to Top" ${isFirst ? 'disabled' : ''} onclick="movePillToTop('${key}')">⬆ Top</button>
+        <button class="reorder-btn" title="Move Up" ${isFirst ? 'disabled' : ''} onclick="movePill('${key}', -1)">▲ Up</button>
+        <button class="reorder-btn" title="Move Down" ${isLast ? 'disabled' : ''} onclick="movePill('${key}', 1)">▼ Down</button>
+      </div>
+    `;
+    listEl.appendChild(item);
+  });
+}
+
+function movePill(key, delta) {
+  const seq = getCurrentPillSequence();
+  const idx = seq.indexOf(key);
+  if (idx === -1) return;
+  const targetIdx = idx + delta;
+  if (targetIdx < 0 || targetIdx >= seq.length) return;
+
+  const temp = seq[idx];
+  seq[idx] = seq[targetIdx];
+  seq[targetIdx] = temp;
+
+  applyPillSequence(seq);
+  savePillSequence(seq);
+  renderReorderModalList();
+}
+
+function movePillToTop(key) {
+  const seq = getCurrentPillSequence();
+  const idx = seq.indexOf(key);
+  if (idx <= 0) return;
+  seq.splice(idx, 1);
+  seq.unshift(key);
+
+  applyPillSequence(seq);
+  savePillSequence(seq);
+  renderReorderModalList();
+}
+
+function setupFilterPillsDragAndDrop() {
+  const container = document.getElementById('filterPillsContainer');
+  if (!container) return;
+
+  const items = container.querySelectorAll('.pill, .pill-action');
+  items.forEach(item => {
+    item.setAttribute('draggable', 'true');
+
+    item.addEventListener('dragstart', (e) => {
+      isDraggingPill = true;
+      draggedPill = item;
+      item.classList.add('dragging');
+      if (e.dataTransfer) {
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/plain', getPillKey(item));
+      }
+    });
+
+    item.addEventListener('dragend', () => {
+      isDraggingPill = false;
+      draggedPill = null;
+      item.classList.remove('dragging');
+      container.querySelectorAll('.pill, .pill-action').forEach(p => {
+        p.classList.remove('drag-over-left', 'drag-over-right');
+      });
+      justFinishedDrag = true;
+      setTimeout(() => {
+        justFinishedDrag = false;
+      }, 120);
+    });
+
+    item.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      if (!draggedPill || draggedPill === item) return;
+      if (e.dataTransfer) {
+        e.dataTransfer.dropEffect = 'move';
+      }
+
+      const rect = item.getBoundingClientRect();
+      const midX = rect.left + rect.width / 2;
+      if (e.clientX < midX) {
+        item.classList.add('drag-over-left');
+        item.classList.remove('drag-over-right');
+      } else {
+        item.classList.add('drag-over-right');
+        item.classList.remove('drag-over-left');
+      }
+    });
+
+    item.addEventListener('dragleave', () => {
+      item.classList.remove('drag-over-left', 'drag-over-right');
+    });
+
+    item.addEventListener('drop', (e) => {
+      e.preventDefault();
+      item.classList.remove('drag-over-left', 'drag-over-right');
+      if (!draggedPill || draggedPill === item) return;
+
+      const rect = item.getBoundingClientRect();
+      const midX = rect.left + rect.width / 2;
+      const insertBefore = (e.clientX < midX);
+
+      if (insertBefore) {
+        container.insertBefore(draggedPill, item);
+      } else {
+        container.insertBefore(draggedPill, item.nextSibling);
+      }
+
+      const newSeq = getCurrentPillSequence();
+      savePillSequence(newSeq);
+    });
+  });
+}
+
+// Window globals for inline onclicks in HTML
+if (typeof window !== 'undefined') {
+  window.resetPillSequence = resetPillSequence;
+  window.openReorderModal = openReorderModal;
+  window.movePill = movePill;
+  window.movePillToTop = movePillToTop;
+}
+
 // Custom Cyberpunk Dropdown Handler
 function setupCustomDropdown() {
   const wrapper = document.getElementById('customSortWrapper');
@@ -4994,6 +5288,11 @@ async function init() {
     // Initialize smart hunters & followed wallets
     loadFollowedWallets();
     syncSeededSmartHunters();
+
+    // Initialize customized tab/pill sequence & drag-and-drop
+    const savedPillsSeq = loadSavedPillSequence();
+    applyPillSequence(savedPillsSeq);
+    setupFilterPillsDragAndDrop();
 
     // Sound alert toggle button setup
     const soundBtn = document.getElementById('soundToggle');
@@ -5115,6 +5414,7 @@ async function init() {
     // Filter pills
     document.querySelectorAll('.pill').forEach(btn => {
       btn.addEventListener('click', async () => {
+        if (isDraggingPill || justFinishedDrag) return;
         document.querySelectorAll('.pill').forEach(b => b.classList.remove('active'));
         btn.classList.add('active');
         activeFilter = btn.getAttribute('data-filter');
@@ -5180,7 +5480,12 @@ async function init() {
     // Smart Hunters Leaderboard Pill Click
     const smartPill = document.getElementById('pillSmartLeaderboard');
     if (smartPill) {
-      smartPill.addEventListener('click', () => {
+      smartPill.addEventListener('click', (e) => {
+        if (isDraggingPill || justFinishedDrag) {
+          e.preventDefault();
+          e.stopPropagation();
+          return;
+        }
         openSmartLeaderboardModal('ALL');
       });
     }
@@ -5190,6 +5495,14 @@ async function init() {
     if (smModal) {
       smModal.addEventListener('click', e => {
         if (e.target === smModal) smModal.close ? smModal.close() : smModal.removeAttribute('open');
+      });
+    }
+
+    // Close Reorder Pills modal on backdrop click
+    const reorderModal = document.getElementById('reorderPillsModal');
+    if (reorderModal) {
+      reorderModal.addEventListener('click', e => {
+        if (e.target === reorderModal) reorderModal.close ? reorderModal.close() : reorderModal.removeAttribute('open');
       });
     }
 
@@ -5323,7 +5636,21 @@ if (typeof module !== 'undefined' && module.exports) {
     setWalletsTabFilter,
     onWalletsTabSearch,
     loadMoreTabWallets,
-    updateWalletsTabBadge
+    updateWalletsTabBadge,
+    DEFAULT_PILLS_SEQUENCE,
+    PILL_SEQUENCE_STORAGE_KEY,
+    getPillKey,
+    getPillElementByKey,
+    getCurrentPillSequence,
+    savePillSequence,
+    loadSavedPillSequence,
+    applyPillSequence,
+    resetPillSequence,
+    openReorderModal,
+    renderReorderModalList,
+    movePill,
+    movePillToTop,
+    setupFilterPillsDragAndDrop
   };
 }
 

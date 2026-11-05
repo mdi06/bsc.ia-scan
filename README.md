@@ -1,7 +1,10 @@
 # Binance .ai Agent ID Real-Time Contract Monitor
 
-Monitors the BNB Smart Chain (BSC) block-by-block to catch new fair-mints, NFT drops, and token projects that integrate with the official **Space ID / Binance `.ai` Agent ID Registry**:
-- **Registry Address**: `0x60B9262456dE011F7d15a54CdD8c48bAaa8B022F`
+Monitors the BNB Smart Chain (BSC) block-by-block to catch new fair-mints, NFT drops, and token projects that integrate with the official Space ID / Binance Agent ecosystem and launchpads:
+- **Space ID Agent ID Registry (`.ai`)**: `0x60B9262456dE011F7d15a54CdD8c48bAaa8B022F`
+- **Space ID Master Registry (`.bnb`)**: `0x08CEd32a7f3eeC915Ba84415e9C07a7286977956`
+- **Four.meme Agent ID Factory**: `0x5c952063c7fc8610FFDB798152D69F0B9550762b`
+- **Four.meme Router**: `0xF251F83e40a78868FcfA3FA4599Dad6494E46034`
 
 ---
 
@@ -42,13 +45,13 @@ python3 monitor.py live
 #### ⌨️ Interactive Controls:
 | Key | Action | Description |
 | :--- | :--- | :--- |
-| **`TAB`** or **`p`** | **Switch Tabs** | Cycle through **[1: 📡 Live Radar]** ➔ **[2: 🧠 Smart Alpha]** ➔ **[3: 🎒 My Portfolio]** |
-| **`1`** / **`2`** / **`3`** | **Direct Tab Jump** | Jump directly to **1** (Live Radar), **2** (Smart Money Alpha), or **3** (My Portfolio) |
+| **`TAB`** or **`p`** | **Switch Tabs** | Cycle through **[1: 📡 Live Radar]** ➔ **[2: 🚀 Launchpads]** ➔ **[3: 🧠 Smart Alpha]** ➔ **[4: 🏆 Wallet Leaderboard]** ➔ **[5: 🎒 My Portfolio]** |
+| **`1`** / **`2`** / **`3`** / **`4`** | **Direct Tab Jump** | Jump directly to tab 1, 2, 3, or 4 |
 | **`↑` / `↓`** or **`k` / `j`** | **Navigate Rows** | Move the `▶` cursor up/down with dynamic sliding-window viewport scrolling |
 | **`PgUp` / `PgDn`** or **`[` / `]`** | **Fast Page Scroll** | Scroll an entire screen of drops up or down |
 | **`Home` / `End`** | **Jump to Ends** | Jump instantly to the very top or bottom of the project list |
 | **`s`** | **1-Click Sniper** | Instant on-chain dry-run simulation & 1-click broadcast gate (`[Y/Enter]` confirm) |
-| **`Enter`** or **`Space`** | **Deep-Dive Modal** | Expands full inspection card with reverse-engineering signals, full supply, holdings & audit |
+| **`Enter`** or **`Space`** | **Deep-Dive Modal** | Expands full inspection card with Dev Root tracing, syndicate clusters, holder distribution & audit |
 | **`m`** | **Open Market** | Opens the collection on **Element NFT Market** or token on **PancakeSwap** in your browser |
 | **`b`** | **Open in BscScan** | Opens the selected contract address or your holdings token page directly in BscScan |
 | **`w`** / **`x`** | **Website / Twitter** | Opens the official website or Twitter/X page for the selected project |
@@ -60,7 +63,15 @@ python3 monitor.py live
 
 *(Tip: Pass `--plain` if you prefer scrolling raw logs instead of the interactive table).*
 
-### 2. 🧠 Smart Money Alpha Scanner (5,000 Tracked Wallets)
+### 2. 🔀 Manual Tab Sequence Customization (Drag-and-Drop & Mobile Reorder)
+In the Web UI, you can fully rearrange the filter tabs/pills (`ALL`, `LAUNCHPAD`, `SNIPER READY`, `NFT SURGE`, `PROXY`, `FAVORITES`, `FOLLOWED`, `FREE MINTS`, `SMART ALPHA`, `SMART LEADERBOARD`, `DEX LP`, `ACTIVE MINTS`):
+- **Native Drag-and-Drop**: Drag any pill left or right in the toolbar. A yellow indicator highlights the drop target, and positions re-order smoothly.
+- **Accidental Click Prevention**: Moving pills will never trigger unintended filter changes during drag operations.
+- **Accessible / Mobile "⚙️ Reorder" Modal**: Click `⚙️ Reorder` to open the sequence management dialog with 1-click `⬆ Top`, `▲ Up`, and `▼ Down` buttons for any screen size.
+- **Auto-Persistence**: Customized tab sequences are automatically saved to `localStorage` (`agent_id_pills_sequence`) and persist across page refreshes.
+- **1-Click Reset**: When a sequence is customized, a `↺ Reset Sequence` button automatically appears to restore default order in 1 click.
+
+### 3. 🧠 Smart Money Alpha Scanner (5,000 Tracked Wallets)
 Scans recent blocks on BSC across ~5,000 verified smart agent wallets (curated by @OGlamozda) to detect early mints, insider accumulation, and alpha trends before they hit secondary markets:
 ```bash
 # Scan recent 200 blocks (~10 minutes of BSC history):

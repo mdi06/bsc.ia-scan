@@ -323,4 +323,518 @@ assert(statsNew.topGainer !== null, 'stats.topGainer must not be null');
 
 console.log(`✔ Persistent Top Gainers Separate Memory (Zero 2k+ Scans & Incremental 150 Merge): PASS [Tracking ${updatedMemory.length} winners, AGENT人生8 preserved]`);
 
-console.log('🎉 All Web3 & Multicall3 tests verified successfully!');
+// =========================================================================
+// Test Option 2: Smart Money Intelligence & Win-Rate Tracking
+// =========================================================================
+const {
+  toggleFollowWallet,
+  getFollowedWallets,
+  setFollowedWallets,
+  computeSmartWalletLeaderboard,
+  toggleDexChart
+} = app;
+
+console.log('Testing Option 2: Smart Money Intelligence & Win-Rate Tracking...');
+
+// Test 1: Following & Unfollowing Smart Wallets
+setFollowedWallets(new Set());
+assert.strictEqual(getFollowedWallets().has('18881.ai'), false, 'Should not follow 18881.ai initially');
+
+const followed = toggleFollowWallet('18881.ai');
+assert.strictEqual(followed, true, 'toggleFollowWallet should return true when followed');
+assert.strictEqual(getFollowedWallets().has('18881.ai'), true, 'followedWallets must contain 18881.ai');
+
+const unfollowed = toggleFollowWallet('18881.ai');
+assert.strictEqual(unfollowed, false, 'toggleFollowWallet should return false when unfollowed');
+assert.strictEqual(getFollowedWallets().has('18881.ai'), false, 'followedWallets must not contain 18881.ai after unfollow');
+console.log('✔ toggleFollowWallet (Follow & Unfollow State): PASS');
+
+// Test 2: computeSmartWalletLeaderboard Aggregation & Ranking
+toggleFollowWallet('shdjjdjd.ai'); // Follow a high win rate hunter
+const sampleHunterDrops = [
+  {
+    name: 'MoonDrop',
+    symbol: 'MOON',
+    contract: '0x9999999999999999999999999999999999999999',
+    standard: 'BEP-20 Token (18 decimals)',
+    smart_wallets: ['shdjjdjd.ai', 'newhunter.ai'],
+    lp_usd: 12000,
+    token_price_usd: 0.05
+  }
+];
+
+const leaderboard = computeSmartWalletLeaderboard(sampleHunterDrops);
+assert(leaderboard.length >= 10, 'Leaderboard must contain baseline hunters');
+const shdEntry = leaderboard.find(h => h.name.toLowerCase() === 'shdjjdjd.ai');
+assert(shdEntry !== undefined, 'shdjjdjd.ai must be in leaderboard');
+assert.strictEqual(shdEntry.isFollowed, true, 'shdjjdjd.ai must be marked as isFollowed=true');
+assert(shdEntry.wins >= 9, 'shdjjdjd.ai must have at least 9 wins');
+assert(shdEntry.winRate >= 70, 'shdjjdjd.ai must have winRate >= 70%');
+
+const newEntry = leaderboard.find(h => h.name.toLowerCase() === 'newhunter.ai');
+assert(newEntry !== undefined, 'newhunter.ai must be incrementally aggregated from new drop');
+assert.strictEqual(newEntry.wins, 1, 'newhunter.ai must have 1 win from MoonDrop');
+assert.strictEqual(newEntry.winRate, 100.0, 'newhunter.ai winRate must be 100%');
+console.log('✔ computeSmartWalletLeaderboard (Aggregation & Follow State): PASS');
+
+// =========================================================================
+// Test Option 3: Secondary Market Bonding Curve & DEX Live Chart Toggle
+// =========================================================================
+console.log('Testing Option 3: Secondary Market Bonding Curve & Live Chart...');
+
+// Test 3: DexScreener Embed Toggle
+const mockDexChartWrap = { style: { display: 'none' }, innerHTML: '' };
+const mockChartLabel = { textContent: '' };
+const mockChartIcon = { textContent: '' };
+
+const origGetById = global.document.getElementById;
+global.document.getElementById = (id) => {
+  if (id === 'dexChartWrap') return mockDexChartWrap;
+  if (id === 'chartToggleLabel') return mockChartLabel;
+  if (id === 'chartToggleIcon') return mockChartIcon;
+  return origGetById ? origGetById(id) : null;
+};
+
+// Toggle Open
+toggleDexChart('0xc4bf2518aa953304170753388f83277eb9588a7a');
+assert.strictEqual(mockDexChartWrap.style.display, 'block', 'Chart container must be displayed');
+assert(mockDexChartWrap.innerHTML.includes('dexscreener.com/bsc/0xc4bf2518aa953304170753388f83277eb9588a7a'), 'Chart iframe must target contract address');
+assert(mockDexChartWrap.innerHTML.includes('theme=dark'), 'Chart iframe must use dark theme');
+assert.strictEqual(mockChartLabel.textContent, 'Hide Live Chart', 'Label must update to Hide Live Chart');
+
+// Toggle Close
+toggleDexChart('0xc4bf2518aa953304170753388f83277eb9588a7a');
+assert.strictEqual(mockDexChartWrap.style.display, 'none', 'Chart container must be hidden');
+assert.strictEqual(mockDexChartWrap.innerHTML, '', 'Chart iframe must be unloaded on close');
+assert.strictEqual(mockChartLabel.textContent, 'Show Live DEX Chart', 'Label must update to Show Live DEX Chart');
+console.log('✔ toggleDexChart (Lazy Embed Loading & Cleanup): PASS');
+
+// Test 4: 2,116 Smart Hunters Scaling & Activity Navigation
+const fs = require('fs');
+const seedData = JSON.parse(fs.readFileSync('seeded_smart_hunters.json', 'utf8'));
+assert.strictEqual(seedData.length, 2116, 'seeded_smart_hunters.json must contain all 2,116 hunters');
+
+const { setSmartHuntersCache, viewWalletActivity, mergeDropsIntoAllDrops, getFilteredDrops } = app;
+setSmartHuntersCache(seedData);
+
+const fullLeaderboard = computeSmartWalletLeaderboard([]);
+assert.strictEqual(fullLeaderboard.length, 2116, 'Leaderboard must scale to all 2,116 tracked hunters');
+const top1 = fullLeaderboard[0];
+assert.strictEqual(top1.name, 'adadcarry.ai', 'Top hunter must be adadcarry.ai');
+assert.strictEqual(top1.wins, 11, 'adadcarry.ai must have 11 confirmed wins');
+console.log('✔ 2,116 Smart Hunters Full Scale Leaderboard: PASS');
+
+// Test 5: viewWalletActivity
+const mockSearchInput = { value: '' };
+global.document.getElementById = (id) => {
+  if (id === 'searchInput') return mockSearchInput;
+  if (id === 'followedFilterCount') return { textContent: '' };
+  return null;
+};
+global.window.scrollTo = () => {};
+
+viewWalletActivity('adadcarry.ai');
+assert.strictEqual(mockSearchInput.value, 'adadcarry.ai', 'Search input must be set to wallet name');
+console.log('✔ viewWalletActivity (Search and Filter Redirection): PASS');
+
+// Test 6: Smart Drops Merge & Followed / Search Activity Resolution
+const smartDropsRaw = JSON.parse(fs.readFileSync('seeded_smart_drops.json', 'utf8'));
+assert(smartDropsRaw.length >= 1900, 'seeded_smart_drops.json must contain ~1,900 smart drops');
+const addedDrops = mergeDropsIntoAllDrops(smartDropsRaw);
+assert(addedDrops > 1800, 'Must merge new smart drops into allDrops');
+
+// Verify adadcarry.ai activity when searching
+searchQuery = 'adadcarry.ai';
+activeFilter = 'ALL';
+const adadSearchResults = getFilteredDrops();
+assert.strictEqual(adadSearchResults.length, 23, 'Must find exactly 23 historical drops for adadcarry.ai');
+console.log(`✔ Search by Smart Hunter (.ai): PASS [Found ${adadSearchResults.length} drops for adadcarry.ai]`);
+
+// Verify adadcarry.ai activity under FOLLOWED filter
+toggleFollowWallet('adadcarry.ai');
+activeFilter = 'FOLLOWED';
+searchQuery = '';
+const followedResults = getFilteredDrops();
+assert(followedResults.length >= 23, 'Followed filter must return all drops of followed hunter');
+console.log(`✔ Followed Filter Activity Resolution: PASS [Found ${followedResults.length} drops for followed hunters]`);
+
+// Restore getElementById
+global.document.getElementById = origGetById;
+
+// ========================================================
+// Test Competitor Features: Dev Root, Wallet Tab, Holder Dist
+// ========================================================
+console.log('Testing Competitor Features (Dev Root, Wallet Tab, Holder Dist)...');
+
+const {
+  openModal,
+  computeHolderDistribution,
+  renderWalletsTabLeaderboard,
+  setWalletsTabFilter,
+  onWalletsTabSearch,
+  loadMoreTabWallets
+} = app;
+
+// Test 7: Dev Root Tracing & Dev Cluster Badge in Modal
+mockInspectContent.innerHTML = '';
+global.document.getElementById = (id) => {
+  if (id === 'inspectModal') return mockInspectModal;
+  if (id === 'modalContent') return mockInspectContent;
+  if (id === 'walletsLeaderboardContainer') return { style: { display: 'none' } };
+  if (id === 'dropsTable') return { style: { display: '' } };
+  if (id === 'loadMoreWrap') return { style: { display: 'none' } };
+  if (id === 'tabWalletsTbody') return { innerHTML: '' };
+  if (id === 'walletsTabCount') return { textContent: '' };
+  if (id === 'walletsTabSummaryPill') return { textContent: '' };
+  if (id === 'walletsTabFollowedCount') return { textContent: '' };
+  if (id === 'footerCount') return { textContent: '' };
+  return origGetById ? origGetById(id) : null;
+};
+
+const clusterDrop = {
+  contract: '0x1111111111111111111111111111111111111111',
+  deployer: '0x2222222222222222222222222222222222222222',
+  dev_root: '0x9999999999999999999999999999999999999999',
+  cluster_devs: 4,
+  cluster_n: 12,
+  name: 'Cluster Token',
+  symbol: 'CLUST',
+  standard: 'BEP-20',
+  hold: {
+    dev: 15.5,
+    insider: 18.0,
+    sniper: 6.0,
+    smart: 10.0,
+    fresh: 3.5,
+    public: 47.0
+  }
+};
+
+openModal(clusterDrop);
+assert(mockInspectContent.innerHTML.includes('0x9999999999'), 'Modal must link Dev Funding Root address');
+assert(mockInspectContent.innerHTML.includes('Dev Cluster: 4 linked wallets / 12 drops'), 'Modal must display Dev Cluster badge');
+assert(mockInspectContent.innerHTML.includes('Holder Distribution Breakdown'), 'Modal must display Holder Distribution section');
+assert(mockInspectContent.innerHTML.includes('High Dev Holding (15.5% > 10%)'), 'Modal must trigger High Dev Holding alert');
+assert(mockInspectContent.innerHTML.includes('Insider Concentration (18.0%)'), 'Modal must trigger Insider Concentration alert');
+assert(mockInspectContent.innerHTML.includes('holder-dist-seg dev'), 'Must contain dev segment');
+assert(mockInspectContent.innerHTML.includes('holder-dist-seg public'), 'Must contain public segment');
+console.log('✔ Feature 1 & 3 (Dev Root Tracing, Dev Cluster Badge & Holder Distribution): PASS');
+
+// Test 7b: Unminted Primary Fair-Mint Phase & Standalone Deployer Inflow Trace
+const unmintedDrop = {
+  contract: '0x6d91b203e663ef5dfd8e168811cad81a87984b29',
+  deployer: '0xcc7fade382e870072495a1a8bd90e12ff78ba1dd',
+  total_minted: 0,
+  max_supply: 1000,
+  holders: 1,
+  name: 'Signal Ray',
+  symbol: 'SGRA',
+  standard: 'Custom Smart Contract'
+};
+
+const unmintedDist = computeHolderDistribution(unmintedDrop);
+assert.strictEqual(unmintedDist.isUnminted, true, 'Drop with 0 minted must be identified as isUnminted');
+assert.strictEqual(unmintedDist.dev, 0, 'Dev pre-mine must be 0 for fair mint');
+assert.strictEqual(unmintedDist.public, 100, 'Public allocation must be 100% available');
+
+openModal(unmintedDrop);
+assert(mockInspectContent.innerHTML.includes('Primary Fair-Mint Phase'), 'Must display Primary Fair-Mint Phase badge');
+assert(mockInspectContent.innerHTML.includes('Zero Dev Pre-Mine'), 'Must clarify zero dev pre-mine');
+assert(mockInspectContent.innerHTML.includes('holder-dist-seg-unminted'), 'Must render unminted phase progress bar');
+assert(mockInspectContent.innerHTML.includes('Trace Inflow ↗'), 'Must link to BscScan inflow trace');
+assert(mockInspectContent.innerHTML.includes('Standalone Deployer'), 'Must mark unclustered deployer as standalone');
+console.log('✔ Feature 1 & 3b (Unminted Fair-Mint State & BscScan Inflow Tracing): PASS');
+
+// Test 7c: Dynamic Minted Distribution with Smart Money & Snipers
+const mintedDrop = {
+  contract: '0xb736d06c52fff74cac4619200c0f3be24c777591',
+  deployer: '0x185992f983307cd50d4d668e4d0fa42e47d08fe8',
+  total_minted: 50000,
+  max_supply: 100000,
+  holders: 35,
+  smart_wallets: ['adadcarry.ai', 'qifeiba.ai'],
+  buys_1h: 25,
+  percent_claimed: 50.0,
+  name: 'Cipher Alpha',
+  symbol: 'CIPA',
+  standard: 'BEP-20'
+};
+
+const mintedDist = computeHolderDistribution(mintedDrop);
+assert.strictEqual(mintedDist.isUnminted, false, 'Circulating drop must not be unminted');
+assert(mintedDist.smart > 0, 'Smart money share must be computed from smart hunters');
+assert(mintedDist.sniper > 0, 'Sniper share must be computed from rapid buys');
+assert(mintedDist.public > 0, 'Public community share must be computed');
+console.log('✔ Feature 1 & 3c (Dynamic Minted Distribution with Smart Money & Snipers): PASS');
+
+// Test 8: Dedicated Wallet Leaderboard Tab Rendering & Filters
+const mockWalletsTbody = { innerHTML: '' };
+const mockSummaryPill = { textContent: '' };
+const mockFollowedCount = { textContent: '' };
+const mockWalletsCount = { textContent: '' };
+const mockLoadMoreWrap = { style: { display: 'none' } };
+
+global.document.getElementById = (id) => {
+  if (id === 'tabWalletsTbody') return mockWalletsTbody;
+  if (id === 'walletsTabSummaryPill') return mockSummaryPill;
+  if (id === 'walletsTabFollowedCount') return mockFollowedCount;
+  if (id === 'walletsTabCount') return mockWalletsCount;
+  if (id === 'tabWalletsLoadMoreWrap') return mockLoadMoreWrap;
+  if (id === 'footerCount') return { textContent: '' };
+  return null;
+};
+global.document.querySelectorAll = () => [];
+
+renderWalletsTabLeaderboard();
+assert(mockWalletsTbody.innerHTML.includes('adadcarry.ai'), 'Wallet leaderboard must render top hunters including adadcarry.ai');
+assert(mockWalletsTbody.innerHTML.includes('🥇'), 'Top hunter must display gold medal badge');
+assert(!mockWalletsTbody.innerHTML.includes('WIN RATE'), 'Headers should not be in tbody');
+
+// Test Search in Wallet Leaderboard
+onWalletsTabSearch('adadcarry');
+assert(mockWalletsTbody.innerHTML.includes('adadcarry.ai'), 'Searching adadcarry must return matching row');
+
+onWalletsTabSearch('nonexistentwalletxyz');
+assert(mockWalletsTbody.innerHTML.includes('No matching Agent ID smart wallets found'), 'Empty state must show when no match');
+
+// Reset Search and Test Filter High Win
+onWalletsTabSearch('');
+setWalletsTabFilter('HIGH_WIN');
+assert(mockWalletsTbody.innerHTML.includes('shdjjdjd.ai'), 'High win filter must include shdjjdjd.ai (75% win rate)');
+
+// Test Filter Followed
+setWalletsTabFilter('FOLLOWED');
+assert(mockWalletsTbody.innerHTML.includes('adadcarry.ai'), 'Followed filter must include followed hunter');
+
+setWalletsTabFilter('ALL');
+console.log('✔ Feature 2 (Dedicated Wallet Leaderboard Tab, Filtering & Search): PASS');
+
+// ========================================================
+// Test: Manual Tab Sequence Customization & Drag-and-Drop
+// ========================================================
+console.log('Testing Manual Tab Sequence Customization & Drag-and-Drop...');
+
+const {
+  DEFAULT_PILLS_SEQUENCE,
+  PILL_SEQUENCE_STORAGE_KEY,
+  getPillKey,
+  getPillElementByKey,
+  getCurrentPillSequence,
+  savePillSequence,
+  loadSavedPillSequence,
+  applyPillSequence,
+  resetPillSequence,
+  openReorderModal,
+  renderReorderModalList,
+  movePill,
+  movePillToTop,
+  setupFilterPillsDragAndDrop
+} = app;
+
+// Ensure localStorage mock is available
+if (!global.localStorage) {
+  global.localStorage = {
+    store: {},
+    getItem(k) { return this.store[k] !== undefined ? this.store[k] : null; },
+    setItem(k, v) { this.store[k] = String(v); },
+    removeItem(k) { delete this.store[k]; },
+    clear() { this.store = {}; }
+  };
+} else {
+  global.localStorage.clear();
+}
+
+// 1. Verify DEFAULT_PILLS_SEQUENCE contents
+assert.strictEqual(DEFAULT_PILLS_SEQUENCE.length, 12, 'Default pills sequence must have 12 items');
+assert.strictEqual(DEFAULT_PILLS_SEQUENCE[0], 'ALL', 'First item must be ALL');
+assert.strictEqual(DEFAULT_PILLS_SEQUENCE[1], 'LAUNCHPAD', 'Second item must be LAUNCHPAD');
+assert(DEFAULT_PILLS_SEQUENCE.includes('SNIPER_READY'), 'Must include SNIPER_READY');
+assert(DEFAULT_PILLS_SEQUENCE.includes('NFT_SURGE'), 'Must include NFT_SURGE');
+assert(DEFAULT_PILLS_SEQUENCE.includes('pillSmartLeaderboard'), 'Must include pillSmartLeaderboard');
+console.log('✔ DEFAULT_PILLS_SEQUENCE integrity: PASS');
+
+// 2. Mock DOM Elements for Pills and Container
+class MockElement {
+  constructor(tag, attrs = {}) {
+    this.tagName = tag.toUpperCase();
+    this.attributes = { ...attrs };
+    this.classList = new Set();
+    this.children = [];
+    this.parentNode = null;
+    this._textContent = attrs.textContent || '';
+    this.style = {};
+    this.eventListeners = {};
+  }
+  get textContent() {
+    if (this._textContent) return this._textContent;
+    if (this._innerHTML) return this._innerHTML;
+    return this.children.map(c => c.textContent).join(' ');
+  }
+  set textContent(val) {
+    this._textContent = String(val);
+  }
+  get innerHTML() {
+    return this._innerHTML !== undefined ? this._innerHTML : this.children.map(c => c.textContent).join('');
+  }
+  set innerHTML(val) {
+    this._innerHTML = val;
+    if (val === '') {
+      this.children = [];
+    }
+  }
+  getAttribute(name) {
+    return this.attributes[name] !== undefined ? this.attributes[name] : null;
+  }
+  setAttribute(name, val) {
+    this.attributes[name] = String(val);
+  }
+  removeAttribute(name) {
+    delete this.attributes[name];
+  }
+  get id() {
+    return this.attributes.id || '';
+  }
+  set id(val) {
+    this.attributes.id = val;
+  }
+  addEventListener(event, fn) {
+    if (!this.eventListeners[event]) this.eventListeners[event] = [];
+    this.eventListeners[event].push(fn);
+  }
+  appendChild(child) {
+    if (child.parentNode) {
+      child.parentNode.removeChild(child);
+    }
+    child.parentNode = this;
+    this.children.push(child);
+  }
+  insertBefore(newChild, refChild) {
+    if (newChild.parentNode) {
+      newChild.parentNode.removeChild(newChild);
+    }
+    newChild.parentNode = this;
+    if (!refChild) {
+      this.children.push(newChild);
+      return;
+    }
+    const idx = this.children.indexOf(refChild);
+    if (idx === -1) {
+      this.children.push(newChild);
+    } else {
+      this.children.splice(idx, 0, newChild);
+    }
+  }
+  removeChild(child) {
+    const idx = this.children.indexOf(child);
+    if (idx !== -1) {
+      this.children.splice(idx, 1);
+      child.parentNode = null;
+    }
+  }
+  querySelector(sel) {
+    for (const child of this.children) {
+      if (sel.startsWith('[data-filter="') && sel.endsWith('"]')) {
+        const val = sel.slice(14, -2);
+        if (child.getAttribute('data-filter') === val) return child;
+      }
+      if (sel.startsWith('#') && child.id === sel.slice(1)) return child;
+    }
+    return null;
+  }
+  querySelectorAll(sel) {
+    return this.children.filter(c => {
+      if (sel.includes('.pill') && c.classList.has('pill')) return true;
+      if (sel.includes('.pill-action') && c.classList.has('pill-action')) return true;
+      return false;
+    });
+  }
+  cloneNode(deep) {
+    const clone = new MockElement(this.tagName, { ...this.attributes, textContent: this.textContent });
+    return clone;
+  }
+}
+
+// Build mock pills
+const mockPillElements = {};
+const mockContainer = new MockElement('div', { id: 'filterPillsContainer' });
+DEFAULT_PILLS_SEQUENCE.forEach(key => {
+  const isAction = key === 'pillSmartLeaderboard';
+  const pill = new MockElement('button', {
+    id: isAction ? key : `pill_${key}`,
+    textContent: key
+  });
+  if (!isAction) pill.setAttribute('data-filter', key);
+  pill.classList.add(isAction ? 'pill-action' : 'pill');
+  mockContainer.appendChild(pill);
+  mockPillElements[key] = pill;
+});
+
+const mockResetBtn = new MockElement('button', { id: 'resetPillOrderBtn' });
+mockResetBtn.style.display = 'none';
+
+const mockReorderList = new MockElement('div', { id: 'reorderPillsList' });
+const mockReorderModal = new MockElement('dialog', { id: 'reorderPillsModal' });
+mockReorderModal.showModal = () => { mockReorderModal.open = true; };
+mockReorderModal.close = () => { mockReorderModal.open = false; };
+
+global.document.getElementById = (id) => {
+  if (id === 'filterPillsContainer') return mockContainer;
+  if (id === 'resetPillOrderBtn') return mockResetBtn;
+  if (id === 'reorderPillsList') return mockReorderList;
+  if (id === 'reorderPillsModal') return mockReorderModal;
+  if (mockPillElements[id]) return mockPillElements[id];
+  return null;
+};
+global.document.createElement = (tag) => new MockElement(tag);
+
+// 3. Test getPillKey
+assert.strictEqual(getPillKey(mockPillElements['ALL']), 'ALL', 'getPillKey should return data-filter value');
+assert.strictEqual(getPillKey(mockPillElements['pillSmartLeaderboard']), 'pillSmartLeaderboard', 'getPillKey should return ID when data-filter absent');
+console.log('✔ getPillKey: PASS');
+
+// 4. Test getCurrentPillSequence
+const seqInitial = getCurrentPillSequence();
+assert.deepStrictEqual(seqInitial, DEFAULT_PILLS_SEQUENCE, 'Current sequence should match default sequence initially');
+console.log('✔ getCurrentPillSequence: PASS');
+
+// 5. Test movePill (move down and move up)
+movePill('ALL', 1); // Swap ALL and LAUNCHPAD -> [LAUNCHPAD, ALL, ...]
+const seqAfterSwap = getCurrentPillSequence();
+assert.strictEqual(seqAfterSwap[0], 'LAUNCHPAD', 'LAUNCHPAD should now be first');
+assert.strictEqual(seqAfterSwap[1], 'ALL', 'ALL should now be second');
+assert.strictEqual(mockResetBtn.style.display, 'inline-flex', 'Reset button should appear when sequence is customized');
+
+const savedInStorage = JSON.parse(global.localStorage.getItem(PILL_SEQUENCE_STORAGE_KEY));
+assert.deepStrictEqual(savedInStorage, seqAfterSwap, 'Storage must match new sequence');
+console.log('✔ movePill & Persistence: PASS');
+
+// 6. Test movePillToTop
+movePillToTop('pillSmartLeaderboard'); // Move leaderboard to top -> [pillSmartLeaderboard, LAUNCHPAD, ALL, ...]
+const seqAfterTop = getCurrentPillSequence();
+assert.strictEqual(seqAfterTop[0], 'pillSmartLeaderboard', 'pillSmartLeaderboard should be at top index 0');
+console.log('✔ movePillToTop: PASS');
+
+// 7. Test renderReorderModalList
+openReorderModal();
+assert(mockReorderModal.open, 'Reorder modal should be opened');
+assert.strictEqual(mockReorderList.children.length, 12, 'Reorder list must render 12 items');
+assert(mockReorderList.children[0].textContent.includes('#1'), 'First item must show #1');
+console.log('✔ openReorderModal & renderReorderModalList: PASS');
+
+// 8. Test resetPillSequence
+resetPillSequence();
+const seqAfterReset = getCurrentPillSequence();
+assert.deepStrictEqual(seqAfterReset, DEFAULT_PILLS_SEQUENCE, 'Reset sequence must restore DEFAULT_PILLS_SEQUENCE');
+assert.strictEqual(global.localStorage.getItem(PILL_SEQUENCE_STORAGE_KEY), null, 'Storage key must be cleared on reset');
+assert.strictEqual(mockResetBtn.style.display, 'none', 'Reset button should be hidden on default sequence');
+console.log('✔ resetPillSequence: PASS');
+
+// 9. Test setupFilterPillsDragAndDrop
+setupFilterPillsDragAndDrop();
+const firstPill = mockContainer.children[0];
+assert(firstPill.eventListeners['dragstart'] !== undefined, 'Pill should have dragstart listener');
+assert(firstPill.eventListeners['dragover'] !== undefined, 'Pill should have dragover listener');
+assert(firstPill.eventListeners['drop'] !== undefined, 'Pill should have drop listener');
+console.log('✔ setupFilterPillsDragAndDrop: PASS');
+
+console.log('🎉 All Web3, Multicall3, Smart Hunters, and Competitor Features verified successfully!');

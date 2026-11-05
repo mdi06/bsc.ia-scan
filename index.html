@@ -101,11 +101,17 @@
             <button class="tab-btn active" id="tabRadar" data-tab="RADAR" role="tab" aria-selected="true">
               <span class="desktop-only">1: 📡 Live Radar</span><span class="mobile-only">📡 Radar</span> (<span id="radarCount">0</span>)
             </button>
+            <button class="tab-btn" id="tabLaunchpad" data-tab="LAUNCHPAD" role="tab" aria-selected="false">
+              <span class="desktop-only">2: 🚀 Launchpads</span><span class="mobile-only">🚀 Launch</span> (<span id="launchpadTabCount">0</span>)
+            </button>
             <button class="tab-btn" id="tabSmart" data-tab="SMART" role="tab" aria-selected="false">
-              <span class="desktop-only">2: 🧠 Smart Alpha</span><span class="mobile-only">🧠 Alpha</span> (<span id="smartCount">0</span>)
+              <span class="desktop-only">3: 🧠 Smart Alpha</span><span class="mobile-only">🧠 Alpha</span> (<span id="smartCount">0</span>)
+            </button>
+            <button class="tab-btn" id="tabWallets" data-tab="WALLETS" role="tab" aria-selected="false">
+              <span class="desktop-only">4: 🏆 Wallet Leaderboard</span><span class="mobile-only">🏆 Wallets</span> (<span id="walletsTabCount">0</span>)
             </button>
             <button class="tab-btn" id="tabPortfolio" data-tab="PORTFOLIO" role="tab" aria-selected="false">
-              <span class="desktop-only">3: 🎒 My Portfolio</span><span class="mobile-only">🎒 Portfolio</span> (<span id="portfolioCount">0</span>)
+              <span class="desktop-only">5: 🎒 My Portfolio</span><span class="mobile-only">🎒 Portfolio</span> (<span id="portfolioCount">0</span>)
             </button>
           </div>
 
@@ -164,16 +170,23 @@
 
         <!-- Row 2: Filter Toolbar -->
         <div class="filter-toolbar-row">
-          <div class="filter-pills" role="toolbar" aria-label="Filter Drops">
-            <button class="pill active" data-filter="ALL">ALL</button>
-            <button class="pill" data-filter="SNIPER_READY" id="pillSniperReady" style="color: #4ade80; border-color: rgba(74, 222, 128, 0.4); font-weight: 700;">🎯 SNIPE READY (<span id="sniperReadyCount">0</span>)</button>
-            <button class="pill" data-filter="NFT_SURGE" id="pillNftSurge" style="color: #d946ef; border-color: rgba(217, 70, 239, 0.4); font-weight: 700;">🦋 NFT SURGE (<span id="nftSurgeCount">0</span>)</button>
-            <button class="pill" data-filter="PROXY" id="pillProxy" style="color: #38bdf8; border-color: rgba(56, 189, 248, 0.4); font-weight: 700;">🧩 PROXY (<span id="proxyCount">0</span>)</button>
-            <button class="pill" data-filter="FAVORITES" id="pillFavorites">⭐ FAVORITES (<span id="favCount">0</span>)</button>
-            <button class="pill" data-filter="FREE">★ FREE MINTS</button>
-            <button class="pill" data-filter="SMART">🧠 SMART ALPHA</button>
-            <button class="pill" data-filter="LP">💧 DEX LP</button>
-            <button class="pill" data-filter="ACTIVE">⚡ ACTIVE MINTS</button>
+          <div class="filter-pills" id="filterPillsContainer" role="toolbar" aria-label="Filter Drops">
+            <button class="pill active" draggable="true" data-filter="ALL" id="pillAll">ALL</button>
+            <button class="pill" draggable="true" data-filter="LAUNCHPAD" id="pillLaunchpad" style="color: #f97316; border-color: rgba(249, 115, 22, 0.4); font-weight: 700;">🚀 LAUNCHPAD (<span id="launchpadCount">0</span>)</button>
+            <button class="pill" draggable="true" data-filter="SNIPER_READY" id="pillSniperReady" style="color: #4ade80; border-color: rgba(74, 222, 128, 0.4); font-weight: 700;">🎯 SNIPE READY (<span id="sniperReadyCount">0</span>)</button>
+            <button class="pill" draggable="true" data-filter="NFT_SURGE" id="pillNftSurge" style="color: #d946ef; border-color: rgba(217, 70, 239, 0.4); font-weight: 700;">🦋 NFT SURGE (<span id="nftSurgeCount">0</span>)</button>
+            <button class="pill" draggable="true" data-filter="PROXY" id="pillProxy" style="color: #38bdf8; border-color: rgba(56, 189, 248, 0.4); font-weight: 700;">🧩 PROXY (<span id="proxyCount">0</span>)</button>
+            <button class="pill" draggable="true" data-filter="FAVORITES" id="pillFavorites">⭐ FAVORITES (<span id="favCount">0</span>)</button>
+            <button class="pill pill-followed" draggable="true" data-filter="FOLLOWED" id="pillFollowed" title="Show drops minted by your followed smart alpha wallets">⭐ FOLLOWED (<span id="followedFilterCount">0</span>)</button>
+            <button class="pill" draggable="true" data-filter="FREE" id="pillFree">★ FREE MINTS</button>
+            <button class="pill" draggable="true" data-filter="SMART" id="pillSmart">🧠 SMART ALPHA</button>
+            <button class="pill-action pill-smart-leaderboard" draggable="true" id="pillSmartLeaderboard" type="button" title="View 2,100+ Smart Wallet Win-Rates & Track Record">🏆 SMART LEADERBOARD</button>
+            <button class="pill" draggable="true" data-filter="LP" id="pillLp">💧 DEX LP</button>
+            <button class="pill" draggable="true" data-filter="ACTIVE" id="pillActive">⚡ ACTIVE MINTS</button>
+          </div>
+          <div class="filter-actions-group">
+            <button id="resetPillOrderBtn" class="pill-order-control-btn" onclick="resetPillSequence()" title="Restore default tab order" style="display: none;">↺ Reset Sequence</button>
+            <button id="reorderPillsBtn" class="pill-order-control-btn" onclick="openReorderModal()" title="Customize and reorder tab sequence">⚙️ Reorder</button>
           </div>
         </div>
       </div>
@@ -277,6 +290,57 @@
           </button>
         </div>
       </div>
+
+      <!-- Dedicated Wallet Leaderboard Viewport (Tab 4) -->
+      <div id="walletsLeaderboardContainer" class="wallets-tab-container" style="display: none;">
+        <div class="wallets-tab-header">
+          <div class="wallets-tab-title-group">
+            <h2 class="wallets-tab-title">🏆 BINANCE .AI AGENT ID WALLET LEADERBOARD</h2>
+            <p class="wallets-tab-desc">
+              On-chain PnL, win rates, and mint graduation track records for 2,100+ Space ID Agent ID holders on BNB Smart Chain.
+            </p>
+          </div>
+          <div class="wallets-tab-summary-pill" id="walletsTabSummaryPill">
+            Tracking 2,116 Hunters
+          </div>
+        </div>
+
+        <div class="wallets-tab-toolbar">
+          <div class="wallets-tab-filters">
+            <button class="filter-pill active" id="tabWalletFilterAll" onclick="setWalletsTabFilter('ALL')">🌟 Top PnL / All</button>
+            <button class="filter-pill" id="tabWalletFilterHighWin" onclick="setWalletsTabFilter('HIGH_WIN')">🔥 High Win-Rate (≥50%)</button>
+            <button class="filter-pill" id="tabWalletFilterFollowed" onclick="setWalletsTabFilter('FOLLOWED')">⭐ Followed Only (<span id="walletsTabFollowedCount">0</span>)</button>
+          </div>
+          <div class="wallets-tab-search">
+            <span class="search-icon">🔍</span>
+            <input type="text" id="tabWalletsSearchInput" placeholder="Search Agent ID (e.g. adadcarry.ai, 0x...)" oninput="onWalletsTabSearch(this.value)" />
+          </div>
+        </div>
+
+        <div class="wallets-table-wrapper">
+          <table class="wallets-table" id="walletsTable">
+            <thead>
+              <tr>
+                <th style="width: 45px; text-align: center;">#</th>
+                <th>AGENT ID / WALLET</th>
+                <th style="text-align: center;">WIN RATE</th>
+                <th style="text-align: center;">WINS / MINTS</th>
+                <th>TOP WINNING PICKS</th>
+                <th style="text-align: center; width: 170px;">ACTIONS</th>
+              </tr>
+            </thead>
+            <tbody id="tabWalletsTbody">
+              <!-- Dynamically rendered by app.js -->
+            </tbody>
+          </table>
+        </div>
+
+        <div id="tabWalletsLoadMoreWrap" class="load-more-wrap" style="text-align: center; padding: 20px 0; display: none;">
+          <button id="tabWalletsLoadMoreBtn" class="load-more-btn" onclick="loadMoreTabWallets()">
+            <span>⬇️ Load More Alpha Hunters</span>
+          </button>
+        </div>
+      </div>
     </main>
 
     <!-- Pinned Footer Status Bar -->
@@ -329,6 +393,13 @@
     </div>
   </dialog>
 
+  <!-- Smart Wallet Hunter Leaderboard Modal (<dialog>) -->
+  <dialog id="smartLeaderboardModal" class="project-modal smart-modal">
+    <div class="modal-content" id="smartLeaderboardModalContent">
+      <!-- Injected by app.js -->
+    </div>
+  </dialog>
+
   <!-- Web3 Wallet Connection & Account Modal (<dialog>) -->
   <dialog id="walletModal" class="project-modal wallet-modal">
     <div class="modal-content" id="walletModalContent">
@@ -340,6 +411,26 @@
   <dialog id="syncModal" class="project-modal sync-modal">
     <div class="modal-content" id="syncModalContent">
       <!-- Injected by app.js -->
+    </div>
+  </dialog>
+
+  <!-- Reorder Filter Tabs Modal (<dialog>) -->
+  <dialog id="reorderPillsModal" class="project-modal reorder-modal">
+    <div class="modal-content" id="reorderPillsModalContent">
+      <div class="modal-header">
+        <div class="modal-title">⚙️ CUSTOMIZE TAB SEQUENCE</div>
+        <button class="modal-close-btn" onclick="document.getElementById('reorderPillsModal').close()">✕ Close [ESC]</button>
+      </div>
+      <p style="font-size: 12px; color: var(--text-dim); margin: 0 0 12px 0;">
+        Arrange your workspace tabs in any sequence. Drag and drop directly in the toolbar, or use the buttons below to reorder. Changes are saved automatically.
+      </p>
+      <div class="reorder-list" id="reorderPillsList">
+        <!-- Rendered dynamically by app.js -->
+      </div>
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 16px; border-top: 1px solid var(--border-dim); padding-top: 12px;">
+        <button class="btn-reset-order" onclick="resetPillSequence()">↺ Restore Default Order</button>
+        <button class="btn-save-order" onclick="document.getElementById('reorderPillsModal').close()">✓ Done</button>
+      </div>
     </div>
   </dialog>
 
