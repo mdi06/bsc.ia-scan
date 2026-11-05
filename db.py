@@ -532,6 +532,50 @@ class DatabaseManager:
     def upsert_project(self, project: Dict[str, Any]):
         self.upsert_projects([project])
 
+    def delete_projects(self, contracts: List[str]) -> int:
+        """Deletes projects by contract from Supabase and SQLite, invalidating cache."""
+        clean = [c.lower().strip() for c in contracts if c and isinstance(c, str)]
+        if not clean:
+            return 0
+        
+        deleted_count = 0
+        # 1. Supabase Cloud Delete
+        if self.mode == "supabase":
+            try:
+                client = self.client
+                if HAS_HTTPX and client:
+                    batch_size = 50
+                    for i in range(0, len(clean), batch_size):
+                        chunk = clean[i : i + batch_size]
+                        in_clause = ",".join(f'"{c}"' for c in chunk)
+                        resp = client.delete(f"/rest/v1/projects?contract=in.({in_clause})")
+                        if resp.status_code in (200, 204):
+                            deleted_count += len(chunk)
+            except Exception as e:
+                print(f"[⚠️ Supabase Delete Error] {e}", flush=True)
+
+        # 2. SQLite Delete
+        try:
+            conn = self._get_sqlite_connection()
+            with self._lock:
+                cur = conn.cursor()
+                placeholders = ",".join("?" for _ in clean)
+                cur.execute(f"DELETE FROM projects WHERE contract IN ({placeholders})", clean)
+                conn.commit()
+                deleted_count = max(deleted_count, cur.rowcount)
+            conn.close()
+        except Exception as e:
+            print(f"[⚠️ SQLite Delete Error] {e}", flush=True)
+
+        # 3. In-memory cache purge
+        with self._cache_lock:
+            for c in clean:
+                self._projects_cache.pop(c, None)
+            self._cached_json_bytes = None
+            self._last_cache_time = 0.0
+
+        return deleted_count
+
     # -------------------------------------------------------------------------
     # User Favorites Operations
     # -------------------------------------------------------------------------

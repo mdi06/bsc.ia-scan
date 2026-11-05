@@ -209,50 +209,37 @@
     // Dynamic keyframe generator based on real DOM geometry
     function getDynamicTrajectories() {
       // 1. Precise positions of elements inside iframe
-      const [r2X, r2Y] = getIframeElementCoords('#tableBody tr:nth-child(2) td:nth-child(3)', [560, 520]);
+      const [r1X, r1Y] = getIframeElementCoords('#tableBody tr:first-child td:nth-child(5)', [560, 480]);
       const [favX, favY] = getIframeElementCoords('.modal-fav-btn', [1120, 240]);
       const [closeX, closeY] = getIframeElementCoords('#inspectModal .modal-close-btn', [1240, 240]);
-      const [smartX, smartY] = getIframeElementCoords('#tabSmart', [520, 218]);
-      const [bannerX, bannerY] = getIframeElementCoords('#topProfitBanner', [720, 340]);
 
-      // Dynamic Camera trajectory: perfectly centered and balanced framing
+      // Dynamic Camera trajectory: perfectly centered and balanced framing for 10s video
       const cameraKeyframes = [
-        [0.0,  1.0,   960, 540],     // Wide establishing shot
-        [1.6,  1.0,   960, 540],     // Start smooth zoom
-        [2.7,  1.26,  900, r2Y],     // Frame Row 2 elegantly (centered horizontally)
-        [3.4,  1.26,  900, r2Y],     // Hold on Row 2 click
-        [4.2,  1.24,  960, 540],     // Smooth transition to centered modal
-        [6.8,  1.24,  960, 540],     // Inspecting modal
-        [7.5,  1.24,  960, 540],     // Close modal click
-        [8.3,  1.32,  760, smartY + 80], // Smoothly focus on Tab bar & top table
-        [10.4, 1.32,  760, smartY + 80], // Hold on Smart Alpha view
-        [11.2, 1.22,  bannerX, bannerY + 20], // Pan across profit banner
-        [12.4, 1.0,   960, 540],     // Smooth pull out to full window
-        [14.0, 1.0,   960, 540]      // Rest
+        [0.0,  1.0,   960, 540],     // Wide establishing shot of radar
+        [1.0,  1.0,   960, 540],     // Start glide towards asset
+        [1.8,  1.18,  880, r1Y + 30], // Smooth zoom approaching Row 1 asset
+        [2.0,  1.18,  880, r1Y + 30], // Tap / Click on asset row
+        [2.8,  1.42,  960, 460],     // Smooth cinematic zoom into Inspect Modal
+        [4.8,  1.45,  960, 450],     // Focus on Contract, Dev Funding Root & Dev Syndicate
+        [6.8,  1.45,  960, 570],     // Pan down across Holder Distribution & Security Audit
+        [8.4,  1.40,  960, 640],     // Focus on 1-Click Mint / Sniper CLI
+        [10.0, 1.25,  960, 540]      // Elegant hero pull-back framing full modal
       ];
 
-      // Dynamic Cursor trajectory (snaps exactly to buttons with visible tactile clicks)
+      // Dynamic Cursor trajectory (smooth glide, tap click with ripple, then inspects info)
       const cursorKeyframes = [
-        [0.0,  1400, 750, false],
-        [1.5,  1050, 640, false],
-        [2.6,  r2X + 60, r2Y, false],   // Arrive directly on Row 2 project name
-        [3.0,  r2X + 60, r2Y, true],    // Click Row 2
-        [3.3,  r2X + 60, r2Y, false],   // Release
-        [4.2,  860,  460, false],        // Glide over Security analysis in modal
-        [5.2,  860,  660, false],        // Glide over Smart Money stats
-        [6.1,  favX, favY, false],       // Hover directly over "★ Favorite"
-        [6.4,  favX, favY, true],        // Click Favorite (modal switches to "+ Favorited")
-        [6.7,  favX, favY, false],
-        [7.1,  closeX, closeY, false],   // Hover directly over "✕ [ESC]" Close button
-        [7.3,  closeX, closeY, true],    // Click Close
-        [7.5,  closeX, closeY, false],   // Release click
-        [8.3,  smartX, smartY, false],   // Hover directly over "2: Smart Alpha"
-        [8.6,  smartX, smartY, true],    // Click Smart Alpha Tab
-        [8.9,  smartX, smartY, false],
-        [10.0, bannerX, bannerY, false], // Glide over Top Profit banner
-        [11.4, 820, 520, false],         // Glide across alpha table
-        [12.8, 960, 620, false],         // Centered rest
-        [14.0, 960, 620, false]
+        [0.0,  1350, 720, false],
+        [1.0,  1080, 580, false],
+        [1.8,  r1X + 40, r1Y, false],   // Arrive directly on Row 1 asset
+        [2.0,  r1X + 40, r1Y, true],    // TAP / CLICK asset! (tactile click ripple)
+        [2.3,  r1X + 40, r1Y, false],   // Release
+        [3.5,  800,  400, false],        // Glide over Token Name & Contract address
+        [4.8,  840,  450, false],        // Glide over Dev Funding Root & Dev Syndicate Cluster
+        [6.2,  840,  550, false],        // Glide across Holder Distribution spectrum bar
+        [7.4,  900,  620, false],        // Glide over Security & Anti-Rug Audit
+        [8.6,  960,  690, false],        // Hover over 1-Click Web3 Direct Mint button
+        [9.5,  1100, 740, false],       // Smooth rest
+        [10.0, 1100, 740, false]
       ];
 
       return { cameraKeyframes, cursorKeyframes };
@@ -282,10 +269,7 @@
     }
 
     // App event triggers
-    let row2Triggered = false;
-    let favTriggered = false;
-    let closeTriggered = false;
-    let smartTabTriggered = false;
+    let rowTriggered = false;
     let cachedTrajectories = null;
 
     window.setVideoTime = function(t) {
@@ -319,46 +303,30 @@
         const doc = iframe.contentWindow && iframe.contentWindow.document;
         if (!doc) return;
 
-        // At t = 3.0s: Click row 2 to open modal
-        if (t >= 3.0 && t < 7.4 && !row2Triggered) {
-          row2Triggered = true;
-          closeTriggered = false;
+        // At t = 2.0s: Click row 1 to open modal
+        if (t >= 2.0 && !rowTriggered) {
+          rowTriggered = true;
           const rows = doc.querySelectorAll('#tableBody tr');
-          if (rows[1]) rows[1].click();
+          if (rows[0]) rows[0].click();
         }
 
-        // At t = 6.4s: Click Favorite
-        if (t >= 6.4 && !favTriggered) {
-          favTriggered = true;
-          const favBtn = doc.querySelector('.modal-fav-btn');
-          if (favBtn) favBtn.click();
-        }
-
-        // At t = 7.4s: Close modal
-        if (t >= 7.4 && !closeTriggered) {
-          closeTriggered = true;
-          row2Triggered = false;
-          const modal = doc.getElementById('inspectModal');
-          if (modal && modal.open) modal.close();
-        }
-
-        // At t = 8.6s: Click Smart Alpha Tab
-        if (t >= 8.6 && !smartTabTriggered) {
-          smartTabTriggered = true;
-          const tabSmart = doc.getElementById('tabSmart');
-          if (tabSmart) tabSmart.click();
+        // Smoothly scroll modal down to showcase Holder Distribution, Security, and 1-Click Mint
+        if (t >= 5.5 && t <= 8.5) {
+          const p = (t - 5.5) / 3.0;
+          const modalContent = doc.getElementById('modalContent');
+          if (modalContent) modalContent.scrollTop = lerp(0, 260, smoothstep(0, 1, p));
+        } else if (t > 8.5) {
+          const modalContent = doc.getElementById('modalContent');
+          if (modalContent) modalContent.scrollTop = 260;
         }
 
         // Reset if rewound
-        if (t < 2.5) {
-          row2Triggered = false;
-          favTriggered = false;
-          closeTriggered = false;
-          smartTabTriggered = false;
-          const tabRadar = doc.getElementById('tabRadar');
-          if (tabRadar && !tabRadar.classList.contains('active')) tabRadar.click();
+        if (t < 1.5) {
+          rowTriggered = false;
           const modal = doc.getElementById('inspectModal');
           if (modal && modal.open) modal.close();
+          const modalContent = doc.getElementById('modalContent');
+          if (modalContent) modalContent.scrollTop = 0;
         }
       } catch (e) {
         // loading

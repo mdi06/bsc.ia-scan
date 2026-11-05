@@ -4,8 +4,8 @@ const { spawn } = require('child_process');
 const puppeteer = require('/private/tmp/video-build/node_modules/puppeteer-core');
 
 const FPS = 30;
-const DURATION = 14.0;
-const TOTAL_FRAMES = Math.round(FPS * DURATION); // 420 frames
+const DURATION = 10.0;
+const TOTAL_FRAMES = Math.round(FPS * DURATION); // 300 frames (10 seconds)
 const WIDTH = 1920;
 const HEIGHT = 1080;
 
@@ -96,10 +96,12 @@ async function main() {
 
   await browser.close();
 
-  // Also create 100% silent version
+  // Also create 100% silent version and localized copy
   console.log('Creating silent MP4 version...');
   const { execSync } = require('child_process');
   execSync(`ffmpeg -y -i "${OUT_VIDEO_SFX}" -an -c:v copy "${OUT_VIDEO_SILENT}"`);
+  execSync(`cp "${OUT_VIDEO_SFX}" "${path.resolve(__dirname, 'bnb_agent_id_screen_studio_10s.mp4')}"`);
+  execSync(`cp "${OUT_VIDEO_SILENT}" "${path.resolve(__dirname, 'bnb_agent_id_screen_studio_10s_silent.mp4')}"`);
 
   // Create preview thumbnails
   execSync(`ffmpeg -y -ss 00:00:01.200 -i "${OUT_VIDEO_SFX}" -vframes 1 "${path.resolve(__dirname, 'thumbnail_screen_studio_wide.jpg')}"`);

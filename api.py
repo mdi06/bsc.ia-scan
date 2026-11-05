@@ -56,11 +56,38 @@ def run_api_memory_guard():
             pass
 
 
+BOGUS_SCAM_CONTRACTS = [
+    "0xd0523ce816e2b404db5633d181572cded33d7fa9",  # PrinterAi ($100T fake price on $0.0002 LP)
+    "0xc5a5f6337bd9d1ee1a7367a804fce07094956922",  # The Bank ($99.7K fake price on $0.00 LP)
+    "0x2170ed0880ac9a755fd29b2688956bd959f933f8",  # Binance-Peg ETH (Layer 1 crypto)
+    "0x7425889fe94f9d693e8daefe88bcced6acfef4c0",  # Meta Platforms (METAB)
+    "0xbe9d156892e55e7154bcd3cb0fea677f9d3103e1",  # SpaceX (SPCXB)
+    "0x80106cb3ead06659a5ad19df39d9b4733863b9b0",  # Microsoft (MSFTB)
+    "0x5b1910eaad6450e50f816082aa078c41f10c292f",  # Tesla, Inc. (TSLAB)
+    "0x431a6136ee1b2f76378c8a14b53ef11ba9099b7a",  # Apple (AAPLB)
+]
+BOGUS_SET = set(c.lower() for c in BOGUS_SCAM_CONTRACTS)
+
+
 @app.on_event("startup")
 def startup_event():
     import threading
     t = threading.Thread(target=run_api_memory_guard, daemon=True, name="ApiMemoryGuard")
     t.start()
+    try:
+        purged = db.delete_projects(BOGUS_SCAM_CONTRACTS)
+        if purged:
+            print(f"[FastAPI Startup] Automatically purged {purged} bogus scam/stock contracts from database", flush=True)
+    except Exception as e:
+        print(f"[FastAPI Startup Purge Error] {e}", flush=True)
+
+
+@app.post("/api/admin/purge-bogus")
+@app.delete("/api/projects/{contract}")
+def purge_bogus_endpoint(contract: Optional[str] = None):
+    targets = [contract.lower()] if contract else BOGUS_SCAM_CONTRACTS
+    cnt = db.delete_projects(targets)
+    return {"success": True, "purged": cnt, "targets": targets}
 
 
 @app.get("/healthz")
@@ -102,7 +129,8 @@ def get_feed(
     Lightweight, high-speed feed endpoint for initial UI render (< 50ms) and delta updates.
     Returns the newest drops, total counts, and filter stats in a tiny payload (< 100 KB).
     """
-    all_projs = db.get_all_projects()
+    raw_projs = db.get_all_projects()
+    all_projs = [p for p in raw_projs if (p.get("contract") or "").lower() not in BOGUS_SET]
     total = len(all_projs)
     latest_block = all_projs[0].get("block") if all_projs else None
 
@@ -230,7 +258,7 @@ def get_projects(
     order: str = Query("desc")
 ):
     """Modernized REST endpoint with query filtering, pagination, and sorting."""
-    return db.get_projects(
+    res = db.get_projects(
         limit=limit,
         offset=offset,
         search=search,
@@ -240,6 +268,9 @@ def get_projects(
         sort_by=sort_by,
         order=order
     )
+    if isinstance(res, dict) and "projects" in res:
+        res["projects"] = [p for p in res["projects"] if (p.get("contract") or "").lower() not in BOGUS_SET]
+    return res
 
 
 @app.get("/api/favorites")
