@@ -482,13 +482,351 @@ function computeItemProfit(item, bnbPriceUsd = bnbPrice) {
   };
 }
 
+// Persistent Memory for Top Post-Mint Gainers & Hall of Fame Markets
+// Eliminates full 2k+ project scans; incrementally updates and saves top winners from incoming 150-drop batches.
+const SAVED_TOP_MARKETS_KEY = 'agent_id_saved_top_markets';
+let savedTopGainers = [];
+
+function getBaselineTopGainers() {
+  return [
+    {
+      name: "FishingAi Rod",
+      symbol: "ROD",
+      contract: "0xbdb206b823e2782dd75fff0ef89795146c29ed76",
+      standard: "ERC-721 (NFT Collection)",
+      secUsd: 6.75,
+      mintUsd: 0.0,
+      profit: 6.75,
+      athPrice: 6.75,
+      athProfit: 6.75,
+      multiplier: 0,
+      isSold: false,
+      isFree: true,
+      holders: 1524,
+      item: {
+        name: "FishingAi Rod",
+        symbol: "ROD",
+        contract: "0xbdb206b823e2782dd75fff0ef89795146c29ed76",
+        standard: "ERC-721 (NFT Collection)",
+        market_url: "https://element.market/collections/fishingai-rod",
+        token_price_usd: 6.75,
+        ath_price_usd: 6.75,
+        holders: 1524
+      }
+    },
+    {
+      name: "MLEE DAO",
+      symbol: "MDAO",
+      contract: "0xc4bf2518aa953304170753388f83277eb9588a7a",
+      standard: "BEP-20 Token (18 decimals)",
+      secUsd: 0.1070,
+      mintUsd: 0.0,
+      profit: 0.1070,
+      athPrice: 0.1070,
+      athProfit: 0.1070,
+      multiplier: 0,
+      isSold: false,
+      isFree: true,
+      holders: 8400,
+      item: {
+        name: "MLEE DAO",
+        symbol: "MDAO",
+        contract: "0xc4bf2518aa953304170753388f83277eb9588a7a",
+        standard: "BEP-20 Token (18 decimals)",
+        pair_url: "https://pancakeswap.finance/swap?outputCurrency=0xc4bf2518aa953304170753388f83277eb9588a7a",
+        token_price_usd: 0.1070,
+        ath_price_usd: 0.1070,
+        holders: 8400
+      }
+    },
+    {
+      name: "AGENT人生8",
+      symbol: "AGENT人生8",
+      contract: "0xca45f13730154fbbf2d93acf169de83f52864f80",
+      standard: "BEP-20 Token (18 decimals)",
+      secUsd: 0.04794,
+      mintUsd: 0.0,
+      profit: 0.04794,
+      athPrice: 0.04794,
+      athProfit: 0.04794,
+      multiplier: 0,
+      isSold: true,
+      isFree: true,
+      holders: 888,
+      item: {
+        name: "AGENT人生8",
+        symbol: "AGENT人生8",
+        contract: "0xca45f13730154fbbf2d93acf169de83f52864f80",
+        standard: "BEP-20 Token (18 decimals)",
+        pair_url: "https://pancakeswap.finance/swap?outputCurrency=0xca45f13730154fbbf2d93acf169de83f52864f80",
+        token_price_usd: 0.04794,
+        ath_price_usd: 0.04794,
+        max_supply: 88888888,
+        total_minted: 88888888,
+        holders: 888,
+        is_sold: true
+      }
+    },
+    {
+      name: "The Donkey",
+      symbol: "驴来",
+      contract: "0xa856c666595f556f647f94d741aae389baf97777",
+      standard: "BEP-20 Token (18 decimals)",
+      secUsd: 0.00004160,
+      mintUsd: 0.0,
+      profit: 0.00004160,
+      athPrice: 0.00004160,
+      athProfit: 0.00004160,
+      multiplier: 0,
+      isSold: true,
+      isFree: true,
+      holders: 550,
+      item: {
+        name: "The Donkey",
+        symbol: "驴来",
+        contract: "0xa856c666595f556f647f94d741aae389baf97777",
+        standard: "BEP-20 Token (18 decimals)",
+        pair_url: "https://pancakeswap.finance/swap?outputCurrency=0xa856c666595f556f647f94d741aae389baf97777",
+        token_price_usd: 0.00004160,
+        ath_price_usd: 0.00004160,
+        max_supply: 210000000000,
+        total_minted: 210000000000,
+        holders: 550,
+        is_sold: true
+      }
+    },
+    {
+      name: "4Broker Bibi",
+      symbol: "BIBI",
+      contract: "0xd6e8fd077adbd6d7a7cc24bf981c5a969bbd124e",
+      standard: "BEP-20 Token (18 decimals)",
+      secUsd: 0.00000379,
+      mintUsd: 0.0,
+      profit: 0.00000379,
+      athPrice: 0.00000379,
+      athProfit: 0.00000379,
+      multiplier: 0,
+      isSold: false,
+      isFree: true,
+      holders: 1100,
+      item: {
+        name: "4Broker Bibi",
+        symbol: "BIBI",
+        contract: "0xd6e8fd077adbd6d7a7cc24bf981c5a969bbd124e",
+        standard: "BEP-20 Token (18 decimals)",
+        pair_url: "https://pancakeswap.finance/swap?outputCurrency=0xd6e8fd077adbd6d7a7cc24bf981c5a969bbd124e",
+        token_price_usd: 0.00000379,
+        ath_price_usd: 0.00000379,
+        holders: 1100
+      }
+    },
+    {
+      name: "币安ID",
+      symbol: "币安ID",
+      contract: "0x90f6b49ebdaee09b67ffc71e2c9efca1b2be4822",
+      standard: "BEP-20 Token (18 decimals)",
+      secUsd: 0.00000353,
+      mintUsd: 0.0,
+      profit: 0.00000353,
+      athPrice: 0.000005042,
+      athProfit: 0.000005042,
+      multiplier: 0,
+      isSold: true,
+      isFree: true,
+      holders: 4820,
+      item: {
+        name: "币安ID",
+        symbol: "币安ID",
+        contract: "0x90f6b49ebdaee09b67ffc71e2c9efca1b2be4822",
+        standard: "BEP-20 Token (18 decimals)",
+        pair_url: "https://pancakeswap.finance/swap?outputCurrency=0x90f6b49ebdaee09b67ffc71e2c9efca1b2be4822",
+        token_price_usd: 0.00000353,
+        ath_price_usd: 0.000005042,
+        max_supply: 10000000000,
+        total_minted: 10000000000,
+        holders: 4820,
+        is_sold: true
+      }
+    }
+  ];
+}
+
+function isValidTopMarketItem(item) {
+  const sym = String(item.symbol || '').toUpperCase();
+  if (['BTCB', 'WBNB', 'USDT', 'USDC', 'BUSD', 'U', 'OSK', 'FIST'].includes(sym)) return false;
+  const pStr = String(item.mint_price_str || (item.item && item.item.mint_price_str) || '').toUpperCase();
+  if (pStr.includes('DEX TRADED')) return false;
+  return true;
+}
+
+function loadSavedTopGainers() {
+  try {
+    if (typeof localStorage !== 'undefined') {
+      const stored = localStorage.getItem(SAVED_TOP_MARKETS_KEY);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          savedTopGainers = parsed.filter(isValidTopMarketItem);
+          if (savedTopGainers.length > 0) return;
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('Error reading saved top gainers from localStorage:', e);
+  }
+
+  // Fallback to baseline historical winners if storage is fresh/empty
+  savedTopGainers = getBaselineTopGainers();
+  saveSavedTopGainers();
+}
+
+function saveSavedTopGainers() {
+  try {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(SAVED_TOP_MARKETS_KEY, JSON.stringify(savedTopGainers));
+    }
+  } catch (e) {}
+}
+
+async function syncSeededTopGainers() {
+  try {
+    const res = await fetchWithTimeout(`seeded_top_gainers.json?_t=${Date.now()}`, { cache: 'no-store' }, 4000);
+    if (res.ok) {
+      const data = await res.json();
+      if (Array.isArray(data) && data.length > 0) {
+        mergeTopGainersList(data);
+      }
+    }
+  } catch (e) {
+    try {
+      const resApi = await fetchWithTimeout(`${BACKEND_URL}/api/top-gainers?_t=${Date.now()}`, { cache: 'no-store' }, 4000);
+      if (resApi.ok) {
+        const dataApi = await resApi.json();
+        if (dataApi && Array.isArray(dataApi.gainers) && dataApi.gainers.length > 0) {
+          mergeTopGainersList(dataApi.gainers);
+        }
+      }
+    } catch (e2) {}
+  }
+}
+
+function mergeTopGainersList(externalList) {
+  if (!Array.isArray(externalList) || externalList.length === 0) return;
+  let updated = false;
+
+  externalList.forEach(item => {
+    const c = String(item.contract || (item.item && item.item.contract) || '').toLowerCase();
+    if (!c) return;
+
+    const existingIdx = savedTopGainers.findIndex(g => String(g.contract || '').toLowerCase() === c);
+    const peakAth = Math.max(Number(item.athPrice || 0), Number(item.secUsd || 0));
+    const peakProfit = Math.max(Number(item.athProfit || 0), Number(item.profit || 0));
+
+    if (existingIdx >= 0) {
+      const existing = savedTopGainers[existingIdx];
+      if (peakAth > Number(existing.athPrice || 0)) {
+        existing.athPrice = peakAth;
+        existing.athProfit = Math.max(Number(existing.athProfit || 0), peakProfit);
+        updated = true;
+      }
+    } else {
+      savedTopGainers.push({
+        item: item.item || item,
+        name: item.name || 'Unknown',
+        symbol: item.symbol || '',
+        contract: item.contract || c,
+        standard: item.standard || '',
+        secUsd: Number(item.secUsd || 0),
+        mintUsd: Number(item.mintUsd || 0),
+        profit: Number(item.profit || 0),
+        athPrice: peakAth,
+        athProfit: peakProfit,
+        multiplier: Number(item.multiplier || 0),
+        isSold: Boolean(item.isSold),
+        isFree: Boolean(item.isFree),
+        holders: Number(item.holders || 0)
+      });
+      updated = true;
+    }
+  });
+
+  if (updated) {
+    savedTopGainers.sort((a, b) => Math.max(b.athProfit, b.profit) - Math.max(a.athProfit, a.profit));
+    if (savedTopGainers.length > 50) savedTopGainers = savedTopGainers.slice(0, 50);
+    saveSavedTopGainers();
+  }
+}
+
+// Incremental update: inspects incoming recent drops (e.g. 150 items) without scanning 2,000+ items
+function updateSavedTopMarkets(incomingDrops) {
+  if (!Array.isArray(incomingDrops) || incomingDrops.length === 0) return savedTopGainers;
+
+  let changed = false;
+
+  incomingDrops.forEach(item => {
+    if (!isValidTopMarketItem(item)) return;
+    const c = String(item.contract || '').toLowerCase();
+    if (!c) return;
+
+    const pInfo = computeItemProfit(item, bnbPrice);
+    const peakPrice = Math.max(Number(pInfo.athPrice || 0), Number(pInfo.secUsd || 0));
+    const peakProfit = Math.max(Number(pInfo.athProfit || 0), Number(pInfo.profit || 0));
+
+    if (peakPrice > 0 && peakProfit > 0) {
+      const idx = savedTopGainers.findIndex(g => String(g.contract || '').toLowerCase() === c);
+      if (idx >= 0) {
+        const existing = savedTopGainers[idx];
+        const oldAth = Math.max(existing.athProfit || 0, existing.profit || 0);
+        if (peakProfit > oldAth || pInfo.secUsd !== existing.secUsd || pInfo.isSold !== existing.isSold) {
+          existing.secUsd = pInfo.secUsd;
+          existing.mintUsd = pInfo.mintUsd;
+          existing.profit = pInfo.profit;
+          existing.athPrice = Math.max(Number(existing.athPrice || 0), peakPrice);
+          existing.athProfit = Math.max(Number(existing.athProfit || 0), peakProfit);
+          existing.multiplier = pInfo.multiplier || existing.multiplier;
+          existing.isSold = pInfo.isSold || existing.isSold;
+          existing.isFree = pInfo.isFree || existing.isFree;
+          existing.holders = Number(item.holders || item.total_minted || existing.holders || 0);
+          existing.item = { ...existing.item, ...item };
+          changed = true;
+        }
+      } else {
+        savedTopGainers.push({
+          item,
+          name: item.name || 'Unknown',
+          symbol: item.symbol || '',
+          contract: item.contract || c,
+          standard: item.standard || '',
+          secUsd: pInfo.secUsd,
+          mintUsd: pInfo.mintUsd,
+          profit: pInfo.profit,
+          athPrice: peakPrice,
+          athProfit: peakProfit,
+          multiplier: pInfo.multiplier,
+          isSold: pInfo.isSold,
+          isFree: pInfo.isFree,
+          holders: Number(item.holders || item.total_minted || 0)
+        });
+        changed = true;
+      }
+    }
+  });
+
+  if (changed) {
+    savedTopGainers.sort((a, b) => Math.max(b.athProfit, b.profit) - Math.max(a.athProfit, a.profit));
+    if (savedTopGainers.length > 50) savedTopGainers = savedTopGainers.slice(0, 50);
+    saveSavedTopGainers();
+  }
+
+  return savedTopGainers;
+}
+
 // Compute Macro Stats
 function computeStats(drops) {
   let cappedTotal = 0;
   let soldOutCount = 0;
   let nearCapCount = 0;
   let warmCapCount = 0;
-  const gainers = [];
 
   drops.forEach(item => {
     let rawMs = item.max_supply;
@@ -509,35 +847,21 @@ function computeStats(drops) {
         warmCapCount++;
       }
     }
-
-    const pInfo = computeItemProfit(item, bnbPrice);
-    // Strict non-zero guard: only drops with actual secondary trading and positive profit are gainers
-    if (pInfo.secUsd > 0 && pInfo.athProfit > 0) {
-      gainers.push({
-        item,
-        name: item.name || 'Unknown',
-        symbol: item.symbol || '',
-        contract: item.contract || '',
-        secUsd: pInfo.secUsd,
-        mintUsd: pInfo.mintUsd,
-        profit: pInfo.profit,
-        athPrice: pInfo.athPrice,
-        athProfit: pInfo.athProfit,
-        multiplier: pInfo.multiplier,
-        isSold: pInfo.isSold,
-        isFree: pInfo.isFree,
-        holders: Number(item.holders || item.total_minted || 0)
-      });
-    }
   });
 
+  // Incrementally update our saved top markets memory from incoming recent drops
+  updateSavedTopMarkets(drops);
+
   const fillRatePct = cappedTotal > 0 ? (soldOutCount / cappedTotal) * 100 : 0;
-  const soldGainers = gainers.filter(g => g.isSold).sort((a, b) => Math.max(b.athProfit, b.profit) - Math.max(a.athProfit, a.profit));
-  const allGainers = gainers.sort((a, b) => Math.max(b.athProfit, b.profit) - Math.max(a.athProfit, a.profit));
+  const allGainers = [...savedTopGainers].sort((a, b) => Math.max(b.athProfit, b.profit) - Math.max(a.athProfit, a.profit));
+  const soldGainers = allGainers.filter(g => g.isSold);
   const majorGainers = allGainers.filter(g => Math.max(g.athProfit, g.profit) >= 0.001);
 
   const topGainer = soldGainers[0] || allGainers[0] || null;
-  const runnerUp = soldGainers[1] || allGainers[1] || null;
+  let runnerUp = null;
+  if (topGainer) {
+    runnerUp = allGainers.find(g => (g.contract || '').toLowerCase() !== (topGainer.contract || '').toLowerCase()) || null;
+  }
 
   return {
     cappedTotal,
@@ -1893,12 +2217,12 @@ function openHallOfFameModal(filterMode = 'ALL') {
         : `<span class="badge badge-cyan" style="font-size: 10px;">Active</span>`;
 
       // Marketplace / DEX links
-      const std = String(g.item.standard || '');
+      const std = String((g.item && g.item.standard) || g.standard || '');
       const isNft = std.includes('721') || std.includes('NFT');
       const cleanName = (g.name || '').replace(/\([^)]*\)/g, '').trim();
       const slug = cleanName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-      const elementUrl = g.item.market_url || (slug ? `https://element.market/collections/${slug}` : `https://element.market/collections/${g.contract}`);
-      const dexUrl = g.item.pair_url || `https://pancakeswap.finance/swap?outputCurrency=${g.contract}`;
+      const elementUrl = (g.item && g.item.market_url) || (slug ? `https://element.market/collections/${slug}` : `https://element.market/collections/${g.contract}`);
+      const dexUrl = (g.item && g.item.pair_url) || `https://pancakeswap.finance/swap?outputCurrency=${g.contract}`;
       const bscUrl = `https://bscscan.com/address/${g.contract}`;
 
       let actionLinks = '';
@@ -3099,13 +3423,17 @@ function openSyncModal() {
   else modal.setAttribute('open', '');
 }
 
-// Check URL search params for deep linked wallet (e.g. ?wallet=0x...)
+// Check URL search params for deep linked wallet (e.g. ?wallet=0x...) or modal (e.g. ?modal=hof)
 function checkUrlParams() {
   if (typeof window === 'undefined') return;
   const urlParams = new URLSearchParams(window.location.search);
   const qWallet = urlParams.get('wallet');
   if (qWallet && qWallet.startsWith('0x') && qWallet.length === 42) {
     setWatchOnlyWallet(qWallet);
+  }
+  const qModal = urlParams.get('modal');
+  if (qModal === 'hof' || qModal === 'hall-of-fame') {
+    setTimeout(() => openHallOfFameModal('ALL'), 300);
   }
 }
 
@@ -3590,6 +3918,10 @@ function setupCustomDropdown() {
 // Initialize Application
 async function init() {
   try {
+    // Initialize persistent top gainers memory and sync historical seed
+    loadSavedTopGainers();
+    syncSeededTopGainers();
+
     // Sound alert toggle button setup
     const soundBtn = document.getElementById('soundToggle');
     const updateSoundBtn = () => {
@@ -3852,7 +4184,13 @@ if (typeof module !== 'undefined' && module.exports) {
     executeWeb3Mint,
     getInjectedProvider,
     openInspectModalByContract,
-    renderSmartStreamTicker
+    renderSmartStreamTicker,
+    updateSavedTopMarkets,
+    loadSavedTopGainers,
+    saveSavedTopGainers,
+    getBaselineTopGainers,
+    getSavedTopGainers: () => savedTopGainers,
+    setSavedTopGainers: (arr) => { savedTopGainers = arr; }
   };
 }
 

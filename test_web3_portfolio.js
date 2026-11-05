@@ -273,4 +273,54 @@ openInspectModalByContract('0x2222222222222222222222222222222222222222');
 assert(mockInspectContent.innerHTML.includes('0x2222222222222222222222222222222222222222'), 'Must populate modal content for matching contract');
 console.log('✔ openInspectModalByContract Target Resolution: PASS');
 
+// ==========================================
+// Test Persistent Top Gainers Separate Memory
+// ==========================================
+const app = require('./app.js');
+const { updateSavedTopMarkets, getSavedTopGainers, setSavedTopGainers, computeStats, loadSavedTopGainers } = app;
+
+// 1. Initialize persistent memory with baseline legends
+loadSavedTopGainers();
+const initialMemory = getSavedTopGainers();
+assert(initialMemory.length > 0, 'Saved top gainers must contain baseline legends');
+const hasAgent8 = initialMemory.some(g => (g.name || '').includes('AGENT人生8') || (g.contract || '').toLowerCase() === '0xca45f13730154fbbf2d93acf169de83f52864f80');
+assert(hasAgent8, 'Saved top gainers must contain AGENT人生8');
+
+// 2. Simulate 150 incoming new drops that DO NOT contain AGENT人生8
+const newBatch150 = [];
+for (let i = 0; i < 150; i++) {
+  newBatch150.push({
+    contract: `0xaaaa${i.toString(16).padStart(36, '0')}`,
+    name: `NewDrop #${i}`,
+    symbol: `ND${i}`,
+    standard: 'BEP-20 Token (18 decimals)',
+    mint_price_str: 'FREE',
+    mint_price_bnb: 0.0,
+    mint_value_wei: '0',
+    max_supply: 1000000,
+    total_minted: 500,
+    token_price_usd: i === 42 ? 0.00025 : 0.0, // only drop #42 has secondary trades
+    holders: 100
+  });
+}
+
+// Compute stats on the new 150-drop batch
+const statsNew = computeStats(newBatch150);
+
+// Verify that AGENT人生8 was NOT lost!
+const updatedMemory = getSavedTopGainers();
+const stillHasAgent8 = updatedMemory.some(g => (g.name || '').includes('AGENT人生8') || (g.contract || '').toLowerCase() === '0xca45f13730154fbbf2d93acf169de83f52864f80');
+assert(stillHasAgent8, 'Historical winner AGENT人生8 must remain in separate saved memory after 150-drop batch roll-off!');
+
+// Verify the new gainer from the 150 batch (NewDrop #42) was incrementally added to saved memory
+const hasNewDrop42 = updatedMemory.some(g => g.name === 'NewDrop #42');
+assert(hasNewDrop42, 'New gainer from incoming 150-drop batch must be incrementally added to saved top markets');
+
+// Verify that statsNew.allGainers includes both historical legends and new gainer
+assert(statsNew.allGainers.some(g => (g.name || '').includes('AGENT人生8')), 'stats.allGainers must include AGENT人生8');
+assert(statsNew.allGainers.some(g => g.name === 'NewDrop #42'), 'stats.allGainers must include NewDrop #42');
+assert(statsNew.topGainer !== null, 'stats.topGainer must not be null');
+
+console.log(`✔ Persistent Top Gainers Separate Memory (Zero 2k+ Scans & Incremental 150 Merge): PASS [Tracking ${updatedMemory.length} winners, AGENT人生8 preserved]`);
+
 console.log('🎉 All Web3 & Multicall3 tests verified successfully!');

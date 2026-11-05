@@ -151,6 +151,24 @@ def get_feed(
     }
 
 
+@app.get("/api/top-gainers")
+def get_top_gainers():
+    """
+    Dedicated endpoint returning saved persistent top post-mint gainers / Hall of Fame markets.
+    Zero-overhead: reads from cached persistent memory without scanning 2k+ projects.
+    """
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    seed_file = os.path.join(base_dir, "seeded_top_gainers.json")
+    if os.path.exists(seed_file):
+        try:
+            with open(seed_file, "r") as f:
+                data = json.load(f)
+            return {"success": True, "count": len(data), "gainers": data}
+        except Exception as e:
+            return {"success": False, "error": str(e), "gainers": []}
+    return {"success": True, "count": 0, "gainers": []}
+
+
 @app.get("/api/projects")
 def get_projects(
     limit: int = Query(50, ge=1, le=500),
