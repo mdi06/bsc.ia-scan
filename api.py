@@ -118,6 +118,15 @@ def get_virtual_history_json(request: Request):
     )
 
 
+def _etag_matches(client_etag: Optional[str], target_etag: str) -> bool:
+    """Matches weak (W/...) and strong ETags across Cloudflare and browsers."""
+    if not client_etag or not target_etag:
+        return False
+    c = client_etag.strip().lstrip("W/").strip('"')
+    t = target_etag.strip().lstrip("W/").strip('"')
+    return c == t
+
+
 @app.get("/api/feed")
 def get_feed(
     request: Request,
@@ -159,7 +168,7 @@ def get_feed(
 
         if not delta:
             # Bandwidth Guard 1: HTTP 304 Not Modified (0 bytes body) if client already has this state
-            if client_etag == delta_etag:
+            if _etag_matches(client_etag, delta_etag):
                 return Response(status_code=304, headers={"ETag": delta_etag, "Cache-Control": "public, max-age=5"})
             # Bandwidth Guard 2: Minimal 0-drop payload without redundant nested stats (~80 bytes vs 20 KB)
             return JSONResponse(
@@ -204,7 +213,7 @@ def get_feed(
     paginated = target_list[offset : offset + limit]
 
     feed_etag = f'"{latest_block}-{total}-{offset}-{limit}-{filter or ""}"'
-    if client_etag == feed_etag:
+    if _etag_matches(client_etag, feed_etag):
         return Response(status_code=304, headers={"ETag": feed_etag, "Cache-Control": "public, max-age=5"})
 
     return JSONResponse(
