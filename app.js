@@ -2393,8 +2393,8 @@ function getFilteredDrops() {
   return list;
 }
 
-const TABLE_RENDER_CHUNK = 60;
-let tableRenderLimit = 60;
+const TABLE_RENDER_CHUNK = 150;
+let tableRenderLimit = 150;
 
 // Render Table Rows
 function renderTable(keepLimit = false) {
