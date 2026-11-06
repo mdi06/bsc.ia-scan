@@ -908,4 +908,104 @@ assert(mockToastContainer.children[1].innerHTML.includes('toast-title">SNIPER RE
 
 console.log('✔ Toast Notifications & Clean Feedback: PASS');
 
+console.log('Testing Dedicated Secondary Market Tab & Metrics...');
+const {
+  isSecondaryMarketAsset,
+  getSanitizedMcap,
+  updateSecondaryTabCount,
+  updateSecondaryBannerUI,
+  setActiveTab,
+  setActiveFilter,
+  setSearchQuery,
+  setAllDrops
+} = app;
+
+// Test 1: Secondary Market Asset Detection
+const testGang = {
+  name: "Gang",
+  symbol: "GANG",
+  contract: "0x0c6302401aa5325c2e36f170f52c00b1d220b405",
+  market_cap: 2426607,
+  lp_usd: 214316,
+  volume_24h: 680690,
+  token_price_usd: 0.002451
+};
+
+const testPtah = {
+  name: "Ptah",
+  symbol: "PTAH",
+  contract: "0x999980fb8dff1799c7e9d7f71bca899e43d39999",
+  market_cap: 320058,
+  lp_usd: 424,
+  volume_24h: 219,
+  token_price_usd: 0.000320
+};
+
+const testRegularMint = {
+  name: "Unpaired Mint",
+  symbol: "MINT",
+  contract: "0x123",
+  lp_usd: 0,
+  market_cap: 0,
+  volume_24h: 0,
+  token_price_usd: 0
+};
+
+const testPegged = {
+  name: "Binance-Peg USD",
+  symbol: "USDT",
+  contract: "0x55d398326f99059ff775485246999027b3197955",
+  market_cap: 5000000000,
+  lp_usd: 10000000,
+  volume_24h: 50000000,
+  token_price_usd: 1.0
+};
+
+assert.strictEqual(isSecondaryMarketAsset(testGang), true, 'GANG must be identified as secondary market asset');
+assert.strictEqual(isSecondaryMarketAsset(testPtah), true, 'PTAH must be identified as secondary market asset');
+assert.strictEqual(isSecondaryMarketAsset(testRegularMint), false, 'Unpaired mint must NOT be secondary market asset');
+assert.strictEqual(isSecondaryMarketAsset(testPegged), false, 'Pegged USDT must be excluded from secondary market tab');
+console.log('✔ isSecondaryMarketAsset detection & pegged exclusion: PASS');
+
+// Test 2: Filtering & Default Sorting by Valuation Descending
+setActiveFilter('ALL');
+setSearchQuery('');
+setAllDrops([testRegularMint, testPtah, testPegged, testGang]);
+setActiveTab('SECONDARY');
+const secFiltered = getFilteredDrops();
+assert.strictEqual(secFiltered.length, 2, 'Should filter strictly to the 2 secondary market tokens');
+assert.strictEqual(secFiltered[0].symbol, 'GANG', 'Top valuation token (GANG $2.43M) must sort first');
+assert.strictEqual(secFiltered[1].symbol, 'PTAH', 'PTAH ($320K) must sort second');
+console.log('✔ Secondary Market Tab filtering & default valuation sort: PASS');
+
+// Test 3: Tab Count and Overview Banner UI
+const mockTabBadge = new MockElement('span');
+const mockTotalMcap = new MockElement('span');
+const mockTotalVol = new MockElement('span');
+const mockTotalLp = new MockElement('span');
+const mockTopAsset = new MockElement('span');
+const mockSecBanner = new MockElement('div');
+
+const prevGetElem = global.document.getElementById;
+global.document.getElementById = (id) => {
+  if (id === 'secondaryTabCount') return mockTabBadge;
+  if (id === 'secondaryMarketBanner') return mockSecBanner;
+  if (id === 'secTotalMcap') return mockTotalMcap;
+  if (id === 'secTotalVol') return mockTotalVol;
+  if (id === 'secTotalLp') return mockTotalLp;
+  if (id === 'secTopAsset') return mockTopAsset;
+  return prevGetElem ? prevGetElem(id) : null;
+};
+
+updateSecondaryTabCount();
+assert.strictEqual(String(mockTabBadge.textContent), '2', 'Secondary Tab badge count must display 2');
+
+updateSecondaryBannerUI();
+assert(mockTotalMcap.textContent.includes('2.7M') || mockTotalMcap.textContent.includes('2.75M'), 'Overview banner valuation must sum tracked assets');
+assert(mockTopAsset.textContent.includes('Gang'), 'Top valuation asset must be Gang');
+console.log('✔ Secondary Tab Badge & Overview Banner UI: PASS');
+
+// Reset tab back to RADAR
+setActiveTab('RADAR');
+
 console.log('🎉 All Web3, Multicall3, Smart Hunters, and Competitor Features verified successfully!');

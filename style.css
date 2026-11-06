@@ -243,16 +243,69 @@ body {
   font-weight: 700;
 }
 
+.tab-btn[data-tab="SECONDARY"].active {
+  background: linear-gradient(135deg, #ffd600 0%, #f59e0b 100%) !important;
+  color: #050e12 !important;
+  border-color: #ffd600 !important;
+  font-weight: 800;
+  box-shadow: 0 0 16px rgba(255, 214, 0, 0.45);
+}
+
+.tab-btn[data-tab="SECONDARY"].active::before {
+  background: #050e12;
+  box-shadow: 0 0 4px #050e12;
+}
+
+.tab-btn[data-tab="LAUNCHPAD"].active {
+  background: #f97316;
+  color: #000000;
+  border-color: #f97316;
+  font-weight: 700;
+}
+
 .tab-btn[data-tab="SMART"].active {
   background: var(--color-magenta);
   color: #ffffff;
   border-color: var(--color-magenta);
 }
 
+.tab-btn[data-tab="WALLETS"].active {
+  background: #38bdf8;
+  color: #000000;
+  border-color: #38bdf8;
+  font-weight: 700;
+}
+
 .tab-btn[data-tab="PORTFOLIO"].active {
   background: var(--color-green);
   color: #000000;
   border-color: var(--color-green);
+}
+
+@keyframes secPulse {
+  0% { transform: scale(0.95); opacity: 0.6; }
+  50% { transform: scale(1.25); opacity: 1; box-shadow: 0 0 10px #ffd600; }
+  100% { transform: scale(0.95); opacity: 0.6; }
+}
+
+.tab-secondary-highlight {
+  position: relative;
+  border-color: rgba(255, 214, 0, 0.45) !important;
+  color: #ffd600 !important;
+  background: rgba(255, 214, 0, 0.08) !important;
+}
+
+.tab-secondary-highlight::before {
+  content: '';
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #ffd600;
+  margin-right: 4px;
+  vertical-align: middle;
+  box-shadow: 0 0 6px #ffd600;
+  animation: secPulse 2s infinite ease-in-out;
 }
 
 .controls-row {
@@ -2005,7 +2058,8 @@ tbody tr.selected {
     display: none !important;
   }
 
-  .portfolio-banner {
+  .portfolio-banner,
+  .secondary-market-banner {
     flex-direction: column;
     align-items: stretch;
     gap: 6px;
@@ -2475,6 +2529,54 @@ tbody tr.selected {
   border-radius: 3px;
   font-size: 10px;
   margin-left: 4px;
+}
+
+/* Dynamic Tab 2 Secondary Market Overview Banner */
+.secondary-market-banner {
+  background: linear-gradient(90deg, rgba(26, 22, 6, 0.98), rgba(14, 16, 18, 0.99));
+  border-top: 1px solid rgba(255, 214, 0, 0.2);
+  border-bottom: 2px solid #ffd600;
+  border-left: none;
+  border-right: none;
+  border-radius: 0;
+  padding: 10px 24px;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  box-sizing: border-box;
+  box-shadow: 0 2px 14px rgba(255, 214, 0, 0.1);
+}
+
+.sec-stat-group {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.sec-stat-card {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+}
+
+.sec-stat-label {
+  color: var(--text-dim);
+  font-weight: 700;
+  letter-spacing: 0.5px;
+}
+
+#secTopAsset {
+  cursor: pointer;
+  transition: opacity 0.15s ease;
+}
+#secTopAsset:hover {
+  opacity: 0.85;
+  text-decoration: underline;
 }
 
 /* Dynamic Tab 3 Portfolio Banner */

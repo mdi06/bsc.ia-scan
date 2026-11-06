@@ -462,7 +462,7 @@ const EXCLUDED_PEGS_CONTRACTS = new Set([
 ]);
 
 const SYNTHETIC_EQUITY_SYMBOLS = new Set([
-  'TSLAB', 'AAPLB', 'MSFTB', 'METAB', 'SPCXB', 'NVDA', 'AMZNB', 'GOOGLB', 'MRNAB', 'SOXSB'
+  'TSLAB', 'AAPLB', 'MSFTB', 'METAB', 'SPCXB', 'NVDA', 'NVDAB', 'AMZNB', 'GOOGLB', 'MRNAB', 'SOXSB', 'CRCLB', 'QQQB', 'MSTRB'
 ]);
 
 // Compute Individual Project Profit and Maintain ATH High-Water Mark
@@ -2024,6 +2024,84 @@ function updateLaunchpadCount() {
   if (pillEl) pillEl.textContent = cnt;
 }
 
+function getSanitizedMcap(d) {
+  if (!d) return 0;
+  let mc = Number(d.market_cap || d.fdv || 0);
+  if (mc > 100000000 && Number(d.lp_usd || 0) < 50000) return 0;
+  return mc;
+}
+
+// Secondary Market asset detector
+function isSecondaryMarketAsset(d) {
+  if (!d) return false;
+  const c = String(d.contract || '').toLowerCase();
+  const sym = String(d.symbol || '').toUpperCase();
+  if (EXCLUDED_PEGS_CONTRACTS.has(c) || EXCLUDED_PEGS_SYMBOLS.has(sym) || SYNTHETIC_EQUITY_SYMBOLS.has(sym)) {
+    return false;
+  }
+  const lp = Number(d.lp_usd || 0);
+  const mc = getSanitizedMcap(d);
+  const px = Number(d.token_price_usd || 0);
+  const vol = Number(d.volume_24h || 0);
+  const secVol = Number(d.secondary_vol_bnb || 0);
+  const hasPair = Boolean(d.pair_address);
+  const isGrad = Boolean(d.is_graduated);
+  return lp > 50 || mc > 500 || (px > 0 && vol > 0) || secVol > 0 || hasPair || isGrad;
+}
+
+function updateSecondaryTabCount() {
+  if (typeof document === 'undefined') return;
+  const cnt = allDrops.filter(d => isSecondaryMarketAsset(d)).length;
+  const tabEl = document.getElementById('secondaryTabCount');
+  if (tabEl) tabEl.textContent = cnt;
+}
+
+function updateSecondaryBannerUI() {
+  if (typeof document === 'undefined') return;
+  const banner = document.getElementById('secondaryMarketBanner');
+  if (!banner) return;
+
+  const secDrops = allDrops.filter(d => isSecondaryMarketAsset(d));
+  let totalMcap = 0;
+  let totalVol = 0;
+  let totalLp = 0;
+  let topAsset = null;
+  let topMcap = 0;
+
+  secDrops.forEach(d => {
+    const mc = getSanitizedMcap(d);
+    const vol = Number(d.volume_24h || 0);
+    const lp = Number(d.lp_usd || 0);
+
+    totalMcap += mc;
+    totalVol += vol;
+    totalLp += lp;
+
+    if (mc > topMcap) {
+      topMcap = mc;
+      topAsset = d;
+    }
+  });
+
+  const secTotalMcapEl = document.getElementById('secTotalMcap');
+  const secTotalVolEl = document.getElementById('secTotalVol');
+  const secTotalLpEl = document.getElementById('secTotalLp');
+  const secTopAssetEl = document.getElementById('secTopAsset');
+
+  if (secTotalMcapEl) secTotalMcapEl.textContent = `$${formatCount(totalMcap)}`;
+  if (secTotalVolEl) secTotalVolEl.textContent = `$${formatCount(totalVol)}`;
+  if (secTotalLpEl) secTotalLpEl.textContent = `$${formatCount(totalLp)}`;
+  if (secTopAssetEl) {
+    if (topAsset) {
+      secTopAssetEl.textContent = `${topAsset.name || topAsset.symbol} ($${formatCount(topMcap)})`;
+      secTopAssetEl.onclick = () => openModal(topAsset);
+    } else {
+      secTopAssetEl.textContent = '—';
+      secTopAssetEl.onclick = null;
+    }
+  }
+}
+
 // ABI pad32 helper for PancakeSwap V2 Router Calldata
 function pad32(val) {
   if (typeof val === 'number' || typeof val === 'bigint') {
@@ -2295,7 +2373,9 @@ function getFilteredDrops() {
   let list = [...allDrops];
 
   // Tab filtering
-  if (activeTab === 'LAUNCHPAD') {
+  if (activeTab === 'SECONDARY') {
+    list = list.filter(d => isSecondaryMarketAsset(d));
+  } else if (activeTab === 'LAUNCHPAD') {
     list = list.filter(d => isLaunchpadDrop(d));
   } else if (activeTab === 'SMART') {
     list = list.filter(d => (d.smart_wallets && d.smart_wallets.length > 0) || (d.smart_minters && d.smart_minters.length > 0));
@@ -2367,7 +2447,11 @@ function getFilteredDrops() {
   }
 
   // Sort
-  if (sortMode === 'PROFIT') {
+  if (sortMode === 'MCAP') {
+    list.sort((a, b) => getSanitizedMcap(b) - getSanitizedMcap(a));
+  } else if (sortMode === 'VOLUME') {
+    list.sort((a, b) => Number(b.volume_24h || 0) - Number(a.volume_24h || 0));
+  } else if (sortMode === 'PROFIT') {
     list.sort((a, b) => {
       const profitA = Math.max(Number(a.ath_profit_usd || 0), Number(a.current_profit_usd || 0));
       const profitB = Math.max(Number(b.ath_profit_usd || 0), Number(b.current_profit_usd || 0));
@@ -2386,8 +2470,12 @@ function getFilteredDrops() {
   } else if (sortMode === 'LP') {
     list.sort((a, b) => Number(b.lp_usd || 0) - Number(a.lp_usd || 0));
   } else {
-    // NEWEST
-    list.sort((a, b) => Number(b.block || 0) - Number(a.block || 0));
+    // NEWEST / Default
+    if (activeTab === 'SECONDARY' && sortMode === 'NEWEST') {
+      list.sort((a, b) => (getSanitizedMcap(b) - getSanitizedMcap(a)) || (Number(b.block || 0) - Number(a.block || 0)));
+    } else {
+      list.sort((a, b) => Number(b.block || 0) - Number(a.block || 0));
+    }
   }
 
   return list;
@@ -2412,11 +2500,36 @@ function renderTable(keepLimit = false) {
   updateNftSurgeCount();
   updateProxyCount();
   updateLaunchpadCount();
+  updateSecondaryTabCount();
   updateFollowedFilterCount();
+  if (activeTab === 'SECONDARY') {
+    updateSecondaryBannerUI();
+  }
   const totalDisplay = globalStats ? globalStats.total : allDrops.length;
   const footerCountEl = document.getElementById('footerCount');
   if (footerCountEl) {
     footerCountEl.textContent = `Showing ${Math.min(filtered.length, tableRenderLimit)} of ${totalDisplay} collections`;
+  }
+
+  // Dynamic table headers based on active tab
+  const thLp = document.getElementById('thLp');
+  const thProgress = document.getElementById('thProgress');
+  const thPrice = document.getElementById('thPrice');
+  const thFloor = document.getElementById('thFloor');
+  const thAction = document.getElementById('thAction');
+
+  if (activeTab === 'SECONDARY') {
+    if (thLp) thLp.textContent = '🥞 PANCAKESWAP LP';
+    if (thProgress) thProgress.textContent = '💎 MARKET CAP / FDV';
+    if (thPrice) thPrice.textContent = '🌊 24H VOLUME';
+    if (thFloor) thFloor.textContent = '📈 DEX PRICE / 24H';
+    if (thAction) thAction.textContent = '🥞 TRADE DEX';
+  } else {
+    if (thLp) thLp.textContent = 'LP / VOL';
+    if (thProgress) thProgress.textContent = 'MINT PROGRESS';
+    if (thPrice) thPrice.textContent = 'MINT PRICE';
+    if (thFloor) thFloor.textContent = 'FLOOR / TRADE';
+    if (thAction) thAction.textContent = 'INSPECT';
   }
 
   // Feature 2: Dedicated Wallet Leaderboard Tab Visibility Toggle
@@ -2490,6 +2603,18 @@ function renderTable(keepLimit = false) {
           <button class="pill-action pill-smart-leaderboard" onclick="openSmartLeaderboardModal('ALL')" style="font-size: 12px; padding: 6px 14px;">
             🏆 Open Smart Hunter Leaderboard (2,100+ Wallets)
           </button>
+        </td>
+      `;
+    } else if (activeTab === 'SECONDARY') {
+      tr.innerHTML = `
+        <td colspan="14" style="text-align: center; padding: 40px 20px; color: var(--text-dim);">
+          <div style="font-size: 28px; margin-bottom: 8px;">📈</div>
+          <div style="font-weight: 700; color: #ffd600; font-size: 14px; margin-bottom: 6px;">
+            No Secondary Market Pairs Found
+          </div>
+          <div style="font-size: 12px; max-width: 500px; margin: 0 auto 14px; line-height: 1.5;">
+            Tokens automatically graduate here once they inject PancakeSwap LP, achieve &gt;$500 market cap, or begin active secondary trading.
+          </div>
         </td>
       `;
     } else {
@@ -2708,13 +2833,65 @@ function renderTable(keepLimit = false) {
     const starClass = isFav ? 'star-btn starred' : 'star-btn';
     const starIcon = isFav ? '★' : '☆';
 
+    const isSec = (activeTab === 'SECONDARY');
     const isPort = (activeTab === 'PORTFOLIO');
     const isNft = std.includes('721') || std.includes('NFT');
     let cellHolders = hbStr;
+    let cellLp = lpStr;
+    let cellProg = progBar;
+    let cellPrice = priceStr;
     let cellFloor = floorStr;
     let actBtn = `<button class="inspect-btn"><span class="desktop-only">Inspect</span><span class="mobile-only">🔍 Deep Dive & Snipe CLI ➔</span></button>`;
 
-    if (isPort) {
+    if (isSec) {
+      if (lpUsd > 0) {
+        cellLp = `<span style="color: var(--color-green); font-weight:700;">$${formatCount(lpUsd)}</span>`;
+      } else if (secVol > 0) {
+        cellLp = `<span style="color: var(--color-magenta); font-weight:600;">${secVol.toFixed(2)} BNB</span>`;
+      } else {
+        cellLp = `<span class="dim">—</span>`;
+      }
+
+      const mcapVal = Number(item.market_cap || item.fdv || 0);
+      if (mcapVal > 0) {
+        const hasFdvDiff = item.fdv && item.market_cap && Math.abs(Number(item.fdv) - Number(item.market_cap)) > 100;
+        cellProg = `
+          <div style="display: flex; flex-direction: column; gap: 2px;">
+            <span class="badge badge-green" style="font-weight: 700; font-size: 11px;">$${formatCount(mcapVal)}</span>
+            ${hasFdvDiff ? `<span class="dim" style="font-size: 9px;">FDV: $${formatCount(item.fdv)}</span>` : ''}
+          </div>
+        `;
+      } else {
+        cellProg = `<span class="dim">—</span>`;
+      }
+
+      const volVal = Number(item.volume_24h || 0);
+      if (volVal > 0) {
+        cellPrice = `<span style="color: var(--color-cyan); font-weight: 700;">$${formatCount(volVal)}</span>`;
+      } else {
+        cellPrice = `<span class="dim">—</span>`;
+      }
+
+      const tkUsd = Number(item.token_price_usd || item.market_price_usd || 0);
+      if (tkUsd > 0) {
+        const chg24 = Number(item.price_change_24h || 0);
+        const isUp = chg24 >= 0;
+        const chgBadge = chg24 !== 0
+          ? `<span class="badge ${isUp ? 'badge-green' : 'badge-red'}" style="font-size: 9px; padding: 1px 4px; margin-left: 4px;">${isUp ? '+' : ''}${chg24.toFixed(1)}%</span>`
+          : '';
+        cellFloor = `
+          <div style="display: flex; align-items: center; gap: 2px;">
+            <span style="color: var(--color-green); font-weight: 700;">$${tkUsd < 0.001 ? tkUsd.toFixed(6) : tkUsd.toFixed(4)}</span>
+            ${chgBadge}
+          </div>
+        `;
+      } else {
+        cellFloor = `<span class="dim">—</span>`;
+      }
+
+      const dexUrl = `https://pancakeswap.finance/swap?outputCurrency=${item.contract}`;
+      actBtn = `<button class="inspect-btn trade-dex-btn" onclick="event.stopPropagation(); window.open('${dexUrl}', '_blank')" style="border-color: #f59e0b; color: #f59e0b; font-weight: 700;" title="Trade on PancakeSwap DEX"><span class="desktop-only">🥞 Trade DEX ↗</span><span class="mobile-only">🥞 Trade ↗</span></button>`;
+    } else if (isPort) {
       if (item.contract === '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee') {
         cellHolders = `<span style="color: var(--color-green); font-weight:700;">Gas: ${Number(item.user_balance || 0).toFixed(4)} BNB</span>`;
         cellFloor = `<span class="badge badge-cyan" style="font-size: 11px;">⛽ GAS RESERVE</span>`;
@@ -2741,11 +2918,11 @@ function renderTable(keepLimit = false) {
       <td class="col-type">${stdBadge}</td>
       <td class="col-safety">${safeBadge}</td>
       <td class="col-interest">${intBadge}</td>
-      <td class="col-holders" data-label="${isPort ? 'HOLDINGS' : 'HOLDERS'}"><span class="cell-val">${cellHolders}</span></td>
-      <td class="col-lp" data-label="LIQUIDITY"><span class="cell-val">${lpStr}</span></td>
-      <td class="col-progress">${progBar}</td>
-      <td class="col-price" data-label="MINT"><span class="cell-val">${priceStr}</span></td>
-      <td class="col-floor" data-label="FLOOR"><span class="cell-val">${cellFloor}</span></td>
+      <td class="col-holders" data-label="${isPort ? 'HOLDINGS' : (isSec ? 'HOLDERS / BUYS' : 'HOLDERS')}"><span class="cell-val">${cellHolders}</span></td>
+      <td class="col-lp" data-label="${isSec ? 'PANCAKESWAP LP' : 'LIQUIDITY'}"><span class="cell-val">${cellLp}</span></td>
+      <td class="col-progress" data-label="${isSec ? 'MARKET CAP' : 'PROGRESS'}">${cellProg}</td>
+      <td class="col-price" data-label="${isSec ? '24H VOLUME' : 'MINT'}"><span class="cell-val">${cellPrice}</span></td>
+      <td class="col-floor" data-label="${isSec ? 'DEX PRICE' : 'FLOOR'}"><span class="cell-val">${cellFloor}</span></td>
       <td class="col-action">${actBtn}</td>
     `;
     fragment.appendChild(tr);
@@ -2961,8 +3138,61 @@ function appendNextTableBatch() {
       lpStr = `<span style="color: var(--color-cyan); font-weight:600;" title="Market Cap / FDV: $${formatCount(mcapUsdBatch)}">MC: $${formatCount(mcapUsdBatch)}</span>`;
     }
 
+    const isSec = (activeTab === 'SECONDARY');
+    let cellLp = lpStr;
+    let cellProg = progBar;
+    let cellPrice = priceStr;
     let actBtn = `<button class="inspect-btn" onclick="openModal(allDrops[${index}] || allDrops.find(x => x.contract === '${item.contract}'))"><span class="desktop-only">Inspect</span><span class="mobile-only">➔</span></button>`;
-    if (isPort && item.user_balance > 0) {
+
+    if (isSec) {
+      if (Number(item.lp_usd || 0) > 0) {
+        cellLp = `<span style="color: var(--color-green); font-weight:700;">$${formatCount(item.lp_usd)}</span>`;
+      } else if (Number(item.secondary_vol_bnb || 0) > 0) {
+        cellLp = `<span style="color: var(--color-magenta); font-weight:600;">${Number(item.secondary_vol_bnb).toFixed(2)} BNB</span>`;
+      } else {
+        cellLp = `<span class="dim">—</span>`;
+      }
+
+      const mcapVal = Number(item.market_cap || item.fdv || 0);
+      if (mcapVal > 0) {
+        const hasFdvDiff = item.fdv && item.market_cap && Math.abs(Number(item.fdv) - Number(item.market_cap)) > 100;
+        cellProg = `
+          <div style="display: flex; flex-direction: column; gap: 2px;">
+            <span class="badge badge-green" style="font-weight: 700; font-size: 11px;">$${formatCount(mcapVal)}</span>
+            ${hasFdvDiff ? `<span class="dim" style="font-size: 9px;">FDV: $${formatCount(item.fdv)}</span>` : ''}
+          </div>
+        `;
+      } else {
+        cellProg = `<span class="dim">—</span>`;
+      }
+
+      const volVal = Number(item.volume_24h || 0);
+      if (volVal > 0) {
+        cellPrice = `<span style="color: var(--color-cyan); font-weight: 700;">$${formatCount(volVal)}</span>`;
+      } else {
+        cellPrice = `<span class="dim">—</span>`;
+      }
+
+      const tkUsd = Number(item.token_price_usd || item.market_price_usd || 0);
+      if (tkUsd > 0) {
+        const chg24 = Number(item.price_change_24h || 0);
+        const isUp = chg24 >= 0;
+        const chgBadge = chg24 !== 0
+          ? `<span class="badge ${isUp ? 'badge-green' : 'badge-red'}" style="font-size: 9px; padding: 1px 4px; margin-left: 4px;">${isUp ? '+' : ''}${chg24.toFixed(1)}%</span>`
+          : '';
+        cellFloor = `
+          <div style="display: flex; align-items: center; gap: 2px;">
+            <span style="color: var(--color-green); font-weight: 700;">$${tkUsd < 0.001 ? tkUsd.toFixed(6) : tkUsd.toFixed(4)}</span>
+            ${chgBadge}
+          </div>
+        `;
+      } else {
+        cellFloor = `<span class="dim">—</span>`;
+      }
+
+      const dexUrl = `https://pancakeswap.finance/swap?outputCurrency=${item.contract}`;
+      actBtn = `<button class="inspect-btn trade-dex-btn" onclick="event.stopPropagation(); window.open('${dexUrl}', '_blank')" style="border-color: #f59e0b; color: #f59e0b; font-weight: 700;" title="Trade on PancakeSwap DEX"><span class="desktop-only">🥞 Trade DEX ↗</span><span class="mobile-only">🥞 Trade ↗</span></button>`;
+    } else if (isPort && item.user_balance > 0) {
       if (item.is_native_gas) {
         cellHolders = `<span style="color: var(--color-green); font-weight:700;">Gas: ${Number(item.user_balance || 0).toFixed(4)} BNB</span>`;
         cellFloor = `<span class="badge badge-cyan" style="font-size: 11px;">⛽ GAS RESERVE</span>`;
@@ -2989,11 +3219,11 @@ function appendNextTableBatch() {
       <td class="col-type">${stdBadge}</td>
       <td class="col-safety">${safeBadge}</td>
       <td class="col-interest">${intBadge}</td>
-      <td class="col-holders" data-label="${isPort ? 'HOLDINGS' : 'HOLDERS'}"><span class="cell-val">${cellHolders}</span></td>
-      <td class="col-lp" data-label="LIQUIDITY"><span class="cell-val">${lpStr}</span></td>
-      <td class="col-progress">${progBar}</td>
-      <td class="col-price" data-label="MINT"><span class="cell-val">${priceStr}</span></td>
-      <td class="col-floor" data-label="FLOOR"><span class="cell-val">${cellFloor}</span></td>
+      <td class="col-holders" data-label="${isPort ? 'HOLDINGS' : (isSec ? 'HOLDERS / BUYS' : 'HOLDERS')}"><span class="cell-val">${cellHolders}</span></td>
+      <td class="col-lp" data-label="${isSec ? 'PANCAKESWAP LP' : 'LIQUIDITY'}"><span class="cell-val">${cellLp}</span></td>
+      <td class="col-progress" data-label="${isSec ? 'MARKET CAP' : 'PROGRESS'}">${cellProg}</td>
+      <td class="col-price" data-label="${isSec ? '24H VOLUME' : 'MINT'}"><span class="cell-val">${cellPrice}</span></td>
+      <td class="col-floor" data-label="${isSec ? 'DEX PRICE' : 'FLOOR'}"><span class="cell-val">${cellFloor}</span></td>
       <td class="col-action">${actBtn}</td>
     `;
     fragment.appendChild(tr);
@@ -5053,6 +5283,7 @@ async function pollDeltaFeed() {
       updateNftSurgeCount();
       updateProxyCount();
       updateLaunchpadCount();
+      updateSecondaryTabCount();
     }
 
     if (data && data.projects && data.projects.length > 0) {
@@ -5329,6 +5560,7 @@ async function fetchDrops() {
     updateNftSurgeCount();
     updateProxyCount();
     updateLaunchpadCount();
+    updateSecondaryTabCount();
 
     // Re-hydrate user balances if wallet is connected
     if (connectedWallet && userOwnedContracts.size > 0) {
@@ -5829,18 +6061,21 @@ async function init() {
         }
 
         const isPort = (activeTab === 'PORTFOLIO');
+        const isSec = (activeTab === 'SECONDARY');
         const statsBanner = document.getElementById('statsBanner');
         const portBanner = document.getElementById('portfolioBanner');
-        if (statsBanner && portBanner) {
-          statsBanner.style.display = isPort ? 'none' : 'flex';
-          portBanner.style.display = isPort ? 'flex' : 'none';
-        }
+        const secBanner = document.getElementById('secondaryMarketBanner');
+        if (statsBanner) statsBanner.style.display = (isPort || isSec) ? 'none' : 'flex';
+        if (portBanner) portBanner.style.display = isPort ? 'flex' : 'none';
+        if (secBanner) secBanner.style.display = isSec ? 'flex' : 'none';
 
         if (isPort) {
           updatePortfolioBannerUI();
           if (connectedWallet && userOwnedContracts.size === 0 && !isScanningPortfolio) {
             scanUserPortfolio(connectedWallet);
           }
+        } else if (isSec) {
+          updateSecondaryBannerUI();
         }
 
         if (typeof window !== 'undefined' && window.va) {
@@ -5850,19 +6085,25 @@ async function init() {
       });
     });
 
-    // Global keyboard shortcuts (1: Radar, 2: Launchpads, 3: Smart Alpha, 4: Portfolio)
+    // Global keyboard shortcuts (1: Radar, 2: Secondary Market, 3: Launchpads, 4: Smart Alpha, 5: Wallets, 6: Portfolio)
     document.addEventListener('keydown', (e) => {
       if (['INPUT', 'TEXTAREA'].includes(document.activeElement?.tagName)) return;
       if (e.key === '1') {
         const b = document.getElementById('tabRadar');
         if (b) b.click();
       } else if (e.key === '2') {
-        const b = document.getElementById('tabLaunchpad');
+        const b = document.getElementById('tabSecondary');
         if (b) b.click();
       } else if (e.key === '3') {
-        const b = document.getElementById('tabSmart');
+        const b = document.getElementById('tabLaunchpad');
         if (b) b.click();
       } else if (e.key === '4') {
+        const b = document.getElementById('tabSmart');
+        if (b) b.click();
+      } else if (e.key === '5') {
+        const b = document.getElementById('tabWallets');
+        if (b) b.click();
+      } else if (e.key === '6') {
         const b = document.getElementById('tabPortfolio');
         if (b) b.click();
       }
@@ -6046,6 +6287,10 @@ if (typeof module !== 'undefined' && module.exports) {
     scanUserPortfolio,
     updateWalletButtonUI,
     updatePortfolioBannerUI,
+    isSecondaryMarketAsset,
+    getSanitizedMcap,
+    updateSecondaryTabCount,
+    updateSecondaryBannerUI,
     getFavoritesStorageKey,
     loadFavoritesForActiveWallet,
     saveFavorites,
@@ -6094,6 +6339,9 @@ if (typeof module !== 'undefined' && module.exports) {
     openModal,
     setActiveTab: (t) => { activeTab = t; },
     getActiveTab: () => activeTab,
+    setActiveFilter: (f) => { activeFilter = f; },
+    getActiveFilter: () => activeFilter,
+    setSearchQuery: (q) => { searchQuery = q; },
     renderWalletsTabLeaderboard,
     setWalletsTabFilter,
     onWalletsTabSearch,

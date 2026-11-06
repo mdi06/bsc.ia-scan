@@ -1648,7 +1648,7 @@ EXCLUDED_PEGS_CONTRACTS = {
 }
 
 SYNTHETIC_EQUITY_SYMBOLS = {
-    "TSLAB", "AAPLB", "MSFTB", "METAB", "SPCXB", "NVDA", "AMZNB", "GOOGLB", "MRNAB", "SOXSB"
+    "TSLAB", "AAPLB", "MSFTB", "METAB", "SPCXB", "NVDA", "NVDAB", "AMZNB", "GOOGLB", "MRNAB", "SOXSB", "CRCLB", "QQQB", "MSTRB"
 }
 
 
@@ -2042,7 +2042,10 @@ def analyze_market_interest(
     if stats["buys_24h"] == 0 and details.get("total_minted"):
         stats["buys_24h"] = details.get("total_minted", 0)
     if stats.get("market_cap", 0.0) == 0.0 and details.get("total_minted") and stats.get("token_price_usd", 0.0) > 0.0:
-        stats["market_cap"] = float(details["total_minted"]) * float(stats["token_price_usd"])
+        tm_val = float(details["total_minted"])
+        if tm_val > 1e14:
+            tm_val = tm_val / 1e18
+        stats["market_cap"] = tm_val * float(stats["token_price_usd"])
 
     # If no token security was fetched, audit NFT risk
     if not stats.get("security"):
