@@ -2060,11 +2060,60 @@ function isSecondaryMarketAsset(d) {
   return lp > 50 || mc > 500 || (px > 0 && vol > 0) || secVol > 0 || hasPair || isGrad;
 }
 
+let hasLoadedSecondaryDrops = false;
+let isLoadingSecondaryDrops = false;
+
+async function loadSecondaryDrops() {
+  if (hasLoadedSecondaryDrops) return;
+  if (isLoadingSecondaryDrops) {
+    while (isLoadingSecondaryDrops) {
+      await new Promise(r => setTimeout(r, 40));
+    }
+    return;
+  }
+  isLoadingSecondaryDrops = true;
+  try {
+    let res;
+    try {
+      res = await fetchWithTimeout(`${BACKEND_URL}/api/feed?filter=secondary&limit=300`, { cache: 'default' }, 8000);
+      if (!res.ok) throw new Error('Backend filter=secondary failed');
+    } catch (e1) {
+      try {
+        res = await fetchWithTimeout(`https://bsc-ia-scan.onrender.com/api/feed?filter=secondary&limit=300`, { cache: 'default' }, 8000);
+      } catch (e2) {
+        return;
+      }
+    }
+
+    if (res && res.ok) {
+      const payload = await res.json();
+      const drops = Array.isArray(payload) ? payload : (payload.projects || []);
+      if (Array.isArray(drops) && drops.length > 0) {
+        mergeDropsIntoAllDrops(drops);
+        hasLoadedSecondaryDrops = true;
+        updateSecondaryTabCount();
+        updateSecondaryBannerUI();
+        if (activeTab === 'SECONDARY') {
+          renderTable();
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('Secondary drops load fallback:', err);
+  } finally {
+    isLoadingSecondaryDrops = false;
+  }
+}
+if (typeof window !== 'undefined') {
+  window.loadSecondaryDrops = loadSecondaryDrops;
+}
+
 function updateSecondaryTabCount() {
   if (typeof document === 'undefined') return;
-  const cnt = allDrops.filter(d => isSecondaryMarketAsset(d)).length;
+  const localCnt = allDrops.filter(d => isSecondaryMarketAsset(d)).length;
+  const count = (globalStats && globalStats.secondary) ? Math.max(localCnt, globalStats.secondary) : localCnt;
   const tabEl = document.getElementById('secondaryTabCount');
-  if (tabEl) tabEl.textContent = cnt;
+  if (tabEl) tabEl.textContent = count;
 }
 
 function updateSecondaryBannerUI() {
@@ -5606,7 +5655,24 @@ async function fetchDrops() {
     }
 
     if (freshDrops.length > 0) {
-      allDrops = freshDrops;
+      // Merge fresh drops while strictly preserving all loaded secondary and smart market runners
+      const mergedMap = new Map();
+      freshDrops.forEach(d => {
+        const c = (d.contract || '').toLowerCase();
+        if (c) mergedMap.set(c, d);
+      });
+      allDrops.forEach(d => {
+        const c = (d.contract || '').toLowerCase();
+        if (c && !mergedMap.has(c)) {
+          mergedMap.set(c, d);
+        }
+      });
+      allDrops = Array.from(mergedMap.values());
+      if (activeTab === 'SECONDARY') {
+        allDrops.sort((a, b) => getSanitizedMcap(b) - getSanitizedMcap(a));
+      } else {
+        allDrops.sort((a, b) => Number(b.block || 0) - Number(a.block || 0));
+      }
       if (!latestKnownBlock && allDrops[0] && allDrops[0].block) {
         latestKnownBlock = allDrops[0].block;
       }
@@ -5718,6 +5784,17 @@ async function fetchDrops() {
         }
       });
     }, 100);
+
+    // Preload all historical secondary market runners across entire database
+    setTimeout(() => {
+      loadSecondaryDrops().then(() => {
+        updateSecondaryTabCount();
+        updateSecondaryBannerUI();
+        if (activeTab === 'SECONDARY') {
+          renderTable();
+        }
+      });
+    }, 200);
 
   } catch (err) {
     console.error('Failed to load drops:', err);
@@ -6180,6 +6257,13 @@ async function init() {
         if (activeTab === 'SMART' && !hasLoadedSmartDrops) {
           loadSmartDrops().then(() => renderTable());
         }
+        if (activeTab === 'SECONDARY' && !hasLoadedSecondaryDrops) {
+          loadSecondaryDrops().then(() => {
+            updateSecondaryTabCount();
+            updateSecondaryBannerUI();
+            renderTable();
+          });
+        }
 
         const isPort = (activeTab === 'PORTFOLIO');
         const isSec = (activeTab === 'SECONDARY');
@@ -6443,6 +6527,7 @@ if (typeof module !== 'undefined' && module.exports) {
     toggleDexChart,
     viewWalletActivity,
     loadSmartDrops,
+    loadSecondaryDrops,
     mergeDropsIntoAllDrops,
     getFilteredDrops,
     renderSmartLeaderboardRows,

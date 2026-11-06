@@ -127,6 +127,62 @@ def _etag_matches(client_etag: Optional[str], target_etag: str) -> bool:
     return c == t
 
 
+EXCLUDED_PEGS_SYMBOLS = {
+    'BTCB', 'WBTC', 'BTC', 'ETH', 'WETH', 'WBNB', 'BNB', 'USDT', 'USDC', 'BUSD', 
+    'DAI', 'TUSD', 'FDUSD', 'CAKE', 'U', 'OSK', 'FIST'
+}
+EXCLUDED_PEGS_CONTRACTS = {
+    '0x7130d2a12b9bcbfae4f2634d864a1ee1ce3ead9c',
+    '0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c',
+    '0x55d398326f99059ff775485246999027b3197955',
+    '0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d',
+    '0xe9e7cea3dedca5984780bafc599bd69add087d56',
+    '0x2170ed0880ac9a755fd29b2688956bd959f933f8',
+    '0x14016e85a25a55f2e084741d69d9d82361f38e2b',
+    '0x0e09fabb73bd3ade0a17ecc321fd13a19e81ce82'
+}
+SYNTHETIC_EQUITY_SYMBOLS = {
+    'TSLAB', 'AAPLB', 'MSFTB', 'METAB', 'SPCXB', 'NVDA', 'NVDAB', 'AMZNB', 'GOOGLB', 'MRNAB', 'SOXSB', 'CRCLB', 'QQQB', 'MSTRB'
+}
+
+def get_sanitized_mcap(d: dict) -> float:
+    if not d:
+        return 0.0
+    mc = float(d.get("market_cap") or d.get("fdv") or 0.0)
+    if mc == 0.0:
+        px = float(d.get("token_price_usd") or d.get("market_price_usd") or 0.0)
+        tm = float(d.get("total_minted") or 0.0)
+        ms = float(d.get("max_supply") or 0.0)
+        if px > 0:
+            if 0 < tm < 1e14:
+                mc = tm * px
+            elif 0 < ms < 1e14:
+                mc = ms * px
+            elif tm >= 1e14:
+                mc = (tm / 1e18) * px
+            elif ms >= 1e14:
+                mc = (ms / 1e18) * px
+    if mc > 100_000_000 and float(d.get("lp_usd") or 0.0) < 50_000:
+        return 0.0
+    return mc
+
+def is_secondary_market_asset(d: dict) -> bool:
+    if not d:
+        return False
+    c = str(d.get("contract") or "").lower().strip()
+    sym = str(d.get("symbol") or "").upper().strip()
+    if c in EXCLUDED_PEGS_CONTRACTS or sym in EXCLUDED_PEGS_SYMBOLS or sym in SYNTHETIC_EQUITY_SYMBOLS:
+        return False
+    lp = float(d.get("lp_usd") or 0.0)
+    mc = get_sanitized_mcap(d)
+    px = float(d.get("token_price_usd") or 0.0)
+    vol = float(d.get("volume_24h") or 0.0)
+    sec_vol = float(d.get("secondary_vol_bnb") or 0.0)
+    has_pair = bool(d.get("pair_address") or d.get("pair_url"))
+    is_grad = bool(d.get("is_graduated"))
+    return lp > 50.0 or mc > 500.0 or (px > 0 and vol > 0) or sec_vol > 0 or has_pair or is_grad
+
+
 @app.get("/api/feed")
 def get_feed(
     request: Request,
@@ -149,6 +205,7 @@ def get_feed(
     sniper_ready_count = sum(1 for d in all_projs if d.get("sniper_ready"))
     proxy_count = sum(1 for d in all_projs if d.get("is_proxy_clone"))
     nft_surge_count = sum(1 for d in all_projs if d.get("is_nft_surge"))
+    secondary_count = sum(1 for d in all_projs if is_secondary_market_asset(d))
 
     stats = {
         "total": total,
@@ -156,6 +213,7 @@ def get_feed(
         "sniper_ready": sniper_ready_count,
         "proxy": proxy_count,
         "nft_surge": nft_surge_count,
+        "secondary": secondary_count,
         "latest_block": latest_block
     }
 
@@ -200,7 +258,10 @@ def get_feed(
 
     # Filter target list if requested
     target_list = all_projs
-    if filter == "smart":
+    if filter == "secondary":
+        target_list = [d for d in all_projs if is_secondary_market_asset(d)]
+        target_list.sort(key=lambda x: get_sanitized_mcap(x), reverse=True)
+    elif filter == "smart":
         target_list = [d for d in all_projs if (d.get("smart_wallets") or d.get("smart_minters"))]
     elif filter == "sniper_ready":
         target_list = [d for d in all_projs if d.get("sniper_ready")]

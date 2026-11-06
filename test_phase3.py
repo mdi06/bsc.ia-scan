@@ -134,5 +134,13 @@ def test_api_feed_endpoint():
     assert filter_data["success"] is True
     assert "filter_total" in filter_data
 
+    # 4. Secondary market filter mode
+    res_sec = client.get("/api/feed?limit=10&filter=secondary")
+    assert res_sec.status_code == 200
+    sec_data = res_sec.json()
+    assert sec_data["success"] is True
+    assert "filter_total" in sec_data
+    assert "secondary" in sec_data.get("stats", {})
+
 
 
