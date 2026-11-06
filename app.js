@@ -1362,11 +1362,17 @@ if (typeof window !== 'undefined') window.openSmartLeaderboardModal = openSmartL
 let currentTabWalletFilter = 'ALL';
 let tabWalletsSearchKeyword = '';
 let tabWalletsDisplayLimit = 50;
+let cachedHunters = null;
+let cachedHuntersAllDropsLen = 0;
 
 function updateWalletsTabBadge() {
   if (typeof document === 'undefined') return;
   const countEl = document.getElementById('walletsTabCount');
-  const allHunters = computeSmartWalletLeaderboard(allDrops);
+  if (!cachedHunters || cachedHuntersAllDropsLen !== allDrops.length) {
+    cachedHunters = computeSmartWalletLeaderboard(allDrops);
+    cachedHuntersAllDropsLen = allDrops.length;
+  }
+  const allHunters = cachedHunters;
   if (countEl) countEl.textContent = allHunters.length.toLocaleString();
   const summaryEl = document.getElementById('walletsTabSummaryPill');
   if (summaryEl) {
@@ -1789,8 +1795,9 @@ function renderSmartStreamTicker(drops) {
   };
 
   const events = [];
+  const targetDrops = drops.length > 80 ? drops.slice(0, 80) : drops;
 
-  drops.forEach((d) => {
+  targetDrops.forEach((d) => {
     const symbol = escapeHtml((d.symbol || d.name || 'UNKNOWN').toUpperCase());
     const contract = escapeHtml(d.contract || '');
     const time = formatTickerTime(d.detected_at);
@@ -2386,11 +2393,17 @@ function getFilteredDrops() {
   return list;
 }
 
+const TABLE_RENDER_CHUNK = 60;
+let tableRenderLimit = 60;
+
 // Render Table Rows
-function renderTable() {
+function renderTable(keepLimit = false) {
   if (typeof document === 'undefined') return;
   const tbody = document.getElementById('tableBody');
   if (!tbody) return;
+  if (!keepLimit) {
+    tableRenderLimit = TABLE_RENDER_CHUNK;
+  }
   tbody.innerHTML = '';
   const filtered = getFilteredDrops();
 
@@ -2403,7 +2416,7 @@ function renderTable() {
   const totalDisplay = globalStats ? globalStats.total : allDrops.length;
   const footerCountEl = document.getElementById('footerCount');
   if (footerCountEl) {
-    footerCountEl.textContent = `Showing ${filtered.length} of ${totalDisplay} collections`;
+    footerCountEl.textContent = `Showing ${Math.min(filtered.length, tableRenderLimit)} of ${totalDisplay} collections`;
   }
 
   // Feature 2: Dedicated Wallet Leaderboard Tab Visibility Toggle
@@ -2486,7 +2499,9 @@ function renderTable() {
     return;
   }
 
-  filtered.forEach((item, index) => {
+  const fragment = document.createDocumentFragment();
+  const visible = filtered.slice(0, tableRenderLimit);
+  visible.forEach((item, index) => {
     const tr = document.createElement('tr');
     if (item._isNew) tr.classList.add('row-new');
     tr.addEventListener('click', () => openModal(item));
@@ -2722,36 +2737,296 @@ function renderTable() {
       <td class="col-floor" data-label="FLOOR"><span class="cell-val">${cellFloor}</span></td>
       <td class="col-action">${actBtn}</td>
     `;
-    tbody.appendChild(tr);
+    fragment.appendChild(tr);
   });
+  tbody.appendChild(fragment);
 
   // Update pagination button visibility and progress
   if (loadMoreWrap) {
-    if (activeTab === 'RADAR' && activeFilter === 'ALL' && !searchQuery && hasMoreDrops) {
+    if (tableRenderLimit < filtered.length || (activeTab === 'RADAR' && activeFilter === 'ALL' && !searchQuery && hasMoreDrops)) {
       loadMoreWrap.style.display = 'block';
       const loadedCountEl = document.getElementById('loadedCount');
       const totalAvailEl = document.getElementById('totalAvailableCount');
-      if (loadedCountEl) loadedCountEl.textContent = allDrops.length;
-      if (totalAvailEl) totalAvailEl.textContent = globalStats ? globalStats.total : allDrops.length;
+      if (loadedCountEl) loadedCountEl.textContent = Math.min(filtered.length, tableRenderLimit);
+      if (totalAvailEl) totalAvailEl.textContent = (activeTab === 'RADAR' && activeFilter === 'ALL' && !searchQuery && globalStats) ? globalStats.total : filtered.length;
     } else {
       loadMoreWrap.style.display = 'none';
     }
   }
 }
 
+// Progressive Batch Appender for smooth 60 FPS scrolling
+function appendNextTableBatch() {
+  const filtered = getFilteredDrops();
+  if (tableRenderLimit >= filtered.length) return;
+  const nextBatch = filtered.slice(tableRenderLimit, tableRenderLimit + TABLE_RENDER_CHUNK);
+  if (nextBatch.length === 0) return;
+
+  const tbody = document.getElementById('tableBody');
+  if (!tbody) return;
+  const fragment = document.createDocumentFragment();
+
+  nextBatch.forEach((item, idx) => {
+    const index = tableRenderLimit + idx;
+    const tr = document.createElement('tr');
+    if (item._isNew) tr.classList.add('row-new');
+    tr.addEventListener('click', () => openModal(item));
+
+    const blk = item.block ? `#${String(item.block).slice(-6)}` : '-';
+    const smWalletsList = (item.smart_wallets && item.smart_wallets.length > 0)
+      ? item.smart_wallets
+      : (item.smart_minters && item.smart_minters.length > 0 ? item.smart_minters : []);
+    const isSm = smWalletsList.length > 0;
+    const hasFollowed = smWalletsList.some(w => followedWallets.has(String(w).toLowerCase()));
+    const isCluster = smWalletsList.length >= 3;
+    const isReady = isSniperReady(item);
+
+    let smBadge = '';
+    if (hasFollowed) {
+      const followedNames = smWalletsList.filter(w => followedWallets.has(String(w).toLowerCase()));
+      const firstF = followedNames[0] || 'Alpha';
+      smBadge = `<span class="badge-followed-star" title="⭐ Followed Alpha Hunter: ${escapeHtml(followedNames.join(', '))}">⭐ ${escapeHtml(firstF)}</span>`;
+    } else if (isCluster && isReady) {
+      smBadge = `<span class="badge-cluster" title="🔥 ${smWalletsList.length} Smart Wallets Cluster & Sniper Ready">🔥🎯 CLUSTER (${smWalletsList.length})</span>`;
+    } else if (isCluster) {
+      smBadge = `<span class="badge-cluster" title="🔥 ${smWalletsList.length} Smart Wallets Cluster Inflow">🔥 CLUSTER (${smWalletsList.length})</span>`;
+    } else if (isSm && isReady) {
+      smBadge = `<span title="Smart Alpha & Sniper Ready">🧠🎯</span>`;
+    } else if (isReady) {
+      smBadge = `<span title="Sniper Ready">🎯</span>`;
+    } else if (isSm) {
+      smBadge = `<span title="${smWalletsList.join(', ')}">🧠</span>`;
+    }
+
+    // Standard badge
+    const std = String(item.standard || 'ERC-721');
+    let stdBadge = `<span style="color: var(--color-magenta); font-weight:600;">ERC-721</span>`;
+    if (item.is_nft_surge) {
+      stdBadge = `<span class="badge badge-magenta" style="box-shadow: 0 0 8px rgba(217, 70, 239, 0.4); font-weight:700;">🦋 SURGE (${item.secondary_sales_count || 0})</span>`;
+    } else if (item.is_proxy_clone) {
+      stdBadge = `<span class="badge badge-cyan" style="box-shadow: 0 0 8px rgba(56, 189, 248, 0.4); font-weight:700;" title="${escapeHtml(item.proxy_type || 'Proxy')} Master: ${escapeHtml(item.master_implementation || '')}">🧩 PROXY</span>`;
+    } else if (std.includes('BEP-20')) {
+      stdBadge = `<span style="color: var(--color-cyan); font-weight:600;">BEP-20</span>`;
+    } else if (std.includes('Fair-Mint')) {
+      stdBadge = `<span style="color: var(--color-yellow); font-weight:600;">Fair-Mint</span>`;
+    }
+
+    // Safety badge
+    const rLvl = String(item.risk_level || 'SAFE').toUpperCase();
+    const rBdg = String(item.risk_badge || '').toUpperCase();
+    let safeBadge = `<span style="color: var(--color-green); font-weight:600;">🟢 Clean</span>`;
+    if (rBdg.includes('HONEYPOT') || rLvl === 'RUG') {
+      safeBadge = `<span class="badge badge-red">🚨 Honeypot</span>`;
+    } else if (rBdg.includes('SERIAL') || (item.security && item.security.is_serial_dev)) {
+      safeBadge = `<span class="badge badge-red">🚨 SerialDev</span>`;
+    } else if (rBdg.includes('DRAIN') || (item.security && item.security.is_fund_drain)) {
+      safeBadge = `<span class="badge badge-red">🚨 Drained</span>`;
+    } else if (rBdg.includes('HIGH') || rLvl === 'HIGH') {
+      safeBadge = `<span class="badge badge-yellow">🔴 HighRisk</span>`;
+    } else if (rBdg.includes('MED') || rLvl === 'MED') {
+      safeBadge = `<span style="color: var(--color-yellow); font-weight:600;">🟡 Med Risk</span>`;
+    } else if (isReady) {
+      safeBadge = `<span class="badge badge-green" style="box-shadow: 0 0 8px rgba(74, 222, 128, 0.4); font-weight: 700;">🎯 READY</span>`;
+    }
+
+    // Interest Badge
+    const sc = Number(item.score || 0);
+    let intBadge = `<span style="color: var(--text-dim);">Cold (0)</span>`;
+    if (sc >= 80) {
+      intBadge = `<span style="color: var(--color-red); font-weight:700;">🔥 Hot (${sc})</span>`;
+    } else if (sc >= 50) {
+      intBadge = `<span style="color: var(--color-yellow); font-weight:600;">⚡ Med (${sc})</span>`;
+    } else if (sc >= 20) {
+      intBadge = `<span style="color: var(--color-cyan);">🌱 Warm (${sc})</span>`;
+    }
+
+    // Progress Bar
+    const isNft = std.includes('721') || std.includes('NFT');
+    const ms = Number(item.max_supply || 0);
+    const tm = Number(item.total_minted || 0);
+    let progPct = 0;
+    let progLabel = 'TOKEN 0%';
+    if (isNft && ms > 0) {
+      progPct = Math.min(100, Math.max(0, (tm / ms) * 100));
+      progLabel = `${progPct.toFixed(0)}%`;
+    } else if (ms > 0) {
+      progPct = Math.min(100, Math.max(0, (tm / ms) * 100));
+      progLabel = `TOKEN ${progPct.toFixed(0)}%`;
+    } else if (tm > 0) {
+      progLabel = 'OPEN FAIR';
+      progPct = 100;
+    }
+    if (ms > 0 && tm >= ms) {
+      progLabel = 'SOLD 100%';
+      progPct = 100;
+    }
+    const progColor = progPct >= 99 ? 'var(--color-magenta)' : (progPct >= 50 ? 'var(--color-green)' : 'var(--color-cyan)');
+    const progBar = `
+      <div style="font-size: 10px; color: ${progColor}; font-weight: 700; margin-bottom: 2px;">${progLabel}</div>
+      <div class="progress-bar-wrap">
+        <div class="progress-bar-fill" style="width: ${progPct}%; background: ${progColor};"></div>
+      </div>
+    `;
+
+    // Mint Price
+    const pStr = String(item.mint_price_str || '').toUpperCase();
+    const vWei = Number(item.mint_value_wei || 0);
+    const isFree = item.has_free_mint || pStr.includes('FREE') || (vWei === 0 && Number(item.mint_price_bnb || 0) === 0 && !pStr.includes('PAID') && !pStr.includes('DEX') && !pStr.includes('TBD'));
+    let priceStr = `<span class="dim">TBD</span>`;
+    if (pStr.includes('DEX')) {
+      priceStr = `<span style="color: var(--color-cyan);">DEX Traded</span>`;
+    } else if (isFree) {
+      priceStr = `<span style="color: var(--color-green); font-weight:700;">⭐ FREE</span>`;
+    } else if (vWei > 0) {
+      priceStr = `<span style="color: var(--color-yellow); font-weight:600;">💎 ${(vWei / 1e18).toFixed(4)} BNB</span>`;
+    }
+
+    // Floor / Trade
+    const flUsd = Number(item.floor_price_usd || 0);
+    const flBnb = Number(item.floor_price_bnb || 0);
+    const tkUsd = Number(item.token_price_usd || item.market_price_usd || 0);
+    let floorStr = `<span class="dim">—</span>`;
+    if (flUsd > 0) {
+      floorStr = `<span style="color: var(--color-cyan); font-weight:600;">$${flUsd.toFixed(2)}</span>`;
+    } else if (flBnb > 0) {
+      if (item.is_nft_surge) {
+        floorStr = `<span style="color: var(--color-magenta); font-weight:700;">${flBnb.toFixed(4)} BNB</span>`;
+      } else {
+        floorStr = `<span style="color: var(--color-cyan); font-weight:600;">${flBnb} BNB</span>`;
+      }
+    } else if (tkUsd > 0) {
+      floorStr = `<span style="color: var(--color-green); font-weight:600;">$${tkUsd < 0.001 ? tkUsd.toFixed(6) : tkUsd.toFixed(4)}</span>`;
+    }
+
+    const athProf = Number(item.ath_profit_usd || 0);
+    const curProf = Number(item.current_profit_usd || 0);
+    const maxProf = Math.max(athProf, curProf);
+    if (maxProf > 0) {
+      const pStrVal = formatCryptoPrice(maxProf, true);
+      const multVal = item.ath_multiplier ? ` [${item.ath_multiplier}x]` : '';
+      floorStr += ` <span class="badge badge-green" style="font-size: 9px; padding: 1px 4px; margin-left: 2px;" title="Peak ATH Post-Mint Net: ${pStrVal} / token${multVal}">🏆 ${pStrVal}</span>`;
+    }
+
+    const exitSignal = evaluatePortfolioExit(item, bnbPrice);
+    const isPort = (activeTab === 'PORTFOLIO');
+    let cellHolders = `${formatCount(item.holders || 1)} / ${formatCount(item.buys_24h || 1)}`;
+    if (isPort && item.user_balance > 0) {
+      const balVal = isNft ? `${item.user_balance} NFT` : formatCount(item.user_balance);
+      const usdVal = exitSignal.holding_usd > 0 ? ` (~$${exitSignal.holding_usd.toFixed(2)})` : '';
+      cellHolders = `<strong style="color: var(--color-green);">${balVal}</strong>${usdVal}`;
+    }
+
+    let cellFloor = floorStr;
+    if (isPort && item.user_balance > 0) {
+      cellFloor = `
+        <div style="display: flex; flex-direction: column; gap: 2px;">
+          <span>${floorStr}</span>
+          <span class="badge ${exitSignal.badge_class || 'badge-cyan'}" style="font-size: 9px; padding: 1px 4px;" title="${escapeHtml(exitSignal.recommendation)}">
+            ${exitSignal.badge}
+          </span>
+        </div>
+      `;
+    }
+
+    const isFav = isFavorited(item.contract, item);
+    const starClass = isFav ? 'btn-star starred' : 'btn-star';
+    const starIcon = isFav ? '★' : '☆';
+
+    let lpStr = '—';
+    if (Number(item.lp_usd || 0) > 0) {
+      lpStr = `<span style="color: var(--color-green); font-weight:600;">$${formatCount(item.lp_usd)}</span>`;
+    } else if (item.is_nft_surge && Number(item.secondary_vol_bnb || 0) > 0) {
+      lpStr = `<span style="color: var(--color-magenta); font-weight:600;">${Number(item.secondary_vol_bnb).toFixed(2)} BNB</span>`;
+    }
+
+    let actBtn = `<button class="inspect-btn" onclick="openModal(allDrops[${index}] || allDrops.find(x => x.contract === '${item.contract}'))"><span class="desktop-only">Inspect</span><span class="mobile-only">➔</span></button>`;
+    if (isPort && item.user_balance > 0) {
+      if (item.is_native_gas) {
+        cellHolders = `<span style="color: var(--color-green); font-weight:700;">Gas: ${Number(item.user_balance || 0).toFixed(4)} BNB</span>`;
+        cellFloor = `<span class="badge badge-cyan" style="font-size: 11px;">⛽ GAS RESERVE</span>`;
+        actBtn = `<button class="inspect-btn" style="border-color: var(--color-cyan); color: var(--color-cyan); font-weight:700;"><span class="desktop-only">⛽ Gas Reserve</span><span class="mobile-only">⛽ Gas ➔</span></button>`;
+      } else if (isNft) {
+        cellHolders = `<span style="color: var(--color-green); font-weight:700;">Holdings: ${formatCount(item.user_balance || 1)} NFT</span>`;
+        cellFloor = `<span class="badge ${exitSignal.badge_class}" style="font-size: 11px;">${exitSignal.badge}</span>`;
+        actBtn = `<button class="inspect-btn" style="border-color: var(--color-magenta); color: var(--color-magenta); font-weight:700;"><span class="desktop-only">🎨 Element List</span><span class="mobile-only">🎨 Element ➔</span></button>`;
+      } else {
+        const balNum = Number(item.user_balance || 0);
+        const balStr = balNum >= 1000 ? formatCount(balNum) : (balNum < 0.01 ? balNum.toFixed(4) : balNum.toFixed(2));
+        cellHolders = `<span style="color: var(--color-green); font-weight:700;">Holdings: ${balStr}</span>`;
+        cellFloor = `<span class="badge ${exitSignal.badge_class}" style="font-size: 11px;">${exitSignal.badge}</span>`;
+        actBtn = `<button class="inspect-btn" style="border-color: #f0b90b; color: #f0b90b; font-weight:700;"><span class="desktop-only">🥞 1-Click Exit</span><span class="mobile-only">🥞 Exit CLI ➔</span></button>`;
+      }
+    }
+
+    tr.innerHTML = `
+      <td class="col-fav"><button class="${starClass}" onclick="toggleFavorite('${item.contract}', event)" title="${isFav ? 'Remove from favorites' : 'Add to favorites'}">${starIcon}</button></td>
+      <td class="col-num">${index + 1}</td>
+      <td class="col-block"><code>${blk}</code></td>
+      <td class="col-sm">${smBadge}</td>
+      <td class="col-project"><strong>${item.name || 'Unknown'}</strong><span class="sym">(${item.symbol || ''})</span></td>
+      <td class="col-type">${stdBadge}</td>
+      <td class="col-safety">${safeBadge}</td>
+      <td class="col-interest">${intBadge}</td>
+      <td class="col-holders" data-label="${isPort ? 'HOLDINGS' : 'HOLDERS'}"><span class="cell-val">${cellHolders}</span></td>
+      <td class="col-lp" data-label="LIQUIDITY"><span class="cell-val">${lpStr}</span></td>
+      <td class="col-progress">${progBar}</td>
+      <td class="col-price" data-label="MINT"><span class="cell-val">${priceStr}</span></td>
+      <td class="col-floor" data-label="FLOOR"><span class="cell-val">${cellFloor}</span></td>
+      <td class="col-action">${actBtn}</td>
+    `;
+    fragment.appendChild(tr);
+  });
+
+  tbody.appendChild(fragment);
+  tableRenderLimit += nextBatch.length;
+
+  const footerCountEl = document.getElementById('footerCount');
+  const totalDisplay = globalStats ? globalStats.total : allDrops.length;
+  if (footerCountEl) {
+    footerCountEl.textContent = `Showing ${Math.min(filtered.length, tableRenderLimit)} of ${totalDisplay} collections`;
+  }
+
+  const loadMoreWrap = document.getElementById('loadMoreWrap');
+  if (loadMoreWrap) {
+    const loadedCountEl = document.getElementById('loadedCount');
+    if (loadedCountEl) loadedCountEl.textContent = Math.min(filtered.length, tableRenderLimit);
+    if (tableRenderLimit >= filtered.length && !hasMoreDrops) {
+      loadMoreWrap.style.display = 'none';
+    }
+  }
+}
+if (typeof window !== 'undefined') window.appendNextTableBatch = appendNextTableBatch;
+
+function handleLoadMoreClick() {
+  const filtered = getFilteredDrops();
+  if (tableRenderLimit < filtered.length) {
+    appendNextTableBatch();
+  } else if (hasMoreDrops && !isLoadingMore) {
+    loadMoreDrops();
+  }
+}
+if (typeof window !== 'undefined') {
+  window.handleLoadMoreClick = handleLoadMoreClick;
+}
+
 // Dynamic Holder Distribution Intelligence
 // Analyzes on-chain fair-mint state, smart money concentration, sniper allocation, and creator share
 function computeHolderDistribution(item) {
   if (!item) return { dev: 0, insider: 0, smart: 0, sniper: 0, fresh: 0, public: 100, isUnminted: false };
+  if (item._cachedHolderDist) return item._cachedHolderDist;
   
   // If explicitly provided with realistic distribution, preserve it
   if (item.hold && typeof item.hold === 'object' && Object.keys(item.hold).length > 0 &&
       (item.hold.dev > 0 || item.hold.insider > 0 || item.hold.sniper > 0 || item.hold.smart > 0 || item.hold.fresh > 0)) {
-    return { ...item.hold, isUnminted: false };
+    const res = { ...item.hold, isUnminted: false };
+    item._cachedHolderDist = res;
+    return res;
   }
   if (item.holder_distribution && typeof item.holder_distribution === 'object' && Object.keys(item.holder_distribution).length > 0 &&
       (item.holder_distribution.dev > 0 || item.holder_distribution.insider > 0 || item.holder_distribution.sniper > 0 || item.holder_distribution.smart > 0 || item.holder_distribution.fresh > 0)) {
-    return { ...item.holder_distribution, isUnminted: false };
+    const res = { ...item.holder_distribution, isUnminted: false };
+    item._cachedHolderDist = res;
+    return res;
   }
 
   const tm = Number(item.total_minted || 0);
@@ -2759,7 +3034,7 @@ function computeHolderDistribution(item) {
   const isUnminted = (tm === 0 && holders <= 1);
 
   if (isUnminted) {
-    return {
+    const res = {
       isUnminted: true,
       dev: 0.0,
       insider: 0.0,
@@ -2768,6 +3043,8 @@ function computeHolderDistribution(item) {
       fresh: 0.0,
       public: 100.0
     };
+    item._cachedHolderDist = res;
+    return res;
   }
 
   // Dynamic calculation for minted tokens
@@ -2809,7 +3086,7 @@ function computeHolderDistribution(item) {
   const nonPublic = devHold + insiderHold + sniperHold + smartHold + freshHold;
   const publicHold = Math.max(0.0, 100.0 - nonPublic);
 
-  return {
+  const result = {
     isUnminted: false,
     dev: Number(devHold.toFixed(1)),
     insider: Number(insiderHold.toFixed(1)),
@@ -2818,6 +3095,8 @@ function computeHolderDistribution(item) {
     fresh: Number(freshHold.toFixed(1)),
     public: Number(publicHold.toFixed(1))
   };
+  item._cachedHolderDist = result;
+  return result;
 }
 
 // Modal Inspection Dialog
@@ -5450,19 +5729,27 @@ async function init() {
     document.addEventListener('click', unlockAudio, { once: true });
     document.addEventListener('keydown', unlockAudio, { once: true });
 
-    await fetchDrops();
+    // Infinite scroll: smoothly append batches and load older drops as user scrolls down
+    const handleInfiniteScroll = (target) => {
+      const isNearBottom = target === window
+        ? (window.innerHeight + window.scrollY >= document.body.offsetHeight - 600)
+        : (target.scrollTop + target.clientHeight >= target.scrollHeight - 300);
 
-    // Background sync every 5m to refresh volume/liquidity metrics (delta feed handles new drops in real-time)
-    setInterval(fetchDrops, 300000);
+      if (!isNearBottom) return;
 
-    // Infinite scroll: automatically load older drops as user scrolls down
-    window.addEventListener('scroll', () => {
-      if (activeTab === 'RADAR' && activeFilter === 'ALL' && !searchQuery && hasMoreDrops && !isLoadingMore) {
-        if (window.innerHeight + window.scrollY >= document.body.offsetHeight - 600) {
-          loadMoreDrops();
-        }
+      const filtered = getFilteredDrops();
+      if (tableRenderLimit < filtered.length) {
+        appendNextTableBatch();
+      } else if (activeTab === 'RADAR' && activeFilter === 'ALL' && !searchQuery && hasMoreDrops && !isLoadingMore) {
+        loadMoreDrops();
       }
-    }, { passive: true });
+    };
+
+    window.addEventListener('scroll', () => handleInfiniteScroll(window), { passive: true });
+    const tableWrap = document.querySelector('.table-wrapper');
+    if (tableWrap) {
+      tableWrap.addEventListener('scroll', () => handleInfiniteScroll(tableWrap), { passive: true });
+    }
 
     // Tab buttons
     document.querySelectorAll('.tab-btn').forEach(btn => {
@@ -5654,6 +5941,10 @@ async function init() {
 
     // Auto-reconnect previously authorized wallet
     tryAutoReconnect();
+
+    // Start cloud feed fetch & periodic background sync (non-blocking so UI is instant)
+    fetchDrops().catch(err => console.warn('Initial fetchDrops hitch:', err));
+    setInterval(fetchDrops, 300000);
 
     // Poll latest block
     pollLatestBlock();

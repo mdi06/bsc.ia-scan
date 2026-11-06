@@ -1099,11 +1099,15 @@ tbody tr.selected {
   font-family: var(--font-mono);
   box-shadow: 0 10px 40px rgba(0, 0, 0, 0.8), 0 0 20px rgba(255, 59, 148, 0.25);
   outline: none;
+  contain: layout;
+  will-change: transform, opacity;
 }
 
 .project-modal::backdrop {
-  background: rgba(0, 0, 0, 0.8);
+  background: rgba(0, 0, 0, 0.82);
   backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  will-change: opacity;
 }
 
 .modal-content {
