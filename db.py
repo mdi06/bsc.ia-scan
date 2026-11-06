@@ -56,6 +56,21 @@ class DatabaseManager:
         self._client_instance = None
         self._client_pid = None
 
+        # Pre-seed in-memory cache from local history (0-byte egress on cold start)
+        if os.path.exists(HISTORY_FILE):
+            try:
+                with open(HISTORY_FILE, "r", encoding="utf-8") as f:
+                    seed_drops = json.load(f)
+                if isinstance(seed_drops, list):
+                    for d in seed_drops:
+                        c = (d.get("contract") or "").lower()
+                        if c:
+                            self._projects_cache[c] = d
+                    if self._projects_cache:
+                        self._cache_initialized = True
+            except Exception:
+                pass
+
         if self.mode == "sqlite":
             self._init_sqlite()
         
