@@ -2393,8 +2393,8 @@ function getFilteredDrops() {
   return list;
 }
 
-const TABLE_RENDER_CHUNK = 150;
-let tableRenderLimit = 150;
+const TABLE_RENDER_CHUNK = 60;
+let tableRenderLimit = 60;
 
 // Render Table Rows
 function renderTable(keepLimit = false) {
@@ -2577,19 +2577,25 @@ function renderTable(keepLimit = false) {
       ? `<span class="hld">${formatCount(hld)}</span> <span class="dim">/</span> <span class="buy">${formatCount(buys)}</span>`
       : `<span class="dim">0 / 0</span>`;
 
-    // LP / Vol
+    // LP / Vol & Market Cap
     const lpUsd = Number(item.lp_usd || 0);
+    const mcapUsd = Number(item.market_cap || item.fdv || 0);
     const volBnb = item.volume_bnb || item.nft_volume_bnb;
     const secVol = Number(item.secondary_vol_bnb || 0);
     let lpStr = `<span class="dim">—</span>`;
     if (lpUsd > 0) {
       lpStr = `<span style="color: var(--color-green); font-weight:600;">$${lpUsd.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>`;
+      if (mcapUsd > 0) {
+        lpStr += `<div class="sub-mcap" style="font-size: 10px; color: var(--color-cyan); font-weight:600;" title="Market Cap / FDV: $${formatCount(mcapUsd)}">MC: $${formatCount(mcapUsd)}</div>`;
+      }
     } else if (item.is_nft_surge && secVol > 0) {
       lpStr = `<span style="color: var(--color-magenta); font-weight:700;" title="${item.secondary_sales_count || 0} Element sales">${secVol.toFixed(3)} BNB 🦋</span>`;
     } else if (secVol > 0) {
       lpStr = `<span style="color: var(--color-cyan); font-weight:600;" title="${item.secondary_sales_count || 0} Element sales">${secVol.toFixed(3)} BNB</span>`;
     } else if (volBnb && Number(volBnb) > 0) {
       lpStr = `<span style="color: var(--color-cyan); font-weight:600;">${Number(volBnb).toFixed(2)} BNB</span>`;
+    } else if (mcapUsd > 0) {
+      lpStr = `<span style="color: var(--color-cyan); font-weight:600;" title="Market Cap / FDV: $${formatCount(mcapUsd)}">MC: $${formatCount(mcapUsd)}</span>`;
     }
 
     // Progress Bar
@@ -2676,6 +2682,11 @@ function renderTable(keepLimit = false) {
       }
     } else if (tkUsd > 0) {
       floorStr = `<span style="color: var(--color-green); font-weight:600;">$${tkUsd < 0.001 ? tkUsd.toFixed(6) : tkUsd.toFixed(4)}</span>`;
+      const chg24 = Number(item.price_change_24h || 0);
+      if (chg24 !== 0) {
+        const isUp = chg24 > 0;
+        floorStr += ` <span class="badge ${isUp ? 'badge-green' : 'badge-red'}" style="font-size: 9px; padding: 1px 3px;" title="24h Price Change: ${chg24.toFixed(1)}%">${isUp ? '+' : ''}${chg24.toFixed(1)}%</span>`;
+      }
     }
 
     const athProf = Number(item.ath_profit_usd || 0);
@@ -2896,6 +2907,11 @@ function appendNextTableBatch() {
       }
     } else if (tkUsd > 0) {
       floorStr = `<span style="color: var(--color-green); font-weight:600;">$${tkUsd < 0.001 ? tkUsd.toFixed(6) : tkUsd.toFixed(4)}</span>`;
+      const chg24 = Number(item.price_change_24h || 0);
+      if (chg24 !== 0) {
+        const isUp = chg24 > 0;
+        floorStr += ` <span class="badge ${isUp ? 'badge-green' : 'badge-red'}" style="font-size: 9px; padding: 1px 3px;" title="24h Price Change: ${chg24.toFixed(1)}%">${isUp ? '+' : ''}${chg24.toFixed(1)}%</span>`;
+      }
     }
 
     const athProf = Number(item.ath_profit_usd || 0);
@@ -2932,11 +2948,17 @@ function appendNextTableBatch() {
     const starClass = isFav ? 'btn-star starred' : 'btn-star';
     const starIcon = isFav ? '★' : '☆';
 
+    const mcapUsdBatch = Number(item.market_cap || item.fdv || 0);
     let lpStr = '—';
     if (Number(item.lp_usd || 0) > 0) {
       lpStr = `<span style="color: var(--color-green); font-weight:600;">$${formatCount(item.lp_usd)}</span>`;
+      if (mcapUsdBatch > 0) {
+        lpStr += `<div class="sub-mcap" style="font-size: 10px; color: var(--color-cyan); font-weight:600;" title="Market Cap / FDV: $${formatCount(mcapUsdBatch)}">MC: $${formatCount(mcapUsdBatch)}</div>`;
+      }
     } else if (item.is_nft_surge && Number(item.secondary_vol_bnb || 0) > 0) {
       lpStr = `<span style="color: var(--color-magenta); font-weight:600;">${Number(item.secondary_vol_bnb).toFixed(2)} BNB</span>`;
+    } else if (mcapUsdBatch > 0) {
+      lpStr = `<span style="color: var(--color-cyan); font-weight:600;" title="Market Cap / FDV: $${formatCount(mcapUsdBatch)}">MC: $${formatCount(mcapUsdBatch)}</span>`;
     }
 
     let actBtn = `<button class="inspect-btn" onclick="openModal(allDrops[${index}] || allDrops.find(x => x.contract === '${item.contract}'))"><span class="desktop-only">Inspect</span><span class="mobile-only">➔</span></button>`;
@@ -3186,6 +3208,19 @@ function openModal(item) {
   const smartHold = Number(dist.smart || 0);
   const freshHold = Number(dist.fresh || 0);
   const publicHold = Number(dist.public || 0);
+
+  const mcapNum = Number(item.market_cap || item.fdv || 0);
+  const vol24Num = Number(item.volume_24h || 0);
+  const chg24Num = Number(item.price_change_24h || 0);
+  const tkPriceNum = Number(item.token_price_usd || item.market_price_usd || 0);
+
+  let mcapFormatted = mcapNum > 0 ? `$${formatCount(mcapNum)}` : (tm > 0 && tkPriceNum > 0 ? `$${formatCount(tm * tkPriceNum)}` : '<span class="dim">Fair Mint Phase</span>');
+  let vol24Formatted = vol24Num > 0 ? `$${formatCount(vol24Num)}` : '<span class="dim">—</span>';
+  let chg24Badge = '';
+  if (chg24Num !== 0) {
+    const isUp = chg24Num > 0;
+    chg24Badge = `<span class="badge ${isUp ? 'badge-green' : 'badge-red'}" style="font-size: 11px; font-weight: 700;">${isUp ? '▲ +' : '▼ '}${chg24Num.toFixed(1)}% (24h)</span>`;
+  }
   const isUnminted = Boolean(dist.isUnminted);
 
   const isDevHeavy = devHold > 10.0;
@@ -3241,6 +3276,33 @@ function openModal(item) {
         <div><span class="dim">Deployment Block:</span> <code>#${item.block || 'N/A'}</code></div>
         <div><span class="dim">Total Minted:</span> <strong>${formatCount(item.total_minted)}</strong> / ${formatCount(item.max_supply) || '∞'}</div>
         <div><span class="dim">Holders:</span> <strong>${formatCount(item.holders)} unique wallets</strong></div>
+      </div>
+    </div>
+
+    <div class="modal-section market-dynamics-card">
+      <div class="modal-section-title" style="display: flex; justify-content: space-between; align-items: center;">
+        <span style="color: var(--color-cyan); font-weight: 700; display: inline-flex; align-items: center; gap: 6px;">
+          💎 Market Valuation & Trading Dynamics
+        </span>
+        ${chg24Badge}
+      </div>
+      <div class="modal-grid" style="grid-template-columns: repeat(4, 1fr); gap: 10px; margin-top: 6px;">
+        <div class="market-metric-box">
+          <span class="dim">Market Cap / FDV</span>
+          <strong style="color: ${mcapNum > 0 ? 'var(--color-green)' : 'var(--text-primary)'}; font-size: 15px; display: block; margin-top: 2px;">${mcapFormatted}</strong>
+        </div>
+        <div class="market-metric-box">
+          <span class="dim">24h Trading Vol</span>
+          <strong style="color: ${vol24Num > 0 ? 'var(--color-cyan)' : 'var(--text-dim)'}; font-size: 15px; display: block; margin-top: 2px;">${vol24Formatted}</strong>
+        </div>
+        <div class="market-metric-box">
+          <span class="dim">PancakeSwap LP</span>
+          <strong style="color: ${lp > 0 ? 'var(--color-yellow)' : 'var(--text-dim)'}; font-size: 15px; display: block; margin-top: 2px;">${lp > 0 ? `$${formatCount(lp)}` : '$0'}</strong>
+        </div>
+        <div class="market-metric-box">
+          <span class="dim">Current Price</span>
+          <strong style="font-size: 15px; display: block; margin-top: 2px;">${tkPriceNum > 0 ? formatCryptoPrice(tkPriceNum) : (Number(item.floor_price_usd || 0) > 0 ? `$${Number(item.floor_price_usd).toFixed(2)}` : '<span class="dim">—</span>')}</strong>
+        </div>
       </div>
     </div>
 

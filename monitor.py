@@ -1055,6 +1055,9 @@ def fetch_token_market_data(token_addr: str) -> Dict[str, Any]:
         "buys_1h": 0,
         "sells_24h": 0,
         "volume_24h": 0.0,
+        "market_cap": 0.0,
+        "fdv": 0.0,
+        "price_change_24h": 0.0,
         "pair_url": "",
         "market_price_usd": 0.0,
         "market_price_bnb": 0.0,
@@ -1197,6 +1200,11 @@ def fetch_token_market_data(token_addr: str) -> Dict[str, Any]:
                 res["buys_1h"] = txns.get("h1", {}).get("buys", 0)
                 res["sells_24h"] = txns.get("h24", {}).get("sells", 0)
                 res["volume_24h"] = float(p.get("volume", {}).get("h24", 0.0) or 0.0)
+                mcap = float(p.get("marketCap") or 0.0)
+                fdv = float(p.get("fdv") or 0.0)
+                res["market_cap"] = mcap if mcap > 0 else fdv
+                res["fdv"] = fdv
+                res["price_change_24h"] = float((p.get("priceChange") or {}).get("h24") or 0.0)
                 res["pair_url"] = p.get("url", "")
                 res["market_price_usd"] = float(p.get("priceUsd") or 0.0)
                 res["market_price_bnb"] = float(p.get("priceNative") or 0.0)
@@ -1855,6 +1863,9 @@ def analyze_market_interest(
         "buys_1h": 0,
         "sells_24h": 0,
         "volume_24h": 0.0,
+        "market_cap": 0.0,
+        "fdv": 0.0,
+        "price_change_24h": 0.0,
         "pair_url": "",
         "recent_mints": 0,
         "unique_minters": 0,
@@ -2005,6 +2016,9 @@ def analyze_market_interest(
         stats["buys_1h"] = mkt_data.get("buys_1h", 0)
         stats["sells_24h"] = mkt_data.get("sells_24h", 0)
         stats["volume_24h"] = mkt_data.get("volume_24h", 0.0)
+        stats["market_cap"] = mkt_data.get("market_cap", 0.0)
+        stats["fdv"] = mkt_data.get("fdv", 0.0)
+        stats["price_change_24h"] = mkt_data.get("price_change_24h", 0.0)
         stats["pair_url"] = mkt_data.get("pair_url", "")
         if mkt_data.get("lp_usd"):
             stats["lp_usd"] = mkt_data["lp_usd"]
@@ -2027,6 +2041,8 @@ def analyze_market_interest(
         stats["holders"] = details.get("total_minted", 0)
     if stats["buys_24h"] == 0 and details.get("total_minted"):
         stats["buys_24h"] = details.get("total_minted", 0)
+    if stats.get("market_cap", 0.0) == 0.0 and details.get("total_minted") and stats.get("token_price_usd", 0.0) > 0.0:
+        stats["market_cap"] = float(details["total_minted"]) * float(stats["token_price_usd"])
 
     # If no token security was fetched, audit NFT risk
     if not stats.get("security"):
@@ -2525,6 +2541,9 @@ KNOWN_PROJECTS = [
         "buys_1h": 0,
         "sells_24h": 0,
         "volume_24h": 0.0,
+        "market_cap": 0.0,
+        "fdv": 0.0,
+        "price_change_24h": 0.0,
         "pair_url": "",
         "mint_calldata": "0xa0712d680000000000000000000000000000000000000000000000000000000000000001",
         "signals": [
@@ -2560,6 +2579,9 @@ KNOWN_PROJECTS = [
         "buys_1h": 0,
         "sells_24h": 0,
         "volume_24h": 0.0,
+        "market_cap": 0.0,
+        "fdv": 0.0,
+        "price_change_24h": 0.0,
         "pair_url": "",
         "mint_calldata": "0xa0712d680000000000000000000000000000000000000000000000000000000000000001",
         "signals": [
@@ -2597,6 +2619,9 @@ KNOWN_PROJECTS = [
         "buys_1h": 0,
         "sells_24h": 0,
         "volume_24h": 0.0,
+        "market_cap": 0.0,
+        "fdv": 0.0,
+        "price_change_24h": 0.0,
         "pair_url": "",
         "mint_calldata": "0xa0712d680000000000000000000000000000000000000000000000000000000000000001",
         "signals": [

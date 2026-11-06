@@ -403,12 +403,14 @@ class DatabaseManager:
     @staticmethod
     def _compute_fingerprint(p: Dict[str, Any]) -> str:
         """Computes a compact signature to detect if mutable metrics have actually changed."""
+        mc_k = int(float(p.get("market_cap") or 0.0) / 100)
+        vol_k = int(float(p.get("volume_24h") or 0.0) / 100)
         return (
             f"{p.get('progress')}_{p.get('holders')}_{p.get('score')}_"
             f"{p.get('sniper_ready')}_{p.get('is_proxy_clone')}_{p.get('is_nft_surge')}_"
             f"{p.get('risk_level')}_{p.get('risk_badge')}_{p.get('status')}_"
             f"{p.get('token_price_usd')}_{p.get('token_symbol')}_{p.get('lp_usd')}_"
-            f"{p.get('mint_value_wei')}_{p.get('mint_price_str')}"
+            f"{mc_k}_{vol_k}_{p.get('mint_value_wei')}_{p.get('mint_price_str')}"
         )
 
     def upsert_projects(self, projects: List[Dict[str, Any]]):

@@ -82,6 +82,9 @@ def _enrich_contract_background(rpc: monitor.BscRpcClient, contract_addr: str, d
                     item["buys_1h"] = max(item.get("buys_1h", 0), mkt.get("buys_1h", 0))
                     item["sells_24h"] = mkt.get("sells_24h", 0)
                     item["volume_24h"] = mkt.get("volume_24h", 0.0)
+                    item["market_cap"] = mkt.get("market_cap", 0.0)
+                    item["fdv"] = mkt.get("fdv", 0.0)
+                    item["price_change_24h"] = mkt.get("price_change_24h", 0.0)
                     if mkt.get("pair_url"):
                         item["pair_url"] = mkt["pair_url"]
                     if mkt.get("security"):
@@ -648,6 +651,14 @@ def run_market_dynamics_updater_loop():
 
                         vol = pair.get("volume", {})
                         item["volume_24h"] = float(vol.get("h24") or 0.0)
+
+                        mcap = float(pair.get("marketCap") or 0.0)
+                        fdv = float(pair.get("fdv") or 0.0)
+                        item["market_cap"] = mcap if mcap > 0 else fdv
+                        item["fdv"] = fdv
+
+                        p_chg = pair.get("priceChange", {})
+                        item["price_change_24h"] = float(p_chg.get("h24") or 0.0)
 
                         txns = pair.get("txns", {})
                         h24 = txns.get("h24", {})

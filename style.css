@@ -3518,6 +3518,47 @@ tbody tr.selected {
 }
 
 /* ========================================================
+   Market Valuation & Trading Dynamics Card
+   ======================================================== */
+.market-dynamics-card {
+  background: rgba(0, 240, 255, 0.04);
+  border: 1px solid rgba(0, 240, 255, 0.28);
+  border-radius: 8px;
+  padding: 14px;
+}
+
+.market-metric-box {
+  background: rgba(8, 22, 31, 0.85);
+  border: 1px solid var(--border-dim);
+  border-radius: 6px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.market-metric-box .dim {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-dim);
+}
+
+.sub-mcap {
+  font-size: 10px;
+  color: var(--color-cyan);
+  font-weight: 600;
+  margin-top: 2px;
+  line-height: 1.2;
+}
+
+@media (max-width: 600px) {
+  .market-dynamics-card .modal-grid {
+    grid-template-columns: repeat(2, 1fr) !important;
+  }
+}
+
+/* ========================================================
    Secondary Bonding Curve & DEX Live Chart Styles (Option 3)
    ======================================================== */
 .bonding-gauge-card {
