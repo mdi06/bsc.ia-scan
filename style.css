@@ -1525,7 +1525,9 @@ tbody tr.selected {
   gap: 12px;
   color: var(--text-white);
   min-width: 290px;
-  max-width: 380px;
+  max-width: 440px;
+  box-sizing: border-box;
+  overflow: hidden;
   pointer-events: auto;
   animation: toastSlideIn 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards;
   transition: opacity 0.35s ease, transform 0.35s ease;
@@ -1547,6 +1549,7 @@ tbody tr.selected {
   flex-direction: column;
   gap: 2px;
   flex-grow: 1;
+  min-width: 0;
 }
 
 .toast-title {
@@ -1555,6 +1558,9 @@ tbody tr.selected {
   color: var(--color-green);
   letter-spacing: 0.8px;
   text-transform: uppercase;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .toast-desc {
@@ -1567,8 +1573,11 @@ tbody tr.selected {
 }
 
 .toast-meta {
-  font-size: 10px;
+  font-size: 10.5px;
   color: var(--color-cyan);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 @keyframes toastSlideIn {

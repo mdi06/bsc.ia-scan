@@ -340,36 +340,50 @@ function showNewMarketToast(item) {
 
   // Auto-dismiss after 5s
   setTimeout(() => {
-    toast.classList.add('fade-out');
-    setTimeout(() => toast.remove(), 400);
+    if (toast.classList) toast.classList.add('fade-out');
+    setTimeout(() => {
+      if (toast.remove) toast.remove();
+      else if (toast.parentNode) toast.parentNode.removeChild(toast);
+    }, 400);
   }, 5000);
 }
 
 // Generic feedback toast
-function showToast(title, desc, icon = '💎') {
+function showToast(title, desc, icon = '💎', meta = '') {
   const container = document.getElementById('toastContainer');
   if (!container) return;
+
+  // Clean duplicate leading emoji from title if icon is present
+  const cleanTitle = (icon && title)
+    ? title.replace(/^[\p{Extended_Pictographic}\uFE0F\s]+/u, '').trim()
+    : title;
 
   const toast = document.createElement('div');
   toast.className = 'market-toast';
   toast.innerHTML = `
     <div class="toast-icon">${icon}</div>
     <div class="toast-content">
-      <div class="toast-title">${escapeHtml(title)}</div>
+      <div class="toast-title">${escapeHtml(cleanTitle)}</div>
       <div class="toast-desc">${escapeHtml(desc)}</div>
+      ${meta ? `<div class="toast-meta">${escapeHtml(meta)}</div>` : ''}
     </div>
   `;
   container.appendChild(toast);
 
   setTimeout(() => {
-    toast.classList.add('fade-out');
-    setTimeout(() => toast.remove(), 400);
+    if (toast.classList) toast.classList.add('fade-out');
+    setTimeout(() => {
+      if (toast.remove) toast.remove();
+      else if (toast.parentNode) toast.parentNode.removeChild(toast);
+    }, 400);
   }, 4500);
 }
 
 // Copy Donation Wallet Address Helper
 function copyDonationAddress(btn, location = 'header') {
-  navigator.clipboard.writeText(DONATION_WALLET);
+  if (typeof navigator !== 'undefined' && navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(DONATION_WALLET);
+  }
   if (btn) {
     const orig = btn.innerHTML;
     btn.innerHTML = '✓ Copied!';
@@ -379,7 +393,13 @@ function copyDonationAddress(btn, location = 'header') {
       btn.style.color = '';
     }, 2000);
   }
-  showToast('💎 DONATION WALLET COPIED', `${DONATION_WALLET} (BNB / EVM) · Thank you for supporting!`, '💎');
+  const shortAddr = `${DONATION_WALLET.slice(0, 10)}...${DONATION_WALLET.slice(-8)}`;
+  showToast(
+    'DONATION WALLET COPIED',
+    `${shortAddr} (BNB / EVM)`,
+    '💎',
+    'Address copied to clipboard · Thank you for supporting!'
+  );
   if (typeof window !== 'undefined' && window.va) {
     window.va('event', { name: 'tip_dev_copy', data: { location } });
   }
@@ -4653,7 +4673,9 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = 12000) {
 // High-speed real-time delta polling state
 let isPollingDelta = false;
 let deltaPollTimer = null;
-const DELTA_POLL_INTERVAL_MS = 8000; // 8s interval protects Render 5GB bandwidth while keeping market data near real-time
+let lastDeltaEtag = '';
+let lastFeedEtag = '';
+const DELTA_POLL_INTERVAL_MS = 15000; // 15s interval protects hosting bandwidth while keeping market data near real-time
 
 // Real-Time Delta Polling (auto-pauses when tab is hidden or backgrounded)
 async function pollDeltaFeed() {
@@ -4661,12 +4683,23 @@ async function pollDeltaFeed() {
   isPollingDelta = true;
 
   try {
+    const fetchOptions = {
+      headers: lastDeltaEtag ? { 'If-None-Match': lastDeltaEtag } : {}
+    };
     const res = await fetchWithTimeout(
       `${BACKEND_URL}/api/feed?since_block=${latestKnownBlock}`,
-      { cache: 'default' },
+      fetchOptions,
       4000
     );
+    if (res.status === 304) {
+      // Bandwidth Guard: Zero bytes downloaded! State is unchanged.
+      return;
+    }
     if (!res.ok) return;
+
+    const newEtag = res.headers.get('ETag');
+    if (newEtag) lastDeltaEtag = newEtag;
+
     const data = await res.json();
 
     if (data && data.stats) {
@@ -4856,17 +4889,28 @@ async function fetchDrops() {
 
     let res;
     let source = 'Render Feed';
+    const feedHeaders = lastFeedEtag ? { 'If-None-Match': lastFeedEtag } : {};
     try {
-      res = await fetchWithTimeout(`${BACKEND_URL}/api/feed?limit=150`, { cache: 'default' }, 8000);
+      res = await fetchWithTimeout(`${BACKEND_URL}/api/feed?limit=150`, { headers: feedHeaders }, 8000);
+      if (res.status === 304) {
+        // Feed unchanged, zero bytes transferred
+        return;
+      }
       if (!res.ok) throw new Error('Render /api/feed failed');
     } catch (e) {
       try {
-        res = await fetchWithTimeout(`https://agent-id-backend.onrender.com/api/feed?limit=150`, { cache: 'default' }, 8000);
+        res = await fetchWithTimeout(`https://agent-id-backend.onrender.com/api/feed?limit=150`, { headers: feedHeaders }, 8000);
+        if (res.status === 304) return;
         if (!res.ok) throw new Error('Render direct /api/feed failed');
       } catch (e2) {
         source = 'Local Snapshot';
         res = await fetchWithTimeout(`feed_snapshot.json`, { cache: 'default' }, 4000);
       }
+    }
+
+    if (res && res.headers) {
+      const feedEtag = res.headers.get('ETag');
+      if (feedEtag) lastFeedEtag = feedEtag;
     }
 
     const payload = await res.json();
@@ -5408,8 +5452,8 @@ async function init() {
 
     await fetchDrops();
 
-    // Background sync every 60s to refresh volume/liquidity metrics (delta feed handles new drops every 4s)
-    setInterval(fetchDrops, 60000);
+    // Background sync every 5m to refresh volume/liquidity metrics (delta feed handles new drops in real-time)
+    setInterval(fetchDrops, 300000);
 
     // Infinite scroll: automatically load older drops as user scrolls down
     window.addEventListener('scroll', () => {
@@ -5715,7 +5759,10 @@ if (typeof module !== 'undefined' && module.exports) {
     renderReorderModalList,
     movePill,
     movePillToTop,
-    setupFilterPillsDragAndDrop
+    setupFilterPillsDragAndDrop,
+    showToast,
+    copyDonationAddress,
+    DONATION_WALLET
   };
 }
 

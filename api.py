@@ -120,6 +120,7 @@ def get_virtual_history_json(request: Request):
 
 @app.get("/api/feed")
 def get_feed(
+    request: Request,
     limit: int = Query(150, ge=1, le=500),
     offset: int = Query(0, ge=0),
     since_block: Optional[int] = Query(None),
@@ -127,7 +128,7 @@ def get_feed(
 ):
     """
     Lightweight, high-speed feed endpoint for initial UI render (< 50ms) and delta updates.
-    Returns the newest drops, total counts, and filter stats in a tiny payload (< 100 KB).
+    Includes Bandwidth Guard: HTTP 304 Not Modified & tiny delta payloads to preserve free hosting.
     """
     raw_projs = db.get_all_projects()
     all_projs = [p for p in raw_projs if (p.get("contract") or "").lower() not in BOGUS_SET]
@@ -149,18 +150,44 @@ def get_feed(
         "latest_block": latest_block
     }
 
+    client_etag = request.headers.get("if-none-match")
+
     if since_block is not None:
         # Delta mode: only return drops created after this block!
         delta = [p for p in all_projs if int(p.get("block") or 0) > since_block]
-        return {
-            "success": True,
-            "mode": "delta",
-            "total": total,
-            "count": len(delta),
-            "latest_block": latest_block,
-            "projects": delta,
-            "stats": stats
-        }
+        delta_etag = f'"{latest_block}-{total}-delta-{since_block}"'
+
+        if not delta:
+            # Bandwidth Guard 1: HTTP 304 Not Modified (0 bytes body) if client already has this state
+            if client_etag == delta_etag:
+                return Response(status_code=304, headers={"ETag": delta_etag, "Cache-Control": "public, max-age=5"})
+            # Bandwidth Guard 2: Minimal 0-drop payload without redundant nested stats (~80 bytes vs 20 KB)
+            return JSONResponse(
+                status_code=200,
+                headers={"ETag": delta_etag, "Cache-Control": "public, max-age=5"},
+                content={
+                    "success": True,
+                    "mode": "delta",
+                    "total": total,
+                    "count": 0,
+                    "latest_block": latest_block,
+                    "projects": []
+                }
+            )
+
+        return JSONResponse(
+            status_code=200,
+            headers={"ETag": delta_etag, "Cache-Control": "public, max-age=5"},
+            content={
+                "success": True,
+                "mode": "delta",
+                "total": total,
+                "count": len(delta),
+                "latest_block": latest_block,
+                "projects": delta,
+                "stats": stats
+            }
+        )
 
     # Filter target list if requested
     target_list = all_projs
@@ -175,19 +202,28 @@ def get_feed(
 
     target_total = len(target_list)
     paginated = target_list[offset : offset + limit]
-    return {
-        "success": True,
-        "mode": "feed",
-        "total": total,
-        "filter_total": target_total,
-        "count": len(paginated),
-        "offset": offset,
-        "limit": limit,
-        "has_more": (offset + limit) < target_total,
-        "latest_block": latest_block,
-        "projects": paginated,
-        "stats": stats
-    }
+
+    feed_etag = f'"{latest_block}-{total}-{offset}-{limit}-{filter or ""}"'
+    if client_etag == feed_etag:
+        return Response(status_code=304, headers={"ETag": feed_etag, "Cache-Control": "public, max-age=5"})
+
+    return JSONResponse(
+        status_code=200,
+        headers={"ETag": feed_etag, "Cache-Control": "public, max-age=5"},
+        content={
+            "success": True,
+            "mode": "feed",
+            "total": total,
+            "filter_total": target_total,
+            "count": len(paginated),
+            "offset": offset,
+            "limit": limit,
+            "has_more": (offset + limit) < target_total,
+            "latest_block": latest_block,
+            "projects": paginated,
+            "stats": stats
+        }
+    )
 
 
 @app.get("/api/top-gainers")

@@ -678,6 +678,7 @@ class MockElement {
   }
   set innerHTML(val) {
     this._innerHTML = val;
+    this._textContent = val;
     if (val === '') {
       this.children = [];
     }
@@ -729,6 +730,11 @@ class MockElement {
     if (idx !== -1) {
       this.children.splice(idx, 1);
       child.parentNode = null;
+    }
+  }
+  remove() {
+    if (this.parentNode) {
+      this.parentNode.removeChild(this);
     }
   }
   querySelector(sel) {
@@ -836,5 +842,70 @@ assert(firstPill.eventListeners['dragstart'] !== undefined, 'Pill should have dr
 assert(firstPill.eventListeners['dragover'] !== undefined, 'Pill should have dragover listener');
 assert(firstPill.eventListeners['drop'] !== undefined, 'Pill should have drop listener');
 console.log('✔ setupFilterPillsDragAndDrop: PASS');
+
+// ========================================================
+// Test: Toast Notifications & Clean Feedback Styling
+// ========================================================
+console.log('Testing Toast Notifications & Clean Feedback Styling...');
+
+const {
+  showToast,
+  copyDonationAddress,
+  DONATION_WALLET
+} = app;
+
+const mockToastContainer = new MockElement('div', { id: 'toastContainer' });
+const origGetElem = global.document.getElementById;
+global.document.getElementById = (id) => {
+  if (id === 'toastContainer') return mockToastContainer;
+  return origGetElem ? origGetElem(id) : null;
+};
+
+// Clipboard Mock
+let clipboardContent = '';
+if (typeof navigator !== 'undefined') {
+  Object.defineProperty(navigator, 'clipboard', {
+    value: {
+      writeText: async (txt) => { clipboardContent = txt; }
+    },
+    configurable: true
+  });
+} else {
+  global.navigator = {
+    clipboard: {
+      writeText: async (txt) => { clipboardContent = txt; }
+    }
+  };
+}
+
+const mockTipBtn = new MockElement('button', { textContent: '💎 Tip Dev' });
+copyDonationAddress(mockTipBtn, 'header');
+
+assert.strictEqual(clipboardContent, DONATION_WALLET, 'Clipboard must receive full 42-character donation address');
+assert.strictEqual(mockTipBtn.textContent, '✓ Copied!', 'Button text must briefly update to ✓ Copied!');
+
+assert.strictEqual(mockToastContainer.children.length, 1, 'Toast container must receive 1 toast');
+const toastEl = mockToastContainer.children[0];
+const toastHtml = toastEl.innerHTML;
+
+// 1. Verify duplicate emoji was removed from title
+assert(toastHtml.includes('toast-icon">💎<'), 'Toast must have diamond icon');
+assert(toastHtml.includes('toast-title">DONATION WALLET COPIED<'), 'Toast title must NOT duplicate diamond icon');
+assert(!toastHtml.includes('toast-title">💎'), 'Toast title must be clean text without duplicate emoji');
+
+// 2. Verify shortened address and meta line
+const expectedShortAddr = `${DONATION_WALLET.slice(0, 10)}...${DONATION_WALLET.slice(-8)}`;
+assert(toastHtml.includes(expectedShortAddr), 'Toast must contain shortened address preview');
+assert(toastHtml.includes('Address copied to clipboard · Thank you for supporting!'), 'Toast meta must confirm clipboard copy');
+
+// 3. Test generic showToast emoji cleaning on other alert types
+mockToastContainer.children = [];
+showToast('⭐ SMART WALLET FOLLOWED', 'Tracking 18881.ai', '⭐');
+assert(mockToastContainer.children[0].innerHTML.includes('toast-title">SMART WALLET FOLLOWED<'), 'Star emoji should be cleaned from title');
+
+showToast('🎯 SNIPER READY ALERT', 'Project is 60% minted', '🎯');
+assert(mockToastContainer.children[1].innerHTML.includes('toast-title">SNIPER READY ALERT<'), 'Target emoji should be cleaned from title');
+
+console.log('✔ Toast Notifications & Clean Feedback: PASS');
 
 console.log('🎉 All Web3, Multicall3, Smart Hunters, and Competitor Features verified successfully!');

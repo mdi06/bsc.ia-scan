@@ -44,6 +44,7 @@ class DatabaseManager:
         
         # In-memory fast cache: {contract_lower: project_dict} with 3s TTL for cross-process freshness
         self._projects_cache: Dict[str, Dict[str, Any]] = {}
+        self._p_fingerprints: Dict[str, str] = {}
         self._cache_initialized = False
         self._last_cache_time = 0.0
         self._last_synced_updated_at = 0
@@ -399,8 +400,20 @@ class DatabaseManager:
         with self._cache_lock:
             return self._projects_cache.get(c)
 
+    @staticmethod
+    def _compute_fingerprint(p: Dict[str, Any]) -> str:
+        """Computes a compact signature to detect if mutable metrics have actually changed."""
+        return (
+            f"{p.get('progress')}_{p.get('holders')}_{p.get('score')}_"
+            f"{p.get('sniper_ready')}_{p.get('is_proxy_clone')}_{p.get('is_nft_surge')}_"
+            f"{p.get('risk_level')}_{p.get('risk_badge')}_{p.get('status')}_"
+            f"{p.get('token_price_usd')}_{p.get('token_symbol')}_{p.get('lp_usd')}_"
+            f"{p.get('mint_value_wei')}_{p.get('mint_price_str')}"
+        )
+
     def upsert_projects(self, projects: List[Dict[str, Any]]):
-        """Batch upserts projects into SQLite or Supabase and updates in-memory cache."""
+        """Batch upserts projects into SQLite or Supabase and updates in-memory cache.
+        Includes Bandwidth Guard: Filters out unchanged records to avoid redundant Supabase REST calls."""
         if not projects:
             return
 
@@ -416,25 +429,38 @@ class DatabaseManager:
 
         now_ts = int(time.time())
 
-        # 1. Update in-memory cache immediately
+        # 1. Update in-memory cache and isolate truly modified/dirty records
+        changed_records = []
         with self._cache_lock:
             for p in clean_records:
                 c = p["contract"].lower()
+                fp = self._compute_fingerprint(p)
+                if c in self._p_fingerprints and self._p_fingerprints[c] == fp:
+                    # Clean/identical project record - skip outbound network I/O
+                    continue
+                self._p_fingerprints[c] = fp
+                changed_records.append(p)
                 if c in self._projects_cache:
                     self._projects_cache[c].update(p)
                 else:
                     self._projects_cache[c] = dict(p)
-            self._cache_initialized = True
-            self._cache_dirty = True
-            self._last_cache_time = now_ts
-            if now_ts > self._last_synced_updated_at:
-                self._last_synced_updated_at = now_ts
 
-        # 2. Supabase Cloud Sync
+            if changed_records:
+                self._cache_initialized = True
+                self._cache_dirty = True
+                self._last_cache_time = now_ts
+                if now_ts > self._last_synced_updated_at:
+                    self._last_synced_updated_at = now_ts
+
+        # Bandwidth Guard: If zero projects changed, abort outbound network writes immediately
+        if not changed_records:
+            return
+
+        # 2. Supabase Cloud Sync (ONLY sync truly modified records)
         if self.mode == "supabase":
             try:
                 rows = []
-                for p in clean_records:
+                for p in changed_records:
                     rows.append({
                         "contract": p["contract"].lower(),
                         "name": str(p.get("name", "")),
@@ -481,7 +507,7 @@ class DatabaseManager:
             try:
                 cur = conn.cursor()
                 payloads = []
-                for p in clean_records:
+                for p in changed_records:
                     payloads.append((
                         p["contract"].lower(),
                         p.get("name", ""),
@@ -571,6 +597,7 @@ class DatabaseManager:
         with self._cache_lock:
             for c in clean:
                 self._projects_cache.pop(c, None)
+                self._p_fingerprints.pop(c, None)
             self._cached_json_bytes = None
             self._last_cache_time = 0.0
 
