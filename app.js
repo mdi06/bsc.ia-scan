@@ -83,7 +83,7 @@ function scheduleCloudFavoritesSync(wallet) {
 // When running locally (http://localhost:8080), use local backend seamlessly with 0 cloud bandwidth
 const BACKEND_URL = (typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'))
   ? ''
-  : 'https://agent-id-backend.onrender.com';
+  : 'https://bsc-ia-scan.onrender.com';
 
 async function syncFavoritesFromCloud(wallet) {
   if (!wallet) return;
@@ -5506,7 +5506,7 @@ async function loadMoreDrops() {
       res = await fetchWithTimeout(`${BACKEND_URL}/api/feed?limit=150&offset=${offset}`, { cache: 'default' }, 8000);
       if (!res.ok) throw new Error('Render load more failed');
     } catch (e) {
-      res = await fetchWithTimeout(`https://agent-id-backend.onrender.com/api/feed?limit=150&offset=${offset}`, { cache: 'default' }, 8000);
+      res = await fetchWithTimeout(`https://bsc-ia-scan.onrender.com/api/feed?limit=150&offset=${offset}`, { cache: 'default' }, 8000);
     }
 
     if (!res.ok) throw new Error('Failed to load more');
@@ -5580,7 +5580,7 @@ async function fetchDrops() {
       if (!res.ok) throw new Error('Render /api/feed failed');
     } catch (e) {
       try {
-        res = await fetchWithTimeout(`https://agent-id-backend.onrender.com/api/feed?limit=150`, { headers: feedHeaders }, 8000);
+        res = await fetchWithTimeout(`https://bsc-ia-scan.onrender.com/api/feed?limit=150`, { headers: feedHeaders }, 8000);
         if (res.status === 304) return;
         if (!res.ok) throw new Error('Render direct /api/feed failed');
       } catch (e2) {

@@ -103,21 +103,9 @@ def import_into_new_supabase(new_url: str, new_key: str, source_file: str = "his
         seen.add(c)
         rows.append({
             "contract": c,
-            "name": d.get("name", ""),
-            "symbol": d.get("symbol", ""),
-            "token_id": str(d.get("token_id", "")),
             "block": int(d.get("block") or 0),
-            "progress": float(d.get("progress") or 0.0),
-            "holders": int(d.get("holders") or 0),
-            "status": d.get("status", "TRACKING"),
-            "risk_level": d.get("risk_level", "SAFE"),
-            "risk_badge": d.get("risk_badge", "🟢 Clean"),
-            "sniper_ready": bool(d.get("sniper_ready")),
-            "is_proxy_clone": bool(d.get("is_proxy_clone")),
-            "score": float(d.get("score") or 0.0),
-            "data": d,
-            "detected_at": str(d.get("detected_at", "")),
-            "updated_at": now_ts
+            "updated_at": now_ts,
+            "data": d
         })
 
     print(f"[📤 Uploading] Upserting {len(rows)} unique projects in batches of 50...")
@@ -203,3 +191,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
