@@ -1,6 +1,12 @@
 {
   "version": 2,
   "cleanUrls": true,
+  "rewrites": [
+    {
+      "source": "/(google[0-9a-fA-F]+\\.html)",
+      "destination": "/$1"
+    }
+  ],
   "builds": [
     {
       "src": "*",
