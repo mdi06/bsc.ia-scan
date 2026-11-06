@@ -1041,6 +1041,18 @@ tbody tr.selected {
 .col-progress {
   min-width: 250px;
 }
+#dropsTable.secondary-mode .col-progress {
+  min-width: 140px;
+}
+th.sortable-th {
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+th.sortable-th:hover {
+  color: var(--color-cyan);
+  background: rgba(0, 240, 255, 0.08);
+}
 
 .progress-cell {
   display: flex;

@@ -2027,6 +2027,17 @@ function updateLaunchpadCount() {
 function getSanitizedMcap(d) {
   if (!d) return 0;
   let mc = Number(d.market_cap || d.fdv || 0);
+  if (mc === 0) {
+    const px = Number(d.token_price_usd || d.market_price_usd || 0);
+    const tm = Number(d.total_minted || 0);
+    const ms = Number(d.max_supply || 0);
+    if (px > 0) {
+      if (tm > 0 && tm < 1e14) mc = tm * px;
+      else if (ms > 0 && ms < 1e14) mc = ms * px;
+      else if (tm >= 1e14) mc = (tm / 1e18) * px;
+      else if (ms >= 1e14) mc = (ms / 1e18) * px;
+    }
+  }
   if (mc > 100000000 && Number(d.lp_usd || 0) < 50000) return 0;
   return mc;
 }
@@ -2447,8 +2458,16 @@ function getFilteredDrops() {
   }
 
   // Sort
-  if (sortMode === 'MCAP') {
+  if (sortMode === 'MCAP' || sortMode === 'MCAP_DESC') {
     list.sort((a, b) => getSanitizedMcap(b) - getSanitizedMcap(a));
+  } else if (sortMode === 'MCAP_ASC') {
+    list.sort((a, b) => {
+      const ma = getSanitizedMcap(a);
+      const mb = getSanitizedMcap(b);
+      if (ma === 0 && mb > 0) return 1;
+      if (mb === 0 && ma > 0) return -1;
+      return ma - mb;
+    });
   } else if (sortMode === 'VOLUME') {
     list.sort((a, b) => Number(b.volume_24h || 0) - Number(a.volume_24h || 0));
   } else if (sortMode === 'PROFIT') {
@@ -2512,28 +2531,80 @@ function renderTable(keepLimit = false) {
   }
 
   // Dynamic table headers based on active tab
-  const thLp = document.getElementById('thLp');
-  const thProgress = document.getElementById('thProgress');
-  const thPrice = document.getElementById('thPrice');
-  const thFloor = document.getElementById('thFloor');
+  const thCol9 = document.getElementById('thCol9');
+  const thCol10 = document.getElementById('thCol10') || document.getElementById('thProgress');
+  const thCol11 = document.getElementById('thCol11') || document.getElementById('thPrice');
+  const thCol12 = document.getElementById('thCol12') || document.getElementById('thLp');
+  const thCol13 = document.getElementById('thCol13') || document.getElementById('thFloor');
   const thAction = document.getElementById('thAction');
 
+  const dropsTable = document.getElementById('dropsTable');
+  if (dropsTable) {
+    dropsTable.classList.toggle('secondary-mode', activeTab === 'SECONDARY');
+  }
+
   if (activeTab === 'SECONDARY') {
-    if (thLp) thLp.textContent = '🥞 PANCAKESWAP LP';
-    if (thProgress) thProgress.textContent = '💎 MARKET CAP / FDV';
-    if (thPrice) thPrice.textContent = '🌊 24H VOLUME';
-    if (thFloor) thFloor.textContent = '📈 DEX PRICE / 24H';
-    if (thAction) thAction.textContent = '🥞 TRADE DEX';
+    if (thCol9) {
+      thCol9.textContent = '📈 DEX PRICE / 24H';
+      thCol9.className = 'col-floor';
+    }
+    if (thCol10) {
+      const isAsc = (sortMode === 'MCAP_ASC');
+      const sortArrow = isAsc ? '▲' : '▼';
+      thCol10.innerHTML = `💎 MARKET CAP / FDV <span style="font-size: 10px; color: var(--color-cyan); margin-left: 2px;">${sortArrow}</span>`;
+      thCol10.className = 'col-progress sortable-th';
+      thCol10.style.cursor = 'pointer';
+      thCol10.title = isAsc ? 'Sorted: Low ➔ High (Click to sort High ➔ Low)' : 'Sorted: High ➔ Low (Click to sort Low ➔ High)';
+      thCol10.onclick = () => {
+        const nextSort = (sortMode === 'MCAP_ASC') ? 'MCAP_DESC' : 'MCAP_ASC';
+        setSortMode(nextSort);
+      };
+    }
+    if (thCol11) {
+      thCol11.textContent = '🌊 24H VOLUME';
+      thCol11.className = 'col-price';
+    }
+    if (thCol12) {
+      thCol12.textContent = '🥞 PANCAKESWAP LP';
+      thCol12.className = 'col-lp';
+    }
+    if (thCol13) {
+      thCol13.textContent = '👥 HOLDERS / BUYS';
+      thCol13.className = 'col-holders';
+    }
+    if (thAction) {
+      thAction.textContent = '🥞 TRADE DEX';
+    }
   } else {
-    if (thLp) thLp.textContent = 'LP / VOL';
-    if (thProgress) thProgress.textContent = 'MINT PROGRESS';
-    if (thPrice) thPrice.textContent = 'MINT PRICE';
-    if (thFloor) thFloor.textContent = 'FLOOR / TRADE';
-    if (thAction) thAction.textContent = 'INSPECT';
+    if (thCol9) {
+      thCol9.textContent = 'HOLDERS / BUYS';
+      thCol9.className = 'col-holders';
+    }
+    if (thCol10) {
+      thCol10.textContent = 'LP / VOL';
+      thCol10.className = 'col-lp';
+      thCol10.style.cursor = 'default';
+      thCol10.title = '';
+      thCol10.onclick = null;
+    }
+    if (thCol11) {
+      thCol11.textContent = 'MINT PROGRESS';
+      thCol11.className = 'col-progress';
+    }
+    if (thCol12) {
+      thCol12.textContent = 'MINT PRICE';
+      thCol12.className = 'col-price';
+    }
+    if (thCol13) {
+      thCol13.textContent = 'FLOOR / TRADE';
+      thCol13.className = 'col-floor';
+    }
+    if (thAction) {
+      thAction.textContent = 'INSPECT';
+    }
   }
 
   // Feature 2: Dedicated Wallet Leaderboard Tab Visibility Toggle
-  const dropsTable = document.getElementById('dropsTable');
   const walletsContainer = document.getElementById('walletsLeaderboardContainer');
   const loadMoreWrap = document.getElementById('loadMoreWrap');
 
@@ -2852,12 +2923,12 @@ function renderTable(keepLimit = false) {
         cellLp = `<span class="dim">—</span>`;
       }
 
-      const mcapVal = Number(item.market_cap || item.fdv || 0);
+      const mcapVal = getSanitizedMcap(item);
       if (mcapVal > 0) {
         const hasFdvDiff = item.fdv && item.market_cap && Math.abs(Number(item.fdv) - Number(item.market_cap)) > 100;
         cellProg = `
           <div style="display: flex; flex-direction: column; gap: 2px;">
-            <span class="badge badge-green" style="font-weight: 700; font-size: 11px;">$${formatCount(mcapVal)}</span>
+            <span style="color: var(--color-green); font-weight: 700; font-size: 13px; letter-spacing: 0.3px;">$${formatCount(mcapVal)}</span>
             ${hasFdvDiff ? `<span class="dim" style="font-size: 9px;">FDV: $${formatCount(item.fdv)}</span>` : ''}
           </div>
         `;
@@ -2909,22 +2980,41 @@ function renderTable(keepLimit = false) {
       }
     }
 
-    tr.innerHTML = `
-      <td class="col-fav"><button class="${starClass}" onclick="toggleFavorite('${item.contract}', event)" title="${isFav ? 'Remove from favorites' : 'Add to favorites'}">${starIcon}</button></td>
-      <td class="col-num">${index + 1}</td>
-      <td class="col-block"><code>${blk}</code></td>
-      <td class="col-sm">${smBadge}</td>
-      <td class="col-project"><strong>${item.name || 'Unknown'}</strong><span class="sym">(${item.symbol || ''})</span></td>
-      <td class="col-type">${stdBadge}</td>
-      <td class="col-safety">${safeBadge}</td>
-      <td class="col-interest">${intBadge}</td>
-      <td class="col-holders" data-label="${isPort ? 'HOLDINGS' : (isSec ? 'HOLDERS / BUYS' : 'HOLDERS')}"><span class="cell-val">${cellHolders}</span></td>
-      <td class="col-lp" data-label="${isSec ? 'PANCAKESWAP LP' : 'LIQUIDITY'}"><span class="cell-val">${cellLp}</span></td>
-      <td class="col-progress" data-label="${isSec ? 'MARKET CAP' : 'PROGRESS'}">${cellProg}</td>
-      <td class="col-price" data-label="${isSec ? '24H VOLUME' : 'MINT'}"><span class="cell-val">${cellPrice}</span></td>
-      <td class="col-floor" data-label="${isSec ? 'DEX PRICE' : 'FLOOR'}"><span class="cell-val">${cellFloor}</span></td>
-      <td class="col-action">${actBtn}</td>
-    `;
+    if (isSec) {
+      tr.innerHTML = `
+        <td class="col-fav"><button class="${starClass}" onclick="toggleFavorite('${item.contract}', event)" title="${isFav ? 'Remove from favorites' : 'Add to favorites'}">${starIcon}</button></td>
+        <td class="col-num">${index + 1}</td>
+        <td class="col-block"><code>${blk}</code></td>
+        <td class="col-sm">${smBadge}</td>
+        <td class="col-project"><strong>${item.name || 'Unknown'}</strong><span class="sym">(${item.symbol || ''})</span></td>
+        <td class="col-type">${stdBadge}</td>
+        <td class="col-safety">${safeBadge}</td>
+        <td class="col-interest">${intBadge}</td>
+        <td class="col-floor" data-label="DEX PRICE"><span class="cell-val">${cellFloor}</span></td>
+        <td class="col-progress" data-label="MARKET CAP">${cellProg}</td>
+        <td class="col-price" data-label="24H VOLUME"><span class="cell-val">${cellPrice}</span></td>
+        <td class="col-lp" data-label="PANCAKESWAP LP"><span class="cell-val">${cellLp}</span></td>
+        <td class="col-holders" data-label="HOLDERS / BUYS"><span class="cell-val">${cellHolders}</span></td>
+        <td class="col-action">${actBtn}</td>
+      `;
+    } else {
+      tr.innerHTML = `
+        <td class="col-fav"><button class="${starClass}" onclick="toggleFavorite('${item.contract}', event)" title="${isFav ? 'Remove from favorites' : 'Add to favorites'}">${starIcon}</button></td>
+        <td class="col-num">${index + 1}</td>
+        <td class="col-block"><code>${blk}</code></td>
+        <td class="col-sm">${smBadge}</td>
+        <td class="col-project"><strong>${item.name || 'Unknown'}</strong><span class="sym">(${item.symbol || ''})</span></td>
+        <td class="col-type">${stdBadge}</td>
+        <td class="col-safety">${safeBadge}</td>
+        <td class="col-interest">${intBadge}</td>
+        <td class="col-holders" data-label="${isPort ? 'HOLDINGS' : 'HOLDERS'}"><span class="cell-val">${cellHolders}</span></td>
+        <td class="col-lp" data-label="LIQUIDITY"><span class="cell-val">${cellLp}</span></td>
+        <td class="col-progress" data-label="PROGRESS">${cellProg}</td>
+        <td class="col-price" data-label="MINT"><span class="cell-val">${cellPrice}</span></td>
+        <td class="col-floor" data-label="FLOOR"><span class="cell-val">${cellFloor}</span></td>
+        <td class="col-action">${actBtn}</td>
+      `;
+    }
     fragment.appendChild(tr);
   });
   tbody.appendChild(fragment);
@@ -3153,12 +3243,12 @@ function appendNextTableBatch() {
         cellLp = `<span class="dim">—</span>`;
       }
 
-      const mcapVal = Number(item.market_cap || item.fdv || 0);
+      const mcapVal = getSanitizedMcap(item);
       if (mcapVal > 0) {
         const hasFdvDiff = item.fdv && item.market_cap && Math.abs(Number(item.fdv) - Number(item.market_cap)) > 100;
         cellProg = `
           <div style="display: flex; flex-direction: column; gap: 2px;">
-            <span class="badge badge-green" style="font-weight: 700; font-size: 11px;">$${formatCount(mcapVal)}</span>
+            <span style="color: var(--color-green); font-weight: 700; font-size: 13px; letter-spacing: 0.3px;">$${formatCount(mcapVal)}</span>
             ${hasFdvDiff ? `<span class="dim" style="font-size: 9px;">FDV: $${formatCount(item.fdv)}</span>` : ''}
           </div>
         `;
@@ -3210,22 +3300,41 @@ function appendNextTableBatch() {
       }
     }
 
-    tr.innerHTML = `
-      <td class="col-fav"><button class="${starClass}" onclick="toggleFavorite('${item.contract}', event)" title="${isFav ? 'Remove from favorites' : 'Add to favorites'}">${starIcon}</button></td>
-      <td class="col-num">${index + 1}</td>
-      <td class="col-block"><code>${blk}</code></td>
-      <td class="col-sm">${smBadge}</td>
-      <td class="col-project"><strong>${item.name || 'Unknown'}</strong><span class="sym">(${item.symbol || ''})</span></td>
-      <td class="col-type">${stdBadge}</td>
-      <td class="col-safety">${safeBadge}</td>
-      <td class="col-interest">${intBadge}</td>
-      <td class="col-holders" data-label="${isPort ? 'HOLDINGS' : (isSec ? 'HOLDERS / BUYS' : 'HOLDERS')}"><span class="cell-val">${cellHolders}</span></td>
-      <td class="col-lp" data-label="${isSec ? 'PANCAKESWAP LP' : 'LIQUIDITY'}"><span class="cell-val">${cellLp}</span></td>
-      <td class="col-progress" data-label="${isSec ? 'MARKET CAP' : 'PROGRESS'}">${cellProg}</td>
-      <td class="col-price" data-label="${isSec ? '24H VOLUME' : 'MINT'}"><span class="cell-val">${cellPrice}</span></td>
-      <td class="col-floor" data-label="${isSec ? 'DEX PRICE' : 'FLOOR'}"><span class="cell-val">${cellFloor}</span></td>
-      <td class="col-action">${actBtn}</td>
-    `;
+    if (isSec) {
+      tr.innerHTML = `
+        <td class="col-fav"><button class="${starClass}" onclick="toggleFavorite('${item.contract}', event)" title="${isFav ? 'Remove from favorites' : 'Add to favorites'}">${starIcon}</button></td>
+        <td class="col-num">${index + 1}</td>
+        <td class="col-block"><code>${blk}</code></td>
+        <td class="col-sm">${smBadge}</td>
+        <td class="col-project"><strong>${item.name || 'Unknown'}</strong><span class="sym">(${item.symbol || ''})</span></td>
+        <td class="col-type">${stdBadge}</td>
+        <td class="col-safety">${safeBadge}</td>
+        <td class="col-interest">${intBadge}</td>
+        <td class="col-floor" data-label="DEX PRICE"><span class="cell-val">${cellFloor}</span></td>
+        <td class="col-progress" data-label="MARKET CAP">${cellProg}</td>
+        <td class="col-price" data-label="24H VOLUME"><span class="cell-val">${cellPrice}</span></td>
+        <td class="col-lp" data-label="PANCAKESWAP LP"><span class="cell-val">${cellLp}</span></td>
+        <td class="col-holders" data-label="HOLDERS / BUYS"><span class="cell-val">${cellHolders}</span></td>
+        <td class="col-action">${actBtn}</td>
+      `;
+    } else {
+      tr.innerHTML = `
+        <td class="col-fav"><button class="${starClass}" onclick="toggleFavorite('${item.contract}', event)" title="${isFav ? 'Remove from favorites' : 'Add to favorites'}">${starIcon}</button></td>
+        <td class="col-num">${index + 1}</td>
+        <td class="col-block"><code>${blk}</code></td>
+        <td class="col-sm">${smBadge}</td>
+        <td class="col-project"><strong>${item.name || 'Unknown'}</strong><span class="sym">(${item.symbol || ''})</span></td>
+        <td class="col-type">${stdBadge}</td>
+        <td class="col-safety">${safeBadge}</td>
+        <td class="col-interest">${intBadge}</td>
+        <td class="col-holders" data-label="${isPort ? 'HOLDINGS' : 'HOLDERS'}"><span class="cell-val">${cellHolders}</span></td>
+        <td class="col-lp" data-label="LIQUIDITY"><span class="cell-val">${cellLp}</span></td>
+        <td class="col-progress" data-label="PROGRESS">${cellProg}</td>
+        <td class="col-price" data-label="MINT"><span class="cell-val">${cellPrice}</span></td>
+        <td class="col-floor" data-label="FLOOR"><span class="cell-val">${cellFloor}</span></td>
+        <td class="col-action">${actBtn}</td>
+      `;
+    }
     fragment.appendChild(tr);
   });
 
@@ -5895,6 +6004,35 @@ if (typeof window !== 'undefined') {
   window.openReorderModal = openReorderModal;
   window.movePill = movePill;
   window.movePillToTop = movePillToTop;
+  window.setSortMode = setSortMode;
+}
+
+function setSortMode(val) {
+  sortMode = val;
+  const nativeSelect = document.getElementById('sortSelect');
+  if (nativeSelect) nativeSelect.value = val;
+
+  const label = document.getElementById('customSortLabel');
+  const options = document.querySelectorAll('.custom-option');
+
+  options.forEach(o => {
+    const oVal = o.getAttribute('data-value');
+    if (oVal === val || (val === 'MCAP_DESC' && oVal === 'MCAP')) {
+      o.classList.add('selected');
+      o.setAttribute('aria-selected', 'true');
+      const textNode = o.querySelector('span');
+      if (label && textNode) label.textContent = textNode.textContent;
+    } else {
+      o.classList.remove('selected');
+      o.setAttribute('aria-selected', 'false');
+    }
+  });
+
+  if (typeof window !== 'undefined' && window.va) {
+    window.va('event', { name: 'sort_changed', data: { sort: val } });
+  }
+
+  renderTable();
 }
 
 // Custom Cyberpunk Dropdown Handler
@@ -5917,27 +6055,10 @@ function setupCustomDropdown() {
     opt.addEventListener('click', (e) => {
       e.stopPropagation();
       const val = opt.getAttribute('data-value');
-      const textNode = opt.querySelector('span');
-      const text = textNode ? textNode.textContent : val;
-
-      options.forEach(o => {
-        o.classList.remove('selected');
-        o.setAttribute('aria-selected', 'false');
-      });
-      opt.classList.add('selected');
-      opt.setAttribute('aria-selected', 'true');
-
-      if (label) label.textContent = text;
-      sortMode = val;
-      if (nativeSelect) nativeSelect.value = val;
-      if (typeof window !== 'undefined' && window.va) {
-        window.va('event', { name: 'sort_changed', data: { sort: val } });
-      }
+      setSortMode(val);
 
       wrapper.classList.remove('open');
       trigger.setAttribute('aria-expanded', 'false');
-
-      renderTable();
     });
   });
 
@@ -6142,8 +6263,7 @@ async function init() {
     const sortSel = document.getElementById('sortSelect');
     if (sortSel) {
       sortSel.addEventListener('change', e => {
-        sortMode = e.target.value;
-        renderTable();
+        setSortMode(e.target.value);
       });
     }
 
@@ -6363,7 +6483,9 @@ if (typeof module !== 'undefined' && module.exports) {
     setupFilterPillsDragAndDrop,
     showToast,
     copyDonationAddress,
-    DONATION_WALLET
+    DONATION_WALLET,
+    setSortMode,
+    getSortMode: () => sortMode
   };
 }
 

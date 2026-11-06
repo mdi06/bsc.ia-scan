@@ -614,18 +614,42 @@ def run_market_dynamics_updater_loop():
             dex_updates = {}
             for i in range(0, len(contracts_to_check), batch_size):
                 chunk = contracts_to_check[i:i + batch_size]
-                chunk_addrs = [x["contract"] for x in chunk]
+                chunk_addrs = [x["contract"] for x in chunk if x.get("contract")]
+                # Also collect any known pair addresses from pair_url
+                chunk_pairs = []
+                for x in chunk:
+                    p_url = x.get("pair_url") or ""
+                    m = re.search(r'dexscreener\.com/bsc/(0x[a-fA-F0-9]{40})', p_url)
+                    if m:
+                        chunk_pairs.append(m.group(1).lower())
                 try:
-                    url = f"https://api.dexscreener.com/latest/dex/tokens/{','.join(chunk_addrs)}"
-                    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-                    with urllib.request.urlopen(req, timeout=10) as resp:
-                        data = json.loads(resp.read().decode())
-                        pairs = data.get("pairs") or []
-                        for pair in pairs:
-                            b_tok = pair.get("baseToken", {})
-                            b_addr = (b_tok.get("address") or "").lower()
-                            if b_addr and b_addr not in dex_updates:
-                                dex_updates[b_addr] = pair
+                    if chunk_addrs:
+                        url = f"https://api.dexscreener.com/latest/dex/tokens/{','.join(chunk_addrs)}"
+                        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+                        with urllib.request.urlopen(req, timeout=10) as resp:
+                            data = json.loads(resp.read().decode())
+                            pairs = data.get("pairs") or []
+                            for pair in pairs:
+                                b_tok = pair.get("baseToken", {})
+                                b_addr = (b_tok.get("address") or "").lower()
+                                p_addr = (pair.get("pairAddress") or "").lower()
+                                if b_addr:
+                                    dex_updates[b_addr] = pair
+                                if p_addr:
+                                    dex_updates[p_addr] = pair
+                    if chunk_pairs:
+                        url_p = f"https://api.dexscreener.com/latest/dex/pairs/bsc/{','.join(chunk_pairs)}"
+                        req_p = urllib.request.Request(url_p, headers={"User-Agent": "Mozilla/5.0"})
+                        with urllib.request.urlopen(req_p, timeout=10) as resp_p:
+                            data_p = json.loads(resp_p.read().decode())
+                            for pair in (data_p.get("pairs") or []):
+                                b_tok = pair.get("baseToken", {})
+                                b_addr = (b_tok.get("address") or "").lower()
+                                p_addr = (pair.get("pairAddress") or "").lower()
+                                if b_addr:
+                                    dex_updates[b_addr] = pair
+                                if p_addr:
+                                    dex_updates[p_addr] = pair
                 except Exception:
                     pass
                 time.sleep(0.5)
@@ -634,7 +658,12 @@ def run_market_dynamics_updater_loop():
             changed_items = []
             for item in history:
                 c = (item.get("contract") or "").lower()
-                pair = dex_updates.get(c)
+                pair_addr = ""
+                m = re.search(r'dexscreener\.com/bsc/(0x[a-fA-F0-9]{40})', item.get("pair_url") or "")
+                if m:
+                    pair_addr = m.group(1).lower()
+
+                pair = dex_updates.get(c) or (dex_updates.get(pair_addr) if pair_addr else None)
                 item_changed = False
 
                 if pair:
@@ -654,6 +683,12 @@ def run_market_dynamics_updater_loop():
 
                         mcap = float(pair.get("marketCap") or 0.0)
                         fdv = float(pair.get("fdv") or 0.0)
+                        if mcap == 0 and fdv == 0 and (item.get("token_price_usd") or 0.0) > 0:
+                            supply_val = float(item.get("total_minted") or item.get("max_supply") or 0.0)
+                            if supply_val > 0.0:
+                                if supply_val > 1e14:
+                                    supply_val = supply_val / 1e18
+                                mcap = supply_val * float(item["token_price_usd"])
                         item["market_cap"] = mcap if mcap > 0 else fdv
                         item["fdv"] = fdv
 

@@ -2041,11 +2041,12 @@ def analyze_market_interest(
         stats["holders"] = details.get("total_minted", 0)
     if stats["buys_24h"] == 0 and details.get("total_minted"):
         stats["buys_24h"] = details.get("total_minted", 0)
-    if stats.get("market_cap", 0.0) == 0.0 and details.get("total_minted") and stats.get("token_price_usd", 0.0) > 0.0:
-        tm_val = float(details["total_minted"])
-        if tm_val > 1e14:
-            tm_val = tm_val / 1e18
-        stats["market_cap"] = tm_val * float(stats["token_price_usd"])
+    if stats.get("market_cap", 0.0) == 0.0 and stats.get("token_price_usd", 0.0) > 0.0:
+        supply_val = float(details.get("total_minted") or details.get("max_supply") or 0.0)
+        if supply_val > 0.0:
+            if supply_val > 1e14:
+                supply_val = supply_val / 1e18
+            stats["market_cap"] = supply_val * float(stats["token_price_usd"])
 
     # If no token security was fetched, audit NFT risk
     if not stats.get("security"):

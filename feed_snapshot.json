@@ -5,19 +5,19 @@
     "contract": "0x0c6302401aa5325c2e36f170f52c00b1d220b405",
     "standard": "BEP-20 Token (18 decimals)",
     "block": 131930000,
-    "total_minted": 1000000000.0,
+    "total_minted": 999340798.5037478,
     "max_supply": 1000000000.0,
     "holders": 3200,
     "score": 92,
     "rating": "\ud83d\udd25 VIRAL SURGE",
-    "lp_usd": 214315.68,
+    "lp_usd": 213159.89,
     "lp_wbnb": 303.9,
-    "token_price_usd": 0.002451,
+    "token_price_usd": 0.002427,
     "token_symbol": "GANG",
-    "market_cap": 2426607.0,
-    "fdv": 2426607.0,
-    "volume_24h": 680690.64,
-    "price_change_24h": -11.31,
+    "market_cap": 2402812.0,
+    "fdv": 2402812.0,
+    "volume_24h": 689184.57,
+    "price_change_24h": -13.83,
     "buys_24h": 2568,
     "buys_1h": 49,
     "sells_24h": 2335,
@@ -57,13 +57,13 @@
     "holders": 4200,
     "score": 68,
     "rating": "\u26a1 GRADUATED",
-    "lp_usd": 424.35,
-    "token_price_usd": 0.00032,
+    "lp_usd": 439.38,
+    "token_price_usd": 0.000336,
     "token_symbol": "PTAH",
-    "market_cap": 320058.0,
-    "fdv": 320058.0,
-    "volume_24h": 219.43,
-    "price_change_24h": -39.74,
+    "market_cap": 336018.0,
+    "fdv": 336018.0,
+    "volume_24h": 220.13,
+    "price_change_24h": -39.0,
     "buys_24h": 101,
     "buys_1h": 2,
     "sells_24h": 133,
@@ -169,7 +169,10 @@
       "\u25ab [green]\u2714[/green] Capital Safety: No fund drain detected",
       "\u25ab [dim]\u25ab Refund Guarantee: N/A (Free Mint / Gas Only)[/dim]",
       "\u25ab [green]\u2714[/green] Secondary Market: Primary bonding phase (No DEX LP yet)"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\ud83c\udfa8",
@@ -244,7 +247,10 @@
       "\u25ab [green]\u2714[/green] Deployer: Clean reputation (No spam deployment)",
       "\u25ab [green]\u2714[/green] Capital Safety: No fund drain detected",
       "\u25ab [dim]\u25ab Refund Guarantee: N/A (Free Mint / Gas Only)[/dim]"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\ud83e\ude99",
@@ -396,7 +402,10 @@
       "\u25ab [red]\u2716[/red] Deployer: \ud83d\udea8 Serial Dev (8 contracts deployed in 24h)",
       "\u25ab [red]\u2716[/red] Capital Drain: \ud83d\udea8 Empty contract with no DEX LP (Funds pocketed)",
       "\u25ab [red]\u2716[/red] Refund Guarantee: \u26a0\ufe0f No refund method (Capital trapped if unfilled)"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\ud83c\udfa8",
@@ -467,7 +476,10 @@
       "\u25ab [red]\u2716[/red] Deployer: \ud83d\udea8 Serial Dev (7 contracts deployed in 24h)",
       "\u25ab [red]\u2716[/red] Capital Drain: \ud83d\udea8 Empty contract with no DEX LP (Funds pocketed)",
       "\u25ab [red]\u2716[/red] Refund Guarantee: \u26a0\ufe0f No refund method (Capital trapped if unfilled)"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\ud83e\ude99",
@@ -543,7 +555,10 @@
       "\u25ab [red]\u2716[/red] Capital Drain: \ud83d\udea8 Empty contract with no DEX LP (Funds pocketed)",
       "\u25ab [red]\u2716[/red] Refund Guarantee: \u26a0\ufe0f No refund method (Capital trapped if unfilled)",
       "\u25ab [green]\u2714[/green] Secondary Market: Primary bonding phase (No DEX LP yet)"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\ud83c\udfa8",
@@ -614,7 +629,10 @@
       "\u25ab [red]\u2716[/red] Deployer: \ud83d\udea8 Serial Dev (6 contracts deployed in 24h)",
       "\u25ab [red]\u2716[/red] Capital Drain: \ud83d\udea8 Empty contract with no DEX LP (Funds pocketed)",
       "\u25ab [red]\u2716[/red] Refund Guarantee: \u26a0\ufe0f No refund method (Capital trapped if unfilled)"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\ud83e\ude99",
@@ -688,7 +706,10 @@
       "\u25ab [green]\u2714[/green] Capital Safety: No fund drain detected",
       "\u25ab [dim]\u25ab Refund Guarantee: N/A (Free Mint / Gas Only)[/dim]",
       "\u25ab [green]\u2714[/green] Secondary Market: Primary bonding phase (No DEX LP yet)"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\ud83e\ude99",
@@ -765,7 +786,10 @@
       "\u25ab [green]\u2714[/green] Capital Safety: No fund drain detected",
       "\u25ab [dim]\u25ab Refund Guarantee: N/A (Free Mint / Gas Only)[/dim]",
       "\u25ab [green]\u2714[/green] Secondary Market: Primary bonding phase (No DEX LP yet)"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\u2699\ufe0f",
@@ -837,7 +861,10 @@
       "\u25ab [yellow]\u26a0\ufe0f[/yellow] Deployer: Fresh wallet (<8h, low nonce)",
       "\u25ab [green]\u2714[/green] Capital Safety: No fund drain detected",
       "\u25ab [green]\u2714[/green] Refund Guarantee: Bytecode refund verified (refund())"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\ud83e\ude99",
@@ -913,14 +940,17 @@
       "\u25ab [red]\u2716[/red] Capital Drain: \ud83d\udea8 Empty contract with no DEX LP (Funds pocketed)",
       "\u25ab [red]\u2716[/red] Refund Guarantee: \u26a0\ufe0f No refund method (Capital trapped if unfilled)",
       "\u25ab [green]\u2714[/green] Secondary Market: Primary bonding phase (No DEX LP yet)"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\ud83e\ude99",
     "name": "\u5927\u72d7\u5e01",
     "block": 131591205,
     "score": 27,
-    "lp_usd": 12755.09,
+    "lp_usd": 12688.36,
     "rating": "\ud83c\udf31 WARMING UP / SEEDED",
     "symbol": "DAGOU",
     "buys_1h": 1,
@@ -965,7 +995,7 @@
       "\ud83d\udfe1 Fresh Dev Wallet (low nonce)"
     ],
     "risk_level": "MED",
-    "volume_24h": 176.02,
+    "volume_24h": 185.22,
     "detected_at": "2026-11-04 08:16:07",
     "sniper_badge": "\ud83c\udfaf Snipe Ready",
     "sniper_ready": true,
@@ -983,7 +1013,7 @@
     "mint_price_bnb": 0.0,
     "mint_price_str": "DEX Traded",
     "mint_value_wei": "0",
-    "token_price_usd": 62.78,
+    "token_price_usd": 62.35,
     "sniper_checklist": [
       "\u25ab [green]\u2714[/green] Progress: Crowd Surge (2018 active agent wallets)",
       "\u25ab [yellow]\u26a0\ufe0f[/yellow] Deployer: Fresh wallet (<8h, low nonce)",
@@ -991,9 +1021,9 @@
       "\u25ab [dim]\u25ab Refund Guarantee: N/A (Free Mint / Gas Only)[/dim]",
       "\u25ab [green]\u2714[/green] Secondary Market: Primary bonding phase (No DEX LP yet)"
     ],
-    "market_cap": 37006.0,
-    "fdv": 55408.0,
-    "price_change_24h": -3.73
+    "market_cap": 36748.0,
+    "fdv": 55023.0,
+    "price_change_24h": -4.15
   },
   {
     "icon": "\ud83e\ude99",
@@ -1069,7 +1099,10 @@
       "\u25ab [red]\u2716[/red] Capital Drain: \ud83d\udea8 Empty contract with no DEX LP (Funds pocketed)",
       "\u25ab [red]\u2716[/red] Refund Guarantee: \u26a0\ufe0f No refund method (Capital trapped if unfilled)",
       "\u25ab [green]\u2714[/green] Secondary Market: Primary bonding phase (No DEX LP yet)"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\ud83e\ude99",
@@ -1232,7 +1265,10 @@
       "\u25ab [red]\u2716[/red] Capital Drain: \ud83d\udea8 Empty contract with no DEX LP (Funds pocketed)",
       "\u25ab [red]\u2716[/red] Refund Guarantee: \u26a0\ufe0f No refund method (Capital trapped if unfilled)",
       "\u25ab [green]\u2714[/green] Secondary Market: Primary bonding phase (No DEX LP yet)"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\ud83c\udfa8",
@@ -1305,7 +1341,10 @@
       "\u25ab [green]\u2714[/green] Deployer: Clean reputation (No spam deployment)",
       "\u25ab [green]\u2714[/green] Capital Safety: No fund drain detected",
       "\u25ab [dim]\u25ab Refund Guarantee: N/A (Free Mint / Gas Only)[/dim]"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\ud83c\udfa8",
@@ -1374,7 +1413,10 @@
       "\u25ab [green]\u2714[/green] Deployer: Clean reputation (No spam deployment)",
       "\u25ab [green]\u2714[/green] Capital Safety: No fund drain detected",
       "\u25ab [dim]\u25ab Refund Guarantee: N/A (Free Mint / Gas Only)[/dim]"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\ud83c\udfa8",
@@ -1443,7 +1485,10 @@
       "\u25ab [green]\u2714[/green] Deployer: Clean reputation (No spam deployment)",
       "\u25ab [green]\u2714[/green] Capital Safety: No fund drain detected",
       "\u25ab [dim]\u25ab Refund Guarantee: N/A (Free Mint / Gas Only)[/dim]"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\ud83c\udfa8",
@@ -1514,7 +1559,10 @@
       "\u25ab [red]\u2716[/red] Deployer: \ud83d\udea8 Serial Dev (5 contracts deployed in 24h)",
       "\u25ab [red]\u2716[/red] Capital Drain: \ud83d\udea8 Empty contract with no DEX LP (Funds pocketed)",
       "\u25ab [red]\u2716[/red] Refund Guarantee: \u26a0\ufe0f No refund method (Capital trapped if unfilled)"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\ud83e\ude99",
@@ -1588,7 +1636,10 @@
       "\u25ab [green]\u2714[/green] Capital Safety: No fund drain detected",
       "\u25ab [dim]\u25ab Refund Guarantee: N/A (Free Mint / Gas Only)[/dim]",
       "\u25ab [green]\u2714[/green] Secondary Market: Primary bonding phase (No DEX LP yet)"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\ud83c\udfa8",
@@ -1659,7 +1710,10 @@
       "\u25ab [red]\u2716[/red] Deployer: \ud83d\udea8 Serial Dev (4 contracts deployed in 24h)",
       "\u25ab [red]\u2716[/red] Capital Drain: \ud83d\udea8 Empty contract with no DEX LP (Funds pocketed)",
       "\u25ab [red]\u2716[/red] Refund Guarantee: \u26a0\ufe0f No refund method (Capital trapped if unfilled)"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\ud83c\udfa8",
@@ -1730,7 +1784,10 @@
       "\u25ab [red]\u2716[/red] Deployer: \ud83d\udea8 Serial Dev (3 contracts deployed in 24h)",
       "\u25ab [green]\u2714[/green] Capital Safety: No fund drain detected",
       "\u25ab [red]\u2716[/red] Refund Guarantee: \u26a0\ufe0f No refund method (Capital trapped if unfilled)"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\ud83e\ude99",
@@ -1808,7 +1865,10 @@
       "\u25ab [red]\u2716[/red] Capital Drain: \ud83d\udea8 Empty contract with no DEX LP (Funds pocketed)",
       "\u25ab [red]\u2716[/red] Refund Guarantee: \u26a0\ufe0f No refund method (Capital trapped if unfilled)",
       "\u25ab [green]\u2714[/green] Secondary Market: Primary bonding phase (No DEX LP yet)"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\u2699\ufe0f",
@@ -1880,7 +1940,10 @@
       "\u25ab [yellow]\u26a0\ufe0f[/yellow] Deployer: Fresh wallet (<8h, low nonce)",
       "\u25ab [green]\u2714[/green] Capital Safety: No fund drain detected",
       "\u25ab [green]\u2714[/green] Refund Guarantee: Bytecode refund verified (refund())"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\ud83e\ude99",
@@ -1956,7 +2019,10 @@
       "\u25ab [red]\u2716[/red] Capital Drain: \ud83d\udea8 Empty contract with no DEX LP (Funds pocketed)",
       "\u25ab [red]\u2716[/red] Refund Guarantee: \u26a0\ufe0f No refund method (Capital trapped if unfilled)",
       "\u25ab [green]\u2714[/green] Secondary Market: Primary bonding phase (No DEX LP yet)"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\ud83d\uddbc\ufe0f",
@@ -2030,7 +2096,10 @@
       "\u25ab [yellow]\u26a0\ufe0f[/yellow] Deployer: Fresh wallet (<8h, low nonce)",
       "\u25ab [green]\u2714[/green] Capital Safety: No fund drain detected",
       "\u25ab [dim]\u25ab Refund Guarantee: N/A (Free Mint / Gas Only)[/dim]"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\ud83c\udfa8",
@@ -2101,7 +2170,10 @@
       "\u25ab [green]\u2714[/green] Deployer: Clean reputation (No spam deployment)",
       "\u25ab [green]\u2714[/green] Capital Safety: No fund drain detected",
       "\u25ab [dim]\u25ab Refund Guarantee: N/A (Free Mint / Gas Only)[/dim]"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\ud83e\ude99",
@@ -2172,7 +2244,10 @@
       "\u25ab [green]\u2714[/green] Capital Safety: No fund drain detected",
       "\u25ab [dim]\u25ab Refund Guarantee: N/A (Free Mint / Gas Only)[/dim]",
       "\u25ab [green]\u2714[/green] Secondary Market: Primary bonding phase (No DEX LP yet)"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\u2699\ufe0f",
@@ -2247,7 +2322,10 @@
       "\u25ab [yellow]\u26a0\ufe0f[/yellow] Deployer: Fresh wallet (<8h, low nonce)",
       "\u25ab [red]\u2716[/red] Capital Drain: \ud83d\udea8 Empty contract with no DEX LP (Funds pocketed)",
       "\u25ab [green]\u2714[/green] Refund Guarantee: Bytecode refund verified (refund())"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\u26a1",
@@ -2320,7 +2398,10 @@
       "\u25ab [green]\u2714[/green] Capital Safety: No fund drain detected",
       "\u25ab [dim]\u25ab Refund Guarantee: N/A (Free Mint / Gas Only)[/dim]",
       "\u25ab [green]\u2714[/green] Secondary Market: Primary bonding phase (No DEX LP yet)"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\ud83c\udfa8",
@@ -2389,7 +2470,10 @@
       "\u25ab [green]\u2714[/green] Deployer: Clean reputation (No spam deployment)",
       "\u25ab [green]\u2714[/green] Capital Safety: No fund drain detected",
       "\u25ab [dim]\u25ab Refund Guarantee: N/A (Free Mint / Gas Only)[/dim]"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\ud83c\udfa8",
@@ -2458,7 +2542,10 @@
       "\u25ab [green]\u2714[/green] Deployer: Clean reputation (No spam deployment)",
       "\u25ab [green]\u2714[/green] Capital Safety: No fund drain detected",
       "\u25ab [dim]\u25ab Refund Guarantee: N/A (Free Mint / Gas Only)[/dim]"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\ud83e\ude99",
@@ -2536,7 +2623,10 @@
       "\u25ab [red]\u2716[/red] Capital Drain: \ud83d\udea8 Empty contract with no DEX LP (Funds pocketed)",
       "\u25ab [red]\u2716[/red] Refund Guarantee: \u26a0\ufe0f No refund method (Capital trapped if unfilled)",
       "\u25ab [green]\u2714[/green] Secondary Market: Primary bonding phase (No DEX LP yet)"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\u2699\ufe0f",
@@ -2599,7 +2689,10 @@
       "\u25ab [green]\u2714[/green] Deployer: Clean reputation (No spam deployment)",
       "\u25ab [green]\u2714[/green] Capital Safety: No fund drain detected",
       "\u25ab [dim]\u25ab Refund Guarantee: N/A (Free Mint / Gas Only)[/dim]"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\ud83c\udfa8",
@@ -2674,7 +2767,10 @@
       "\u25ab [red]\u2716[/red] Deployer: \ud83d\udea8 Serial Dev (29 contracts deployed in 24h)",
       "\u25ab [red]\u2716[/red] Capital Drain: \ud83d\udea8 Empty contract with no DEX LP (Funds pocketed)",
       "\u25ab [dim]\u25ab Refund Guarantee: N/A (Free Mint / Gas Only)[/dim]"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\ud83c\udfa8",
@@ -2750,7 +2846,10 @@
       "\u25ab [green]\u2714[/green] Deployer: Clean reputation (No spam deployment)",
       "\u25ab [red]\u2716[/red] Capital Drain: \ud83d\udea8 Empty contract with no DEX LP (Funds pocketed)",
       "\u25ab [red]\u2716[/red] Refund Guarantee: \u26a0\ufe0f No refund method (Capital trapped if unfilled)"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\ud83c\udfa8",
@@ -2826,14 +2925,17 @@
       "\u25ab [green]\u2714[/green] Deployer: Clean reputation (No spam deployment)",
       "\u25ab [red]\u2716[/red] Capital Drain: \ud83d\udea8 Empty contract with no DEX LP (Funds pocketed)",
       "\u25ab [red]\u2716[/red] Refund Guarantee: \u26a0\ufe0f No refund method (Capital trapped if unfilled)"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\u26a1",
     "name": "MSN",
     "block": 131587732,
     "score": 8,
-    "lp_usd": 49.17461288496873,
+    "lp_usd": 521.26,
     "rating": "\u2744\ufe0f COLD / DORMANT",
     "symbol": "MSN",
     "buys_1h": 1,
@@ -2877,7 +2979,7 @@
       "No Refund Function in Bytecode"
     ],
     "risk_level": "MED",
-    "volume_24h": 0.0,
+    "volume_24h": 4.21,
     "detected_at": "2026-11-04 07:50:11",
     "sniper_badge": "\u26a0\ufe0f No Refund",
     "sniper_ready": false,
@@ -2905,14 +3007,17 @@
     "mint_price_bnb": 0.01,
     "mint_price_str": "0.0100 BNB",
     "mint_value_wei": "10000000000000000",
-    "token_price_usd": 1.4767151016507127,
+    "token_price_usd": 0.4051,
     "sniper_checklist": [
       "\u25ab [yellow]\u23f3[/yellow] Progress: 0% (<60% threshold, tracking)",
       "\u25ab [green]\u2714[/green] Deployer: Clean reputation (No spam deployment)",
       "\u25ab [green]\u2714[/green] Capital Safety: No fund drain detected",
       "\u25ab [red]\u2716[/red] Refund Guarantee: \u26a0\ufe0f No refund method (Capital trapped if unfilled)",
       "\u25ab [green]\u2714[/green] Secondary Market: Primary bonding phase (No DEX LP yet)"
-    ]
+    ],
+    "market_cap": 265.0,
+    "fdv": 265.0,
+    "price_change_24h": -2.63
   },
   {
     "icon": "\ud83c\udfa8",
@@ -2988,7 +3093,10 @@
       "\u25ab [green]\u2714[/green] Deployer: Clean reputation (No spam deployment)",
       "\u25ab [red]\u2716[/red] Capital Drain: \ud83d\udea8 Empty contract with no DEX LP (Funds pocketed)",
       "\u25ab [red]\u2716[/red] Refund Guarantee: \u26a0\ufe0f No refund method (Capital trapped if unfilled)"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\ud83e\ude99",
@@ -3064,7 +3172,10 @@
       "\u25ab [green]\u2714[/green] Capital Safety: No fund drain detected",
       "\u25ab [red]\u2716[/red] Refund Guarantee: \u26a0\ufe0f No refund method (Capital trapped if unfilled)",
       "\u25ab [green]\u2714[/green] Secondary Market: Primary bonding phase (No DEX LP yet)"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\ud83c\udfa8",
@@ -3133,7 +3244,10 @@
       "\u25ab [green]\u2714[/green] Deployer: Clean reputation (No spam deployment)",
       "\u25ab [green]\u2714[/green] Capital Safety: No fund drain detected",
       "\u25ab [dim]\u25ab Refund Guarantee: N/A (Free Mint / Gas Only)[/dim]"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\u2699\ufe0f",
@@ -3205,7 +3319,10 @@
       "\u25ab [yellow]\u26a0\ufe0f[/yellow] Deployer: Fresh wallet (<8h, low nonce)",
       "\u25ab [green]\u2714[/green] Capital Safety: No fund drain detected",
       "\u25ab [green]\u2714[/green] Refund Guarantee: Bytecode refund verified (refund())"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\ud83e\ude99",
@@ -3279,7 +3396,10 @@
       "\u25ab [green]\u2714[/green] Capital Safety: No fund drain detected",
       "\u25ab [dim]\u25ab Refund Guarantee: N/A (Free Mint / Gas Only)[/dim]",
       "\u25ab [green]\u2714[/green] Secondary Market: Primary bonding phase (No DEX LP yet)"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\ud83c\udfa8",
@@ -3358,7 +3478,10 @@
       "\u25ab [yellow]\u26a0\ufe0f[/yellow] Deployer: Fresh wallet (<8h, low nonce)",
       "\u25ab [red]\u2716[/red] Capital Drain: \ud83d\udea8 Empty contract with no DEX LP (Funds pocketed)",
       "\u25ab [green]\u2714[/green] Refund Guarantee: Bytecode refund verified (claimRefund())"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\ud83c\udfa8",
@@ -3434,7 +3557,10 @@
       "\u25ab [green]\u2714[/green] Deployer: Clean reputation (No spam deployment)",
       "\u25ab [red]\u2716[/red] Capital Drain: \ud83d\udea8 Empty contract with no DEX LP (Funds pocketed)",
       "\u25ab [red]\u2716[/red] Refund Guarantee: \u26a0\ufe0f No refund method (Capital trapped if unfilled)"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\u26a1",
@@ -3504,7 +3630,10 @@
       "\u25ab [green]\u2714[/green] Capital Safety: No fund drain detected",
       "\u25ab [dim]\u25ab Refund Guarantee: N/A (Free Mint / Gas Only)[/dim]",
       "\u25ab [green]\u2714[/green] Secondary Market: Primary bonding phase (No DEX LP yet)"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\ud83c\udfa8",
@@ -3584,7 +3713,10 @@
       "\u25ab [red]\u2716[/red] Deployer: \ud83d\udea8 Serial Dev (14 contracts deployed in 24h)",
       "\u25ab [red]\u2716[/red] Capital Drain: \ud83d\udea8 Empty contract with no DEX LP (Funds pocketed)",
       "\u25ab [red]\u2716[/red] Refund Guarantee: \u26a0\ufe0f No refund method (Capital trapped if unfilled)"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\u2699\ufe0f",
@@ -3659,7 +3791,10 @@
       "\u25ab [yellow]\u26a0\ufe0f[/yellow] Deployer: Fresh wallet (<8h, low nonce)",
       "\u25ab [red]\u2716[/red] Capital Drain: \ud83d\udea8 Empty contract with no DEX LP (Funds pocketed)",
       "\u25ab [green]\u2714[/green] Refund Guarantee: Bytecode refund verified (refund())"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\ud83c\udfa8",
@@ -3722,7 +3857,10 @@
       "\u25ab [green]\u2714[/green] Deployer: Clean reputation (No spam deployment)",
       "\u25ab [green]\u2714[/green] Capital Safety: No fund drain detected",
       "\u25ab [dim]\u25ab Refund Guarantee: N/A (Free Mint / Gas Only)[/dim]"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\ud83c\udfa8",
@@ -3785,14 +3923,17 @@
       "\u25ab [green]\u2714[/green] Deployer: Clean reputation (No spam deployment)",
       "\u25ab [green]\u2714[/green] Capital Safety: No fund drain detected",
       "\u25ab [dim]\u25ab Refund Guarantee: N/A (Free Mint / Gas Only)[/dim]"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\ud83e\ude99",
     "name": "\u5e01\u5b89\u65e0\u5fe7",
     "block": 131586605,
     "score": 82,
-    "lp_usd": 15552.7,
+    "lp_usd": 15507.21,
     "rating": "\ud83d\ude80 VIRAL RUSH / SNIPER FRENZY",
     "symbol": "\u5e01\u5b89\u65e0\u5fe7",
     "buys_1h": 1,
@@ -3836,7 +3977,7 @@
       "Open Source"
     ],
     "risk_level": "SAFE",
-    "volume_24h": 3482.98,
+    "volume_24h": 3363.57,
     "detected_at": "2026-11-04 07:41:36",
     "sniper_badge": "\ud83d\udcc8 On DEX",
     "sniper_ready": false,
@@ -3854,7 +3995,7 @@
     "mint_price_bnb": 0.0,
     "mint_price_str": "DEX Traded",
     "mint_value_wei": "0",
-    "token_price_usd": 1.267e-08,
+    "token_price_usd": 1.262e-08,
     "sniper_checklist": [
       "\u25ab [green]\u2714[/green] Progress: Crowd Surge (2679 active agent wallets)",
       "\u25ab [green]\u2714[/green] Deployer: Clean reputation (No spam deployment)",
@@ -3862,9 +4003,9 @@
       "\u25ab [dim]\u25ab Refund Guarantee: N/A (Free Mint / Gas Only)[/dim]",
       "\u25ab [yellow]\u2716[/yellow] Secondary Market: DEX LP already active ($3,374,426) -> Trade on DEX instead of minting"
     ],
-    "market_cap": 12214.0,
-    "fdv": 12214.0,
-    "price_change_24h": -45.09
+    "market_cap": 12167.0,
+    "fdv": 12167.0,
+    "price_change_24h": -44.11
   },
   {
     "icon": "\ud83e\ude99",
@@ -3942,7 +4083,10 @@
       "\u25ab [red]\u2716[/red] Capital Drain: \ud83d\udea8 Empty contract with no DEX LP (Funds pocketed)",
       "\u25ab [red]\u2716[/red] Refund Guarantee: \u26a0\ufe0f No refund method (Capital trapped if unfilled)",
       "\u25ab [green]\u2714[/green] Secondary Market: Primary bonding phase (No DEX LP yet)"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\u2699\ufe0f",
@@ -4014,7 +4158,10 @@
       "\u25ab [yellow]\u26a0\ufe0f[/yellow] Deployer: Fresh wallet (<8h, low nonce)",
       "\u25ab [green]\u2714[/green] Capital Safety: No fund drain detected",
       "\u25ab [green]\u2714[/green] Refund Guarantee: Bytecode refund verified (refund())"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\ud83c\udfa8",
@@ -4083,7 +4230,10 @@
       "\u25ab [green]\u2714[/green] Deployer: Clean reputation (No spam deployment)",
       "\u25ab [green]\u2714[/green] Capital Safety: No fund drain detected",
       "\u25ab [dim]\u25ab Refund Guarantee: N/A (Free Mint / Gas Only)[/dim]"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\ud83c\udfa8",
@@ -4152,7 +4302,10 @@
       "\u25ab [green]\u2714[/green] Deployer: Clean reputation (No spam deployment)",
       "\u25ab [green]\u2714[/green] Capital Safety: No fund drain detected",
       "\u25ab [dim]\u25ab Refund Guarantee: N/A (Free Mint / Gas Only)[/dim]"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\ud83e\ude99",
@@ -4305,7 +4458,10 @@
       "\u25ab [green]\u2714[/green] Deployer: Clean reputation (No spam deployment)",
       "\u25ab [red]\u2716[/red] Capital Drain: \ud83d\udea8 Empty contract with no DEX LP (Funds pocketed)",
       "\u25ab [red]\u2716[/red] Refund Guarantee: \u26a0\ufe0f No refund method (Capital trapped if unfilled)"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\ud83e\ude99",
@@ -4381,7 +4537,10 @@
       "\u25ab [red]\u2716[/red] Capital Drain: \ud83d\udea8 Empty contract with no DEX LP (Funds pocketed)",
       "\u25ab [red]\u2716[/red] Refund Guarantee: \u26a0\ufe0f No refund method (Capital trapped if unfilled)",
       "\u25ab [green]\u2714[/green] Secondary Market: Primary bonding phase (No DEX LP yet)"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\ud83e\ude99",
@@ -4520,7 +4679,7 @@
       "Closed Source"
     ],
     "risk_level": "MED",
-    "volume_24h": 181.77,
+    "volume_24h": 143.88,
     "detected_at": "2026-11-04 07:34:16",
     "sniper_badge": "\ud83c\udfaf Snipe Ready",
     "sniper_ready": true,
@@ -4550,7 +4709,7 @@
     ],
     "market_cap": 486.0,
     "fdv": 486.0,
-    "price_change_24h": -47.18
+    "price_change_24h": -43.16
   },
   {
     "icon": "\ud83c\udfa8",
@@ -4619,7 +4778,10 @@
       "\u25ab [green]\u2714[/green] Deployer: Clean reputation (No spam deployment)",
       "\u25ab [green]\u2714[/green] Capital Safety: No fund drain detected",
       "\u25ab [dim]\u25ab Refund Guarantee: N/A (Free Mint / Gas Only)[/dim]"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\u2699\ufe0f",
@@ -4694,7 +4856,10 @@
       "\u25ab [yellow]\u26a0\ufe0f[/yellow] Deployer: Fresh wallet (<8h, low nonce)",
       "\u25ab [red]\u2716[/red] Capital Drain: \ud83d\udea8 Empty contract with no DEX LP (Funds pocketed)",
       "\u25ab [green]\u2714[/green] Refund Guarantee: Bytecode refund verified (refund())"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\ud83c\udfa8",
@@ -4767,7 +4932,10 @@
       "\u25ab [green]\u2714[/green] Deployer: Clean reputation (No spam deployment)",
       "\u25ab [green]\u2714[/green] Capital Safety: No fund drain detected",
       "\u25ab [dim]\u25ab Refund Guarantee: N/A (Free Mint / Gas Only)[/dim]"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\ud83e\ude99",
@@ -4848,7 +5016,10 @@
       "\u25ab [green]\u2714[/green] Capital Safety: No fund drain detected",
       "\u25ab [dim]\u25ab Refund Guarantee: N/A (Free Mint / Gas Only)[/dim]",
       "\u25ab [green]\u2714[/green] Secondary Market: Primary bonding phase (No DEX LP yet)"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\ud83e\ude99",
@@ -4927,7 +5098,10 @@
       "\u25ab [green]\u2714[/green] Capital Safety: No fund drain detected",
       "\u25ab [dim]\u25ab Refund Guarantee: N/A (Free Mint / Gas Only)[/dim]",
       "\u25ab [green]\u2714[/green] Secondary Market: Primary bonding phase (No DEX LP yet)"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\ud83c\udfa8",
@@ -5001,7 +5175,10 @@
       "\u25ab [yellow]\u26a0\ufe0f[/yellow] Deployer: Fresh wallet (<8h, low nonce)",
       "\u25ab [green]\u2714[/green] Capital Safety: No fund drain detected",
       "\u25ab [dim]\u25ab Refund Guarantee: N/A (Free Mint / Gas Only)[/dim]"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\ud83e\ude99",
@@ -5080,7 +5257,10 @@
       "\u25ab [green]\u2714[/green] Capital Safety: No fund drain detected",
       "\u25ab [dim]\u25ab Refund Guarantee: N/A (Free Mint / Gas Only)[/dim]",
       "\u25ab [green]\u2714[/green] Secondary Market: Primary bonding phase (No DEX LP yet)"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\ud83e\ude99",
@@ -5157,7 +5337,9 @@
       "\u25ab [dim]\u25ab Refund Guarantee: N/A (Free Mint / Gas Only)[/dim]",
       "\u25ab [green]\u2714[/green] Secondary Market: Primary bonding phase (No DEX LP yet)"
     ],
-    "market_cap": 1417.5052327272517
+    "market_cap": 1417.5052327272517,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\ud83e\ude99",
@@ -5238,7 +5420,10 @@
       "\u25ab [green]\u2714[/green] Capital Safety: No fund drain detected",
       "\u25ab [dim]\u25ab Refund Guarantee: N/A (Free Mint / Gas Only)[/dim]",
       "\u25ab [green]\u2714[/green] Secondary Market: Primary bonding phase (No DEX LP yet)"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\ud83c\udfa8",
@@ -5314,7 +5499,10 @@
       "\u25ab [green]\u2714[/green] Deployer: Clean reputation (No spam deployment)",
       "\u25ab [red]\u2716[/red] Capital Drain: \ud83d\udea8 Empty contract with no DEX LP (Funds pocketed)",
       "\u25ab [red]\u2716[/red] Refund Guarantee: \u26a0\ufe0f No refund method (Capital trapped if unfilled)"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\ud83c\udfa8",
@@ -5390,14 +5578,17 @@
       "\u25ab [green]\u2714[/green] Deployer: Clean reputation (No spam deployment)",
       "\u25ab [red]\u2716[/red] Capital Drain: \ud83d\udea8 Empty contract with no DEX LP (Funds pocketed)",
       "\u25ab [red]\u2716[/red] Refund Guarantee: \u26a0\ufe0f No refund method (Capital trapped if unfilled)"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\u26a1",
     "name": "\u72f4\u72b4",
     "block": 131584993,
     "score": 8,
-    "lp_usd": 9.832270255453095,
+    "lp_usd": 573.93,
     "rating": "\u2744\ufe0f COLD / DORMANT",
     "symbol": "\u72f4\u72b4",
     "buys_1h": 1,
@@ -5441,7 +5632,7 @@
       "No Refund Function in Bytecode"
     ],
     "risk_level": "MED",
-    "volume_24h": 0.0,
+    "volume_24h": 13.05,
     "detected_at": "2026-11-04 07:29:41",
     "sniper_badge": "\u26a0\ufe0f No Refund",
     "sniper_ready": false,
@@ -5473,14 +5664,17 @@
     "mint_price_bnb": 0.01,
     "mint_price_str": "0.0100 BNB",
     "mint_value_wei": "10000000000000000",
-    "token_price_usd": 1.4763168551731374,
+    "token_price_usd": 0.4794,
     "sniper_checklist": [
       "\u25ab [yellow]\u23f3[/yellow] Progress: 0% (<60% threshold, tracking)",
       "\u25ab [green]\u2714[/green] Deployer: Clean reputation (No spam deployment)",
       "\u25ab [green]\u2714[/green] Capital Safety: No fund drain detected",
       "\u25ab [red]\u2716[/red] Refund Guarantee: \u26a0\ufe0f No refund method (Capital trapped if unfilled)",
       "\u25ab [green]\u2714[/green] Secondary Market: Primary bonding phase (No DEX LP yet)"
-    ]
+    ],
+    "market_cap": 304.0,
+    "fdv": 304.0,
+    "price_change_24h": -8.95
   },
   {
     "icon": "\ud83e\ude99",
@@ -5555,7 +5749,9 @@
       "\u25ab [dim]\u25ab Refund Guarantee: N/A (Free Mint / Gas Only)[/dim]",
       "\u25ab [green]\u2714[/green] Secondary Market: Primary bonding phase (No DEX LP yet)"
     ],
-    "market_cap": 171.4419
+    "market_cap": 171.4419,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\ud83c\udfa8",
@@ -5624,7 +5820,10 @@
       "\u25ab [green]\u2714[/green] Deployer: Clean reputation (No spam deployment)",
       "\u25ab [green]\u2714[/green] Capital Safety: No fund drain detected",
       "\u25ab [dim]\u25ab Refund Guarantee: N/A (Free Mint / Gas Only)[/dim]"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\ud83c\udfa8",
@@ -5693,7 +5892,10 @@
       "\u25ab [green]\u2714[/green] Deployer: Clean reputation (No spam deployment)",
       "\u25ab [green]\u2714[/green] Capital Safety: No fund drain detected",
       "\u25ab [dim]\u25ab Refund Guarantee: N/A (Free Mint / Gas Only)[/dim]"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\ud83e\ude99",
@@ -5848,7 +6050,10 @@
       "\u25ab [green]\u2714[/green] Deployer: Clean reputation (No spam deployment)",
       "\u25ab [green]\u2714[/green] Capital Safety: No fund drain detected",
       "\u25ab [red]\u2716[/red] Refund Guarantee: \u26a0\ufe0f No refund method (Capital trapped if unfilled)"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\ud83c\udfa8",
@@ -5924,7 +6129,10 @@
       "\u25ab [green]\u2714[/green] Deployer: Clean reputation (No spam deployment)",
       "\u25ab [red]\u2716[/red] Capital Drain: \ud83d\udea8 Empty contract with no DEX LP (Funds pocketed)",
       "\u25ab [red]\u2716[/red] Refund Guarantee: \u26a0\ufe0f No refund method (Capital trapped if unfilled)"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\u2699\ufe0f",
@@ -5999,7 +6207,10 @@
       "\u25ab [yellow]\u26a0\ufe0f[/yellow] Deployer: Fresh wallet (<8h, low nonce)",
       "\u25ab [red]\u2716[/red] Capital Drain: \ud83d\udea8 Empty contract with no DEX LP (Funds pocketed)",
       "\u25ab [green]\u2714[/green] Refund Guarantee: Bytecode refund verified (refund())"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\ud83c\udfa8",
@@ -6158,7 +6369,10 @@
       "\u25ab [green]\u2714[/green] Deployer: Clean reputation (No spam deployment)",
       "\u25ab [green]\u2714[/green] Capital Safety: No fund drain detected",
       "\u25ab [dim]\u25ab Refund Guarantee: N/A (Free Mint / Gas Only)[/dim]"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\ud83c\udfa8",
@@ -6231,7 +6445,10 @@
       "\u25ab [green]\u2714[/green] Deployer: Clean reputation (No spam deployment)",
       "\u25ab [green]\u2714[/green] Capital Safety: No fund drain detected",
       "\u25ab [red]\u2716[/red] Refund Guarantee: \u26a0\ufe0f No refund method (Capital trapped if unfilled)"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\ud83c\udfa8",
@@ -6300,7 +6517,10 @@
       "\u25ab [green]\u2714[/green] Deployer: Clean reputation (No spam deployment)",
       "\u25ab [green]\u2714[/green] Capital Safety: No fund drain detected",
       "\u25ab [dim]\u25ab Refund Guarantee: N/A (Free Mint / Gas Only)[/dim]"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\ud83e\ude99",
@@ -6378,7 +6598,10 @@
       "\u25ab [red]\u2716[/red] Capital Drain: \ud83d\udea8 Empty contract with no DEX LP (Funds pocketed)",
       "\u25ab [red]\u2716[/red] Refund Guarantee: \u26a0\ufe0f No refund method (Capital trapped if unfilled)",
       "\u25ab [green]\u2714[/green] Secondary Market: Primary bonding phase (No DEX LP yet)"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\ud83e\ude99",
@@ -6455,7 +6678,10 @@
       "\u25ab [green]\u2714[/green] Capital Safety: No fund drain detected",
       "\u25ab [dim]\u25ab Refund Guarantee: N/A (Free Mint / Gas Only)[/dim]",
       "\u25ab [green]\u2714[/green] Secondary Market: Primary bonding phase (No DEX LP yet)"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\ud83c\udfa8",
@@ -6526,7 +6752,10 @@
       "\u25ab [green]\u2714[/green] Deployer: Clean reputation (No spam deployment)",
       "\u25ab [green]\u2714[/green] Capital Safety: No fund drain detected",
       "\u25ab [dim]\u25ab Refund Guarantee: N/A (Free Mint / Gas Only)[/dim]"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\ud83c\udfa8",
@@ -6595,7 +6824,10 @@
       "\u25ab [green]\u2714[/green] Deployer: Clean reputation (No spam deployment)",
       "\u25ab [green]\u2714[/green] Capital Safety: No fund drain detected",
       "\u25ab [dim]\u25ab Refund Guarantee: N/A (Free Mint / Gas Only)[/dim]"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\ud83c\udfa8",
@@ -6666,7 +6898,10 @@
       "\u25ab [green]\u2714[/green] Deployer: Clean reputation (No spam deployment)",
       "\u25ab [green]\u2714[/green] Capital Safety: No fund drain detected",
       "\u25ab [dim]\u25ab Refund Guarantee: N/A (Free Mint / Gas Only)[/dim]"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\ud83c\udfa8",
@@ -6735,7 +6970,10 @@
       "\u25ab [green]\u2714[/green] Deployer: Clean reputation (No spam deployment)",
       "\u25ab [green]\u2714[/green] Capital Safety: No fund drain detected",
       "\u25ab [dim]\u25ab Refund Guarantee: N/A (Free Mint / Gas Only)[/dim]"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\ud83c\udfa8",
@@ -6804,7 +7042,10 @@
       "\u25ab [green]\u2714[/green] Deployer: Clean reputation (No spam deployment)",
       "\u25ab [green]\u2714[/green] Capital Safety: No fund drain detected",
       "\u25ab [dim]\u25ab Refund Guarantee: N/A (Free Mint / Gas Only)[/dim]"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\ud83c\udfa8",
@@ -6873,7 +7114,10 @@
       "\u25ab [green]\u2714[/green] Deployer: Clean reputation (No spam deployment)",
       "\u25ab [green]\u2714[/green] Capital Safety: No fund drain detected",
       "\u25ab [dim]\u25ab Refund Guarantee: N/A (Free Mint / Gas Only)[/dim]"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\ud83c\udfa8",
@@ -6949,7 +7193,10 @@
       "\u25ab [green]\u2714[/green] Deployer: Clean reputation (No spam deployment)",
       "\u25ab [red]\u2716[/red] Capital Drain: \ud83d\udea8 Empty contract with no DEX LP (Funds pocketed)",
       "\u25ab [red]\u2716[/red] Refund Guarantee: \u26a0\ufe0f No refund method (Capital trapped if unfilled)"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\ud83c\udfa8",
@@ -7032,7 +7279,10 @@
       "\u25ab [green]\u2714[/green] Deployer: Clean reputation (No spam deployment)",
       "\u25ab [green]\u2714[/green] Capital Safety: No fund drain detected",
       "\u25ab [red]\u2716[/red] Refund Guarantee: \u26a0\ufe0f No refund method (Capital trapped if unfilled)"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\ud83c\udfa8",
@@ -7108,7 +7358,10 @@
       "\u25ab [green]\u2714[/green] Deployer: Clean reputation (No spam deployment)",
       "\u25ab [red]\u2716[/red] Capital Drain: \ud83d\udea8 Empty contract with no DEX LP (Funds pocketed)",
       "\u25ab [red]\u2716[/red] Refund Guarantee: \u26a0\ufe0f No refund method (Capital trapped if unfilled)"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\ud83e\ude99",
@@ -7194,7 +7447,10 @@
       "\u25ab [green]\u2714[/green] Capital Safety: No fund drain detected",
       "\u25ab [dim]\u25ab Refund Guarantee: N/A (Free Mint / Gas Only)[/dim]",
       "\u25ab [green]\u2714[/green] Secondary Market: Primary bonding phase (No DEX LP yet)"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\u2699\ufe0f",
@@ -7266,7 +7522,10 @@
       "\u25ab [yellow]\u26a0\ufe0f[/yellow] Deployer: Fresh wallet (<8h, low nonce)",
       "\u25ab [green]\u2714[/green] Capital Safety: No fund drain detected",
       "\u25ab [green]\u2714[/green] Refund Guarantee: Bytecode refund verified (refund())"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\ud83c\udfa8",
@@ -7335,7 +7594,10 @@
       "\u25ab [green]\u2714[/green] Deployer: Clean reputation (No spam deployment)",
       "\u25ab [green]\u2714[/green] Capital Safety: No fund drain detected",
       "\u25ab [dim]\u25ab Refund Guarantee: N/A (Free Mint / Gas Only)[/dim]"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\ud83e\ude99",
@@ -7413,7 +7675,10 @@
       "\u25ab [red]\u2716[/red] Capital Drain: \ud83d\udea8 Empty contract with no DEX LP (Funds pocketed)",
       "\u25ab [red]\u2716[/red] Refund Guarantee: \u26a0\ufe0f No refund method (Capital trapped if unfilled)",
       "\u25ab [green]\u2714[/green] Secondary Market: Primary bonding phase (No DEX LP yet)"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\ud83c\udfa8",
@@ -7482,7 +7747,10 @@
       "\u25ab [green]\u2714[/green] Deployer: Clean reputation (No spam deployment)",
       "\u25ab [green]\u2714[/green] Capital Safety: No fund drain detected",
       "\u25ab [dim]\u25ab Refund Guarantee: N/A (Free Mint / Gas Only)[/dim]"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\ud83c\udfa8",
@@ -7562,7 +7830,10 @@
       "\u25ab [yellow]\u26a0\ufe0f[/yellow] Deployer: Fresh wallet (<8h, low nonce)",
       "\u25ab [green]\u2714[/green] Capital Safety: No fund drain detected",
       "\u25ab [dim]\u25ab Refund Guarantee: N/A (Free Mint / Gas Only)[/dim]"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\ud83c\udfa8",
@@ -7631,7 +7902,10 @@
       "\u25ab [green]\u2714[/green] Deployer: Clean reputation (No spam deployment)",
       "\u25ab [green]\u2714[/green] Capital Safety: No fund drain detected",
       "\u25ab [dim]\u25ab Refund Guarantee: N/A (Free Mint / Gas Only)[/dim]"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\ud83c\udfa8",
@@ -7700,7 +7974,10 @@
       "\u25ab [green]\u2714[/green] Deployer: Clean reputation (No spam deployment)",
       "\u25ab [green]\u2714[/green] Capital Safety: No fund drain detected",
       "\u25ab [dim]\u25ab Refund Guarantee: N/A (Free Mint / Gas Only)[/dim]"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\ud83c\udfa8",
@@ -7769,7 +8046,10 @@
       "\u25ab [green]\u2714[/green] Deployer: Clean reputation (No spam deployment)",
       "\u25ab [green]\u2714[/green] Capital Safety: No fund drain detected",
       "\u25ab [dim]\u25ab Refund Guarantee: N/A (Free Mint / Gas Only)[/dim]"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\ud83e\ude99",
@@ -7846,7 +8126,10 @@
       "\u25ab [green]\u2714[/green] Capital Safety: No fund drain detected",
       "\u25ab [dim]\u25ab Refund Guarantee: N/A (Free Mint / Gas Only)[/dim]",
       "\u25ab [green]\u2714[/green] Secondary Market: Primary bonding phase (No DEX LP yet)"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\u2699\ufe0f",
@@ -7921,7 +8204,10 @@
       "\u25ab [yellow]\u26a0\ufe0f[/yellow] Deployer: Fresh wallet (<8h, low nonce)",
       "\u25ab [red]\u2716[/red] Capital Drain: \ud83d\udea8 Empty contract with no DEX LP (Funds pocketed)",
       "\u25ab [green]\u2714[/green] Refund Guarantee: Bytecode refund verified (refund())"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\ud83c\udfa8",
@@ -7990,7 +8276,10 @@
       "\u25ab [green]\u2714[/green] Deployer: Clean reputation (No spam deployment)",
       "\u25ab [green]\u2714[/green] Capital Safety: No fund drain detected",
       "\u25ab [dim]\u25ab Refund Guarantee: N/A (Free Mint / Gas Only)[/dim]"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\ud83c\udfa8",
@@ -8066,7 +8355,10 @@
       "\u25ab [green]\u2714[/green] Deployer: Clean reputation (No spam deployment)",
       "\u25ab [red]\u2716[/red] Capital Drain: \ud83d\udea8 Empty contract with no DEX LP (Funds pocketed)",
       "\u25ab [red]\u2716[/red] Refund Guarantee: \u26a0\ufe0f No refund method (Capital trapped if unfilled)"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\u26a1",
@@ -8136,7 +8428,10 @@
       "\u25ab [green]\u2714[/green] Capital Safety: No fund drain detected",
       "\u25ab [dim]\u25ab Refund Guarantee: N/A (Free Mint / Gas Only)[/dim]",
       "\u25ab [green]\u2714[/green] Secondary Market: Primary bonding phase (No DEX LP yet)"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\ud83e\ude99",
@@ -8214,7 +8509,10 @@
       "\u25ab [red]\u2716[/red] Capital Drain: \ud83d\udea8 Empty contract with no DEX LP (Funds pocketed)",
       "\u25ab [red]\u2716[/red] Refund Guarantee: \u26a0\ufe0f No refund method (Capital trapped if unfilled)",
       "\u25ab [green]\u2714[/green] Secondary Market: Primary bonding phase (No DEX LP yet)"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\ud83c\udfa8",
@@ -8290,7 +8588,10 @@
       "\u25ab [green]\u2714[/green] Deployer: Clean reputation (No spam deployment)",
       "\u25ab [red]\u2716[/red] Capital Drain: \ud83d\udea8 Empty contract with no DEX LP (Funds pocketed)",
       "\u25ab [red]\u2716[/red] Refund Guarantee: \u26a0\ufe0f No refund method (Capital trapped if unfilled)"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\u2699\ufe0f",
@@ -8365,7 +8666,10 @@
       "\u25ab [yellow]\u26a0\ufe0f[/yellow] Deployer: Fresh wallet (<8h, low nonce)",
       "\u25ab [red]\u2716[/red] Capital Drain: \ud83d\udea8 Empty contract with no DEX LP (Funds pocketed)",
       "\u25ab [green]\u2714[/green] Refund Guarantee: Bytecode refund verified (refund())"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\ud83c\udfa8",
@@ -8434,7 +8738,10 @@
       "\u25ab [green]\u2714[/green] Deployer: Clean reputation (No spam deployment)",
       "\u25ab [green]\u2714[/green] Capital Safety: No fund drain detected",
       "\u25ab [dim]\u25ab Refund Guarantee: N/A (Free Mint / Gas Only)[/dim]"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\ud83c\udfa8",
@@ -8505,7 +8812,10 @@
       "\u25ab [green]\u2714[/green] Deployer: Clean reputation (No spam deployment)",
       "\u25ab [green]\u2714[/green] Capital Safety: No fund drain detected",
       "\u25ab [dim]\u25ab Refund Guarantee: N/A (Free Mint / Gas Only)[/dim]"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\ud83e\ude99",
@@ -8583,7 +8893,10 @@
       "\u25ab [red]\u2716[/red] Capital Drain: \ud83d\udea8 Empty contract with no DEX LP (Funds pocketed)",
       "\u25ab [red]\u2716[/red] Refund Guarantee: \u26a0\ufe0f No refund method (Capital trapped if unfilled)",
       "\u25ab [green]\u2714[/green] Secondary Market: Primary bonding phase (No DEX LP yet)"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\u2699\ufe0f",
@@ -8658,7 +8971,10 @@
       "\u25ab [yellow]\u26a0\ufe0f[/yellow] Deployer: Fresh wallet (<8h, low nonce)",
       "\u25ab [red]\u2716[/red] Capital Drain: \ud83d\udea8 Empty contract with no DEX LP (Funds pocketed)",
       "\u25ab [green]\u2714[/green] Refund Guarantee: Bytecode refund verified (refund())"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\ud83c\udfa8",
@@ -8727,7 +9043,10 @@
       "\u25ab [green]\u2714[/green] Deployer: Clean reputation (No spam deployment)",
       "\u25ab [green]\u2714[/green] Capital Safety: No fund drain detected",
       "\u25ab [dim]\u25ab Refund Guarantee: N/A (Free Mint / Gas Only)[/dim]"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\ud83c\udfa8",
@@ -8796,7 +9115,10 @@
       "\u25ab [green]\u2714[/green] Deployer: Clean reputation (No spam deployment)",
       "\u25ab [green]\u2714[/green] Capital Safety: No fund drain detected",
       "\u25ab [dim]\u25ab Refund Guarantee: N/A (Free Mint / Gas Only)[/dim]"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\ud83c\udfa8",
@@ -8887,7 +9209,10 @@
       "\u25ab [green]\u2714[/green] Deployer: Clean reputation (No spam deployment)",
       "\u25ab [green]\u2714[/green] Capital Safety: No fund drain detected",
       "\u25ab [dim]\u25ab Refund Guarantee: N/A (Free Mint / Gas Only)[/dim]"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\ud83c\udfa8",
@@ -8961,7 +9286,10 @@
       "\u25ab [yellow]\u26a0\ufe0f[/yellow] Deployer: Fresh wallet (<8h, low nonce)",
       "\u25ab [green]\u2714[/green] Capital Safety: No fund drain detected",
       "\u25ab [dim]\u25ab Refund Guarantee: N/A (Free Mint / Gas Only)[/dim]"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\u2699\ufe0f",
@@ -9031,7 +9359,10 @@
       "\u25ab [yellow]\u26a0\ufe0f[/yellow] Deployer: Fresh wallet (<8h, low nonce)",
       "\u25ab [green]\u2714[/green] Capital Safety: No fund drain detected",
       "\u25ab [red]\u2716[/red] Refund Guarantee: \u26a0\ufe0f No refund method (Capital trapped if unfilled)"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\ud83c\udfa8",
@@ -9100,7 +9431,10 @@
       "\u25ab [green]\u2714[/green] Deployer: Clean reputation (No spam deployment)",
       "\u25ab [green]\u2714[/green] Capital Safety: No fund drain detected",
       "\u25ab [dim]\u25ab Refund Guarantee: N/A (Free Mint / Gas Only)[/dim]"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\u2699\ufe0f",
@@ -9172,7 +9506,10 @@
       "\u25ab [yellow]\u26a0\ufe0f[/yellow] Deployer: Fresh wallet (<8h, low nonce)",
       "\u25ab [green]\u2714[/green] Capital Safety: No fund drain detected",
       "\u25ab [green]\u2714[/green] Refund Guarantee: Bytecode refund verified (refund())"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\ud83c\udfa8",
@@ -9245,7 +9582,10 @@
       "\u25ab [green]\u2714[/green] Deployer: Clean reputation (No spam deployment)",
       "\u25ab [green]\u2714[/green] Capital Safety: No fund drain detected",
       "\u25ab [dim]\u25ab Refund Guarantee: N/A (Free Mint / Gas Only)[/dim]"
-    ]
+    ],
+    "market_cap": 2889.0,
+    "fdv": 2889.0,
+    "price_change_24h": null
   },
   {
     "icon": "\ud83c\udfa8",
@@ -9314,7 +9654,10 @@
       "\u25ab [green]\u2714[/green] Deployer: Clean reputation (No spam deployment)",
       "\u25ab [green]\u2714[/green] Capital Safety: No fund drain detected",
       "\u25ab [dim]\u25ab Refund Guarantee: N/A (Free Mint / Gas Only)[/dim]"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\ud83e\ude99",
@@ -9391,7 +9734,10 @@
       "\u25ab [green]\u2714[/green] Capital Safety: No fund drain detected",
       "\u25ab [dim]\u25ab Refund Guarantee: N/A (Free Mint / Gas Only)[/dim]",
       "\u25ab [green]\u2714[/green] Secondary Market: Primary bonding phase (No DEX LP yet)"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\ud83e\ude99",
@@ -9476,7 +9822,10 @@
       "\u25ab [green]\u2714[/green] Capital Safety: No fund drain detected",
       "\u25ab [dim]\u25ab Refund Guarantee: N/A (Free Mint / Gas Only)[/dim]",
       "\u25ab [green]\u2714[/green] Secondary Market: Primary bonding phase (No DEX LP yet)"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\ud83c\udfa8",
@@ -9545,7 +9894,10 @@
       "\u25ab [green]\u2714[/green] Deployer: Clean reputation (No spam deployment)",
       "\u25ab [green]\u2714[/green] Capital Safety: No fund drain detected",
       "\u25ab [dim]\u25ab Refund Guarantee: N/A (Free Mint / Gas Only)[/dim]"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\ud83c\udfa8",
@@ -9614,7 +9966,10 @@
       "\u25ab [green]\u2714[/green] Deployer: Clean reputation (No spam deployment)",
       "\u25ab [green]\u2714[/green] Capital Safety: No fund drain detected",
       "\u25ab [dim]\u25ab Refund Guarantee: N/A (Free Mint / Gas Only)[/dim]"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\u2699\ufe0f",
@@ -9686,7 +10041,10 @@
       "\u25ab [yellow]\u26a0\ufe0f[/yellow] Deployer: Fresh wallet (<8h, low nonce)",
       "\u25ab [green]\u2714[/green] Capital Safety: No fund drain detected",
       "\u25ab [green]\u2714[/green] Refund Guarantee: Bytecode refund verified (refund())"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\ud83e\ude99",
@@ -9779,7 +10137,10 @@
       "\u25ab [green]\u2714[/green] Capital Safety: No fund drain detected",
       "\u25ab [dim]\u25ab Refund Guarantee: N/A (Free Mint / Gas Only)[/dim]",
       "\u25ab [green]\u2714[/green] Secondary Market: Primary bonding phase (No DEX LP yet)"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\ud83c\udfa8",
@@ -9855,7 +10216,10 @@
       "\u25ab [green]\u2714[/green] Deployer: Clean reputation (No spam deployment)",
       "\u25ab [red]\u2716[/red] Capital Drain: \ud83d\udea8 Empty contract with no DEX LP (Funds pocketed)",
       "\u25ab [red]\u2716[/red] Refund Guarantee: \u26a0\ufe0f No refund method (Capital trapped if unfilled)"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\ud83c\udfa8",
@@ -9926,7 +10290,10 @@
       "\u25ab [green]\u2714[/green] Deployer: Clean reputation (No spam deployment)",
       "\u25ab [green]\u2714[/green] Capital Safety: No fund drain detected",
       "\u25ab [dim]\u25ab Refund Guarantee: N/A (Free Mint / Gas Only)[/dim]"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\ud83c\udfa8",
@@ -10001,7 +10368,10 @@
       "\u25ab [red]\u2716[/red] Deployer: \ud83d\udea8 Serial Dev (22 contracts deployed in 24h)",
       "\u25ab [red]\u2716[/red] Capital Drain: \ud83d\udea8 Empty contract with no DEX LP (Funds pocketed)",
       "\u25ab [dim]\u25ab Refund Guarantee: N/A (Free Mint / Gas Only)[/dim]"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\ud83c\udfa8",
@@ -10077,7 +10447,10 @@
       "\u25ab [green]\u2714[/green] Deployer: Clean reputation (No spam deployment)",
       "\u25ab [red]\u2716[/red] Capital Drain: \ud83d\udea8 Empty contract with no DEX LP (Funds pocketed)",
       "\u25ab [red]\u2716[/red] Refund Guarantee: \u26a0\ufe0f No refund method (Capital trapped if unfilled)"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\ud83c\udfa8",
@@ -10153,7 +10526,10 @@
       "\u25ab [green]\u2714[/green] Deployer: Clean reputation (No spam deployment)",
       "\u25ab [red]\u2716[/red] Capital Drain: \ud83d\udea8 Empty contract with no DEX LP (Funds pocketed)",
       "\u25ab [red]\u2716[/red] Refund Guarantee: \u26a0\ufe0f No refund method (Capital trapped if unfilled)"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\u2699\ufe0f",
@@ -10225,7 +10601,10 @@
       "\u25ab [yellow]\u26a0\ufe0f[/yellow] Deployer: Fresh wallet (<8h, low nonce)",
       "\u25ab [green]\u2714[/green] Capital Safety: No fund drain detected",
       "\u25ab [green]\u2714[/green] Refund Guarantee: Bytecode refund verified (refund())"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\u26a1",
@@ -10299,7 +10678,10 @@
       "\u25ab [green]\u2714[/green] Capital Safety: No fund drain detected",
       "\u25ab [red]\u2716[/red] Refund Guarantee: \u26a0\ufe0f No refund method (Capital trapped if unfilled)",
       "\u25ab [green]\u2714[/green] Secondary Market: Primary bonding phase (No DEX LP yet)"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\ud83e\ude99",
@@ -10381,7 +10763,10 @@
       "\u25ab [green]\u2714[/green] Capital Safety: No fund drain detected",
       "\u25ab [dim]\u25ab Refund Guarantee: N/A (Free Mint / Gas Only)[/dim]",
       "\u25ab [green]\u2714[/green] Secondary Market: Primary bonding phase (No DEX LP yet)"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\ud83e\ude99",
@@ -10457,7 +10842,10 @@
       "\u25ab [red]\u2716[/red] Capital Drain: \ud83d\udea8 Empty contract with no DEX LP (Funds pocketed)",
       "\u25ab [red]\u2716[/red] Refund Guarantee: \u26a0\ufe0f No refund method (Capital trapped if unfilled)",
       "\u25ab [green]\u2714[/green] Secondary Market: Primary bonding phase (No DEX LP yet)"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\ud83c\udfa8",
@@ -10533,7 +10921,10 @@
       "\u25ab [green]\u2714[/green] Deployer: Clean reputation (No spam deployment)",
       "\u25ab [red]\u2716[/red] Capital Drain: \ud83d\udea8 Empty contract with no DEX LP (Funds pocketed)",
       "\u25ab [red]\u2716[/red] Refund Guarantee: \u26a0\ufe0f No refund method (Capital trapped if unfilled)"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\ud83c\udfa8",
@@ -10602,7 +10993,10 @@
       "\u25ab [green]\u2714[/green] Deployer: Clean reputation (No spam deployment)",
       "\u25ab [green]\u2714[/green] Capital Safety: No fund drain detected",
       "\u25ab [dim]\u25ab Refund Guarantee: N/A (Free Mint / Gas Only)[/dim]"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\ud83c\udfa8",
@@ -10682,14 +11076,17 @@
       "\u25ab [red]\u2716[/red] Deployer: \ud83d\udea8 Serial Dev (14 contracts deployed in 24h)",
       "\u25ab [red]\u2716[/red] Capital Drain: \ud83d\udea8 Empty contract with no DEX LP (Funds pocketed)",
       "\u25ab [red]\u2716[/red] Refund Guarantee: \u26a0\ufe0f No refund method (Capital trapped if unfilled)"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\ud83e\ude99",
     "name": "MSN",
     "block": 131577776,
     "score": 40,
-    "lp_usd": 195.91937954089013,
+    "lp_usd": 863.06,
     "rating": "\u26a1 MODERATE",
     "symbol": "MSN",
     "buys_1h": 1,
@@ -10733,7 +11130,7 @@
       "Open Source"
     ],
     "risk_level": "SAFE",
-    "volume_24h": 0.0,
+    "volume_24h": 53.09,
     "detected_at": "2026-11-04 06:35:28",
     "sniper_badge": "\ud83c\udfaf Snipe Ready",
     "sniper_ready": true,
@@ -10755,7 +11152,7 @@
     "mint_price_bnb": 0.01,
     "mint_price_str": "0.0100 BNB",
     "mint_value_wei": "10000000000000000",
-    "token_price_usd": 1.5759280851101203,
+    "token_price_usd": 0.5718,
     "sniper_checklist": [
       "\u25ab [green]\u2714[/green] Progress: Crowd Surge (888 active agent wallets)",
       "\u25ab [green]\u2714[/green] Deployer: Clean reputation (No spam deployment)",
@@ -10763,7 +11160,9 @@
       "\u25ab [dim]\u25ab Refund Guarantee: N/A (Free Mint / Gas Only)[/dim]",
       "\u25ab [green]\u2714[/green] Secondary Market: Primary bonding phase (No DEX LP yet)"
     ],
-    "market_cap": 1399.4241395777867
+    "market_cap": 468.0,
+    "fdv": 468.0,
+    "price_change_24h": -22.35
   },
   {
     "icon": "\ud83e\ude99",
@@ -10832,7 +11231,10 @@
       "\u25ab [green]\u2714[/green] Capital Safety: No fund drain detected",
       "\u25ab [dim]\u25ab Refund Guarantee: N/A (Free Mint / Gas Only)[/dim]",
       "\u25ab [green]\u2714[/green] Secondary Market: Primary bonding phase (No DEX LP yet)"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\ud83c\udfa8",
@@ -10912,7 +11314,10 @@
       "\u25ab [red]\u2716[/red] Deployer: \ud83d\udea8 Serial Dev (14 contracts deployed in 24h)",
       "\u25ab [red]\u2716[/red] Capital Drain: \ud83d\udea8 Empty contract with no DEX LP (Funds pocketed)",
       "\u25ab [red]\u2716[/red] Refund Guarantee: \u26a0\ufe0f No refund method (Capital trapped if unfilled)"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\ud83c\udfa8",
@@ -10992,7 +11397,10 @@
       "\u25ab [red]\u2716[/red] Deployer: \ud83d\udea8 Serial Dev (14 contracts deployed in 24h)",
       "\u25ab [red]\u2716[/red] Capital Drain: \ud83d\udea8 Empty contract with no DEX LP (Funds pocketed)",
       "\u25ab [red]\u2716[/red] Refund Guarantee: \u26a0\ufe0f No refund method (Capital trapped if unfilled)"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\u2699\ufe0f",
@@ -11064,7 +11472,10 @@
       "\u25ab [yellow]\u26a0\ufe0f[/yellow] Deployer: Fresh wallet (<8h, low nonce)",
       "\u25ab [green]\u2714[/green] Capital Safety: No fund drain detected",
       "\u25ab [green]\u2714[/green] Refund Guarantee: Bytecode refund verified (refund())"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\ud83e\ude99",
@@ -11145,7 +11556,10 @@
       "\u25ab [green]\u2714[/green] Capital Safety: No fund drain detected",
       "\u25ab [dim]\u25ab Refund Guarantee: N/A (Free Mint / Gas Only)[/dim]",
       "\u25ab [green]\u2714[/green] Secondary Market: Primary bonding phase (No DEX LP yet)"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\ud83c\udfa8",
@@ -11216,7 +11630,10 @@
       "\u25ab [green]\u2714[/green] Deployer: Clean reputation (No spam deployment)",
       "\u25ab [green]\u2714[/green] Capital Safety: No fund drain detected",
       "\u25ab [dim]\u25ab Refund Guarantee: N/A (Free Mint / Gas Only)[/dim]"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\ud83e\ude99",
@@ -11293,7 +11710,10 @@
       "\u25ab [green]\u2714[/green] Capital Safety: No fund drain detected",
       "\u25ab [dim]\u25ab Refund Guarantee: N/A (Free Mint / Gas Only)[/dim]",
       "\u25ab [green]\u2714[/green] Secondary Market: Primary bonding phase (No DEX LP yet)"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   },
   {
     "icon": "\ud83e\ude99",
@@ -11372,6 +11792,9 @@
       "\u25ab [green]\u2714[/green] Capital Safety: No fund drain detected",
       "\u25ab [dim]\u25ab Refund Guarantee: N/A (Free Mint / Gas Only)[/dim]",
       "\u25ab [green]\u2714[/green] Secondary Market: Primary bonding phase (No DEX LP yet)"
-    ]
+    ],
+    "market_cap": null,
+    "fdv": null,
+    "price_change_24h": null
   }
 ]

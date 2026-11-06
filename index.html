@@ -27,7 +27,7 @@
   <meta name="twitter:description" content="Real-time autonomous discovery engine tracking 5,000 smart wallets, instant honeypot audits, and new .ai agent deployments on BNB Chain.">
   <meta name="twitter:image" content="https://agent-id-monitor.vercel.app/og-preview.png?v=2">
 
-  <link rel="stylesheet" href="style.css?v=2.9">
+  <link rel="stylesheet" href="style.css?v=3.0">
   <link rel="icon" type="image/svg+xml" href="icon.svg">
   <link rel="apple-touch-icon" href="/thumbnail-square.png">
 
@@ -147,8 +147,12 @@
                     <span>Interest Score</span>
                     <span class="opt-check">✓</span>
                   </li>
-                  <li class="custom-option" data-value="MCAP" role="option" aria-selected="false">
-                    <span>💎 Market Cap</span>
+                  <li class="custom-option" data-value="MCAP_DESC" role="option" aria-selected="false">
+                    <span>💎 Market Cap (High ➔ Low)</span>
+                    <span class="opt-check">✓</span>
+                  </li>
+                  <li class="custom-option" data-value="MCAP_ASC" role="option" aria-selected="false">
+                    <span>💎 Market Cap (Low ➔ High)</span>
                     <span class="opt-check">✓</span>
                   </li>
                   <li class="custom-option" data-value="VOLUME" role="option" aria-selected="false">
@@ -171,7 +175,9 @@
                 <!-- Hidden native select for fallback & state management -->
                 <select id="sortSelect" class="visually-hidden" aria-hidden="true" tabindex="-1">
                   <option value="NEWEST" selected>Block (Newest)</option>
-                  <option value="MCAP">💎 Market Cap</option>
+                  <option value="MCAP_DESC">💎 Market Cap (High ➔ Low)</option>
+                  <option value="MCAP_ASC">💎 Market Cap (Low ➔ High)</option>
+                  <option value="MCAP">💎 Market Cap (High ➔ Low)</option>
                   <option value="VOLUME">🌊 24h Volume</option>
                   <option value="PROFIT">🏆 Post-Mint Profit</option>
                   <option value="INTEREST">Interest Score</option>
@@ -313,11 +319,11 @@
               <th class="col-type">TYPE</th>
               <th class="col-safety">SAFETY</th>
               <th class="col-interest">INTEREST</th>
-              <th class="col-holders">HOLDERS / BUYS</th>
-              <th class="col-lp" id="thLp">LP / VOL</th>
-              <th class="col-progress" id="thProgress">MINT PROGRESS</th>
-              <th class="col-price" id="thPrice">MINT PRICE</th>
-              <th class="col-floor" id="thFloor">FLOOR / TRADE</th>
+              <th class="col-holders" id="thCol9">HOLDERS / BUYS</th>
+              <th class="col-lp" id="thCol10">LP / VOL</th>
+              <th class="col-progress" id="thCol11">MINT PROGRESS</th>
+              <th class="col-price" id="thCol12">MINT PRICE</th>
+              <th class="col-floor" id="thCol13">FLOOR / TRADE</th>
               <th class="col-action" id="thAction">INSPECT</th>
             </tr>
           </thead>
@@ -478,7 +484,7 @@
   <!-- Toast Notifications for New Drops (ARIA live region) -->
   <div id="toastContainer" class="toast-container" aria-live="polite" aria-atomic="true"></div>
 
-  <script src="app.js?v=2.9"></script>
+  <script src="app.js?v=3.0"></script>
 </body>
 </html>
 

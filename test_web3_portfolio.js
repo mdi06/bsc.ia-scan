@@ -917,7 +917,9 @@ const {
   setActiveTab,
   setActiveFilter,
   setSearchQuery,
-  setAllDrops
+  setAllDrops,
+  setSortMode,
+  getSortMode
 } = app;
 
 // Test 1: Secondary Market Asset Detection
@@ -977,6 +979,18 @@ assert.strictEqual(secFiltered.length, 2, 'Should filter strictly to the 2 secon
 assert.strictEqual(secFiltered[0].symbol, 'GANG', 'Top valuation token (GANG $2.43M) must sort first');
 assert.strictEqual(secFiltered[1].symbol, 'PTAH', 'PTAH ($320K) must sort second');
 console.log('✔ Secondary Market Tab filtering & default valuation sort: PASS');
+
+// Test 2b: Market Cap Ascending vs Descending Sort
+setSortMode('MCAP_ASC');
+const secAsc = getFilteredDrops();
+assert.strictEqual(secAsc[0].symbol, 'PTAH', 'Ascending sort: PTAH ($320K) must come before GANG ($2.43M)');
+assert.strictEqual(secAsc[1].symbol, 'GANG', 'Ascending sort: GANG ($2.43M) must come second');
+
+setSortMode('MCAP_DESC');
+const secDesc = getFilteredDrops();
+assert.strictEqual(secDesc[0].symbol, 'GANG', 'Descending sort: GANG ($2.43M) must come first');
+assert.strictEqual(secDesc[1].symbol, 'PTAH', 'Descending sort: PTAH ($320K) must come second');
+console.log('✔ Secondary Market Market Cap High/Low and Low/High Two-Way Sort: PASS');
 
 // Test 3: Tab Count and Overview Banner UI
 const mockTabBadge = new MockElement('span');
