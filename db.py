@@ -42,13 +42,15 @@ class DatabaseManager:
         self._lock = threading.RLock()
         self._cache_lock = threading.RLock()
         
-        # In-memory fast cache: {contract_lower: project_dict} with 3s TTL for cross-process freshness
+        # In-memory fast cache: {contract_lower: project_dict}
+        # 60s TTL: Supabase egress only triggers once per minute max instead of every 3s.
+        # New drops upserted in-memory immediately so the UI stays fresh without polling.
         self._projects_cache: Dict[str, Dict[str, Any]] = {}
         self._p_fingerprints: Dict[str, str] = {}
         self._cache_initialized = False
         self._last_cache_time = 0.0
         self._last_synced_updated_at = 0
-        self._cache_ttl = 3.0  # seconds
+        self._cache_ttl = 60.0  # seconds — was 3s, caused ~1,200 Supabase hits/hr
         self._cached_json_bytes: Optional[bytes] = None
         self._cache_dirty = True
 
