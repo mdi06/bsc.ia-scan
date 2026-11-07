@@ -1408,21 +1408,22 @@ th.sortable-th:hover .sort-indicator.dim-hint {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  max-width: 75%;
   text-align: right;
   display: inline-flex;
   align-items: center;
   justify-content: flex-end;
   justify-content: safe flex-end;
   gap: 4px;
+  flex-shrink: 1;
+  min-width: 0;
 }
 
-.modal-grid > div > .badge {
+.modal-grid > div > .badge,
+.modal-grid > div > .whale-alert-pill {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  max-width: 100%;
   white-space: nowrap;
   letter-spacing: 0.2px;
 }
