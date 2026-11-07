@@ -1198,10 +1198,11 @@ def fetch_token_market_data(token_addr: str) -> Dict[str, Any]:
                     x for x in pairs
                     if (x.get("baseToken", {}).get("address") or "").lower() == token_addr.lower()
                 ]
-                valid_pairs = base_pairs if base_pairs else pairs
+                if not base_pairs:
+                    return res
                 # Prioritize pool with highest liquidity depth
-                valid_pairs.sort(key=lambda x: float((x.get("liquidity") or {}).get("usd", 0) or 0), reverse=True)
-                p = valid_pairs[0]
+                base_pairs.sort(key=lambda x: float((x.get("liquidity") or {}).get("usd", 0) or 0), reverse=True)
+                p = base_pairs[0]
                 txns = p.get("txns", {})
                 res["buys_24h"] = txns.get("h24", {}).get("buys", 0)
                 res["buys_1h"] = txns.get("h1", {}).get("buys", 0)
