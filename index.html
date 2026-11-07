@@ -529,12 +529,12 @@
 
         <div class="wallets-tab-toolbar">
           <div class="wallets-tab-filters">
-            <button class="filter-pill active" id="tabWalletFilterAll" onclick="setWalletsTabFilter('ALL')">🌟 Top PnL /
-              All</button>
-            <button class="filter-pill" id="tabWalletFilterHighWin" onclick="setWalletsTabFilter('HIGH_WIN')">🔥 High
-              Win-Rate (≥50%)</button>
-            <button class="filter-pill" id="tabWalletFilterFollowed" onclick="setWalletsTabFilter('FOLLOWED')">⭐
-              Followed Only (<span id="walletsTabFollowedCount">0</span>)</button>
+            <button class="filter-pill active" id="tabWalletFilterAll" onclick="setWalletsTabFilter('ALL')" title="All Alpha Hunters ranked by Top PnL">🌟 Top PnL / All</button>
+            <button class="filter-pill" id="tabWalletSortWinRate" onclick="setWalletsTabSort('WIN_RATE')" title="Sort by Win Rate % (Click to toggle Ascending/Descending)">🎯 Win Rate <span class="sort-indicator" id="tabWalletSortIndicatorWinRate">↕</span></button>
+            <button class="filter-pill" id="tabWalletSortWins" onclick="setWalletsTabSort('WINS')" title="Sort by Total Wins and Mints (Click to toggle Ascending/Descending)">🏆 Wins / Mints <span class="sort-indicator" id="tabWalletSortIndicatorWins">↕</span></button>
+            <button class="filter-pill" id="tabWalletSortPicks" onclick="setWalletsTabSort('PICKS')" title="Sort by Number of Winning Token Picks">💎 Top Picks <span class="sort-indicator" id="tabWalletSortIndicatorPicks">↕</span></button>
+            <button class="filter-pill" id="tabWalletFilterHighWin" onclick="setWalletsTabFilter('HIGH_WIN')" title="Show only hunters with ≥50% win rate">🔥 High Win-Rate (≥50%)</button>
+            <button class="filter-pill" id="tabWalletFilterFollowed" onclick="setWalletsTabFilter('FOLLOWED')" title="Show only followed hunters">⭐ Followed Only (<span id="walletsTabFollowedCount">0</span>)</button>
           </div>
           <div class="wallets-tab-search">
             <span class="search-icon">🔍</span>
@@ -547,11 +547,11 @@
           <table class="wallets-table" id="walletsTable">
             <thead>
               <tr>
-                <th style="width: 45px; text-align: center;">#</th>
-                <th>AGENT ID / WALLET</th>
-                <th style="text-align: center;">WIN RATE</th>
-                <th style="text-align: center;">WINS / MINTS</th>
-                <th>TOP WINNING PICKS</th>
+                <th style="width: 45px; text-align: center;" class="sortable-th active-sort" id="thWalletRank" onclick="setWalletsTabSort('DEFAULT')" title="Default Rank (Top PnL & Wins)"># <span class="sort-indicator" id="thSortWalletRank">▼</span></th>
+                <th class="sortable-th" id="thWalletName" onclick="setWalletsTabSort('NAME')" title="Sort Alphabetically by Agent ID">AGENT ID / WALLET <span class="sort-indicator" id="thSortWalletName">↕</span></th>
+                <th style="text-align: center;" class="sortable-th" id="thWalletWinRate" onclick="setWalletsTabSort('WIN_RATE')" title="Sort by Win Rate %">WIN RATE <span class="sort-indicator" id="thSortWalletWinRate">↕</span></th>
+                <th style="text-align: center;" class="sortable-th" id="thWalletWinsMints" onclick="setWalletsTabSort('WINS')" title="Sort by Total Wins and Mints">WINS / MINTS <span class="sort-indicator" id="thSortWalletWinsMints">↕</span></th>
+                <th class="sortable-th" id="thWalletTopPicks" onclick="setWalletsTabSort('PICKS')" title="Sort by Top Winning Token Picks">TOP WINNING PICKS <span class="sort-indicator" id="thSortWalletTopPicks">↕</span></th>
                 <th style="text-align: center; width: 170px;">ACTIONS</th>
               </tr>
             </thead>

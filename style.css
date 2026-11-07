@@ -4626,6 +4626,66 @@ th.sortable-th:hover .sort-indicator.dim-hint {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
+  align-items: center;
+}
+
+.wallets-tab-filters .filter-pill {
+  background: rgba(13, 17, 23, 0.85);
+  color: var(--text-dim);
+  border: 1px solid var(--border-dim);
+  padding: 5px 12px;
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+  user-select: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  transition: all 0.15s ease;
+  letter-spacing: 0.3px;
+  white-space: nowrap;
+}
+
+.wallets-tab-filters .filter-pill:hover {
+  color: var(--color-cyan);
+  border-color: var(--color-cyan);
+  background: rgba(0, 240, 255, 0.08);
+  transform: translateY(-1px);
+}
+
+.wallets-tab-filters .filter-pill:active {
+  transform: translateY(0);
+}
+
+.wallets-tab-filters .filter-pill.active {
+  background: rgba(0, 240, 255, 0.15);
+  color: var(--color-cyan);
+  border-color: var(--color-cyan);
+  font-weight: 700;
+  box-shadow: 0 0 10px rgba(0, 240, 255, 0.25);
+}
+
+.wallets-tab-filters .filter-pill#tabWalletFilterAll.active,
+.wallets-tab-filters .filter-pill#tabWalletFilterHighWin.active,
+.wallets-tab-filters .filter-pill#tabWalletFilterFollowed.active {
+  background: rgba(250, 204, 21, 0.15);
+  color: var(--color-yellow);
+  border-color: var(--color-yellow);
+  box-shadow: 0 0 10px rgba(250, 204, 21, 0.25);
+}
+
+.wallets-tab-filters .filter-pill .sort-indicator {
+  font-size: 10px;
+  margin-left: 2px;
+  color: rgba(255, 255, 255, 0.35);
+  transition: color 0.15s ease;
+}
+
+.wallets-tab-filters .filter-pill.active .sort-indicator {
+  color: currentColor;
+  font-weight: 800;
 }
 
 .wallets-tab-search {
@@ -4683,6 +4743,35 @@ th.sortable-th:hover .sort-indicator.dim-hint {
   letter-spacing: 0.5px;
   border-bottom: 1px solid var(--border-dim);
   white-space: nowrap;
+}
+
+.wallets-table th.sortable-th {
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.wallets-table th.sortable-th:hover {
+  color: var(--color-cyan);
+  background: rgba(0, 240, 255, 0.08);
+}
+
+.wallets-table th.sortable-th.active-sort {
+  color: var(--color-cyan);
+  background: rgba(0, 240, 255, 0.06);
+}
+
+.wallets-table th.sortable-th .sort-indicator {
+  display: inline-block;
+  font-size: 10px;
+  margin-left: 3px;
+  color: rgba(255, 255, 255, 0.3);
+}
+
+.wallets-table th.sortable-th.active-sort .sort-indicator {
+  color: var(--color-cyan);
+  font-weight: 800;
+  text-shadow: 0 0 6px rgba(0, 240, 255, 0.6);
 }
 
 .wallets-table td {

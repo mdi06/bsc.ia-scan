@@ -1400,6 +1400,7 @@ if (typeof window !== 'undefined') window.openSmartLeaderboardModal = openSmartL
 // Dedicated Wallet Leaderboard Tab (Feature 2)
 // =========================================================================
 let currentTabWalletFilter = 'ALL';
+let tabWalletsSortMode = 'DEFAULT';
 let tabWalletsSearchKeyword = '';
 let tabWalletsDisplayLimit = 50;
 let cachedHunters = null;
@@ -1425,21 +1426,118 @@ function updateWalletsTabBadge() {
   }
 }
 
+function updateWalletsTabHeaderUI() {
+  if (typeof document === 'undefined') return;
+
+  const sortBtnWin = document.getElementById('tabWalletSortWinRate');
+  const sortBtnWins = document.getElementById('tabWalletSortWins');
+  const sortBtnPicks = document.getElementById('tabWalletSortPicks');
+  const filterBtnAll = document.getElementById('tabWalletFilterAll');
+  const filterBtnHigh = document.getElementById('tabWalletFilterHighWin');
+  const filterBtnFollowed = document.getElementById('tabWalletFilterFollowed');
+
+  const indWin = document.getElementById('tabWalletSortIndicatorWinRate');
+  const indWins = document.getElementById('tabWalletSortIndicatorWins');
+  const indPicks = document.getElementById('tabWalletSortIndicatorPicks');
+
+  if (typeof document.querySelectorAll === 'function') {
+    const pills = document.querySelectorAll('.wallets-tab-filters .filter-pill');
+    if (pills && pills.forEach) {
+      pills.forEach(b => {
+        if (b && b.classList) b.classList.remove('active');
+      });
+    }
+  }
+
+  if (indWin) indWin.textContent = '↕';
+  if (indWins) indWins.textContent = '↕';
+  if (indPicks) indPicks.textContent = '↕';
+
+  if (tabWalletsSortMode === 'WIN_RATE_DESC' || tabWalletsSortMode === 'WIN_RATE_ASC') {
+    if (sortBtnWin) sortBtnWin.classList.add('active');
+    if (indWin) indWin.textContent = (tabWalletsSortMode === 'WIN_RATE_DESC') ? '▼' : '▲';
+  } else if (tabWalletsSortMode === 'WINS_DESC' || tabWalletsSortMode === 'WINS_ASC') {
+    if (sortBtnWins) sortBtnWins.classList.add('active');
+    if (indWins) indWins.textContent = (tabWalletsSortMode === 'WINS_DESC') ? '▼' : '▲';
+  } else if (tabWalletsSortMode === 'PICKS_DESC' || tabWalletsSortMode === 'PICKS_ASC') {
+    if (sortBtnPicks) sortBtnPicks.classList.add('active');
+    if (indPicks) indPicks.textContent = (tabWalletsSortMode === 'PICKS_DESC') ? '▼' : '▲';
+  }
+
+  if (currentTabWalletFilter === 'HIGH_WIN') {
+    if (filterBtnHigh) filterBtnHigh.classList.add('active');
+  } else if (currentTabWalletFilter === 'FOLLOWED') {
+    if (filterBtnFollowed) filterBtnFollowed.classList.add('active');
+  } else if (tabWalletsSortMode === 'DEFAULT') {
+    if (filterBtnAll) filterBtnAll.classList.add('active');
+  }
+
+  // Update table headers
+  const thRank = document.getElementById('thWalletRank');
+  const thName = document.getElementById('thWalletName');
+  const thWinRate = document.getElementById('thWalletWinRate');
+  const thWins = document.getElementById('thWalletWinsMints');
+  const thPicks = document.getElementById('thWalletTopPicks');
+
+  const indThRank = document.getElementById('thSortWalletRank');
+  const indThName = document.getElementById('thSortWalletName');
+  const indThWin = document.getElementById('thSortWalletWinRate');
+  const indThWins = document.getElementById('thSortWalletWinsMints');
+  const indThPicks = document.getElementById('thSortWalletTopPicks');
+
+  [thRank, thName, thWinRate, thWins, thPicks].forEach(th => {
+    if (th && th.classList) th.classList.remove('active-sort');
+  });
+
+  if (indThRank) indThRank.textContent = (tabWalletsSortMode === 'DEFAULT') ? '▼' : '↕';
+  if (indThName) indThName.textContent = '↕';
+  if (indThWin) indThWin.textContent = '↕';
+  if (indThWins) indThWins.textContent = '↕';
+  if (indThPicks) indThPicks.textContent = '↕';
+
+  if (tabWalletsSortMode === 'DEFAULT') {
+    if (thRank) thRank.classList.add('active-sort');
+  } else if (tabWalletsSortMode === 'WIN_RATE_DESC' || tabWalletsSortMode === 'WIN_RATE_ASC') {
+    if (thWinRate) thWinRate.classList.add('active-sort');
+    if (indThWin) indThWin.textContent = (tabWalletsSortMode === 'WIN_RATE_DESC') ? '▼' : '▲';
+  } else if (tabWalletsSortMode === 'WINS_DESC' || tabWalletsSortMode === 'WINS_ASC') {
+    if (thWins) thWins.classList.add('active-sort');
+    if (indThWins) indThWins.textContent = (tabWalletsSortMode === 'WINS_DESC') ? '▼' : '▲';
+  } else if (tabWalletsSortMode === 'PICKS_DESC' || tabWalletsSortMode === 'PICKS_ASC') {
+    if (thPicks) thPicks.classList.add('active-sort');
+    if (indThPicks) indThPicks.textContent = (tabWalletsSortMode === 'PICKS_DESC') ? '▼' : '▲';
+  } else if (tabWalletsSortMode === 'NAME_ASC' || tabWalletsSortMode === 'NAME_DESC') {
+    if (thName) thName.classList.add('active-sort');
+    if (indThName) indThName.textContent = (tabWalletsSortMode === 'NAME_ASC') ? '▲' : '▼';
+  }
+}
+
+function setWalletsTabSort(sortKey) {
+  if (sortKey === 'WIN_RATE') {
+    tabWalletsSortMode = (tabWalletsSortMode === 'WIN_RATE_DESC') ? 'WIN_RATE_ASC' : 'WIN_RATE_DESC';
+  } else if (sortKey === 'WINS') {
+    tabWalletsSortMode = (tabWalletsSortMode === 'WINS_DESC') ? 'WINS_ASC' : 'WINS_DESC';
+  } else if (sortKey === 'PICKS') {
+    tabWalletsSortMode = (tabWalletsSortMode === 'PICKS_DESC') ? 'PICKS_ASC' : 'PICKS_DESC';
+  } else if (sortKey === 'NAME') {
+    tabWalletsSortMode = (tabWalletsSortMode === 'NAME_ASC') ? 'NAME_DESC' : 'NAME_ASC';
+  } else {
+    tabWalletsSortMode = 'DEFAULT';
+  }
+
+  tabWalletsDisplayLimit = 50;
+  updateWalletsTabHeaderUI();
+  renderWalletsTabLeaderboard();
+}
+if (typeof window !== 'undefined') window.setWalletsTabSort = setWalletsTabSort;
+
 function setWalletsTabFilter(filter) {
   currentTabWalletFilter = filter;
   tabWalletsDisplayLimit = 50;
-  if (typeof document !== 'undefined') {
-    document.querySelectorAll('.wallets-tab-filters .filter-pill').forEach(btn => {
-      btn.classList.remove('active');
-    });
-    const idMap = {
-      'ALL': 'tabWalletFilterAll',
-      'HIGH_WIN': 'tabWalletFilterHighWin',
-      'FOLLOWED': 'tabWalletFilterFollowed'
-    };
-    const activeBtn = document.getElementById(idMap[filter]);
-    if (activeBtn) activeBtn.classList.add('active');
+  if (filter === 'ALL') {
+    tabWalletsSortMode = 'DEFAULT';
   }
+  updateWalletsTabHeaderUI();
   renderWalletsTabLeaderboard();
 }
 if (typeof window !== 'undefined') window.setWalletsTabFilter = setWalletsTabFilter;
@@ -1473,6 +1571,29 @@ function renderWalletsTabLeaderboard() {
 
   if (tabWalletsSearchKeyword) {
     list = list.filter(h => h.name.toLowerCase().includes(tabWalletsSearchKeyword));
+  }
+
+  // Sort list according to tabWalletsSortMode
+  list = [...list];
+  if (tabWalletsSortMode === 'WIN_RATE_DESC') {
+    list.sort((a, b) => (b.winRate - a.winRate) || (b.wins - a.wins) || (b.mints - a.mints));
+  } else if (tabWalletsSortMode === 'WIN_RATE_ASC') {
+    list.sort((a, b) => (a.winRate - b.winRate) || (a.wins - b.wins));
+  } else if (tabWalletsSortMode === 'WINS_DESC') {
+    list.sort((a, b) => (b.wins - a.wins) || (b.winRate - a.winRate) || (b.mints - a.mints));
+  } else if (tabWalletsSortMode === 'WINS_ASC') {
+    list.sort((a, b) => (a.wins - b.wins) || (a.winRate - b.winRate));
+  } else if (tabWalletsSortMode === 'PICKS_DESC') {
+    list.sort((a, b) => ((b.topPicks || []).length - (a.topPicks || []).length) || (b.wins - a.wins) || (b.winRate - a.winRate));
+  } else if (tabWalletsSortMode === 'PICKS_ASC') {
+    list.sort((a, b) => ((a.topPicks || []).length - (b.topPicks || []).length) || (a.wins - b.wins));
+  } else if (tabWalletsSortMode === 'NAME_ASC') {
+    list.sort((a, b) => a.name.localeCompare(b.name));
+  } else if (tabWalletsSortMode === 'NAME_DESC') {
+    list.sort((a, b) => b.name.localeCompare(a.name));
+  } else {
+    // DEFAULT: Top PnL rank
+    list.sort((a, b) => (b.wins - a.wins) || (b.winRate - a.winRate) || (b.mints - a.mints));
   }
 
   const footerCountEl = document.getElementById('footerCount');
@@ -7643,6 +7764,8 @@ if (typeof module !== 'undefined' && module.exports) {
     setSearchQuery: (q) => { searchQuery = q; },
     renderWalletsTabLeaderboard,
     setWalletsTabFilter,
+    setWalletsTabSort,
+    getWalletsTabSortMode: () => tabWalletsSortMode,
     onWalletsTabSearch,
     loadMoreTabWallets,
     updateWalletsTabBadge,

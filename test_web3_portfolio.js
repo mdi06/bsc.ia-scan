@@ -471,6 +471,8 @@ const {
   computeHolderDistribution,
   renderWalletsTabLeaderboard,
   setWalletsTabFilter,
+  setWalletsTabSort,
+  getWalletsTabSortMode,
   onWalletsTabSearch,
   loadMoreTabWallets
 } = app;
@@ -608,6 +610,25 @@ assert(mockWalletsTbody.innerHTML.includes('adadcarry.ai'), 'Followed filter mus
 
 setWalletsTabFilter('ALL');
 console.log('✔ Feature 2 (Dedicated Wallet Leaderboard Tab, Filtering & Search): PASS');
+
+// Test Sorting by Win Rate, Wins, Picks, and Reset
+setWalletsTabSort('WIN_RATE');
+assert.strictEqual(getWalletsTabSortMode(), 'WIN_RATE_DESC', 'Sorting mode must toggle to WIN_RATE_DESC');
+assert(mockWalletsTbody.innerHTML.includes('100.0%') || mockWalletsTbody.innerHTML.includes('75.0%'), 'Win Rate sort must show top win rates');
+
+setWalletsTabSort('WIN_RATE');
+assert.strictEqual(getWalletsTabSortMode(), 'WIN_RATE_ASC', 'Second click toggles to WIN_RATE_ASC');
+
+setWalletsTabSort('WINS');
+assert.strictEqual(getWalletsTabSortMode(), 'WINS_DESC', 'Sorting mode must toggle to WINS_DESC');
+assert(mockWalletsTbody.innerHTML.includes('adadcarry.ai'), 'Wins sort should have top winner adadcarry.ai');
+
+setWalletsTabSort('PICKS');
+assert.strictEqual(getWalletsTabSortMode(), 'PICKS_DESC', 'Sorting mode must toggle to PICKS_DESC');
+
+setWalletsTabSort('DEFAULT');
+assert.strictEqual(getWalletsTabSortMode(), 'DEFAULT', 'Sorting mode resets to DEFAULT');
+console.log('✔ Feature 2b (Dedicated Wallet Leaderboard Sorting by Win Rate, Wins, Picks): PASS');
 
 // ========================================================
 // Test: Manual Tab Sequence Customization & Drag-and-Drop
