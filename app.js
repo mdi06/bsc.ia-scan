@@ -6572,7 +6572,7 @@ let isPollingDelta = false;
 let deltaPollTimer = null;
 let lastDeltaEtag = '';
 let lastFeedEtag = '';
-const DELTA_POLL_INTERVAL_MS = 15000; // 15s interval protects hosting bandwidth while keeping market data near real-time
+const DELTA_POLL_INTERVAL_MS = 25000; // 25s interval protects hosting bandwidth while keeping market data near real-time
 
 // Real-Time Delta Polling (auto-pauses when tab is hidden or backgrounded)
 async function pollDeltaFeed() {
@@ -6675,11 +6675,7 @@ async function pollDeltaFeed() {
         const timeStr = new Date().toLocaleTimeString();
         const syncEl = document.getElementById('syncTime');
         if (syncEl) syncEl.textContent = `Synced ${timeStr}`;
-      } else if (data.latest_block && data.latest_block > latestKnownBlock) {
-        latestKnownBlock = data.latest_block;
       }
-    } else if (data && data.latest_block && data.latest_block > latestKnownBlock) {
-      latestKnownBlock = data.latest_block;
     }
   } catch (err) {
     // Delta poll is resilient; silent fallback on minor network hitch

@@ -204,8 +204,9 @@ class DatabaseManager:
     def get_project_count(self) -> int:
         if self.mode == "supabase":
             try:
-                if HAS_HTTPX and self._client:
-                    resp = self._client.get("/rest/v1/projects?select=contract", headers={"Range": "0-0", "Prefer": "count=exact"})
+                client = self.client
+                if HAS_HTTPX and client:
+                    resp = client.get("/rest/v1/projects?select=contract", headers={"Range": "0-0", "Prefer": "count=exact"})
                     content_range = resp.headers.get("content-range", "")
                     if "/" in content_range:
                         return int(content_range.split("/")[1])
@@ -419,14 +420,33 @@ class DatabaseManager:
 
     @staticmethod
     def _compute_fingerprint(p: Dict[str, Any]) -> str:
-        """Computes a compact signature to detect if mutable metrics have actually changed."""
-        mc_k = int(float(p.get("market_cap") or 0.0) / 100)
-        vol_k = int(float(p.get("volume_24h") or 0.0) / 100)
+        """Computes a compact signature to detect if mutable metrics have actually changed significantly.
+        Quantizes floating-point values (price, LP, mcap, volume) to prevent micro-fluctuations (sub-cent / sub-1%)
+        from triggering continuous multi-megabyte outbound REST syncs to Supabase on Render.
+        """
+        # Quantize price to 3 significant digits (e.g., 0.00412 vs 0.004123456)
+        px = float(p.get("token_price_usd") or 0.0)
+        px_bucket = f"{px:.3g}" if px > 0 else "0"
+
+        # Quantize LP into $500 buckets ($0, $500, $1k, $1.5k...)
+        lp = float(p.get("lp_usd") or 0.0)
+        lp_k = int(lp / 500) if lp > 1000 else int(lp / 50)
+
+        # Quantize Market Cap and Volume into $1,000 buckets
+        mc = float(p.get("market_cap") or 0.0)
+        mc_k = int(mc / 1000) if mc > 5000 else int(mc / 100)
+
+        vol = float(p.get("volume_24h") or 0.0)
+        vol_k = int(vol / 1000) if vol > 5000 else int(vol / 100)
+
+        holders = int(p.get("holders") or 0)
+        prog = round(float(p.get("progress") or 0.0), 1)
+
         return (
-            f"{p.get('progress')}_{p.get('holders')}_{p.get('score')}_"
+            f"{prog}_{holders}_{p.get('score')}_"
             f"{p.get('sniper_ready')}_{p.get('is_proxy_clone')}_{p.get('is_nft_surge')}_"
             f"{p.get('risk_level')}_{p.get('risk_badge')}_{p.get('status')}_"
-            f"{p.get('token_price_usd')}_{p.get('token_symbol')}_{p.get('lp_usd')}_"
+            f"{px_bucket}_{p.get('token_symbol')}_{lp_k}_"
             f"{mc_k}_{vol_k}_{p.get('mint_value_wei')}_{p.get('mint_price_str')}"
         )
 

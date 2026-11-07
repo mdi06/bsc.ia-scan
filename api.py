@@ -17,7 +17,7 @@ from typing import Optional, List, Dict, Any
 from fastapi import FastAPI, Query, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import JSONResponse, Response, RedirectResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 import uvicorn
 
@@ -222,16 +222,16 @@ def get_feed(
     if since_block is not None:
         # Delta mode: only return drops created after this block!
         delta = [p for p in all_projs if int(p.get("block") or 0) > since_block]
-        delta_etag = f'"{latest_block}-{total}-delta-{since_block}"'
 
         if not delta:
+            delta_etag = f'"{total}-delta-{since_block}"'
             # Bandwidth Guard 1: HTTP 304 Not Modified (0 bytes body) if client already has this state
             if _etag_matches(client_etag, delta_etag):
-                return Response(status_code=304, headers={"ETag": delta_etag, "Cache-Control": "public, max-age=5"})
+                return Response(status_code=304, headers={"ETag": delta_etag, "Cache-Control": "public, max-age=15"})
             # Bandwidth Guard 2: Minimal 0-drop payload without redundant nested stats (~80 bytes vs 20 KB)
             return JSONResponse(
                 status_code=200,
-                headers={"ETag": delta_etag, "Cache-Control": "public, max-age=5"},
+                headers={"ETag": delta_etag, "Cache-Control": "public, max-age=15"},
                 content={
                     "success": True,
                     "mode": "delta",
@@ -242,6 +242,7 @@ def get_feed(
                 }
             )
 
+        delta_etag = f'"{latest_block}-{total}-delta-{since_block}"'
         return JSONResponse(
             status_code=200,
             headers={"ETag": delta_etag, "Cache-Control": "public, max-age=5"},
@@ -453,10 +454,37 @@ async def post_sync(request: Request):
     raise HTTPException(status_code=400, detail="Expected JSON array of projects")
 
 
-# Mount static files at root if available
+@app.get("/")
+def root_handler(request: Request):
+    """
+    On Render cloud production, redirect human visitors and search crawlers to Vercel (https://agent-id-monitor.vercel.app).
+    Vercel has 100 GB global edge CDN caching, saving Render's limited 5 GB monthly bandwidth.
+    """
+    accept = request.headers.get("accept", "")
+    host = request.headers.get("host", "")
+    if os.environ.get("RENDER") or "onrender.com" in host or "fly.dev" in host:
+        if "application/json" in accept and "text/html" not in accept:
+            return {"status": "ok", "service": "agent-id-backend", "frontend": "https://agent-id-monitor.vercel.app"}
+        return RedirectResponse(url="https://agent-id-monitor.vercel.app", status_code=302)
+
+    workspace_dir = os.path.dirname(os.path.abspath(__file__))
+    index_path = os.path.join(workspace_dir, "index.html")
+    if os.path.exists(index_path):
+        return FileResponse(index_path)
+    return {"status": "ok", "service": "agent-id-backend"}
+
+
+@app.get("/bnb_agent_id_screen_studio.mp4")
+@app.get("/bnb_agent_id_screen_studio_silent.mp4")
+def redirect_heavy_videos():
+    """Redirect 7.5 MB video assets to Vercel CDN instead of streaming through Render's 5 GB quota."""
+    return RedirectResponse(url="https://agent-id-monitor.vercel.app/bnb_agent_id_screen_studio.mp4", status_code=302)
+
+
+# Mount static files at root if in local development mode
 workspace_dir = os.path.dirname(os.path.abspath(__file__))
-if os.path.exists(os.path.join(workspace_dir, "index.html")):
-    app.mount("/", StaticFiles(directory=workspace_dir, html=True), name="static")
+if not os.environ.get("RENDER") and os.path.exists(os.path.join(workspace_dir, "index.html")):
+    app.mount("/static", StaticFiles(directory=workspace_dir, html=False), name="static")
 
 
 def start_api(port=8080):

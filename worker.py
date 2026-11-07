@@ -785,8 +785,8 @@ def run_market_dynamics_updater_loop():
         except Exception as e:
             print(f"[⚠️ Market Engine Error] {e}", flush=True)
 
-        # Sleep 90s between DexScreener sweeps to stay strictly within Render's free egress limits
-        time.sleep(90)
+        # Sleep 120s between DexScreener sweeps to stay strictly within Render's free egress limits
+        time.sleep(120)
 
 
 def run_element_nft_volume_sweeper_loop():
