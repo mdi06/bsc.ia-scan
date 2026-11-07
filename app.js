@@ -470,7 +470,8 @@ function formatCryptoPrice(val, isNet = false) {
 // Known major pegged / Layer-1 tokens and synthetic equities on BSC
 const EXCLUDED_PEGS_SYMBOLS = new Set([
   'BTCB', 'WBTC', 'BTC', 'ETH', 'WETH', 'WBNB', 'BNB', 'USDT', 'USDC', 'BUSD', 
-  'DAI', 'TUSD', 'FDUSD', 'CAKE', 'U', 'OSK', 'FIST'
+  'DAI', 'TUSD', 'FDUSD', 'CAKE', 'U', 'OSK', 'FIST',
+  'SOL', 'XRP', 'ADA', 'DOGE', 'DOT', 'AVAX', 'MATIC', 'POL', 'LINK', 'LTC', 'SHIB', 'UNI'
 ]);
 
 const EXCLUDED_PEGS_CONTRACTS = new Set([
@@ -485,14 +486,30 @@ const EXCLUDED_PEGS_CONTRACTS = new Set([
 ]);
 
 const SYNTHETIC_EQUITY_SYMBOLS = new Set([
-  'TSLAB', 'AAPLB', 'MSFTB', 'METAB', 'SPCXB', 'NVDA', 'NVDAB', 'AMZNB', 'GOOGLB', 'MRNAB', 'SOXSB', 'CRCLB', 'QQQB', 'MSTRB'
+  'TSLAB', 'AAPLB', 'MSFTB', 'METAB', 'SPCXB', 'NVDA', 'NVDAB', 'AMZNB', 'GOOGLB', 'MRNAB', 'SOXSB', 'CRCLB', 'QQQB', 'MSTRB',
+  'BABAB', 'BNCB', 'SKHYB', 'COINB', 'PLTRB', 'AMDB'
 ]);
+
+// Determine if a token is a major pegged/infrastructure asset, stablecoin, synthetic stock, or DEX platform token
+function isExcludedMajorAsset(d) {
+  if (!d) return true;
+  const c = String(d.contract || d.address || '').toLowerCase().trim();
+  const sym = String(d.symbol || d.token_symbol || '').toUpperCase().trim();
+  const name = String(d.name || '').toUpperCase().trim();
+
+  if (c === '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee') return true;
+  if (EXCLUDED_PEGS_CONTRACTS.has(c) || EXCLUDED_PEGS_SYMBOLS.has(sym) || SYNTHETIC_EQUITY_SYMBOLS.has(sym)) {
+    return true;
+  }
+  if (name.includes('PANCAKESWAP') || name.includes('BINANCE-PEG') || name.includes('WRAPPED BNB') || name.includes('TETHER USD') || name.includes('USD COIN')) {
+    return true;
+  }
+  return false;
+}
 
 // Compute Individual Project Profit and Maintain ATH High-Water Mark
 function computeItemProfit(item, bnbPriceUsd = bnbPrice) {
-  const c = String(item.contract || '').toLowerCase();
-  const sym = String(item.symbol || '').toUpperCase();
-  const isPegged = EXCLUDED_PEGS_CONTRACTS.has(c) || EXCLUDED_PEGS_SYMBOLS.has(sym) || SYNTHETIC_EQUITY_SYMBOLS.has(sym);
+  const isPegged = isExcludedMajorAsset(item);
   if (isPegged) {
     return { secUsd: 0, mintUsd: 0, profit: 0, athProfit: 0, athPrice: 0, multiplier: 0, isSold: false, isFree: false };
   }
@@ -734,9 +751,7 @@ function getBaselineTopGainers() {
 
 function isValidTopMarketItem(item) {
   if (!item) return false;
-  const c = String(item.contract || '').toLowerCase();
-  const sym = String(item.symbol || '').toUpperCase();
-  if (EXCLUDED_PEGS_CONTRACTS.has(c) || EXCLUDED_PEGS_SYMBOLS.has(sym) || SYNTHETIC_EQUITY_SYMBOLS.has(sym)) {
+  if (isExcludedMajorAsset(item)) {
     return false;
   }
   const pStr = String(item.mint_price_str || (item.item && item.item.mint_price_str) || '').toUpperCase();
@@ -2054,6 +2069,7 @@ function updateLaunchpadCount() {
 
 function getSanitizedMcap(d) {
   if (!d) return 0;
+  if (isExcludedMajorAsset(d)) return 0;
   let mc = Number(d.market_cap || d.fdv || 0);
   if (mc === 0) {
     const px = Number(d.token_price_usd || d.market_price_usd || 0);
@@ -2066,16 +2082,16 @@ function getSanitizedMcap(d) {
       else if (ms >= 1e14) mc = (ms / 1e18) * px;
     }
   }
-  if (mc > 100000000 && Number(d.lp_usd || 0) < 50000) return 0;
+  // Sanity check: eliminate artificial/illiquid multi-million valuations that lack proportional pool liquidity
+  if (mc > 50000000 && Number(d.lp_usd || 0) < 250000) return 0;
+  if (mc > 100000000 && Number(d.lp_usd || 0) < 500000) return 0;
   return mc;
 }
 
 // Secondary Market asset detector
 function isSecondaryMarketAsset(d) {
   if (!d) return false;
-  const c = String(d.contract || '').toLowerCase();
-  const sym = String(d.symbol || '').toUpperCase();
-  if (EXCLUDED_PEGS_CONTRACTS.has(c) || EXCLUDED_PEGS_SYMBOLS.has(sym) || SYNTHETIC_EQUITY_SYMBOLS.has(sym)) {
+  if (isExcludedMajorAsset(d)) {
     return false;
   }
   const lp = Number(d.lp_usd || 0);
@@ -2203,6 +2219,7 @@ function compute24hPulseMetrics(drops = allDrops, topGainersList = savedTopGaine
   const seenContracts = new Set();
   const uniquePool = [];
   pool.forEach(item => {
+    if (isExcludedMajorAsset(item)) return;
     const c = String(item.contract || '').toLowerCase();
     if (c && !seenContracts.has(c)) {
       seenContracts.add(c);
@@ -2210,21 +2227,30 @@ function compute24hPulseMetrics(drops = allDrops, topGainersList = savedTopGaine
     }
   });
 
-  // Top 24h Runner: prioritize highest positive price change with active volume, or highest market cap
+  // Top 24h Runner: prioritize positive 24h price momentum with volume, or leading secondary market asset
   let topRunner = null;
   let topRunnerScore = -Infinity;
 
   uniquePool.forEach(d => {
-    if (d.contract === '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee') return;
+    if (isExcludedMajorAsset(d)) return;
     const chg = Number(d.price_change_24h || 0);
     const mcap = getSanitizedMcap(d);
     const vol = Number(d.volume_24h || 0);
+    const lp = Number(d.lp_usd || 0);
     const tkUsd = Number(d.token_price_usd || d.market_price_usd || 0);
-    if (tkUsd <= 0 && mcap <= 0) return;
+    if (tkUsd <= 0 && mcap <= 0 && vol <= 0) return;
 
-    let score = mcap;
-    if (chg > 0) score += chg * 50000;
-    if (vol > 0) score += vol * 2;
+    const rLvl = String(d.risk_level || '').toUpperCase();
+    const rBdg = String(d.risk_badge || '').toUpperCase();
+    if (rLvl === 'RUG' || rBdg.includes('HONEYPOT')) return;
+    if (vol < 500 && lp < 500 && mcap < 100000) return;
+
+    let score = 0;
+    if (chg > 0) {
+      score = 100000000 + (chg * 10000) + Math.min(vol, 500000);
+    } else {
+      score = mcap + (vol * 2);
+    }
 
     if (score > topRunnerScore) {
       topRunnerScore = score;
@@ -2233,7 +2259,9 @@ function compute24hPulseMetrics(drops = allDrops, topGainersList = savedTopGaine
   });
 
   if (!topRunner && uniquePool.length > 0) {
-    topRunner = uniquePool.find(d => isSecondaryMarketAsset(d)) || uniquePool[0];
+    topRunner = uniquePool.find(d => !isExcludedMajorAsset(d) && isSecondaryMarketAsset(d))
+      || uniquePool.find(d => !isExcludedMajorAsset(d))
+      || null;
   }
 
   // Graduations & Volume
@@ -2251,7 +2279,13 @@ function compute24hPulseMetrics(drops = allDrops, topGainersList = savedTopGaine
   let refundsCount = 0;
   let threatsBlockedCount = 0;
 
+  // Track the primary secondary market anchor asset (highest genuine mcap with liquidity)
+  let anchorAsset = null;
+  let maxAnchorMcap = 0;
+
   list.forEach(d => {
+    if (isExcludedMajorAsset(d)) return;
+
     const isSec = isSecondaryMarketAsset(d);
     if (isSec || d.is_graduated) gradCount++;
     if (isLaunchpadDrop(d)) launchpadCount++;
@@ -2282,6 +2316,12 @@ function compute24hPulseMetrics(drops = allDrops, topGainersList = savedTopGaine
     if (d.security && d.security.has_refund) {
       refundsCount++;
     }
+
+    const sMcap = getSanitizedMcap(d);
+    if (sMcap > maxAnchorMcap && Number(d.lp_usd || 0) >= 50000) {
+      maxAnchorMcap = sMcap;
+      anchorAsset = d;
+    }
   });
 
   // Top Smart Hunter
@@ -2298,15 +2338,22 @@ function compute24hPulseMetrics(drops = allDrops, topGainersList = savedTopGaine
   let macroHeadline = 'Analyzing 24h rolling activity across fair-mints, secondary trading pairs, and smart hunter capital...';
   if (topRunner) {
     const rName = topRunner.name || topRunner.symbol || 'Leading asset';
-    const rMcap = getSanitizedMcap(topRunner);
     const rChg = Number(topRunner.price_change_24h || 0);
-    const chgStr = rChg !== 0 ? ` (${rChg >= 0 ? '+' : ''}${rChg.toFixed(1)}%)` : '';
     const volStr = totalDexVol > 0 ? `$${formatCount(totalDexVol)}` : '$0';
-    macroHeadline = `${rName} anchors 24h market valuation at $${formatCount(rMcap)}${chgStr} • ${gradCount} tokens trading on PancakeSwap DEX (${volStr} 24h vol) • ${totalSmartInflows} smart hunter inflows active.`;
+
+    if (rChg > 0) {
+      const anchorStr = anchorAsset ? ` • ${anchorAsset.name || anchorAsset.symbol} anchors secondary valuation at $${formatCount(maxAnchorMcap)}` : '';
+      macroHeadline = `${rName} leads 24h momentum (+${rChg.toFixed(1)}%)${anchorStr} • ${gradCount} tokens trading on PancakeSwap DEX (${volStr} 24h vol) • ${totalSmartInflows} smart hunter inflows active.`;
+    } else {
+      const rMcap = getSanitizedMcap(topRunner);
+      const chgStr = rChg !== 0 ? ` (${rChg >= 0 ? '+' : ''}${rChg.toFixed(1)}%)` : '';
+      macroHeadline = `${rName} anchors 24h market valuation at $${formatCount(rMcap)}${chgStr} • ${gradCount} tokens trading on PancakeSwap DEX (${volStr} 24h vol) • ${totalSmartInflows} smart hunter inflows active.`;
+    }
   }
 
   return {
     topRunner,
+    anchorAsset,
     gradCount,
     totalDexVol,
     launchpadCount,
@@ -2481,6 +2528,8 @@ if (typeof window !== 'undefined') {
   window.updateDailyPulseUI = updateDailyPulseUI;
   window.toggleDailyPulseHero = toggleDailyPulseHero;
   window.initDailyPulseHero = initDailyPulseHero;
+  window.isExcludedMajorAsset = isExcludedMajorAsset;
+  window.getSanitizedMcap = getSanitizedMcap;
 }
 
 // ABI pad32 helper for PancakeSwap V2 Router Calldata
@@ -7066,6 +7115,8 @@ if (typeof module !== 'undefined' && module.exports) {
     renderTable,
     getDexScreenerUrl,
     isSecondaryMarketAsset,
+    isExcludedMajorAsset,
+    getSanitizedMcap,
     compute24hPulseMetrics,
     updateDailyPulseUI,
     toggleDailyPulseHero,

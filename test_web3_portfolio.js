@@ -1226,10 +1226,48 @@ global.document.getElementById = savedGetElem2;
 // Test 24H Market Pulse & Alpha Briefing Card (Option A)
 // ==========================================
 console.log('Testing 24H Market Pulse & Alpha Briefing Card (Option A)...');
-const { compute24hPulseMetrics, updateDailyPulseUI, toggleDailyPulseHero } = app;
+const { compute24hPulseMetrics, updateDailyPulseUI, toggleDailyPulseHero, isExcludedMajorAsset } = app;
+
+// Test Major Pegs & Platform Asset Exclusions
+const cakeDrop = {
+  contract: '0x0e09fabb73bd3ade0a17ecc321fd13a19e81ce82',
+  name: 'PancakeSwap Token',
+  symbol: 'Cake',
+  standard: 'BEP-20 Token (18 decimals)',
+  market_cap: 10700000000,
+  fdv: 10700000000,
+  volume_24h: 51100000,
+  token_price_usd: 1.86,
+  price_change_24h: 0.0
+};
+const btcbDrop = {
+  contract: '0x7130d2a12b9bcbfae4f2634d864a1ee1ce3ead9c',
+  name: 'BTCB Token',
+  symbol: 'BTCB',
+  market_cap: 4900000000,
+  volume_24h: 360000
+};
+const snowballDrop = {
+  contract: '0x79b5d86089a29a65fac3278572f00c8fadc361fb',
+  name: 'SnowBall Agent',
+  symbol: 'SNOWBALL',
+  standard: 'BEP-20 Token (18 decimals)',
+  market_cap: 53132,
+  lp_usd: 27071.35,
+  volume_24h: 52343.73,
+  token_price_usd: 8.962e-8,
+  price_change_24h: 110.0
+};
+
+assert.strictEqual(isExcludedMajorAsset(cakeDrop), true, 'Cake must be excluded from 24h pulse metrics');
+assert.strictEqual(isExcludedMajorAsset(btcbDrop), true, 'BTCB must be excluded from 24h pulse metrics');
+assert.strictEqual(isExcludedMajorAsset(tradingDrop), false, 'AntFun must NOT be excluded');
+assert.strictEqual(isExcludedMajorAsset(snowballDrop), false, 'SnowBall Agent must NOT be excluded');
 
 const samplePulseDrops = [
   tradingDrop,
+  cakeDrop, // Injected to verify exclusion
+  btcbDrop, // Injected to verify exclusion
   {
     contract: '0x3333333333333333333333333333333333333333',
     name: 'SafeDrop',
@@ -1249,15 +1287,23 @@ const samplePulseDrops = [
   }
 ];
 
-const pulseMetrics = compute24hPulseMetrics(samplePulseDrops, [tradingDrop], 132123566);
+const pulseMetrics = compute24hPulseMetrics(samplePulseDrops, [tradingDrop, cakeDrop], 132123566);
 assert(pulseMetrics.topRunner, 'Must compute a top 24h runner');
-assert.strictEqual(pulseMetrics.topRunner.contract, tradingDrop.contract, 'Top runner should be AntFun');
-assert.strictEqual(pulseMetrics.gradCount >= 1, true, 'Graduated count should be at least 1');
+assert.notStrictEqual(pulseMetrics.topRunner.symbol.toUpperCase(), 'CAKE', 'Top runner must NEVER be CAKE');
+assert.notStrictEqual(pulseMetrics.topRunner.symbol.toUpperCase(), 'BTCB', 'Top runner must NEVER be BTCB');
+assert.strictEqual(pulseMetrics.topRunner.contract, tradingDrop.contract, 'Top runner should be AntFun when no positive gainers');
+assert.strictEqual(pulseMetrics.totalDexVol < 50000000, true, 'Cake volume must not inflate totalDexVol');
+assert.strictEqual(pulseMetrics.gradCount >= 1, true, 'Graduated count should be tracked for legitimate drops');
 assert.strictEqual(pulseMetrics.totalSmartInflows, 3, 'Smart inflows should sum to 3');
 assert.strictEqual(pulseMetrics.clustersCount, 1, 'Should detect 1 cluster with >=3 smart wallets');
 assert.strictEqual(pulseMetrics.cleanMintsCount >= 1, true, 'Clean mints should be tracked');
 assert.strictEqual(pulseMetrics.threatsBlockedCount >= 1, true, 'Threats blocked should be tracked');
 assert(pulseMetrics.macroHeadline.includes('AntFun') || pulseMetrics.macroHeadline.includes('ANTFUN'), 'Macro headline should highlight the market leader');
+
+// Test positive gainer runner selection
+const pulseWithRunner = compute24hPulseMetrics([...samplePulseDrops, snowballDrop], [tradingDrop], 132123566);
+assert.strictEqual(pulseWithRunner.topRunner.symbol, 'SNOWBALL', 'Top runner should be the surging token SnowBall (+110%)');
+assert(pulseWithRunner.macroHeadline.includes('SnowBall'), 'Macro headline should highlight positive runner');
 console.log('✔ compute24hPulseMetrics calculation & macro synthesis: PASS');
 
 // Test DOM population and Collapsible Toggle
