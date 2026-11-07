@@ -1066,6 +1066,8 @@ async function viewWalletActivity(walletName) {
   searchQuery = clean;
   const sInput = document.getElementById('searchInput');
   if (sInput) sInput.value = clean;
+  const clearBtn = document.getElementById('searchClearBtn');
+  if (clearBtn) clearBtn.style.display = clean ? 'inline-flex' : 'none';
 
   // Set tab to Live Radar and filter to ALL so drops are not hidden by other filters
   const tabRadar = document.getElementById('tabRadar');
@@ -6418,13 +6420,56 @@ async function init() {
       });
     });
 
-    // Search input
-    document.getElementById('searchInput').addEventListener('input', async e => {
-      searchQuery = e.target.value;
-      if (!hasLoadedSmartDrops && (searchQuery.includes('.ai') || searchQuery.startsWith('0x') || searchQuery.length >= 3)) {
-        await loadSmartDrops();
+    // Search input & controls
+    const searchInput = document.getElementById('searchInput');
+    const searchClearBtn = document.getElementById('searchClearBtn');
+
+    if (searchInput) {
+      searchInput.addEventListener('input', async e => {
+        searchQuery = e.target.value;
+        if (searchClearBtn) {
+          searchClearBtn.style.display = searchQuery ? 'inline-flex' : 'none';
+        }
+        if (!hasLoadedSmartDrops && (searchQuery.includes('.ai') || searchQuery.startsWith('0x') || searchQuery.length >= 3)) {
+          await loadSmartDrops();
+        }
+        renderTable();
+      });
+
+      searchInput.addEventListener('keydown', e => {
+        if (e.key === 'Escape') {
+          if (searchInput.value) {
+            searchInput.value = '';
+            searchQuery = '';
+            if (searchClearBtn) searchClearBtn.style.display = 'none';
+            renderTable();
+          }
+          searchInput.blur();
+        }
+      });
+    }
+
+    if (searchClearBtn) {
+      searchClearBtn.addEventListener('click', () => {
+        if (searchInput) {
+          searchInput.value = '';
+          searchQuery = '';
+          searchClearBtn.style.display = 'none';
+          renderTable();
+          searchInput.focus();
+        }
+      });
+    }
+
+    // Global '/' keyboard shortcut to focus prominent search bar
+    window.addEventListener('keydown', e => {
+      if (e.key === '/' && !['INPUT', 'TEXTAREA'].includes(document.activeElement?.tagName)) {
+        if (searchInput) {
+          e.preventDefault();
+          searchInput.focus();
+          searchInput.select();
+        }
       }
-      renderTable();
     });
 
     // Custom Cyberpunk Sort Dropdown

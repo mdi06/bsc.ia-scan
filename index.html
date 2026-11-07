@@ -87,6 +87,16 @@
           </div>
         </div>
 
+        <!-- Prominent Global Cyber Search Bar -->
+        <div class="suite-search-wrap">
+          <div class="search-box suite-search-box">
+            <span class="search-icon">🔍</span>
+            <input type="text" id="searchInput" placeholder="Search name, symbol, contract 0x..." aria-label="Search Drops" autocomplete="off" spellcheck="false">
+            <button type="button" id="searchClearBtn" class="search-clear-btn" aria-label="Clear search" title="Clear search" style="display: none;">✕</button>
+            <span class="search-kbd-badge" title="Press / to search">/</span>
+          </div>
+        </div>
+
         <div class="suite-meta">
           <div class="suite-telemetry">
             <span class="meta-item live-pill" id="liveBlockBadge" title="Live BSC Block Height">📡 <span
@@ -149,11 +159,6 @@
           </div>
 
           <div class="search-sort-group">
-            <div class="search-box">
-              <span class="search-icon">🔍</span>
-              <input type="text" id="searchInput" placeholder="Search name, symbol, 0x..." aria-label="Search Drops">
-            </div>
-
             <div class="sort-box">
               <span class="dim">Sort:</span>
               <div class="custom-select-wrapper" id="customSortWrapper">
