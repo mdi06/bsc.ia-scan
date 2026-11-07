@@ -5064,7 +5064,7 @@ function openWalletModal() {
             <div class="tile-value green">
               <span class="pulse-dot" style="margin-right: 4px;"></span>Active 24/7
             </div>
-            <div class="tile-sub">Render 24/7 engine</div>
+            <div class="tile-sub">Cloud Sync Engine</div>
           </div>
         </div>
 
@@ -5212,7 +5212,7 @@ function openSyncModal() {
       <div style="font-size: 12px; color: var(--text-dim); line-height: 1.6;">
         Your starred favorites and monitored tokens are bound to your wallet address:
         <code style="color: var(--color-cyan);">${activeWallet}</code>.
-        <br/>Watchlists automatically synchronize between desktop and mobile browsers via the 24/7 Render cloud engine.
+        <br/>Watchlists automatically synchronize between desktop and mobile browsers via cloud sync engine.
       </div>
 
       <div class="qr-container">
@@ -5229,7 +5229,7 @@ function openSyncModal() {
 
       <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 14px; font-size: 11px; padding: 8px 12px; background: rgba(0, 255, 136, 0.06); border: 1px solid rgba(0, 255, 136, 0.2); border-radius: 4px;">
         <span>Cloud Sync Status:</span>
-        <strong style="color: var(--color-green);">🟢 Synced (Render 24/7 Engine)</strong>
+        <strong style="color: var(--color-green);">🟢 Synced (Cloud Engine)</strong>
       </div>
     </div>
   `;
