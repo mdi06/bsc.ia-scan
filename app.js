@@ -4751,7 +4751,7 @@ function openModal(item) {
         <div><span class="dim">Deployer Profile:</span> ${item.security && item.security.is_serial_dev ? '<span style="color: var(--color-red); font-weight:700;">🚨 Serial Dev (' + item.security.serial_count + ' drops)</span>' : (item.security && item.security.is_fresh_dev ? '<span style="color: var(--color-yellow);">🟡 Fresh Wallet</span>' : '<span style="color: var(--color-green);">🟢 Established Nonce</span>')}</div>
         <div><span class="dim">PancakeSwap LP:</span> ${item.lp_usd ? '<span style="color: var(--color-green); font-weight:700;">$' + Number(item.lp_usd).toLocaleString(undefined, { maximumFractionDigits: 0 }) + '</span>' : '<span class="dim">No LP Pool detected</span>'}</div>
         <div><span class="dim">Whale Concentration:</span> ${whaleConcentrationBadge}</div>
-        <div><span class="dim">Dev Cluster Audit:</span> ${isCluster ? `<span class="badge badge-red" style="font-weight:700;">🚨 Dev Cluster: ${clusterDevs} linked wallets / ${clusterN} drops</span>` : '<span style="color: var(--color-green);">🟢 Independent Deployer</span>'}</div>
+        <div><span class="dim">Dev Cluster Audit:</span> ${isCluster ? `<span class="badge badge-red" style="font-weight:700;" title="Dev Cluster: ${clusterDevs} linked ${clusterDevs === 1 ? 'wallet' : 'wallets'} / ${clusterN} drops">🚨 ${clusterDevs} Linked / ${clusterN} Drops</span>` : '<span style="color: var(--color-green);">🟢 Independent Deployer</span>'}</div>
       </div>
       <div style="margin-top: 8px; font-size: 11px; color: var(--text-dim); display: flex; align-items: center; gap: 6px;">
         <span class="dim">Distribution Guard:</span> <span>${whaleConcentrationDesc}</span>

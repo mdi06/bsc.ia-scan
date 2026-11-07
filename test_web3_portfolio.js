@@ -512,7 +512,7 @@ const clusterDrop = {
 
 openModal(clusterDrop);
 assert(mockInspectContent.innerHTML.includes('0x9999999999'), 'Modal must link Dev Funding Root address');
-assert(mockInspectContent.innerHTML.includes('Dev Cluster: 4 linked wallets / 12 drops'), 'Modal must display Dev Cluster badge');
+assert(mockInspectContent.innerHTML.includes('Dev Cluster: 4 linked wallets / 12 drops') && mockInspectContent.innerHTML.includes('4 Linked / 12 Drops'), 'Modal must display Dev Cluster badge and tooltip');
 assert(mockInspectContent.innerHTML.includes('Holder Distribution Breakdown'), 'Modal must display Holder Distribution section');
 assert(mockInspectContent.innerHTML.includes('High Dev Holding (15.5% > 10%)'), 'Modal must trigger High Dev Holding alert');
 assert(mockInspectContent.innerHTML.includes('Insider Concentration (18.0%)'), 'Modal must trigger Insider Concentration alert');
