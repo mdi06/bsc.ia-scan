@@ -487,6 +487,13 @@ body {
   gap: 8px;
 }
 
+/* On desktop, users sort directly by clicking table column headers */
+@media (min-width: 769px) {
+  .sort-box {
+    display: none !important;
+  }
+}
+
 /* Custom Cyberpunk Select Dropdown */
 .custom-select-wrapper {
   position: relative;
@@ -1048,10 +1055,36 @@ th.sortable-th {
   cursor: pointer;
   user-select: none;
   transition: background 0.15s ease, color 0.15s ease;
+  white-space: nowrap;
 }
 th.sortable-th:hover {
   color: var(--color-cyan);
   background: rgba(0, 240, 255, 0.08);
+}
+th.sortable-th.active-sort {
+  color: var(--color-cyan);
+  background: rgba(0, 240, 255, 0.06);
+}
+th.sortable-th .sort-indicator {
+  display: inline-block;
+  font-size: 10px;
+  margin-left: 3px;
+  vertical-align: baseline;
+  transition: opacity 0.15s ease;
+}
+th.sortable-th .sort-indicator.desc,
+th.sortable-th .sort-indicator.asc {
+  color: var(--color-cyan);
+  font-weight: 800;
+  text-shadow: 0 0 6px rgba(0, 240, 255, 0.6);
+}
+th.sortable-th .sort-indicator.dim-hint {
+  color: rgba(255, 255, 255, 0.25);
+  opacity: 0;
+}
+th.sortable-th:hover .sort-indicator.dim-hint {
+  opacity: 1;
+  color: rgba(0, 240, 255, 0.6);
 }
 
 .progress-cell {

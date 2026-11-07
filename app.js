@@ -2517,26 +2517,60 @@ function getFilteredDrops() {
       if (mb === 0 && ma > 0) return -1;
       return ma - mb;
     });
-  } else if (sortMode === 'VOLUME') {
+  } else if (sortMode === 'VOLUME' || sortMode === 'VOLUME_DESC') {
     list.sort((a, b) => Number(b.volume_24h || 0) - Number(a.volume_24h || 0));
-  } else if (sortMode === 'PROFIT') {
+  } else if (sortMode === 'VOLUME_ASC') {
+    list.sort((a, b) => Number(a.volume_24h || 0) - Number(b.volume_24h || 0));
+  } else if (sortMode === 'PROFIT' || sortMode === 'PROFIT_DESC') {
     list.sort((a, b) => {
       const profitA = Math.max(Number(a.ath_profit_usd || 0), Number(a.current_profit_usd || 0));
       const profitB = Math.max(Number(b.ath_profit_usd || 0), Number(b.current_profit_usd || 0));
       return profitB - profitA;
     });
-  } else if (sortMode === 'INTEREST') {
+  } else if (sortMode === 'PROFIT_ASC') {
+    list.sort((a, b) => {
+      const profitA = Math.max(Number(a.ath_profit_usd || 0), Number(a.current_profit_usd || 0));
+      const profitB = Math.max(Number(b.ath_profit_usd || 0), Number(b.current_profit_usd || 0));
+      return profitA - profitB;
+    });
+  } else if (sortMode === 'INTEREST' || sortMode === 'INTEREST_DESC') {
     list.sort((a, b) => Number(b.score || 0) - Number(a.score || 0));
-  } else if (sortMode === 'HOLDERS') {
+  } else if (sortMode === 'INTEREST_ASC') {
+    list.sort((a, b) => Number(a.score || 0) - Number(b.score || 0));
+  } else if (sortMode === 'HOLDERS' || sortMode === 'HOLDERS_DESC') {
     list.sort((a, b) => Number(b.holders || 0) - Number(a.holders || 0));
-  } else if (sortMode === 'PROGRESS') {
+  } else if (sortMode === 'HOLDERS_ASC') {
+    list.sort((a, b) => Number(a.holders || 0) - Number(b.holders || 0));
+  } else if (sortMode === 'PROGRESS' || sortMode === 'PROGRESS_DESC') {
     list.sort((a, b) => {
       const pctA = a.max_supply ? (Number(a.total_minted || 0) / Number(a.max_supply)) : 0;
       const pctB = b.max_supply ? (Number(b.total_minted || 0) / Number(b.max_supply)) : 0;
       return pctB - pctA;
     });
-  } else if (sortMode === 'LP') {
+  } else if (sortMode === 'PROGRESS_ASC') {
+    list.sort((a, b) => {
+      const pctA = a.max_supply ? (Number(a.total_minted || 0) / Number(a.max_supply)) : 0;
+      const pctB = b.max_supply ? (Number(b.total_minted || 0) / Number(b.max_supply)) : 0;
+      return pctA - pctB;
+    });
+  } else if (sortMode === 'LP' || sortMode === 'LP_DESC') {
     list.sort((a, b) => Number(b.lp_usd || 0) - Number(a.lp_usd || 0));
+  } else if (sortMode === 'LP_ASC') {
+    list.sort((a, b) => Number(a.lp_usd || 0) - Number(b.lp_usd || 0));
+  } else if (sortMode === 'PRICE' || sortMode === 'PRICE_DESC') {
+    list.sort((a, b) => Number(b.token_price_usd || b.market_price_usd || 0) - Number(a.token_price_usd || a.market_price_usd || 0));
+  } else if (sortMode === 'PRICE_ASC') {
+    list.sort((a, b) => Number(a.token_price_usd || a.market_price_usd || 0) - Number(b.token_price_usd || b.market_price_usd || 0));
+  } else if (sortMode === 'MINT_PRICE_DESC') {
+    list.sort((a, b) => Number(b.mint_price_bnb || 0) - Number(a.mint_price_bnb || 0));
+  } else if (sortMode === 'MINT_PRICE' || sortMode === 'MINT_PRICE_ASC') {
+    list.sort((a, b) => Number(a.mint_price_bnb || 0) - Number(b.mint_price_bnb || 0));
+  } else if (sortMode === 'NAME_ASC') {
+    list.sort((a, b) => String(a.name || a.symbol || '').localeCompare(String(b.name || b.symbol || '')));
+  } else if (sortMode === 'NAME_DESC') {
+    list.sort((a, b) => String(b.name || b.symbol || '').localeCompare(String(a.name || a.symbol || '')));
+  } else if (sortMode === 'BLOCK_ASC') {
+    list.sort((a, b) => Number(a.block || 0) - Number(b.block || 0));
   } else {
     // NEWEST / Default
     if (activeTab === 'SECONDARY' && sortMode === 'NEWEST') {
@@ -2551,6 +2585,58 @@ function getFilteredDrops() {
 
 const TABLE_RENDER_CHUNK = 60;
 let tableRenderLimit = 60;
+
+// Universal Table Header Sorter with Bi-Directional Indicator
+function makeHeaderSortable(el, baseLabel, descMode, ascMode, customToggle) {
+  if (!el) return;
+  const isDesc = (sortMode === descMode) || 
+    (descMode === 'NEWEST' && (sortMode === 'NEWEST' || !sortMode)) ||
+    (descMode === 'MCAP_DESC' && sortMode === 'MCAP') ||
+    (descMode === 'PROGRESS_DESC' && sortMode === 'PROGRESS') ||
+    (descMode === 'HOLDERS_DESC' && sortMode === 'HOLDERS') ||
+    (descMode === 'LP_DESC' && sortMode === 'LP') ||
+    (descMode === 'VOLUME_DESC' && sortMode === 'VOLUME') ||
+    (descMode === 'PROFIT_DESC' && sortMode === 'PROFIT') ||
+    (descMode === 'INTEREST_DESC' && sortMode === 'INTEREST');
+
+  const isAsc = (sortMode === ascMode);
+  const isDefaultBlock = (descMode === 'NEWEST');
+  const isActive = isDefaultBlock ? (sortMode === 'NEWEST' || sortMode === 'BLOCK_ASC') : (isDesc || isAsc);
+
+  let indicator = '<span class="sort-indicator dim-hint">↕</span>';
+  let title = `Click to sort by ${baseLabel.replace(/^[^\w\s]+/, '').trim()}`;
+
+  if (isDesc && (descMode !== 'NEWEST' || sortMode === 'NEWEST')) {
+    indicator = '<span class="sort-indicator desc">▼</span>';
+    title = `Sorted: High ➔ Low (Click to sort Low ➔ High)`;
+  } else if (isAsc) {
+    indicator = '<span class="sort-indicator asc">▲</span>';
+    title = `Sorted: Low ➔ High (Click to reset)`;
+  }
+
+  el.innerHTML = `${baseLabel} ${indicator}`;
+  const baseClass = (el.className || '').replace(/\s*(sortable-th|active-sort)\b/g, '').trim();
+  el.className = `${baseClass} sortable-th${(isActive && (!isDefaultBlock || sortMode === 'BLOCK_ASC')) ? ' active-sort' : ''}`.trim();
+  el.style.cursor = 'pointer';
+  el.title = title;
+
+  el.onclick = () => {
+    if (typeof customToggle === 'function') {
+      const next = customToggle(sortMode);
+      setSortMode(next);
+      return;
+    }
+    let next;
+    if (descMode === 'NEWEST') {
+      next = (sortMode === 'BLOCK_ASC') ? 'NEWEST' : 'BLOCK_ASC';
+    } else {
+      if (isDesc) next = ascMode;
+      else if (isAsc) next = 'NEWEST';
+      else next = descMode;
+    }
+    setSortMode(next);
+  };
+}
 
 // Render Table Rows
 function renderTable(keepLimit = false) {
@@ -2580,12 +2666,19 @@ function renderTable(keepLimit = false) {
   }
 
   // Dynamic table headers based on active tab
+  const thColBlock = document.getElementById('thColBlock');
+  const thColProject = document.getElementById('thColProject');
+  const thColInterest = document.getElementById('thColInterest');
   const thCol9 = document.getElementById('thCol9');
   const thCol10 = document.getElementById('thCol10') || document.getElementById('thProgress');
   const thCol11 = document.getElementById('thCol11') || document.getElementById('thPrice');
   const thCol12 = document.getElementById('thCol12') || document.getElementById('thLp');
   const thCol13 = document.getElementById('thCol13') || document.getElementById('thFloor');
   const thAction = document.getElementById('thAction');
+
+  if (thColBlock) makeHeaderSortable(thColBlock, 'BLOCK', 'NEWEST', 'BLOCK_ASC');
+  if (thColProject) makeHeaderSortable(thColProject, 'PROJECT', 'NAME_ASC', 'NAME_DESC');
+  if (thColInterest) makeHeaderSortable(thColInterest, 'INTEREST', 'INTEREST_DESC', 'INTEREST_ASC');
 
   const dropsTable = document.getElementById('dropsTable');
   if (dropsTable) {
@@ -2594,59 +2687,53 @@ function renderTable(keepLimit = false) {
 
   if (activeTab === 'SECONDARY') {
     if (thCol9) {
-      thCol9.textContent = '📈 DEX PRICE / 24H';
       thCol9.className = 'col-floor';
+      makeHeaderSortable(thCol9, '📈 DEX PRICE / 24H', 'PRICE_DESC', 'PRICE_ASC');
     }
     if (thCol10) {
-      const isAsc = (sortMode === 'MCAP_ASC');
-      const sortArrow = isAsc ? '▲' : '▼';
-      thCol10.innerHTML = `💎 MARKET CAP / FDV <span style="font-size: 10px; color: var(--color-cyan); margin-left: 2px;">${sortArrow}</span>`;
-      thCol10.className = 'col-progress sortable-th';
-      thCol10.style.cursor = 'pointer';
-      thCol10.title = isAsc ? 'Sorted: Low ➔ High (Click to sort High ➔ Low)' : 'Sorted: High ➔ Low (Click to sort Low ➔ High)';
-      thCol10.onclick = () => {
-        const nextSort = (sortMode === 'MCAP_ASC') ? 'MCAP_DESC' : 'MCAP_ASC';
-        setSortMode(nextSort);
-      };
+      thCol10.className = 'col-progress';
+      makeHeaderSortable(thCol10, '💎 MARKET CAP / FDV', 'MCAP_DESC', 'MCAP_ASC');
     }
     if (thCol11) {
-      thCol11.textContent = '🌊 24H VOLUME';
       thCol11.className = 'col-price';
+      makeHeaderSortable(thCol11, '🌊 24H VOLUME', 'VOLUME_DESC', 'VOLUME_ASC');
     }
     if (thCol12) {
-      thCol12.textContent = '🥞 PANCAKESWAP LP';
       thCol12.className = 'col-lp';
+      makeHeaderSortable(thCol12, '🥞 PANCAKESWAP LP', 'LP_DESC', 'LP_ASC');
     }
     if (thCol13) {
-      thCol13.textContent = '👥 HOLDERS / BUYS';
       thCol13.className = 'col-holders';
+      makeHeaderSortable(thCol13, '👥 HOLDERS / BUYS', 'HOLDERS_DESC', 'HOLDERS_ASC');
     }
     if (thAction) {
       thAction.textContent = '🥞 TRADE DEX';
     }
   } else {
     if (thCol9) {
-      thCol9.textContent = 'HOLDERS / BUYS';
       thCol9.className = 'col-holders';
+      makeHeaderSortable(thCol9, 'HOLDERS / BUYS', 'HOLDERS_DESC', 'HOLDERS_ASC');
     }
     if (thCol10) {
-      thCol10.textContent = 'LP / VOL';
       thCol10.className = 'col-lp';
-      thCol10.style.cursor = 'default';
-      thCol10.title = '';
-      thCol10.onclick = null;
+      makeHeaderSortable(thCol10, 'LP / VOL', 'LP_DESC', 'LP_ASC', (curr) => {
+        if (curr === 'LP' || curr === 'LP_DESC') return 'VOLUME_DESC';
+        if (curr === 'VOLUME' || curr === 'VOLUME_DESC') return 'LP_ASC';
+        if (curr === 'LP_ASC') return 'NEWEST';
+        return 'LP_DESC';
+      });
     }
     if (thCol11) {
-      thCol11.textContent = 'MINT PROGRESS';
       thCol11.className = 'col-progress';
+      makeHeaderSortable(thCol11, 'MINT PROGRESS', 'PROGRESS_DESC', 'PROGRESS_ASC');
     }
     if (thCol12) {
-      thCol12.textContent = 'MINT PRICE';
       thCol12.className = 'col-price';
+      makeHeaderSortable(thCol12, 'MINT PRICE', 'MINT_PRICE_ASC', 'MINT_PRICE_DESC');
     }
     if (thCol13) {
-      thCol13.textContent = 'FLOOR / TRADE';
       thCol13.className = 'col-floor';
+      makeHeaderSortable(thCol13, 'FLOOR / TRADE', 'PROFIT_DESC', 'PROFIT_ASC');
     }
     if (thAction) {
       thAction.textContent = 'INSPECT';
@@ -6570,7 +6657,8 @@ if (typeof module !== 'undefined' && module.exports) {
     copyDonationAddress,
     DONATION_WALLET,
     setSortMode,
-    getSortMode: () => sortMode
+    getSortMode: () => sortMode,
+    renderTable
   };
 }
 

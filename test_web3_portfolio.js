@@ -792,6 +792,7 @@ global.document.getElementById = (id) => {
   return null;
 };
 global.document.createElement = (tag) => new MockElement(tag);
+global.document.createDocumentFragment = () => new MockElement('fragment');
 
 // 3. Test getPillKey
 assert.strictEqual(getPillKey(mockPillElements['ALL']), 'ALL', 'getPillKey should return data-filter value');
@@ -919,7 +920,8 @@ const {
   setSearchQuery,
   setAllDrops,
   setSortMode,
-  getSortMode
+  getSortMode,
+  renderTable
 } = app;
 
 // Test 1: Secondary Market Asset Detection
@@ -1021,5 +1023,61 @@ console.log('✔ Secondary Tab Badge & Overview Banner UI: PASS');
 
 // Reset tab back to RADAR
 setActiveTab('RADAR');
+
+// Test 4: Interactive Table Column Header Sorting
+console.log('Testing Interactive Table Column Header Sorting...');
+const mockThBlock = new MockElement('th', { id: 'thColBlock' });
+const mockThProgress = new MockElement('th', { id: 'thCol11' });
+const mockThHolders = new MockElement('th', { id: 'thCol9' });
+const mockTbody = new MockElement('tbody', { id: 'tableBody' });
+
+const savedGetElem = global.document.getElementById;
+global.document.getElementById = (id) => {
+  if (id === 'thColBlock') return mockThBlock;
+  if (id === 'thCol11') return mockThProgress;
+  if (id === 'thCol9') return mockThHolders;
+  if (id === 'tableBody') return mockTbody;
+  return savedGetElem ? savedGetElem(id) : null;
+};
+
+// Render table in RADAR mode
+setActiveTab('RADAR');
+setSortMode('NEWEST');
+renderTable();
+
+// Verify MINT PROGRESS header is configured and clickable
+assert(mockThProgress.innerHTML.includes('MINT PROGRESS'), 'Header must contain MINT PROGRESS');
+assert(typeof mockThProgress.onclick === 'function', 'MINT PROGRESS header must have onclick handler');
+
+// First click: Sorts Progress Descending (100% -> 0%)
+mockThProgress.onclick();
+assert.strictEqual(getSortMode(), 'PROGRESS_DESC', '1st click on MINT PROGRESS must set PROGRESS_DESC');
+
+// Second click: Sorts Progress Ascending (0% -> 100%)
+mockThProgress.onclick();
+assert.strictEqual(getSortMode(), 'PROGRESS_ASC', '2nd click on MINT PROGRESS must set PROGRESS_ASC');
+
+// Third click: Resets to NEWEST
+mockThProgress.onclick();
+assert.strictEqual(getSortMode(), 'NEWEST', '3rd click on MINT PROGRESS must reset to NEWEST');
+
+// Test BLOCK column toggling
+assert(typeof mockThBlock.onclick === 'function', 'BLOCK header must have onclick handler');
+mockThBlock.onclick();
+assert.strictEqual(getSortMode(), 'BLOCK_ASC', 'Clicking BLOCK when in NEWEST must toggle to BLOCK_ASC');
+mockThBlock.onclick();
+assert.strictEqual(getSortMode(), 'NEWEST', 'Clicking BLOCK when in BLOCK_ASC must toggle to NEWEST');
+
+// Test HOLDERS column toggling
+assert(typeof mockThHolders.onclick === 'function', 'HOLDERS header must have onclick handler');
+mockThHolders.onclick();
+assert.strictEqual(getSortMode(), 'HOLDERS_DESC', 'Clicking HOLDERS must set HOLDERS_DESC');
+mockThHolders.onclick();
+assert.strictEqual(getSortMode(), 'HOLDERS_ASC', '2nd click on HOLDERS must set HOLDERS_ASC');
+mockThHolders.onclick();
+assert.strictEqual(getSortMode(), 'NEWEST', '3rd click on HOLDERS must reset to NEWEST');
+
+global.document.getElementById = savedGetElem;
+console.log('✔ Interactive Table Column Header Sorting: PASS');
 
 console.log('🎉 All Web3, Multicall3, Smart Hunters, and Competitor Features verified successfully!');
