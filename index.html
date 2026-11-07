@@ -289,27 +289,27 @@
 
       <div class="daily-pulse-body" id="dailyPulseBody">
         <div class="daily-pulse-grid">
-          <!-- Card 1: Top 24h Runner -->
+          <!-- Card 1: Top 24h Runners (Top 3) -->
           <div class="pulse-card pulse-card-runner">
             <div class="pulse-card-header">
               <span class="pulse-card-icon">🏆</span>
-              <span class="pulse-card-title">TOP 24H RUNNER</span>
-              <span class="badge badge-green pulse-card-badge" id="pulseRunnerChg">+0.0%</span>
+              <span class="pulse-card-title">TOP 24H RUNNERS</span>
+              <span class="badge badge-green pulse-card-badge" id="pulseRunnersBadge">Past 24h</span>
             </div>
             <div class="pulse-card-main">
-              <div class="pulse-runner-identity">
-                <strong class="pulse-runner-name" id="pulseRunnerName" role="button" tabindex="0" title="Click to inspect">—</strong>
-                <span class="pulse-runner-sym" id="pulseRunnerSym">(-)</span>
-              </div>
-              <div class="pulse-runner-metrics">
-                <div><span class="dim">Price:</span> <strong id="pulseRunnerPrice" style="color: var(--color-green);">$0.00</strong></div>
-                <div><span class="dim">Mcap:</span> <strong id="pulseRunnerMcap" style="color: var(--color-cyan);">$0</strong></div>
+              <div class="pulse-mini-list" id="pulseRunnersList">
+                <div class="pulse-runner-identity" style="display:none;">
+                  <strong class="pulse-runner-name" id="pulseRunnerName" role="button" tabindex="0" title="Click to inspect">—</strong>
+                  <span class="pulse-runner-sym" id="pulseRunnerSym">(-)</span>
+                  <strong id="pulseRunnerPrice">$0.00</strong>
+                  <strong id="pulseRunnerMcap">$0</strong>
+                  <span id="pulseRunnerChg">+0.0%</span>
+                  <a href="#" id="pulseRunnerDexLink"></a>
+                </div>
               </div>
             </div>
             <div class="pulse-card-footer">
-              <a href="#" target="_blank" rel="noopener" class="pulse-dex-link" id="pulseRunnerDexLink" title="Open live chart and order book on DexScreener">
-                <span>📈 DexScreener Chart ↗</span>
-              </a>
+              <span class="pulse-footer-note">⚡ Real-time DEX pair price momentum</span>
             </div>
           </div>
 
@@ -335,26 +335,21 @@
             </div>
           </div>
 
-          <!-- Card 3: Smart Money Alpha Inflow -->
+          <!-- Card 3: Top Smart Wallet Mints (Top 3) -->
           <div class="pulse-card pulse-card-alpha">
             <div class="pulse-card-header">
               <span class="pulse-card-icon">🧠</span>
-              <span class="pulse-card-title">SMART ALPHA INFLOW</span>
-              <span class="badge badge-yellow pulse-card-badge" id="pulseSmartBadge">Alpha Active</span>
+              <span class="pulse-card-title">TOP SMART ALPHA MINTS</span>
+              <span class="badge badge-yellow pulse-card-badge" id="pulseSmartBadge">Top Conviction</span>
             </div>
             <div class="pulse-card-main">
-              <div class="pulse-stat-hero">
-                <span class="pulse-stat-num" id="pulseSmartInflows">0</span>
-                <span class="pulse-stat-sub">Smart Wallet Mints Detected</span>
-              </div>
-              <div class="pulse-sub-row">
-                <div><span class="dim">Top Hunter:</span> <strong id="pulseTopHunter" style="color: var(--color-yellow);">—</strong></div>
-                <div><span class="dim">Clusters:</span> <strong id="pulseClustersCount" style="color: var(--color-red);">0</strong></div>
+              <div class="pulse-mini-list" id="pulseSmartMintsList">
+                <!-- Dynamically populated with Top 3 Mints with highest smart wallets -->
               </div>
             </div>
             <div class="pulse-card-footer">
               <span class="pulse-smart-link" onclick="openSmartLeaderboardModal()" role="button" tabindex="0" title="Open 2,100+ Smart Wallet Leaderboard">
-                <span>🏆 View Hunter Track Records ↗</span>
+                <span>🏆 Smart Leaderboard (<span id="pulseSmartInflows">0</span> Inflows) ↗</span>
               </span>
             </div>
           </div>

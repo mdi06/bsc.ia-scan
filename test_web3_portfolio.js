@@ -1303,6 +1303,9 @@ assert(pulseMetrics.macroHeadline.includes('AntFun') || pulseMetrics.macroHeadli
 // Test positive gainer runner selection
 const pulseWithRunner = compute24hPulseMetrics([...samplePulseDrops, snowballDrop], [tradingDrop], 132123566);
 assert.strictEqual(pulseWithRunner.topRunner.symbol, 'SNOWBALL', 'Top runner should be the surging token SnowBall (+110%)');
+assert.strictEqual(Array.isArray(pulseWithRunner.topRunners), true, 'topRunners must be an array');
+assert(pulseWithRunner.topRunners.length >= 1, 'topRunners array must not be empty');
+assert.strictEqual(Array.isArray(pulseWithRunner.topSmartMints), true, 'topSmartMints must be an array');
 assert(pulseWithRunner.macroHeadline.includes('SnowBall'), 'Macro headline should highlight positive runner');
 console.log('✔ compute24hPulseMetrics calculation & macro synthesis: PASS');
 
@@ -1323,6 +1326,14 @@ updateDailyPulseUI();
 
 const runnerNameEl = getMock('pulseRunnerName');
 assert.strictEqual(runnerNameEl.textContent, 'AntFun', 'pulseRunnerName must be populated with AntFun');
+const runnersListEl = getMock('pulseRunnersList');
+assert(runnersListEl.innerHTML.includes('#1'), 'pulseRunnersList must render #1 runner row');
+assert(runnersListEl.innerHTML.includes('AntFun'), 'pulseRunnersList must render AntFun');
+
+const smartMintsListEl = getMock('pulseSmartMintsList');
+assert(smartMintsListEl.innerHTML.includes('#1'), 'pulseSmartMintsList must render #1 smart mint row');
+assert(smartMintsListEl.innerHTML.includes('SafeDrop'), 'pulseSmartMintsList must render SafeDrop with smart wallets');
+assert(smartMintsListEl.innerHTML.includes('3 Wallets'), 'pulseSmartMintsList must display smart wallet count');
 const gradCountEl = getMock('pulseGradCount');
 assert(Number(gradCountEl.textContent) >= 1, 'pulseGradCount must be populated');
 const headlineEl = getMock('pulseMacroHeadline');

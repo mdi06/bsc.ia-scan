@@ -2915,6 +2915,168 @@ th.sortable-th:hover .sort-indicator.dim-hint {
   gap: 4px;
 }
 
+/* Mini Ranked List for Top 3 Runners & Top 3 Smart Mints */
+.pulse-mini-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 1px 0;
+}
+
+.pulse-list-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 3.5px 6px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.pulse-list-row:hover {
+  background: rgba(0, 240, 255, 0.06);
+  border-color: rgba(0, 240, 255, 0.3);
+}
+
+.pulse-row-left {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.pulse-rank-tag {
+  font-size: 9.5px;
+  font-weight: 800;
+  padding: 1px 3.5px;
+  border-radius: 3px;
+  line-height: 1.1;
+  flex-shrink: 0;
+}
+
+.pulse-rank-tag.rank-1 {
+  background: rgba(245, 158, 11, 0.2);
+  color: #fbbf24;
+  border: 1px solid rgba(245, 158, 11, 0.5);
+}
+
+.pulse-rank-tag.rank-2 {
+  background: rgba(0, 240, 255, 0.15);
+  color: #38bdf8;
+  border: 1px solid rgba(0, 240, 255, 0.4);
+}
+
+.pulse-rank-tag.rank-3 {
+  background: rgba(236, 72, 153, 0.15);
+  color: #f472b6;
+  border: 1px solid rgba(236, 72, 153, 0.4);
+}
+
+.pulse-row-identity {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.pulse-row-name {
+  color: var(--text-white);
+  font-size: 11.5px;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 82px;
+}
+
+.pulse-row-sym {
+  color: var(--text-dim);
+  font-size: 9.5px;
+  font-family: monospace;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 48px;
+}
+
+.pulse-row-mid {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  font-size: 10px;
+  flex-shrink: 0;
+  line-height: 1.15;
+}
+
+.pulse-row-price {
+  color: var(--color-green);
+  font-weight: 700;
+  font-family: monospace;
+  font-size: 10.5px;
+}
+
+.pulse-row-mcap {
+  color: var(--text-dim);
+  font-size: 9px;
+}
+
+.pulse-row-sub {
+  color: var(--text-dim);
+  font-size: 9.5px;
+  white-space: nowrap;
+  max-width: 85px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pulse-row-right {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  flex-shrink: 0;
+}
+
+.pulse-row-badge {
+  font-size: 9px;
+  font-weight: 700;
+  padding: 1px 4.5px;
+  border-radius: 3px;
+  white-space: nowrap;
+}
+
+.pulse-mini-dex-btn {
+  font-size: 10px;
+  text-decoration: none;
+  opacity: 0.8;
+  transition: opacity 0.15s ease, transform 0.15s ease;
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+}
+
+.pulse-mini-dex-btn:hover {
+  opacity: 1;
+  transform: scale(1.2);
+}
+
+.pulse-footer-note {
+  font-size: 10px;
+  color: var(--text-dim);
+}
+
+.pulse-empty-note {
+  font-size: 11px;
+  color: var(--text-dim);
+  text-align: center;
+  padding: 10px 0;
+  font-style: italic;
+}
+
 .pulse-runner-identity {
   display: flex;
   align-items: baseline;

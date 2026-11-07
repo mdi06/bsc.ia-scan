@@ -2210,11 +2210,80 @@ function updateSecondaryBannerUI() {
 // ==========================================================================
 // ☀️ 24H Market Pulse & Alpha Briefing Computation & UI
 // ==========================================================================
+
+function renderPulseRunnerRow(r, idx) {
+  if (!r) return '';
+  const rankClass = idx === 0 ? 'rank-1' : (idx === 1 ? 'rank-2' : 'rank-3');
+  const rankLabel = '#' + (idx + 1);
+  const name = escapeHtml(r.name || 'Unknown');
+  const sym = escapeHtml(r.symbol || '');
+  const chg = Number(r.price_change_24h || 0);
+  const isUp = chg >= 0;
+  const chgBadge = isUp ? 'badge-green' : 'badge-red';
+  const chgText = (isUp ? '+' : '') + chg.toFixed(1) + '%';
+  const price = Number(r.token_price_usd || r.market_price_usd || 0);
+  const priceStr = price > 0 ? formatCryptoPrice(price) : '$0.00';
+  const mcap = getSanitizedMcap(r);
+  const mcapStr = mcap > 0 ? 'MC: $' + formatCount(mcap) : '';
+  const dexUrl = getDexScreenerUrl(r) || ('https://pancakeswap.finance/swap?outputCurrency=' + r.contract);
+  const cAddr = escapeHtml(r.contract || '');
+  const idAttr = idx === 0 ? ' id="pulseRunnerName"' : '';
+
+  return `<div class="pulse-list-row pulse-runner-row" onclick="openInspectModalByContract('${cAddr}')" role="button" tabindex="0" title="Click to inspect ${name}">
+    <div class="pulse-row-left">
+      <span class="pulse-rank-tag ${rankClass}">${rankLabel}</span>
+      <div class="pulse-row-identity">
+        <span class="pulse-row-name"${idAttr}>${name}</span>
+        ${sym ? `<span class="pulse-row-sym">${sym}</span>` : ''}
+      </div>
+    </div>
+    <div class="pulse-row-mid">
+      <span class="pulse-row-price">${priceStr}</span>
+      ${mcapStr ? `<span class="pulse-row-mcap">${mcapStr}</span>` : ''}
+    </div>
+    <div class="pulse-row-right">
+      <span class="badge ${chgBadge} pulse-row-badge">${chgText}</span>
+      <a href="${dexUrl}" target="_blank" rel="noopener" class="pulse-mini-dex-btn" title="DexScreener Live Chart" onclick="event.stopPropagation()">📈</a>
+    </div>
+  </div>`;
+}
+
+function renderPulseSmartMintRow(sm, idx) {
+  if (!sm || !sm.drop) return '';
+  const d = sm.drop;
+  const count = sm.count;
+  const rankClass = idx === 0 ? 'rank-1' : (idx === 1 ? 'rank-2' : 'rank-3');
+  const rankLabel = '#' + (idx + 1);
+  const name = escapeHtml(d.name || 'Unknown');
+  const sym = escapeHtml(d.symbol || '');
+  const cAddr = escapeHtml(d.contract || '');
+  const std = String(d.standard || '');
+  const isNft = std.includes('NFT') || std.includes('721');
+  const priceStr = d.mint_price_str && d.mint_price_str !== 'TBD' ? d.mint_price_str : (isNft ? 'ERC-721 NFT' : 'BEP-20');
+  const subStr = escapeHtml(priceStr);
+
+  return `<div class="pulse-list-row pulse-smart-row" onclick="openInspectModalByContract('${cAddr}')" role="button" tabindex="0" title="Click to inspect ${name}">
+    <div class="pulse-row-left">
+      <span class="pulse-rank-tag ${rankClass}">${rankLabel}</span>
+      <div class="pulse-row-identity">
+        <span class="pulse-row-name">${name}</span>
+        ${sym ? `<span class="pulse-row-sym">${sym}</span>` : ''}
+      </div>
+    </div>
+    <div class="pulse-row-mid">
+      <span class="pulse-row-sub">${subStr}</span>
+    </div>
+    <div class="pulse-row-right">
+      <span class="badge badge-yellow pulse-row-badge">🧠 ${count} Wallets</span>
+    </div>
+  </div>`;
+}
+
 function compute24hPulseMetrics(drops = allDrops, topGainersList = savedTopGainers, currentBlock = latestKnownBlock) {
   const list = Array.isArray(drops) ? drops : [];
   const topList = Array.isArray(topGainersList) ? topGainersList : [];
 
-  // Candidates for Top 24h Runner
+  // Candidates for Top 24h Runners
   const pool = [...list, ...topList.map(g => (g && g.item) ? g.item : g)].filter(Boolean);
   const seenContracts = new Set();
   const uniquePool = [];
@@ -2227,10 +2296,8 @@ function compute24hPulseMetrics(drops = allDrops, topGainersList = savedTopGaine
     }
   });
 
-  // Top 24h Runner: prioritize positive 24h price momentum with volume, or leading secondary market asset
-  let topRunner = null;
-  let topRunnerScore = -Infinity;
-
+  // Top 3 Runners: prioritize positive 24h momentum with volume, or leading secondary market assets
+  const runnerCandidates = [];
   uniquePool.forEach(d => {
     if (isExcludedMajorAsset(d)) return;
     const chg = Number(d.price_change_24h || 0);
@@ -2252,17 +2319,46 @@ function compute24hPulseMetrics(drops = allDrops, topGainersList = savedTopGaine
       score = mcap + (vol * 2);
     }
 
-    if (score > topRunnerScore) {
-      topRunnerScore = score;
-      topRunner = d;
+    runnerCandidates.push({ item: d, score });
+  });
+
+  runnerCandidates.sort((a, b) => b.score - a.score);
+  let topRunners = runnerCandidates.slice(0, 3).map(x => x.item);
+
+  // If fewer than 3 candidates, fill with secondary market assets by market cap
+  if (topRunners.length < 3) {
+    const fallbackAssets = uniquePool.filter(d => !isExcludedMajorAsset(d) && !topRunners.some(r => r.contract === d.contract));
+    fallbackAssets.sort((a, b) => (getSanitizedMcap(b) || Number(b.lp_usd || 0)) - (getSanitizedMcap(a) || Number(a.lp_usd || 0)));
+    for (const fb of fallbackAssets) {
+      if (topRunners.length >= 3) break;
+      topRunners.push(fb);
+    }
+  }
+
+  const topRunner = topRunners[0] || null;
+
+  // Top 3 Mints with the biggest amount of smart wallets involved
+  const smartMintCandidates = [];
+  const seenSmartContracts = new Set();
+  list.forEach(d => {
+    if (isExcludedMajorAsset(d)) return;
+    const c = String(d.contract || '').toLowerCase();
+    if (c && !seenSmartContracts.has(c)) {
+      seenSmartContracts.add(c);
+      const smList = (d.smart_wallets && d.smart_wallets.length > 0)
+        ? d.smart_wallets
+        : (d.smart_minters && d.smart_minters.length > 0 ? d.smart_minters : []);
+      if (smList.length > 0) {
+        smartMintCandidates.push({ item: d, count: smList.length });
+      }
     }
   });
 
-  if (!topRunner && uniquePool.length > 0) {
-    topRunner = uniquePool.find(d => !isExcludedMajorAsset(d) && isSecondaryMarketAsset(d))
-      || uniquePool.find(d => !isExcludedMajorAsset(d))
-      || null;
-  }
+  smartMintCandidates.sort((a, b) => b.count - a.count);
+  const topSmartMints = smartMintCandidates.slice(0, 3).map(x => ({
+    drop: x.item,
+    count: x.count
+  }));
 
   // Graduations & Volume
   let gradCount = 0;
@@ -2340,19 +2436,22 @@ function compute24hPulseMetrics(drops = allDrops, topGainersList = savedTopGaine
     const rName = topRunner.name || topRunner.symbol || 'Leading asset';
     const rChg = Number(topRunner.price_change_24h || 0);
     const volStr = totalDexVol > 0 ? `$${formatCount(totalDexVol)}` : '$0';
+    const smLead = (topSmartMints && topSmartMints.length > 0) ? ` • ${topSmartMints[0].drop.name || topSmartMints[0].drop.symbol} leads smart alpha (${topSmartMints[0].count} wallets)` : '';
 
     if (rChg > 0) {
       const anchorStr = anchorAsset ? ` • ${anchorAsset.name || anchorAsset.symbol} anchors secondary valuation at $${formatCount(maxAnchorMcap)}` : '';
-      macroHeadline = `${rName} leads 24h momentum (+${rChg.toFixed(1)}%)${anchorStr} • ${gradCount} tokens trading on PancakeSwap DEX (${volStr} 24h vol) • ${totalSmartInflows} smart hunter inflows active.`;
+      macroHeadline = `${rName} leads 24h momentum (+${rChg.toFixed(1)}%)${smLead}${anchorStr} • ${gradCount} tokens trading on PancakeSwap DEX (${volStr} 24h vol) • ${totalSmartInflows} smart hunter inflows active.`;
     } else {
       const rMcap = getSanitizedMcap(topRunner);
       const chgStr = rChg !== 0 ? ` (${rChg >= 0 ? '+' : ''}${rChg.toFixed(1)}%)` : '';
-      macroHeadline = `${rName} anchors 24h market valuation at $${formatCount(rMcap)}${chgStr} • ${gradCount} tokens trading on PancakeSwap DEX (${volStr} 24h vol) • ${totalSmartInflows} smart hunter inflows active.`;
+      macroHeadline = `${rName} anchors 24h market valuation at $${formatCount(rMcap)}${chgStr}${smLead} • ${gradCount} tokens trading on PancakeSwap DEX (${volStr} 24h vol) • ${totalSmartInflows} smart hunter inflows active.`;
     }
   }
 
   return {
     topRunner,
+    topRunners,
+    topSmartMints,
     anchorAsset,
     gradCount,
     totalDexVol,
@@ -2375,7 +2474,17 @@ function updateDailyPulseUI() {
 
   const metrics = compute24hPulseMetrics();
 
-  // 1. Top 24h Runner Card
+  // 1. Top 24h Runners Card (Top 3)
+  const runnersListEl = document.getElementById('pulseRunnersList');
+  if (runnersListEl) {
+    if (metrics.topRunners && metrics.topRunners.length > 0) {
+      runnersListEl.innerHTML = metrics.topRunners.map((r, i) => renderPulseRunnerRow(r, i)).join('');
+    } else {
+      runnersListEl.innerHTML = '<div class="pulse-empty-note">No active runners in 24h window</div>';
+    }
+  }
+
+  // Backward compatibility for existing single runner references / unit test mocks
   const runner = metrics.topRunner;
   const rNameEl = document.getElementById('pulseRunnerName');
   const rSymEl = document.getElementById('pulseRunnerSym');
@@ -2427,7 +2536,16 @@ function updateDailyPulseUI() {
   if (volEl) volEl.textContent = `$${formatCount(metrics.totalDexVol)}`;
   if (launchEl) launchEl.textContent = metrics.launchpadCount;
 
-  // 3. Smart Money Alpha Inflow
+  // 3. Top Smart Wallet Mints (Top 3)
+  const smartListEl = document.getElementById('pulseSmartMintsList');
+  if (smartListEl) {
+    if (metrics.topSmartMints && metrics.topSmartMints.length > 0) {
+      smartListEl.innerHTML = metrics.topSmartMints.map((sm, i) => renderPulseSmartMintRow(sm, i)).join('');
+    } else {
+      smartListEl.innerHTML = '<div class="pulse-empty-note">No smart wallet mint activity detected</div>';
+    }
+  }
+
   const smartInflowsEl = document.getElementById('pulseSmartInflows');
   const topHunterEl = document.getElementById('pulseTopHunter');
   const clustersEl = document.getElementById('pulseClustersCount');
@@ -2453,18 +2571,25 @@ function updateDailyPulseUI() {
 
   // 6. Collapsed Ticker Bar
   const tickerRunner = document.getElementById('tickerTopRunner');
-  const tickerVol = document.getElementById('tickerVolume');
+  const tickerVolume = document.getElementById('tickerVolume');
   const tickerGrad = document.getElementById('tickerGraduated');
   const tickerInflow = document.getElementById('tickerSmartInflow');
 
-  if (tickerRunner && runner) {
-    const chg = Number(runner.price_change_24h || 0);
-    const mcap = getSanitizedMcap(runner);
-    tickerRunner.textContent = `🏆 Top: ${runner.name || runner.symbol} $${formatCount(mcap)} (${chg >= 0 ? '+' : ''}${chg.toFixed(1)}%)`;
+  if (tickerRunner && metrics.topRunners && metrics.topRunners.length > 0) {
+    const r1 = metrics.topRunners[0];
+    const chg = Number(r1.price_change_24h || 0);
+    tickerRunner.textContent = `🏆 Top: ${r1.name || r1.symbol} (${chg >= 0 ? '+' : ''}${chg.toFixed(1)}%)`;
   }
-  if (tickerVol) tickerVol.textContent = `🌊 DEX Vol: $${formatCount(metrics.totalDexVol)}`;
+  if (tickerVolume) tickerVolume.textContent = `🌊 DEX Vol: $${formatCount(metrics.totalDexVol)}`;
   if (tickerGrad) tickerGrad.textContent = `🚀 ${metrics.gradCount} Graduated`;
-  if (tickerInflow) tickerInflow.textContent = `🧠 ${metrics.totalSmartInflows} Smart Inflows`;
+  if (tickerInflow) {
+    if (metrics.topSmartMints && metrics.topSmartMints.length > 0) {
+      const sm1 = metrics.topSmartMints[0];
+      tickerInflow.textContent = `🧠 Top Mint: ${sm1.drop.name || sm1.drop.symbol} (${sm1.count} Wallets)`;
+    } else {
+      tickerInflow.textContent = `🧠 ${metrics.totalSmartInflows} Smart Inflows`;
+    }
+  }
 }
 
 function toggleDailyPulseHero() {
