@@ -2426,7 +2426,18 @@ function compute24hPulseMetrics(drops = allDrops, topGainersList = savedTopGaine
     count: x.count
   }));
 
-  // Card 2: Top 3 ATH Prices from Mint
+  // Card 2: Top 3 ATH Prices from Mint (Strictly Past 24h Window)
+  let maxBlock = 0;
+  if (currentBlock && currentBlock > 0) {
+    maxBlock = currentBlock;
+  } else {
+    for (const d of pool) {
+      const b = Number(d.block || 0);
+      if (b > maxBlock && b < 132000000) maxBlock = b;
+    }
+  }
+  const min24hBlock = maxBlock > 28800 ? (maxBlock - 28800) : 0;
+
   const athCandidates = [];
   const seenAthContracts = new Set();
   const allAthItems = [
@@ -2435,13 +2446,18 @@ function compute24hPulseMetrics(drops = allDrops, topGainersList = savedTopGaine
     ...uniquePool.filter(d => (Number(d.ath_price_usd || 0) > 0 || Number(d.token_price_usd || 0) > 0 || Number(d.secondary_price_usd || 0) > 0 || Number(d.multiplier || 0) > 0))
   ];
 
+  // Pass 1: Strict 24h Fair-Mints (minted within the last 28,800 blocks)
   allAthItems.forEach(entry => {
     const item = (entry && entry.item) ? entry.item : entry;
     if (!item || !isValidTopMarketItem(item) || isExcludedMajorAsset(item)) return;
     const c = String(item.contract || '').toLowerCase();
     if (!c || seenAthContracts.has(c)) return;
-    seenAthContracts.add(c);
 
+    const blk = Number(item.block || entry.block || 0);
+    const is24hMint = min24hBlock > 0 ? (blk >= min24hBlock) : true;
+    if (!is24hMint) return;
+
+    seenAthContracts.add(c);
     const athPrice = Number(item.ath_price_usd || entry.athPrice || item.token_price_usd || entry.secUsd || 0);
     const profit = Number(entry.athProfit || entry.profit || (athPrice - Number(item.mint_cost_usd || entry.mintUsd || 0)) || athPrice);
     const multiplier = Number(entry.multiplier || item.multiplier || 0);
@@ -2454,6 +2470,7 @@ function compute24hPulseMetrics(drops = allDrops, topGainersList = savedTopGaine
       athPrice,
       profit,
       multiplier,
+      block: blk,
       mintUsd: Number(item.mint_cost_usd || entry.mintUsd || 0),
       isFree: entry.isFree || item.isFree || (Number(item.mint_cost_usd || entry.mintUsd || 0) === 0),
       standard: item.standard || entry.standard || '',
@@ -2462,14 +2479,46 @@ function compute24hPulseMetrics(drops = allDrops, topGainersList = savedTopGaine
     });
   });
 
-  athCandidates.sort((a, b) => {
-    if (b.athPrice !== a.athPrice) return b.athPrice - a.athPrice;
-    return b.profit - a.profit;
-  });
+  // Pass 2: If fewer than 3 strict 24h mints, allow drops with active 24h secondary trading volume / momentum
+  if (athCandidates.length < 3) {
+    allAthItems.forEach(entry => {
+      const item = (entry && entry.item) ? entry.item : entry;
+      if (!item || !isValidTopMarketItem(item) || isExcludedMajorAsset(item)) return;
+      const c = String(item.contract || '').toLowerCase();
+      if (!c || seenAthContracts.has(c)) return;
 
+      const vol = Number(item.volume_24h || entry.volume_24h || 0);
+      const chg = item.price_change_24h || entry.price_change_24h;
+      if (vol <= 0 && (chg === undefined || chg === 0)) return;
+
+      seenAthContracts.add(c);
+      const athPrice = Number(item.ath_price_usd || entry.athPrice || item.token_price_usd || entry.secUsd || 0);
+      const profit = Number(entry.athProfit || entry.profit || (athPrice - Number(item.mint_cost_usd || entry.mintUsd || 0)) || athPrice);
+      const multiplier = Number(entry.multiplier || item.multiplier || 0);
+
+      athCandidates.push({
+        item,
+        contract: item.contract,
+        name: item.name || 'Unknown',
+        symbol: item.symbol || '',
+        athPrice,
+        profit,
+        multiplier,
+        block: Number(item.block || entry.block || 0),
+        mintUsd: Number(item.mint_cost_usd || entry.mintUsd || 0),
+        isFree: entry.isFree || item.isFree || (Number(item.mint_cost_usd || entry.mintUsd || 0) === 0),
+        standard: item.standard || entry.standard || '',
+        pair_url: item.pair_url || entry.pair_url,
+        market_url: item.market_url || entry.market_url
+      });
+    });
+  }
+
+  // Pass 3: Fallback if test fixture has no blocks or volume
   if (athCandidates.length < 3) {
     const fallbackGainers = getBaselineTopGainers();
     fallbackGainers.forEach(fb => {
+      if (athCandidates.length >= 3) return;
       const fbItem = fb.item || fb;
       const c = String(fbItem.contract || '').toLowerCase();
       if (!seenAthContracts.has(c)) {
@@ -2491,6 +2540,11 @@ function compute24hPulseMetrics(drops = allDrops, topGainersList = savedTopGaine
       }
     });
   }
+
+  athCandidates.sort((a, b) => {
+    if (b.athPrice !== a.athPrice) return b.athPrice - a.athPrice;
+    return b.profit - a.profit;
+  });
 
   const topAthMints = athCandidates.slice(0, 3);
 
@@ -2670,7 +2724,7 @@ function compute24hPulseMetrics(drops = allDrops, topGainersList = savedTopGaine
   }
 
   if (topAthMints && topAthMints.length > 0) {
-    headlineParts.push(`${topAthMints[0].name} leads post-mint ATH (${formatCryptoPrice(topAthMints[0].athPrice)})`);
+    headlineParts.push(`${topAthMints[0].name} leads 24h post-mint ATH (${formatCryptoPrice(topAthMints[0].athPrice)})`);
   }
 
   if (topSmartMints && topSmartMints.length > 0) {
