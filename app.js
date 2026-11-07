@@ -2121,6 +2121,7 @@ async function loadSecondaryDrops() {
         hasLoadedSecondaryDrops = true;
         updateSecondaryTabCount();
         updateSecondaryBannerUI();
+        updateDailyPulseUI();
         if (activeTab === 'SECONDARY') {
           renderTable();
         }
@@ -2188,6 +2189,298 @@ function updateSecondaryBannerUI() {
       secTopAssetEl.onclick = null;
     }
   }
+}
+
+// ==========================================================================
+// ☀️ 24H Market Pulse & Alpha Briefing Computation & UI
+// ==========================================================================
+function compute24hPulseMetrics(drops = allDrops, topGainersList = savedTopGainers, currentBlock = latestKnownBlock) {
+  const list = Array.isArray(drops) ? drops : [];
+  const topList = Array.isArray(topGainersList) ? topGainersList : [];
+
+  // Candidates for Top 24h Runner
+  const pool = [...list, ...topList.map(g => (g && g.item) ? g.item : g)].filter(Boolean);
+  const seenContracts = new Set();
+  const uniquePool = [];
+  pool.forEach(item => {
+    const c = String(item.contract || '').toLowerCase();
+    if (c && !seenContracts.has(c)) {
+      seenContracts.add(c);
+      uniquePool.push(item);
+    }
+  });
+
+  // Top 24h Runner: prioritize highest positive price change with active volume, or highest market cap
+  let topRunner = null;
+  let topRunnerScore = -Infinity;
+
+  uniquePool.forEach(d => {
+    if (d.contract === '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee') return;
+    const chg = Number(d.price_change_24h || 0);
+    const mcap = getSanitizedMcap(d);
+    const vol = Number(d.volume_24h || 0);
+    const tkUsd = Number(d.token_price_usd || d.market_price_usd || 0);
+    if (tkUsd <= 0 && mcap <= 0) return;
+
+    let score = mcap;
+    if (chg > 0) score += chg * 50000;
+    if (vol > 0) score += vol * 2;
+
+    if (score > topRunnerScore) {
+      topRunnerScore = score;
+      topRunner = d;
+    }
+  });
+
+  if (!topRunner && uniquePool.length > 0) {
+    topRunner = uniquePool.find(d => isSecondaryMarketAsset(d)) || uniquePool[0];
+  }
+
+  // Graduations & Volume
+  let gradCount = 0;
+  let totalDexVol = 0;
+  let launchpadCount = 0;
+
+  // Smart Money
+  let totalSmartInflows = 0;
+  const hunterCounts = new Map();
+  let clustersCount = 0;
+
+  // Security
+  let cleanMintsCount = 0;
+  let refundsCount = 0;
+  let threatsBlockedCount = 0;
+
+  list.forEach(d => {
+    const isSec = isSecondaryMarketAsset(d);
+    if (isSec || d.is_graduated) gradCount++;
+    if (isLaunchpadDrop(d)) launchpadCount++;
+
+    const vol = Number(d.volume_24h || 0);
+    totalDexVol += vol;
+
+    const smList = (d.smart_wallets && d.smart_wallets.length > 0)
+      ? d.smart_wallets
+      : (d.smart_minters && d.smart_minters.length > 0 ? d.smart_minters : []);
+    if (smList.length > 0) {
+      totalSmartInflows += smList.length;
+      if (smList.length >= 3) clustersCount++;
+      smList.forEach(w => {
+        const key = String(w).toLowerCase();
+        hunterCounts.set(key, (hunterCounts.get(key) || 0) + 1);
+      });
+    }
+
+    const rLvl = String(d.risk_level || 'SAFE').toUpperCase();
+    const rBdg = String(d.risk_badge || '').toUpperCase();
+    if (rBdg.includes('HONEYPOT') || rBdg.includes('SERIAL') || rBdg.includes('DRAIN') || rLvl === 'RUG' || rLvl === 'HIGH') {
+      threatsBlockedCount++;
+    } else {
+      cleanMintsCount++;
+    }
+
+    if (d.security && d.security.has_refund) {
+      refundsCount++;
+    }
+  });
+
+  // Top Smart Hunter
+  let topHunter = 'Alpha Hunter';
+  let topHunterCount = 0;
+  hunterCounts.forEach((cnt, w) => {
+    if (cnt > topHunterCount) {
+      topHunterCount = cnt;
+      topHunter = w;
+    }
+  });
+
+  // Dynamic 1-sentence macro synthesis
+  let macroHeadline = 'Analyzing 24h rolling activity across fair-mints, secondary trading pairs, and smart hunter capital...';
+  if (topRunner) {
+    const rName = topRunner.name || topRunner.symbol || 'Leading asset';
+    const rMcap = getSanitizedMcap(topRunner);
+    const rChg = Number(topRunner.price_change_24h || 0);
+    const chgStr = rChg !== 0 ? ` (${rChg >= 0 ? '+' : ''}${rChg.toFixed(1)}%)` : '';
+    const volStr = totalDexVol > 0 ? `$${formatCount(totalDexVol)}` : '$0';
+    macroHeadline = `${rName} anchors 24h market valuation at $${formatCount(rMcap)}${chgStr} • ${gradCount} tokens trading on PancakeSwap DEX (${volStr} 24h vol) • ${totalSmartInflows} smart hunter inflows active.`;
+  }
+
+  return {
+    topRunner,
+    gradCount,
+    totalDexVol,
+    launchpadCount,
+    totalSmartInflows,
+    topHunter,
+    topHunterCount,
+    clustersCount,
+    cleanMintsCount,
+    refundsCount,
+    threatsBlockedCount,
+    macroHeadline
+  };
+}
+
+function updateDailyPulseUI() {
+  if (typeof document === 'undefined') return;
+  const hero = document.getElementById('dailyPulseHero');
+  if (!hero) return;
+
+  const metrics = compute24hPulseMetrics();
+
+  // 1. Top 24h Runner Card
+  const runner = metrics.topRunner;
+  const rNameEl = document.getElementById('pulseRunnerName');
+  const rSymEl = document.getElementById('pulseRunnerSym');
+  const rChgEl = document.getElementById('pulseRunnerChg');
+  const rPriceEl = document.getElementById('pulseRunnerPrice');
+  const rMcapEl = document.getElementById('pulseRunnerMcap');
+  const rDexLink = document.getElementById('pulseRunnerDexLink');
+
+  if (runner) {
+    if (rNameEl) {
+      rNameEl.textContent = runner.name || 'Unknown';
+      rNameEl.onclick = () => openModal(runner);
+    }
+    if (rSymEl) rSymEl.textContent = runner.symbol ? `(${runner.symbol})` : '';
+
+    const chg = Number(runner.price_change_24h || 0);
+    if (rChgEl) {
+      const isUp = chg >= 0;
+      rChgEl.className = `badge ${isUp ? 'badge-green' : 'badge-red'} pulse-card-badge`;
+      rChgEl.textContent = `${isUp ? '+' : ''}${chg.toFixed(1)}%`;
+    }
+
+    const tkPrice = Number(runner.token_price_usd || runner.market_price_usd || 0);
+    if (rPriceEl) {
+      rPriceEl.textContent = tkPrice > 0 ? formatCryptoPrice(tkPrice) : '$0.00';
+    }
+
+    const mcap = getSanitizedMcap(runner);
+    if (rMcapEl) {
+      rMcapEl.textContent = mcap > 0 ? `$${formatCount(mcap)}` : '$0';
+    }
+
+    const dexUrl = getDexScreenerUrl(runner);
+    if (rDexLink) {
+      if (dexUrl) {
+        rDexLink.href = dexUrl;
+        rDexLink.style.display = 'inline-flex';
+      } else {
+        rDexLink.href = `https://pancakeswap.finance/swap?outputCurrency=${runner.contract}`;
+      }
+    }
+  }
+
+  // 2. Graduations & Volume
+  const gradCountEl = document.getElementById('pulseGradCount');
+  const volEl = document.getElementById('pulse24hVol');
+  const launchEl = document.getElementById('pulseLaunchpadCount');
+  if (gradCountEl) gradCountEl.textContent = metrics.gradCount;
+  if (volEl) volEl.textContent = `$${formatCount(metrics.totalDexVol)}`;
+  if (launchEl) launchEl.textContent = metrics.launchpadCount;
+
+  // 3. Smart Money Alpha Inflow
+  const smartInflowsEl = document.getElementById('pulseSmartInflows');
+  const topHunterEl = document.getElementById('pulseTopHunter');
+  const clustersEl = document.getElementById('pulseClustersCount');
+  if (smartInflowsEl) smartInflowsEl.textContent = metrics.totalSmartInflows;
+  if (topHunterEl) {
+    const hunterDisplay = metrics.topHunter.length > 14 ? `${metrics.topHunter.slice(0, 6)}...${metrics.topHunter.slice(-4)}` : metrics.topHunter;
+    topHunterEl.textContent = hunterDisplay;
+    topHunterEl.title = metrics.topHunter;
+  }
+  if (clustersEl) clustersEl.textContent = metrics.clustersCount;
+
+  // 4. Security & Anti-Rug
+  const cleanMintsEl = document.getElementById('pulseCleanMints');
+  const refundEl = document.getElementById('pulseRefundCount');
+  const threatsEl = document.getElementById('pulseThreatsBlocked');
+  if (cleanMintsEl) cleanMintsEl.textContent = metrics.cleanMintsCount;
+  if (refundEl) refundEl.textContent = metrics.refundsCount;
+  if (threatsEl) threatsEl.textContent = metrics.threatsBlockedCount;
+
+  // 5. Headline Synthesis
+  const headlineEl = document.getElementById('pulseMacroHeadline');
+  if (headlineEl) headlineEl.textContent = metrics.macroHeadline;
+
+  // 6. Collapsed Ticker Bar
+  const tickerRunner = document.getElementById('tickerTopRunner');
+  const tickerVol = document.getElementById('tickerVolume');
+  const tickerGrad = document.getElementById('tickerGraduated');
+  const tickerInflow = document.getElementById('tickerSmartInflow');
+
+  if (tickerRunner && runner) {
+    const chg = Number(runner.price_change_24h || 0);
+    const mcap = getSanitizedMcap(runner);
+    tickerRunner.textContent = `🏆 Top: ${runner.name || runner.symbol} $${formatCount(mcap)} (${chg >= 0 ? '+' : ''}${chg.toFixed(1)}%)`;
+  }
+  if (tickerVol) tickerVol.textContent = `🌊 DEX Vol: $${formatCount(metrics.totalDexVol)}`;
+  if (tickerGrad) tickerGrad.textContent = `🚀 ${metrics.gradCount} Graduated`;
+  if (tickerInflow) tickerInflow.textContent = `🧠 ${metrics.totalSmartInflows} Smart Inflows`;
+}
+
+function toggleDailyPulseHero() {
+  if (typeof document === 'undefined') return;
+  const hero = document.getElementById('dailyPulseHero');
+  const icon = document.getElementById('dailyPulseToggleIcon');
+  const text = document.getElementById('dailyPulseToggleText');
+  const btn = document.getElementById('dailyPulseToggleBtn');
+  if (!hero) return;
+
+  const isCollapsed = hero.classList && (hero.classList.contains ? hero.classList.contains('collapsed') : (hero.classList.has ? hero.classList.has('collapsed') : false));
+  if (isCollapsed) {
+    if (hero.classList.remove) hero.classList.remove('collapsed');
+    else if (hero.classList.delete) hero.classList.delete('collapsed');
+    if (icon) icon.textContent = '▾';
+    if (text) text.textContent = 'Collapse';
+    if (btn) btn.setAttribute('aria-expanded', 'true');
+  } else {
+    hero.classList.add('collapsed');
+    if (icon) icon.textContent = '▸';
+    if (text) text.textContent = 'Expand';
+    if (btn) btn.setAttribute('aria-expanded', 'false');
+  }
+
+  try {
+    localStorage.setItem('agent_id_pulse_collapsed', !isCollapsed ? '1' : '0');
+  } catch (e) {}
+}
+
+function initDailyPulseHero() {
+  if (typeof document === 'undefined') return;
+  const hero = document.getElementById('dailyPulseHero');
+  const icon = document.getElementById('dailyPulseToggleIcon');
+  const text = document.getElementById('dailyPulseToggleText');
+  const btn = document.getElementById('dailyPulseToggleBtn');
+  if (!hero) return;
+
+  let savedState = null;
+  try {
+    savedState = localStorage.getItem('agent_id_pulse_collapsed');
+  } catch (e) {}
+
+  if (savedState === '1') {
+    hero.classList.add('collapsed');
+    if (icon) icon.textContent = '▸';
+    if (text) text.textContent = 'Expand';
+    if (btn) btn.setAttribute('aria-expanded', 'false');
+  } else {
+    if (hero.classList.remove) hero.classList.remove('collapsed');
+    else if (hero.classList.delete) hero.classList.delete('collapsed');
+    if (icon) icon.textContent = '▾';
+    if (text) text.textContent = 'Collapse';
+    if (btn) btn.setAttribute('aria-expanded', 'true');
+  }
+
+  updateDailyPulseUI();
+}
+
+if (typeof window !== 'undefined') {
+  window.compute24hPulseMetrics = compute24hPulseMetrics;
+  window.updateDailyPulseUI = updateDailyPulseUI;
+  window.toggleDailyPulseHero = toggleDailyPulseHero;
+  window.initDailyPulseHero = initDailyPulseHero;
 }
 
 // ABI pad32 helper for PancakeSwap V2 Router Calldata
@@ -2687,6 +2980,7 @@ function renderTable(keepLimit = false) {
   if (activeTab === 'SECONDARY') {
     updateSecondaryBannerUI();
   }
+  updateDailyPulseUI();
   const totalDisplay = globalStats ? globalStats.total : allDrops.length;
   const footerCountEl = document.getElementById('footerCount');
   if (footerCountEl) {
@@ -5941,6 +6235,7 @@ async function fetchDrops() {
       loadSecondaryDrops().then(() => {
         updateSecondaryTabCount();
         updateSecondaryBannerUI();
+        updateDailyPulseUI();
         if (activeTab === 'SECONDARY') {
           renderTable();
         }
@@ -6640,6 +6935,9 @@ async function init() {
     // Check URL parameters (e.g. ?wallet=0x...)
     checkUrlParams();
 
+    // Initialize 24h Daily Pulse Hero Card
+    initDailyPulseHero();
+
     // Auto-reconnect previously authorized wallet
     tryAutoReconnect();
 
@@ -6767,7 +7065,11 @@ if (typeof module !== 'undefined' && module.exports) {
     getSortMode: () => sortMode,
     renderTable,
     getDexScreenerUrl,
-    isSecondaryMarketAsset
+    isSecondaryMarketAsset,
+    compute24hPulseMetrics,
+    updateDailyPulseUI,
+    toggleDailyPulseHero,
+    initDailyPulseHero
   };
 }
 

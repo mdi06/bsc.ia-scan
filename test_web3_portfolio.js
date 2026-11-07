@@ -659,6 +659,8 @@ class MockElement {
     this.tagName = tag.toUpperCase();
     this.attributes = { ...attrs };
     this.classList = new Set();
+    this.classList.contains = (cls) => this.classList.has(cls);
+    this.classList.remove = (...cls) => cls.forEach(c => this.classList.delete(c));
     this.classList.toggle = (cls, force) => {
       const has = this.classList.has(cls);
       const shouldHave = force !== undefined ? force : !has;
@@ -1219,5 +1221,84 @@ assert(modalHtml.includes('View Chart & Trade on DexScreener ↗'), 'Sold out ba
 console.log('✔ Inspection Modal DexScreener links: PASS');
 
 global.document.getElementById = savedGetElem2;
+
+// ==========================================
+// Test 24H Market Pulse & Alpha Briefing Card (Option A)
+// ==========================================
+console.log('Testing 24H Market Pulse & Alpha Briefing Card (Option A)...');
+const { compute24hPulseMetrics, updateDailyPulseUI, toggleDailyPulseHero } = app;
+
+const samplePulseDrops = [
+  tradingDrop,
+  {
+    contract: '0x3333333333333333333333333333333333333333',
+    name: 'SafeDrop',
+    symbol: 'SAFE',
+    standard: 'BEP-20 Token (18 decimals)',
+    smart_wallets: ['adadcarry.ai', '0x1111111111111111111111111111111111111111', '0x2222222222222222222222222222222222222222'],
+    risk_level: 'SAFE',
+    security: { has_refund: true }
+  },
+  {
+    contract: '0x4444444444444444444444444444444444444444',
+    name: 'RugDrop',
+    symbol: 'RUG',
+    standard: 'BEP-20 Token (18 decimals)',
+    risk_level: 'RUG',
+    risk_badge: 'HONEYPOT'
+  }
+];
+
+const pulseMetrics = compute24hPulseMetrics(samplePulseDrops, [tradingDrop], 132123566);
+assert(pulseMetrics.topRunner, 'Must compute a top 24h runner');
+assert.strictEqual(pulseMetrics.topRunner.contract, tradingDrop.contract, 'Top runner should be AntFun');
+assert.strictEqual(pulseMetrics.gradCount >= 1, true, 'Graduated count should be at least 1');
+assert.strictEqual(pulseMetrics.totalSmartInflows, 3, 'Smart inflows should sum to 3');
+assert.strictEqual(pulseMetrics.clustersCount, 1, 'Should detect 1 cluster with >=3 smart wallets');
+assert.strictEqual(pulseMetrics.cleanMintsCount >= 1, true, 'Clean mints should be tracked');
+assert.strictEqual(pulseMetrics.threatsBlockedCount >= 1, true, 'Threats blocked should be tracked');
+assert(pulseMetrics.macroHeadline.includes('AntFun') || pulseMetrics.macroHeadline.includes('ANTFUN'), 'Macro headline should highlight the market leader');
+console.log('✔ compute24hPulseMetrics calculation & macro synthesis: PASS');
+
+// Test DOM population and Collapsible Toggle
+const mockElementsMap = new Map();
+function getMock(id) {
+  if (!mockElementsMap.has(id)) {
+    mockElementsMap.set(id, new MockElement('div', { id }));
+  }
+  return mockElementsMap.get(id);
+}
+
+const savedGetElemPulse = global.document.getElementById;
+global.document.getElementById = (id) => getMock(id);
+
+setAllDrops(samplePulseDrops);
+updateDailyPulseUI();
+
+const runnerNameEl = getMock('pulseRunnerName');
+assert.strictEqual(runnerNameEl.textContent, 'AntFun', 'pulseRunnerName must be populated with AntFun');
+const gradCountEl = getMock('pulseGradCount');
+assert(Number(gradCountEl.textContent) >= 1, 'pulseGradCount must be populated');
+const headlineEl = getMock('pulseMacroHeadline');
+assert(headlineEl.textContent.length > 20, 'pulseMacroHeadline must be populated');
+
+// Test toggle collapse / expand
+const heroEl = getMock('dailyPulseHero');
+const toggleIcon = getMock('dailyPulseToggleIcon');
+const toggleText = getMock('dailyPulseToggleText');
+
+assert.strictEqual(heroEl.classList.has('collapsed'), false, 'Hero should be expanded initially');
+toggleDailyPulseHero();
+assert.strictEqual(heroEl.classList.has('collapsed'), true, 'Hero should be collapsed after 1st toggle');
+assert.strictEqual(toggleText.textContent, 'Expand', 'Toggle text should be Expand');
+assert.strictEqual(toggleIcon.textContent, '▸', 'Toggle icon should be ▸');
+
+toggleDailyPulseHero();
+assert.strictEqual(heroEl.classList.has('collapsed'), false, 'Hero should be expanded after 2nd toggle');
+assert.strictEqual(toggleText.textContent, 'Collapse', 'Toggle text should be Collapse');
+assert.strictEqual(toggleIcon.textContent, '▾', 'Toggle icon should be ▾');
+
+global.document.getElementById = savedGetElemPulse;
+console.log('✔ 24H Daily Pulse DOM population & interactive toggle: PASS');
 
 console.log('🎉 All Web3, Multicall3, Smart Hunters, and Competitor Features verified successfully!');

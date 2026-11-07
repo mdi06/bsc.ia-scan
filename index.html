@@ -261,6 +261,135 @@
       </div>
     </header>
 
+    <!-- ☀️ 24H Market Pulse & Alpha Briefing Hero Card (Collapsible) -->
+    <section class="daily-pulse-hero" id="dailyPulseHero" aria-label="24h Market Summary">
+      <div class="daily-pulse-header">
+        <div class="daily-pulse-title-wrap">
+          <span class="daily-pulse-badge">☀️ 24H PULSE</span>
+          <strong class="daily-pulse-heading">24H MARKET BRIEFING & ALPHA HIGHLIGHTS</strong>
+          <span class="live-pulse-dot" title="Live 24-Hour Rolling Window"></span>
+        </div>
+
+        <div class="daily-pulse-collapsed-ticker" id="dailyPulseCollapsedTicker">
+          <span class="ticker-item" id="tickerTopRunner">🏆 Top: Loading...</span>
+          <span class="ticker-sep">│</span>
+          <span class="ticker-item" id="tickerVolume">🌊 DEX Vol: $0</span>
+          <span class="ticker-sep">│</span>
+          <span class="ticker-item" id="tickerGraduated">🚀 0 Graduated</span>
+          <span class="ticker-sep">│</span>
+          <span class="ticker-item" id="tickerSmartInflow">🧠 0 Inflows</span>
+        </div>
+
+        <div class="daily-pulse-controls">
+          <button type="button" class="daily-pulse-toggle-btn" id="dailyPulseToggleBtn" onclick="toggleDailyPulseHero()" aria-expanded="true" aria-controls="dailyPulseBody" title="Collapse or expand 24h summary card">
+            <span id="dailyPulseToggleIcon">▾</span> <span id="dailyPulseToggleText">Collapse</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="daily-pulse-body" id="dailyPulseBody">
+        <div class="daily-pulse-grid">
+          <!-- Card 1: Top 24h Runner -->
+          <div class="pulse-card pulse-card-runner">
+            <div class="pulse-card-header">
+              <span class="pulse-card-icon">🏆</span>
+              <span class="pulse-card-title">TOP 24H RUNNER</span>
+              <span class="badge badge-green pulse-card-badge" id="pulseRunnerChg">+0.0%</span>
+            </div>
+            <div class="pulse-card-main">
+              <div class="pulse-runner-identity">
+                <strong class="pulse-runner-name" id="pulseRunnerName" role="button" tabindex="0" title="Click to inspect">—</strong>
+                <span class="pulse-runner-sym" id="pulseRunnerSym">(-)</span>
+              </div>
+              <div class="pulse-runner-metrics">
+                <div><span class="dim">Price:</span> <strong id="pulseRunnerPrice" style="color: var(--color-green);">$0.00</strong></div>
+                <div><span class="dim">Mcap:</span> <strong id="pulseRunnerMcap" style="color: var(--color-cyan);">$0</strong></div>
+              </div>
+            </div>
+            <div class="pulse-card-footer">
+              <a href="#" target="_blank" rel="noopener" class="pulse-dex-link" id="pulseRunnerDexLink" title="Open live chart and order book on DexScreener">
+                <span>📈 DexScreener Chart ↗</span>
+              </a>
+            </div>
+          </div>
+
+          <!-- Card 2: 24h Graduations & Volume -->
+          <div class="pulse-card pulse-card-grad">
+            <div class="pulse-card-header">
+              <span class="pulse-card-icon">🚀</span>
+              <span class="pulse-card-title">GRADUATIONS & DEX VOL</span>
+              <span class="badge badge-cyan pulse-card-badge" id="pulseGradPct">DEX Active</span>
+            </div>
+            <div class="pulse-card-main">
+              <div class="pulse-stat-hero">
+                <span class="pulse-stat-num" id="pulseGradCount">0</span>
+                <span class="pulse-stat-sub">Graduated to PancakeSwap</span>
+              </div>
+              <div class="pulse-sub-row">
+                <div><span class="dim">24h DEX Vol:</span> <strong id="pulse24hVol" style="color: var(--color-cyan);">$0</strong></div>
+                <div><span class="dim">Launchpads:</span> <strong id="pulseLaunchpadCount" style="color: #f97316;">0</strong></div>
+              </div>
+            </div>
+            <div class="pulse-card-footer">
+              <span class="dim" style="font-size: 11px;">100% Capped drops injected into liquidity</span>
+            </div>
+          </div>
+
+          <!-- Card 3: Smart Money Alpha Inflow -->
+          <div class="pulse-card pulse-card-alpha">
+            <div class="pulse-card-header">
+              <span class="pulse-card-icon">🧠</span>
+              <span class="pulse-card-title">SMART ALPHA INFLOW</span>
+              <span class="badge badge-yellow pulse-card-badge" id="pulseSmartBadge">Alpha Active</span>
+            </div>
+            <div class="pulse-card-main">
+              <div class="pulse-stat-hero">
+                <span class="pulse-stat-num" id="pulseSmartInflows">0</span>
+                <span class="pulse-stat-sub">Smart Wallet Mints Detected</span>
+              </div>
+              <div class="pulse-sub-row">
+                <div><span class="dim">Top Hunter:</span> <strong id="pulseTopHunter" style="color: var(--color-yellow);">—</strong></div>
+                <div><span class="dim">Clusters:</span> <strong id="pulseClustersCount" style="color: var(--color-red);">0</strong></div>
+              </div>
+            </div>
+            <div class="pulse-card-footer">
+              <span class="pulse-smart-link" onclick="openSmartLeaderboardModal()" role="button" tabindex="0" title="Open 2,100+ Smart Wallet Leaderboard">
+                <span>🏆 View Hunter Track Records ↗</span>
+              </span>
+            </div>
+          </div>
+
+          <!-- Card 4: 24h Security & Anti-Rug -->
+          <div class="pulse-card pulse-card-security">
+            <div class="pulse-card-header">
+              <span class="pulse-card-icon">🛡️</span>
+              <span class="pulse-card-title">24H SECURITY AUDIT</span>
+              <span class="badge badge-green pulse-card-badge" id="pulseSecurityBadge">100% Guard</span>
+            </div>
+            <div class="pulse-card-main">
+              <div class="pulse-stat-hero">
+                <span class="pulse-stat-num" id="pulseCleanMints">0</span>
+                <span class="pulse-stat-sub">Safe Drops Monitored</span>
+              </div>
+              <div class="pulse-sub-row">
+                <div><span class="dim">Bytecode Refunds:</span> <strong id="pulseRefundCount" style="color: var(--color-green);">0</strong></div>
+                <div><span class="dim">Blocked Devs:</span> <strong id="pulseThreatsBlocked" style="color: var(--color-red);">0</strong></div>
+              </div>
+            </div>
+            <div class="pulse-card-footer">
+              <span class="dim" style="font-size: 11px;">Real-time automated bytecode & serial dev filter</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 24h Macro Executive Headline -->
+        <div class="daily-pulse-headline-row">
+          <span class="headline-tag">⚡ 24H MACRO INSIGHT</span>
+          <span class="headline-text" id="pulseMacroHeadline">Analyzing rolling 24-hour liquidity rotation and smart minting patterns...</span>
+        </div>
+      </div>
+    </section>
+
     <!-- Macro Key Stats Banner (Full Width) -->
     <div class="stats-banner" id="statsBanner">
       <div class="stats-macro-group">
