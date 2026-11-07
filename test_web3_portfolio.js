@@ -1226,7 +1226,7 @@ global.document.getElementById = savedGetElem2;
 // Test 24H Market Pulse & Alpha Briefing Card (Option A)
 // ==========================================
 console.log('Testing 24H Market Pulse & Alpha Briefing Card (Option A)...');
-const { compute24hPulseMetrics, updateDailyPulseUI, toggleDailyPulseHero, isExcludedMajorAsset } = app;
+const { compute24hPulseMetrics, updateDailyPulseUI, toggleDailyPulseHero, isExcludedMajorAsset, renderPulseNftRow } = app;
 
 // Test Major Pegs & Platform Asset Exclusions
 const cakeDrop = {
@@ -1310,6 +1310,11 @@ assert.strictEqual(Array.isArray(pulseWithRunner.topAthMints), true, 'topAthMint
 assert(pulseWithRunner.topAthMints.length >= 1, 'topAthMints array must not be empty');
 assert.strictEqual(Array.isArray(pulseWithRunner.topNftSurges), true, 'topNftSurges must be an array');
 assert(pulseWithRunner.topNftSurges.length >= 1, 'topNftSurges array must not be empty');
+pulseWithRunner.topNftSurges.forEach((nft, idx) => {
+  assert(nft.gainPct > 0, `NFT surge at index ${idx} must have positive post-mint gain (got ${nft.gainPct})`);
+  const rowHtml = renderPulseNftRow(nft, idx);
+  assert(!rowHtml.includes('badge-red'), `NFT surge row for ${nft.name} must not have badge-red`);
+});
 assert(pulseWithRunner.macroHeadline.includes('SnowBall'), 'Macro headline should highlight positive runner');
 console.log('✔ compute24hPulseMetrics calculation & macro synthesis: PASS');
 

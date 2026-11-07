@@ -2623,9 +2623,33 @@ function compute24hPulseMetrics(drops = allDrops, topGainersList = savedTopGaine
 
     const flBnb = Number(d.floor_price_bnb || 0);
     const flUsd = Number(d.floor_price_usd || d.token_price_usd || d.market_price_usd || d.secUsd || 0);
+    const effectiveUsd = flUsd > 0 ? flUsd : (flBnb > 0 ? flBnb * 600 : 0);
+    if (effectiveUsd <= 0) return;
+
+    const mintCost = Number(d.mint_cost_usd || d.mintUsd || (d.mint_price_bnb ? d.mint_price_bnb * 600 : 0));
+    const isFree = Boolean(d.isFree || d.has_free_mint || (d.mint_price_str && d.mint_price_str.includes('FREE')) || mintCost === 0);
+
+    let gainPct = 0;
+    let multiplier = 1;
+    if (mintCost > 0) {
+      gainPct = ((effectiveUsd - mintCost) / mintCost) * 100;
+      multiplier = effectiveUsd / mintCost;
+    } else if (isFree) {
+      multiplier = effectiveUsd / 0.01;
+      gainPct = multiplier * 100;
+    } else if (d.price_change_24h !== undefined && d.price_change_24h !== null) {
+      gainPct = Number(d.price_change_24h);
+      multiplier = (100 + gainPct) / 100;
+    }
+
+    // Strict positive surge requirement: Card 4 is for positive surges only!
+    // Disqualify any collections trading below mint cost or in drawdown (e.g. -83.1%)
+    if (gainPct <= 0 || multiplier < 1.0) return;
+
     const sm = Number(d.smart_wallets_count || (d.smart_wallets ? d.smart_wallets.length : 0) || 0);
     const holders = Number(d.holders || 0);
-    const score = (vol * 1.5) + (flUsd * 500) + (flBnb * 300000) + (sm * 100) + (Math.log10(holders + 1) * 20);
+    // Surge score prioritizes the post-mint gain multiplier, balanced by secondary volume & smart money
+    const score = (gainPct * 10) + Math.min(vol, 10000) + (sm * 50) + (Math.log10(holders + 1) * 20);
 
     const cand = {
       contract: d.contract,
@@ -2634,14 +2658,17 @@ function compute24hPulseMetrics(drops = allDrops, topGainersList = savedTopGaine
       standard: d.standard || 'ERC-721',
       mint_price_str: d.mint_price_str,
       mint_price_bnb: d.mint_price_bnb,
-      mint_cost_usd: d.mint_cost_usd,
-      has_free_mint: d.has_free_mint,
+      mint_cost_usd: mintCost,
+      has_free_mint: isFree,
+      isFree,
       price_change_24h: d.price_change_24h,
-      flUsd,
+      flUsd: effectiveUsd,
       flBnb,
       vol,
       sm,
       holders,
+      gainPct,
+      multiplier,
       score,
       market_url: d.market_url || ('https://element.market/collections/' + (d.contract || ''))
     };
@@ -2664,9 +2691,12 @@ function compute24hPulseMetrics(drops = allDrops, topGainersList = savedTopGaine
       vol: 17193.87,
       mint_cost_usd: 0,
       has_free_mint: true,
+      isFree: true,
       sm: 22,
       holders: 1524,
-      score: 25000,
+      gainPct: 67500,
+      multiplier: 675,
+      score: 675000,
       market_url: 'https://element.market/collections/fishingai-rod'
     },
     {
@@ -2678,9 +2708,12 @@ function compute24hPulseMetrics(drops = allDrops, topGainersList = savedTopGaine
       flBnb: 0,
       vol: 1200,
       mint_cost_usd: 0.02,
+      isFree: false,
       sm: 267,
       holders: 3500,
-      score: 28000,
+      gainPct: 500,
+      multiplier: 6,
+      score: 25000,
       market_url: 'https://element.market/collections/agent-cards'
     },
     {
@@ -2693,9 +2726,12 @@ function compute24hPulseMetrics(drops = allDrops, topGainersList = savedTopGaine
       vol: 850,
       mint_cost_usd: 0,
       has_free_mint: true,
+      isFree: true,
       sm: 0,
       holders: 10000,
-      score: 1500,
+      gainPct: 1100,
+      multiplier: 11,
+      score: 15000,
       market_url: 'https://element.market/collections/0xb777c52296f0d7d3c5cab7ae0c1aaac6b014b256'
     }
   ];
