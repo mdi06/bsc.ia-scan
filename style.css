@@ -1648,6 +1648,17 @@ th.sortable-th:hover .sort-indicator.dim-hint {
   color: #000;
 }
 
+.hof-btn-chart {
+  color: var(--color-cyan);
+  background: rgba(0, 240, 255, 0.1);
+  border: 1px solid var(--color-cyan);
+}
+
+.hof-btn-chart:hover {
+  background: var(--color-cyan);
+  color: #000;
+}
+
 .hof-btn-scan {
   color: var(--text-dim);
   background: rgba(255, 255, 255, 0.05);

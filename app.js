@@ -4126,16 +4126,20 @@ function openHallOfFameModal(filterMode = 'ALL') {
       const cleanName = (g.name || '').replace(/\([^)]*\)/g, '').trim();
       const slug = cleanName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
       const elementUrl = (g.item && g.item.market_url) || (slug ? `https://element.market/collections/${slug}` : `https://element.market/collections/${g.contract}`);
-      const dexUrl = (g.item && g.item.pair_url) || `https://pancakeswap.finance/swap?outputCurrency=${g.contract}`;
+      const dexScreenerUrl = (g.item && g.item.pair_url && g.item.pair_url.includes('dexscreener.com'))
+        ? g.item.pair_url
+        : `https://dexscreener.com/bsc/${g.contract}`;
+      const pancakeUrl = `https://pancakeswap.finance/swap?outputCurrency=${g.contract}`;
       const bscUrl = `https://bscscan.com/address/${g.contract}`;
 
       let actionLinks = '';
       if (isNft) {
         actionLinks += `<a href="${elementUrl}" target="_blank" rel="noopener" class="hof-btn hof-btn-mkt" title="Open on Element NFT Market">🦋 Element</a>`;
+        actionLinks += `<a href="${bscUrl}" target="_blank" rel="noopener" class="hof-btn hof-btn-scan" title="View BscScan">🔍 BscScan</a>`;
       } else {
-        actionLinks += `<a href="${dexUrl}" target="_blank" rel="noopener" class="hof-btn hof-btn-dex" title="Trade on PancakeSwap / DexScreener">🥞 DEX</a>`;
+        actionLinks += `<a href="${dexScreenerUrl}" target="_blank" rel="noopener" class="hof-btn hof-btn-chart" title="View Live Chart & Trades on DexScreener">📈 DexScreener</a>`;
+        actionLinks += `<a href="${pancakeUrl}" target="_blank" rel="noopener" class="hof-btn hof-btn-dex" title="Trade on PancakeSwap">🥞 Trade</a>`;
       }
-      actionLinks += `<a href="${bscUrl}" target="_blank" rel="noopener" class="hof-btn hof-btn-scan" title="View BSCScan">🔍 BscScan</a>`;
 
       rowsHtml += `
         <tr>
@@ -4198,7 +4202,7 @@ function openHallOfFameModal(filterMode = 'ALL') {
             <th style="width: 150px;">Peak ATH / Net</th>
             <th style="width: 130px;">Current Price</th>
             <th style="width: 110px;">Status</th>
-            <th style="width: 150px;">Market Links</th>
+            <th style="width: 185px;">Market Links</th>
           </tr>
         </thead>
         <tbody>
