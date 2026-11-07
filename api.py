@@ -65,6 +65,7 @@ BOGUS_SCAM_CONTRACTS = [
     "0x80106cb3ead06659a5ad19df39d9b4733863b9b0",  # Microsoft (MSFTB)
     "0x5b1910eaad6450e50f816082aa078c41f10c292f",  # Tesla, Inc. (TSLAB)
     "0x431a6136ee1b2f76378c8a14b53ef11ba9099b7a",  # Apple (AAPLB)
+    "0x360d0b00c3c3a9d70e6e7372cfbe85e68b95973c",  # DogeZilla (Legacy meme clone with $0 mcap / sub-decimal display bug)
 ]
 BOGUS_SET = set(c.lower() for c in BOGUS_SCAM_CONTRACTS)
 
@@ -129,7 +130,9 @@ def _etag_matches(client_etag: Optional[str], target_etag: str) -> bool:
 
 EXCLUDED_PEGS_SYMBOLS = {
     'BTCB', 'WBTC', 'BTC', 'ETH', 'WETH', 'WBNB', 'BNB', 'USDT', 'USDC', 'BUSD', 
-    'DAI', 'TUSD', 'FDUSD', 'CAKE', 'U', 'OSK', 'FIST'
+    'DAI', 'TUSD', 'FDUSD', 'CAKE', 'U', 'OSK', 'FIST',
+    'SOL', 'XRP', 'ADA', 'DOGE', 'DOT', 'AVAX', 'MATIC', 'POL', 'LINK', 'LTC', 'SHIB', 'UNI',
+    'ZEC', 'BCH', 'XLM', 'EOS', 'ATOM', 'TRX', 'FIL', 'NEAR', 'XMR', 'ETC', 'APT', 'SUI', 'PEPE', 'FLOKI', 'DOGEZILLA'
 }
 EXCLUDED_PEGS_CONTRACTS = {
     '0x7130d2a12b9bcbfae4f2634d864a1ee1ce3ead9c',
@@ -171,7 +174,10 @@ def is_secondary_market_asset(d: dict) -> bool:
         return False
     c = str(d.get("contract") or "").lower().strip()
     sym = str(d.get("symbol") or "").upper().strip()
+    name = str(d.get("name") or "").upper().strip()
     if c in EXCLUDED_PEGS_CONTRACTS or sym in EXCLUDED_PEGS_SYMBOLS or sym in SYNTHETIC_EQUITY_SYMBOLS:
+        return False
+    if "ZCASH" in name or "DOGEZILLA" in name or "BINANCE-PEG" in name or "PANCAKESWAP" in name:
         return False
     lp = float(d.get("lp_usd") or 0.0)
     mc = get_sanitized_mcap(d)

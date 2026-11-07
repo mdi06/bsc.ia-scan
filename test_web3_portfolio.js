@@ -1247,7 +1247,7 @@ global.document.getElementById = savedGetElem2;
 // Test 24H Market Pulse & Alpha Briefing Card (Option A)
 // ==========================================
 console.log('Testing 24H Market Pulse & Alpha Briefing Card (Option A)...');
-const { compute24hPulseMetrics, updateDailyPulseUI, toggleDailyPulseHero, isExcludedMajorAsset, renderPulseNftRow } = app;
+const { compute24hPulseMetrics, updateDailyPulseUI, toggleDailyPulseHero, isExcludedMajorAsset, renderPulseNftRow, formatCryptoPrice } = app;
 
 // Test Major Pegs & Platform Asset Exclusions
 const cakeDrop = {
@@ -1397,6 +1397,59 @@ assert.strictEqual(toggleIcon.textContent, '▾', 'Toggle icon should be ▾');
 
 global.document.getElementById = savedGetElemPulse;
 console.log('✔ 24H Daily Pulse DOM population & interactive toggle: PASS');
+
+// Test Micro-Price Formatting & Outlier Protection
+console.log('Testing Micro-Price Formatting & Outlier Protection...');
+assert.strictEqual(formatCryptoPrice(0), '$0.00', 'Zero price should format as $0.00');
+assert.strictEqual(formatCryptoPrice(0.0001495), '$0.000150', 'Sub-cent price should format cleanly');
+assert(!formatCryptoPrice(1e-12).endsWith('.'), 'Micro price must NEVER format with trailing dot ($0.)');
+assert(!formatCryptoPrice(1e-15).endsWith('.'), 'Extremely small sub-satoshi price must never format with trailing dot');
+assert(formatCryptoPrice(1e-15).includes('<$0.000000000001'), 'Sub-satoshi price formats with upper bound indicator');
+
+// Test Exclusion of Major Assets & Scam Clones (ZEC, DogeZilla)
+assert.strictEqual(isExcludedMajorAsset({ symbol: 'ZEC', name: 'Zcash Token', market_cap: 290500000 }), true, 'Zcash (ZEC) must be excluded as major asset');
+assert.strictEqual(isExcludedMajorAsset({ symbol: 'DogeZil', name: 'DogeZilla' }), true, 'DogeZilla must be excluded');
+
+// Test Quality Guard on Top 24H Runners (Reject $0 Market Cap outliers)
+const zeroMcapDrop = {
+  contract: '0x360d0b00c3c3a9d70e6e7372cfbe85e68b95973c',
+  name: 'DogeZilla',
+  symbol: 'DogeZil',
+  standard: 'BEP-20 Token (1 decimals)',
+  market_cap: 0,
+  fdv: 0,
+  token_price_usd: 0.000000000000000001,
+  volume_24h: 47300,
+  lp_usd: 8300,
+  price_change_24h: 2828.0
+};
+const pulseOutlierCheck = compute24hPulseMetrics([zeroMcapDrop, tradingDrop], [], 132123566);
+assert.notStrictEqual(pulseOutlierCheck.topRunner.symbol, 'DogeZil', 'Top runner must NEVER be a $0 market cap glitch like DogeZilla');
+assert.strictEqual(pulseOutlierCheck.topRunners.some(r => r.symbol === 'DogeZil'), false, 'DogeZil must not be in topRunners');
+
+// Test Zero Address Dev Root & False Cluster Prevention
+const zeroAddrDrop = {
+  contract: '0x360d0b00c3c3a9d70e6e7372cfbe85e68b95973c',
+  name: 'Zero Root Test',
+  symbol: 'ZROOT',
+  deployer: '0x0000000000000000000000000000000000000000',
+  dev_root: '0x0000000000000000000000000000000000000000',
+  cluster_devs: 1,
+  cluster_n: 7
+};
+const mockModalContentZero = { innerHTML: '' };
+const prevGetElemZero = global.document.getElementById;
+global.document.getElementById = (id) => {
+  if (id === 'inspectModal') return { showModal: () => {}, close: () => {} };
+  if (id === 'modalContent') return mockModalContentZero;
+  return null;
+};
+openModal(zeroAddrDrop);
+assert(!mockModalContentZero.innerHTML.includes('0x000000...000000'), 'Modal must NEVER display 0x000000...000000 as funding root');
+assert(!mockModalContentZero.innerHTML.includes('Dev Cluster (1 devs / 7 drops)'), 'Zero address must NEVER trigger a 7-drop Dev Cluster');
+assert(mockModalContentZero.innerHTML.includes('Unresolved') || mockModalContentZero.innerHTML.includes('Independent'), 'Zero address must be marked as Unresolved or Independent');
+global.document.getElementById = prevGetElemZero;
+console.log('✔ Micro-Price Formatting, Outlier Guard & Zero-Address Dev Root: PASS');
 
 console.log('🎉 All Web3, Multicall3, Smart Hunters, and Competitor Features verified successfully!');
 process.exit(0);

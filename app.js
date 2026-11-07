@@ -461,17 +461,25 @@ function formatCryptoPrice(val, isNet = false) {
   if (absN >= 0.01) return `${sign}$${absN.toFixed(4)}`;
   if (absN >= 0.0001) return `${sign}$${absN.toFixed(6)}`;
   if (absN >= 1e-6) return `${sign}$${absN.toFixed(8)}`;
-  // Trim redundant trailing zeros for clean readability
-  const rawStr = absN.toFixed(10);
-  const cleanStr = rawStr.replace(/0+$/, '');
-  return `${sign}$${cleanStr}`;
+  if (absN >= 1e-8) {
+    const rawStr = absN.toFixed(10);
+    const cleanStr = rawStr.replace(/0+$/, '').replace(/\.$/, '');
+    return `${sign}$${cleanStr || '0.00'}`;
+  }
+  if (absN < 1e-12) {
+    return `${sign}<$0.000000000001`;
+  }
+  const fullStr = absN.toFixed(14).replace(/0+$/, '').replace(/\.$/, '');
+  if (!fullStr || fullStr === '0') return `${sign}$0.00`;
+  return `${sign}$${fullStr}`;
 }
 
 // Known major pegged / Layer-1 tokens and synthetic equities on BSC
 const EXCLUDED_PEGS_SYMBOLS = new Set([
   'BTCB', 'WBTC', 'BTC', 'ETH', 'WETH', 'WBNB', 'BNB', 'USDT', 'USDC', 'BUSD', 
   'DAI', 'TUSD', 'FDUSD', 'CAKE', 'U', 'OSK', 'FIST',
-  'SOL', 'XRP', 'ADA', 'DOGE', 'DOT', 'AVAX', 'MATIC', 'POL', 'LINK', 'LTC', 'SHIB', 'UNI'
+  'SOL', 'XRP', 'ADA', 'DOGE', 'DOT', 'AVAX', 'MATIC', 'POL', 'LINK', 'LTC', 'SHIB', 'UNI',
+  'ZEC', 'BCH', 'XLM', 'EOS', 'ATOM', 'TRX', 'FIL', 'NEAR', 'XMR', 'ETC', 'APT', 'SUI', 'PEPE', 'FLOKI', 'DOGEZILLA'
 ]);
 
 const EXCLUDED_PEGS_CONTRACTS = new Set([
@@ -482,7 +490,8 @@ const EXCLUDED_PEGS_CONTRACTS = new Set([
   '0xe9e7cea3dedca5984780bafc599bd69add087d56', // BUSD
   '0x2170ed0880ac9a755fd29b2688956bd959f933f8', // ETH (Binance-Peg)
   '0x14016e85a25a55f2e084741d69d9d82361f38e2b', // DAI
-  '0x0e09fabb73bd3ade0a17ecc321fd13a19e81ce82'  // CAKE
+  '0x0e09fabb73bd3ade0a17ecc321fd13a19e81ce82', // CAKE
+  '0x360d0b00c3c3a9d70e6e7372cfbe85e68b95973c'  // DogeZilla legacy clone
 ]);
 
 const SYNTHETIC_EQUITY_SYMBOLS = new Set([
@@ -501,7 +510,12 @@ function isExcludedMajorAsset(d) {
   if (EXCLUDED_PEGS_CONTRACTS.has(c) || EXCLUDED_PEGS_SYMBOLS.has(sym) || SYNTHETIC_EQUITY_SYMBOLS.has(sym)) {
     return true;
   }
-  if (name.includes('PANCAKESWAP') || name.includes('BINANCE-PEG') || name.includes('WRAPPED BNB') || name.includes('TETHER USD') || name.includes('USD COIN')) {
+  if (name.includes('PANCAKESWAP') || name.includes('BINANCE-PEG') || name.includes('WRAPPED BNB') || name.includes('TETHER USD') || name.includes('USD COIN') || name.includes('ZCASH') || name.includes('DOGEZILLA')) {
+    return true;
+  }
+  // Exclude legacy multi-million assets with huge supply mismatches or no Agent ID association
+  const rawMc = Number(d.market_cap || d.fdv || 0);
+  if (rawMc > 50000000 && (!d.smart_wallets || d.smart_wallets.length === 0) && !d.is_graduated) {
     return true;
   }
   return false;
@@ -2520,12 +2534,12 @@ function compute24hPulseMetrics(drops = allDrops, topGainersList = savedTopGaine
     const vol = Number(d.volume_24h || 0);
     const lp = Number(d.lp_usd || 0);
     const tkUsd = Number(d.token_price_usd || d.market_price_usd || 0);
-    if (tkUsd <= 0 && mcap <= 0 && vol <= 0) return;
+    // Strict Runner Quality Guard: Must have genuine market cap, real non-zero price, and active liquidity
+    if (mcap < 500 || tkUsd <= 1e-8 || lp < 500 || vol < 200) return;
 
     const rLvl = String(d.risk_level || '').toUpperCase();
     const rBdg = String(d.risk_badge || '').toUpperCase();
     if (rLvl === 'RUG' || rBdg.includes('HONEYPOT')) return;
-    if (vol < 500 && lp < 500 && mcap < 100000) return;
 
     let score = 0;
     if (chg > 0) {
@@ -4723,11 +4737,16 @@ function openModal(item) {
     whaleConcentrationDesc = `Medium wallet clustering across ${holdersCount} wallets. Monitor large seller outflows.`;
   }
 
-  // Feature 1: Dev Funding Root & Cluster Metrics
-  const devRootAddr = (item.dev_root || (item.security && item.security.dev_root) || '').trim();
-  const clusterDevs = Number(item.cluster_devs || (item.security && item.security.cluster_devs) || 1);
-  const clusterN = Number(item.cluster_n || (item.security && item.security.cluster_n) || 1);
-  const isCluster = (clusterDevs >= 2 || clusterN >= 3);
+  // Feature 1: Dev Funding Root & Cluster Metrics (Exclude zero / burn address from ever being a dev root)
+  const rawDevRoot = (item.dev_root || (item.security && item.security.dev_root) || '').trim();
+  const isZeroOrBurn = (addr) => !addr || addr.toLowerCase() === '0x0000000000000000000000000000000000000000' || addr.toLowerCase() === '0x0' || addr.toLowerCase() === 'n/a';
+  const devRootAddr = isZeroOrBurn(rawDevRoot) ? '' : rawDevRoot;
+
+  const rawClusterDevs = Number(item.cluster_devs || (item.security && item.security.cluster_devs) || 1);
+  const rawClusterN = Number(item.cluster_n || (item.security && item.security.cluster_n) || 1);
+  const isCluster = Boolean(devRootAddr && (rawClusterDevs >= 2 || rawClusterN >= 3));
+  const clusterDevs = isCluster ? rawClusterDevs : 1;
+  const clusterN = isCluster ? rawClusterN : 1;
 
   // Feature 3: Dynamic Holder Distribution Breakdown
   const dist = computeHolderDistribution(item);
@@ -4776,7 +4795,7 @@ function openModal(item) {
     devRootFormatted = `<a href="https://bscscan.com/address/${devRootAddr}" target="_blank" rel="noopener" style="color: var(--color-cyan); text-decoration: underline;" title="${devRootAddr}"><code>${devRootAddr.slice(0, 8)}...${devRootAddr.slice(-6)}</code> ↗</a>`;
   }
 
-  let devSyndicateFormatted = `<span class="badge badge-dim" style="font-size: 10px;">Unindexed</span>`;
+  let devSyndicateFormatted = `<span class="badge badge-dim" style="font-size: 10px;">🟢 Independent Contract</span>`;
   if (hasDeployer || devRootAddr) {
     if (isCluster) {
       devSyndicateFormatted = `<span class="badge badge-red" style="font-weight: 700; font-size: 10px;">🚨 Dev Cluster (${clusterDevs} devs / ${clusterN} drops)</span>`;
@@ -4784,6 +4803,9 @@ function openModal(item) {
       devSyndicateFormatted = `<span class="badge badge-dim" style="font-size: 10px;">🟢 Standalone (1 drop)</span>`;
     }
   }
+
+  const mintedStr = formatCount(item.total_minted);
+  const supplyStr = (item.max_supply && Number(item.max_supply) > 0) ? `/ ${formatCount(item.max_supply)}` : '<span class="dim">(Uncapped)</span>';
 
   content.innerHTML = `
     <div class="modal-header">
@@ -4803,7 +4825,7 @@ function openModal(item) {
         <div><span class="dim">Syndicate:</span> ${devSyndicateFormatted}</div>
         <div><span class="dim">Standard:</span> <strong>${std}</strong></div>
         <div><span class="dim">Deployment Block:</span> <code>#${item.block || 'N/A'}</code></div>
-        <div><span class="dim">Total Minted:</span> <strong>${formatCount(item.total_minted)}</strong> / ${formatCount(item.max_supply) || '∞'}</div>
+        <div><span class="dim">Total Minted:</span> <strong>${mintedStr}</strong> ${supplyStr}</div>
         <div><span class="dim">Holders:</span> <strong>${formatCount(item.holders)} unique wallets</strong></div>
       </div>
     </div>
@@ -7796,7 +7818,8 @@ if (typeof module !== 'undefined' && module.exports) {
     renderPulseRunnerRow,
     renderPulseSmartMintRow,
     renderPulseAthRow,
-    renderPulseNftRow
+    renderPulseNftRow,
+    formatCryptoPrice
   };
 }
 

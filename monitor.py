@@ -1904,6 +1904,12 @@ def analyze_market_interest(
     serial_count = 1
     is_fresh_dev = False
     dev_root = (details.get("dev_root") or details.get("root") or "").lower() or None
+    if dev_root and (dev_root == "0x0000000000000000000000000000000000000000" or dev_root == "0x0"):
+        dev_root = None
+
+    if deployer_addr and (deployer_addr.lower() == "0x0000000000000000000000000000000000000000" or deployer_addr.lower() == "0x0"):
+        deployer_addr = None
+
     cluster_devs = 1
     cluster_n = 1
 
@@ -1940,33 +1946,33 @@ def analyze_market_interest(
             if not dev_root:
                 for h in prev_deps:
                     r_cand = (h.get("dev_root") or h.get("root") or "").lower()
-                    if r_cand:
+                    if r_cand and r_cand != "0x0000000000000000000000000000000000000000" and r_cand != "0x0":
                         dev_root = r_cand
                         break
 
     # If dev_root is still missing but deployer is known, default dev_root to deployer
-    if not dev_root and deployer_addr:
+    if not dev_root and deployer_addr and deployer_addr != "0x0000000000000000000000000000000000000000":
         dev_root = deployer_addr
 
-    # Dev Funding Root & Cluster Tracing across history
-    if dev_root and history:
+    # Dev Funding Root & Cluster Tracing across history (strictly exclude zero/burn address)
+    if dev_root and dev_root != "0x0000000000000000000000000000000000000000" and history:
         cluster_drops = [
             h for h in history
-            if (h.get("dev_root") or h.get("root") or "").lower() == dev_root
-            or (h.get("deployer") or "").lower() == dev_root
+            if ((h.get("dev_root") or h.get("root") or "").lower() == dev_root and dev_root != "0x0000000000000000000000000000000000000000")
+            or ((h.get("deployer") or "").lower() == dev_root and dev_root != "0x0000000000000000000000000000000000000000")
             or (deployer_addr and (h.get("deployer") or "").lower() == deployer_addr)
         ]
         unique_devs = set()
-        if deployer_addr:
+        if deployer_addr and deployer_addr != "0x0000000000000000000000000000000000000000":
             unique_devs.add(deployer_addr)
-        if dev_root:
+        if dev_root and dev_root != "0x0000000000000000000000000000000000000000":
             unique_devs.add(dev_root)
         for h in cluster_drops:
             d_addr = (h.get("deployer") or "").lower()
-            if d_addr:
+            if d_addr and d_addr != "0x0000000000000000000000000000000000000000":
                 unique_devs.add(d_addr)
             r_addr = (h.get("dev_root") or h.get("root") or "").lower()
-            if r_addr:
+            if r_addr and r_addr != "0x0000000000000000000000000000000000000000":
                 unique_devs.add(r_addr)
         cluster_devs = max(len(unique_devs), 1)
         cluster_n = max(len(cluster_drops) + 1, cluster_devs, serial_count)
