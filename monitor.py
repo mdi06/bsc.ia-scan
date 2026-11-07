@@ -1192,9 +1192,16 @@ def fetch_token_market_data(token_addr: str) -> Dict[str, Any]:
             payload = json.loads(r.read().decode("utf-8"))
             pairs = payload.get("pairs") or []
             if pairs:
+                # Accuracy Guard: Only consider pools where our token is the BASE token.
+                # Avoids selecting quote pools (e.g. GEN/ANTFUN where ANTFUN is the quote token and GEN costs $7.20)
+                base_pairs = [
+                    x for x in pairs
+                    if (x.get("baseToken", {}).get("address") or "").lower() == token_addr.lower()
+                ]
+                valid_pairs = base_pairs if base_pairs else pairs
                 # Prioritize pool with highest liquidity depth
-                pairs.sort(key=lambda x: float((x.get("liquidity") or {}).get("usd", 0) or 0), reverse=True)
-                p = pairs[0]
+                valid_pairs.sort(key=lambda x: float((x.get("liquidity") or {}).get("usd", 0) or 0), reverse=True)
+                p = valid_pairs[0]
                 txns = p.get("txns", {})
                 res["buys_24h"] = txns.get("h24", {}).get("buys", 0)
                 res["buys_1h"] = txns.get("h1", {}).get("buys", 0)

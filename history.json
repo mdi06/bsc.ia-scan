@@ -17783,7 +17783,7 @@
     "name": "AntFun",
     "block": 131570474,
     "score": 65,
-    "lp_usd": 133961.98,
+    "lp_usd": 2043997.51,
     "rating": "\ud83d\udd25 HIGH TRACTION",
     "symbol": "ANTFUN",
     "buys_1h": 110,
@@ -17796,7 +17796,7 @@
     "buys_24h": 4010,
     "contract": "0x6ced5c6d3f913b48d59fa07abbfe9060c409087c",
     "deployer": "",
-    "pair_url": "https://dexscreener.com/bsc/0xce091a55e98186b69a802da5c83c42fed9734c01",
+    "pair_url": "https://dexscreener.com/bsc/0xf0c22680044948752f696bf0bc70672129246df7",
     "security": {
       "audited": true,
       "buy_tax": 0.0,
@@ -17830,7 +17830,7 @@
       "\ud83d\udfe1 Fresh Dev Wallet (low nonce)"
     ],
     "risk_level": "HIGH",
-    "volume_24h": 629900.25,
+    "volume_24h": 552000.0,
     "detected_at": "2026-11-04 05:40:39",
     "sniper_badge": "\ud83d\udcc8 On DEX",
     "sniper_ready": false,
@@ -17848,7 +17848,7 @@
     "mint_price_bnb": 0.0,
     "mint_price_str": "DEX Traded",
     "mint_value_wei": "0",
-    "token_price_usd": 0.02216,
+    "token_price_usd": 0.01709,
     "sniper_checklist": [
       "\u25ab [green]\u2714[/green] Progress: Crowd Surge (268228 active agent wallets)",
       "\u25ab [yellow]\u26a0\ufe0f[/yellow] Deployer: Fresh wallet (<8h, low nonce)",
@@ -17856,10 +17856,11 @@
       "\u25ab [dim]\u25ab Refund Guarantee: N/A (Free Mint / Gas Only)[/dim]",
       "\u25ab [yellow]\u2716[/yellow] Secondary Market: DEX LP already active ($31,441,070) -> Trade on DEX instead of minting"
     ],
-    "market_cap": 33966509.0,
-    "fdv": 22160035.0,
+    "market_cap": 32271878.0,
+    "fdv": 21203064.0,
     "price_change_24h": -2.88,
-    "pair_address": "0xce091a55e98186b69a802da5c83c42fed9734c01"
+    "pair_address": "0xf0c22680044948752f696bf0bc70672129246df7",
+    "market_price_usd": 0.01709
   },
   {
     "icon": "\u2699\ufe0f",
@@ -67390,7 +67391,7 @@
     "mint_price_bnb": 0.0,
     "mint_price_str": "DEX Traded",
     "mint_value_wei": "0",
-    "token_price_usd": 2.195e-09,
+    "token_price_usd": 1.883e-09,
     "sniper_checklist": [
       "\u25ab [green]\u2714[/green] Progress: Crowd Surge (1195 active agent wallets)",
       "\u25ab [green]\u2714[/green] Deployer: Clean reputation (No spam deployment)",
@@ -67398,8 +67399,8 @@
       "\u25ab [dim]\u25ab Refund Guarantee: N/A (Free Mint / Gas Only)[/dim]",
       "\u25ab [yellow]\u2716[/yellow] Secondary Market: DEX LP already active ($26,596) -> Trade on DEX instead of minting"
     ],
-    "market_cap": 19756.0,
-    "fdv": 19756.0,
+    "market_cap": 16951.0,
+    "fdv": 16951.0,
     "price_change_24h": -25.32,
     "pair_address": "0x3566947cad3bcc854b8247fdf5224ca528b31aea"
   },
@@ -167427,7 +167428,7 @@
     "mint_price_bnb": 0.0,
     "mint_price_str": "DEX Traded",
     "mint_value_wei": "0",
-    "token_price_usd": 3.651e-12,
+    "token_price_usd": 3.428e-12,
     "sniper_checklist": [
       "\u25ab [yellow]\u23f3[/yellow] Progress: 0% (<60% threshold, tracking)",
       "\u25ab [green]\u2714[/green] Deployer: Clean reputation (No spam deployment)",
@@ -167435,8 +167436,8 @@
       "\u25ab [dim]\u25ab Refund Guarantee: N/A (Free Mint / Gas Only)[/dim]",
       "\u25ab [green]\u2714[/green] Secondary Market: Primary bonding phase (No DEX LP yet)"
     ],
-    "market_cap": 3181.0,
-    "fdv": 3181.0,
+    "market_cap": 2987.0,
+    "fdv": 2987.0,
     "price_change_24h": -55.65,
     "pair_address": "0xc16141bdd583e7e9db0c8e3512ead53e068fed4b"
   },

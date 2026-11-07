@@ -615,6 +615,7 @@ def run_market_dynamics_updater_loop():
             for i in range(0, len(contracts_to_check), batch_size):
                 chunk = contracts_to_check[i:i + batch_size]
                 chunk_addrs = [x["contract"] for x in chunk if x.get("contract")]
+                chunk_addrs_set = {x.lower() for x in chunk_addrs}
                 # Also collect any known pair addresses from pair_url
                 chunk_pairs = []
                 for x in chunk:
@@ -633,8 +634,13 @@ def run_market_dynamics_updater_loop():
                                 b_tok = pair.get("baseToken", {})
                                 b_addr = (b_tok.get("address") or "").lower()
                                 p_addr = (pair.get("pairAddress") or "").lower()
-                                if b_addr:
-                                    dex_updates[b_addr] = pair
+                                # Accuracy Guard: Only record pairs where our token is the BASE token.
+                                # Avoids assigning foreign token metrics (e.g. GEN in GEN/ANTFUN pair) to our token.
+                                if b_addr and b_addr in chunk_addrs_set:
+                                    pair_liq = float((pair.get("liquidity") or {}).get("usd") or 0.0)
+                                    existing = dex_updates.get(b_addr)
+                                    if not existing or pair_liq > float((existing.get("liquidity") or {}).get("usd") or 0.0):
+                                        dex_updates[b_addr] = pair
                                 if p_addr:
                                     dex_updates[p_addr] = pair
                     if chunk_pairs:
@@ -646,8 +652,11 @@ def run_market_dynamics_updater_loop():
                                 b_tok = pair.get("baseToken", {})
                                 b_addr = (b_tok.get("address") or "").lower()
                                 p_addr = (pair.get("pairAddress") or "").lower()
-                                if b_addr:
-                                    dex_updates[b_addr] = pair
+                                if b_addr and b_addr in chunk_addrs_set:
+                                    pair_liq = float((pair.get("liquidity") or {}).get("usd") or 0.0)
+                                    existing = dex_updates.get(b_addr)
+                                    if not existing or pair_liq > float((existing.get("liquidity") or {}).get("usd") or 0.0):
+                                        dex_updates[b_addr] = pair
                                 if p_addr:
                                     dex_updates[p_addr] = pair
                 except Exception:
@@ -663,7 +672,13 @@ def run_market_dynamics_updater_loop():
                 if m:
                     pair_addr = m.group(1).lower()
 
-                pair = dex_updates.get(c) or (dex_updates.get(pair_addr) if pair_addr else None)
+                # Guard: Candidate pool must have item contract as baseToken
+                candidate = dex_updates.get(c)
+                if not candidate and pair_addr:
+                    cand_p = dex_updates.get(pair_addr)
+                    if cand_p and (cand_p.get("baseToken", {}).get("address") or "").lower() == c:
+                        candidate = cand_p
+                pair = candidate
                 item_changed = False
 
                 if pair:

@@ -3597,12 +3597,12 @@ function openModal(item) {
   const freshHold = Number(dist.fresh || 0);
   const publicHold = Number(dist.public || 0);
 
-  const mcapNum = Number(item.market_cap || item.fdv || 0);
+  const mcapNum = getSanitizedMcap(item);
   const vol24Num = Number(item.volume_24h || 0);
   const chg24Num = Number(item.price_change_24h || 0);
   const tkPriceNum = Number(item.token_price_usd || item.market_price_usd || 0);
 
-  let mcapFormatted = mcapNum > 0 ? `$${formatCount(mcapNum)}` : (tm > 0 && tkPriceNum > 0 ? `$${formatCount(tm * tkPriceNum)}` : '<span class="dim">Fair Mint Phase</span>');
+  let mcapFormatted = mcapNum > 0 ? `$${formatCount(mcapNum)}` : '<span class="dim">Fair Mint Phase</span>';
   let vol24Formatted = vol24Num > 0 ? `$${formatCount(vol24Num)}` : '<span class="dim">—</span>';
   let chg24Badge = '';
   if (chg24Num !== 0) {
