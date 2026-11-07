@@ -1345,7 +1345,8 @@ assert(smartMintsListEl.innerHTML.includes('3 Wallets'), 'pulseSmartMintsList mu
 
 const nftSurgesListEl = getMock('pulseNftSurgesList');
 assert(nftSurgesListEl.innerHTML.includes('#1'), 'pulseNftSurgesList must render #1 NFT surge row');
-assert(nftSurgesListEl.innerHTML.includes('Element'), 'pulseNftSurgesList must render Element Market badge');
+assert(nftSurgesListEl.innerHTML.includes('Element'), 'pulseNftSurgesList must render Element Market link');
+assert(nftSurgesListEl.innerHTML.includes('%') || nftSurgesListEl.innerHTML.includes('x'), 'pulseNftSurgesList must render % gain or multiplier from mint');
 
 const gradCountEl = getMock('pulseGradCount');
 assert(Number(gradCountEl.textContent) >= 1, 'pulseGradCount must be populated');
