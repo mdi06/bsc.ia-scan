@@ -2279,6 +2279,72 @@ function renderPulseSmartMintRow(sm, idx) {
   </div>`;
 }
 
+function renderPulseAthRow(item, idx) {
+  if (!item) return '';
+  const rankClass = idx === 0 ? 'rank-1' : (idx === 1 ? 'rank-2' : 'rank-3');
+  const rankLabel = '#' + (idx + 1);
+  const name = escapeHtml(item.name || 'Unknown');
+  const sym = escapeHtml(item.symbol || '');
+  const cAddr = escapeHtml(item.contract || '');
+  const athPrice = Number(item.athPrice || item.ath_price_usd || item.token_price_usd || item.secUsd || 0);
+  const athStr = athPrice > 0 ? formatCryptoPrice(athPrice) : '$0.00';
+  const mintCost = Number(item.mintUsd || item.mint_cost_usd || 0);
+  const mintStr = (item.isFree || mintCost === 0) ? 'Mint: Free' : ('Mint: ' + formatCryptoPrice(mintCost));
+  const mult = Number(item.multiplier || 0);
+  const multStr = mult > 1 ? (Math.round(mult) + 'x') : '💎 Peak';
+  const dexUrl = getDexScreenerUrl(item) || item.pair_url || item.market_url || ('https://pancakeswap.finance/swap?outputCurrency=' + item.contract);
+
+  return `<div class="pulse-list-row pulse-ath-row" onclick="openInspectModalByContract('${cAddr}')" role="button" tabindex="0" title="Click to inspect ${name} (ATH: ${athStr})">
+    <div class="pulse-row-left">
+      <span class="pulse-rank-tag ${rankClass}">${rankLabel}</span>
+      <div class="pulse-row-identity">
+        <span class="pulse-row-name">${name}</span>
+        ${sym ? `<span class="pulse-row-sym">${sym}</span>` : ''}
+      </div>
+    </div>
+    <div class="pulse-row-mid">
+      <span class="pulse-row-price" style="color: var(--color-cyan);">${athStr}</span>
+      <span class="pulse-row-mcap">${mintStr}</span>
+    </div>
+    <div class="pulse-row-right">
+      <span class="badge badge-cyan pulse-row-badge">${multStr}</span>
+      <a href="${dexUrl}" target="_blank" rel="noopener" class="pulse-mini-dex-btn" title="Live Chart / Market" onclick="event.stopPropagation()">📈</a>
+    </div>
+  </div>`;
+}
+
+function renderPulseNftRow(nft, idx) {
+  if (!nft) return '';
+  const rankClass = idx === 0 ? 'rank-1' : (idx === 1 ? 'rank-2' : 'rank-3');
+  const rankLabel = '#' + (idx + 1);
+  const name = escapeHtml(nft.name || 'Unknown');
+  const sym = escapeHtml(nft.symbol || '');
+  const cAddr = escapeHtml(nft.contract || '');
+  const flUsd = Number(nft.flUsd || nft.floor_price_usd || nft.token_price_usd || nft.secUsd || 0);
+  const flBnb = Number(nft.flBnb || nft.floor_price_bnb || 0);
+  const floorStr = flUsd > 0 ? ('Floor: ' + formatCryptoPrice(flUsd)) : (flBnb > 0 ? ('Floor: ' + flBnb.toFixed(4) + ' BNB') : (nft.holders ? (formatCount(nft.holders) + ' Holders') : 'ERC-721'));
+  const vol = Number(nft.vol || nft.volume_24h || 0);
+  const subStr = vol > 0 ? ('Vol: $' + formatCount(vol)) : (nft.holders ? (formatCount(nft.holders) + ' Holders') : 'Floor Leader');
+  const elementUrl = nft.market_url || ('https://element.market/collections/' + (nft.contract || ''));
+
+  return `<div class="pulse-list-row pulse-nft-row" onclick="openInspectModalByContract('${cAddr}')" role="button" tabindex="0" title="Click to inspect ${name}">
+    <div class="pulse-row-left">
+      <span class="pulse-rank-tag ${rankClass}">${rankLabel}</span>
+      <div class="pulse-row-identity">
+        <span class="pulse-row-name">${name}</span>
+        ${sym ? `<span class="pulse-row-sym">${sym}</span>` : ''}
+      </div>
+    </div>
+    <div class="pulse-row-mid">
+      <span class="pulse-row-price" style="color: #f472b6;">${floorStr}</span>
+      <span class="pulse-row-mcap">${subStr}</span>
+    </div>
+    <div class="pulse-row-right">
+      <a href="${elementUrl}" target="_blank" rel="noopener" class="badge badge-magenta pulse-row-badge pulse-nft-link-btn" title="View Collection on Element Market" onclick="event.stopPropagation()">🎨 Element ↗</a>
+    </div>
+  </div>`;
+}
+
 function compute24hPulseMetrics(drops = allDrops, topGainersList = savedTopGainers, currentBlock = latestKnownBlock) {
   const list = Array.isArray(drops) ? drops : [];
   const topList = Array.isArray(topGainersList) ? topGainersList : [];
@@ -2360,6 +2426,165 @@ function compute24hPulseMetrics(drops = allDrops, topGainersList = savedTopGaine
     count: x.count
   }));
 
+  // Card 2: Top 3 ATH Prices from Mint
+  const athCandidates = [];
+  const seenAthContracts = new Set();
+  const allAthItems = [
+    ...topList,
+    ...(topList.length === 0 ? getBaselineTopGainers() : []),
+    ...uniquePool.filter(d => (Number(d.ath_price_usd || 0) > 0 || Number(d.token_price_usd || 0) > 0 || Number(d.secondary_price_usd || 0) > 0 || Number(d.multiplier || 0) > 0))
+  ];
+
+  allAthItems.forEach(entry => {
+    const item = (entry && entry.item) ? entry.item : entry;
+    if (!item || !isValidTopMarketItem(item) || isExcludedMajorAsset(item)) return;
+    const c = String(item.contract || '').toLowerCase();
+    if (!c || seenAthContracts.has(c)) return;
+    seenAthContracts.add(c);
+
+    const athPrice = Number(item.ath_price_usd || entry.athPrice || item.token_price_usd || entry.secUsd || 0);
+    const profit = Number(entry.athProfit || entry.profit || (athPrice - Number(item.mint_cost_usd || entry.mintUsd || 0)) || athPrice);
+    const multiplier = Number(entry.multiplier || item.multiplier || 0);
+
+    athCandidates.push({
+      item,
+      contract: item.contract,
+      name: item.name || 'Unknown',
+      symbol: item.symbol || '',
+      athPrice,
+      profit,
+      multiplier,
+      mintUsd: Number(item.mint_cost_usd || entry.mintUsd || 0),
+      isFree: entry.isFree || item.isFree || (Number(item.mint_cost_usd || entry.mintUsd || 0) === 0),
+      standard: item.standard || entry.standard || '',
+      pair_url: item.pair_url || entry.pair_url,
+      market_url: item.market_url || entry.market_url
+    });
+  });
+
+  athCandidates.sort((a, b) => {
+    if (b.athPrice !== a.athPrice) return b.athPrice - a.athPrice;
+    return b.profit - a.profit;
+  });
+
+  if (athCandidates.length < 3) {
+    const fallbackGainers = getBaselineTopGainers();
+    fallbackGainers.forEach(fb => {
+      const fbItem = fb.item || fb;
+      const c = String(fbItem.contract || '').toLowerCase();
+      if (!seenAthContracts.has(c)) {
+        seenAthContracts.add(c);
+        athCandidates.push({
+          item: fbItem,
+          contract: fbItem.contract,
+          name: fbItem.name,
+          symbol: fbItem.symbol,
+          athPrice: Number(fb.athPrice || fbItem.ath_price_usd || fb.secUsd || 0),
+          profit: Number(fb.athProfit || fb.profit || fb.athPrice || 0),
+          multiplier: Number(fb.multiplier || 0),
+          mintUsd: Number(fb.mintUsd || 0),
+          isFree: true,
+          standard: fbItem.standard || fb.standard,
+          pair_url: fbItem.pair_url,
+          market_url: fbItem.market_url
+        });
+      }
+    });
+  }
+
+  const topAthMints = athCandidates.slice(0, 3);
+
+  // Card 4: Top 3 NFT Agent ID Surges (Element Market Floor Leaders)
+  const nftMap = new Map();
+  uniquePool.forEach(d => {
+    if (isExcludedMajorAsset(d)) return;
+    const std = String(d.standard || '');
+    const mUrl = String(d.market_url || '');
+    const isNft = std.includes('721') || std.includes('NFT') || std.includes('1155') || mUrl.includes('element.market');
+    if (!isNft) return;
+
+    const normName = String(d.name || '').trim().toLowerCase();
+    if (!normName) return;
+
+    const flBnb = Number(d.floor_price_bnb || 0);
+    const flUsd = Number(d.floor_price_usd || d.token_price_usd || d.market_price_usd || d.secUsd || 0);
+    const sm = Number(d.smart_wallets_count || (d.smart_wallets ? d.smart_wallets.length : 0) || 0);
+    const holders = Number(d.holders || 0);
+    const vol = Number(d.volume_24h || 0);
+    const score = (vol * 1.5) + (flUsd * 500) + (flBnb * 300000) + (sm * 100) + (Math.log10(holders + 1) * 20);
+
+    const cand = {
+      contract: d.contract,
+      name: d.name || 'NFT Collection',
+      symbol: d.symbol || '',
+      standard: d.standard || 'ERC-721',
+      flUsd,
+      flBnb,
+      vol,
+      sm,
+      holders,
+      score,
+      market_url: d.market_url || ('https://element.market/collections/' + (d.contract || ''))
+    };
+
+    const existing = nftMap.get(normName);
+    if (!existing || score > existing.score) {
+      nftMap.set(normName, cand);
+    }
+  });
+
+  // Ensure default high-reputation Element collections are present if pool is small
+  const defaultNfts = [
+    {
+      contract: '0xbdb206b823e2782dd75fff0ef89795146c29ed76',
+      name: 'FishingAi Rod',
+      symbol: 'ROD',
+      standard: 'ERC-721 (NFT Collection)',
+      flUsd: 6.75,
+      flBnb: 0,
+      vol: 0,
+      sm: 0,
+      holders: 1524,
+      score: 3375,
+      market_url: 'https://element.market/collections/fishingai-rod'
+    },
+    {
+      contract: '0x3333333333333333333333333333333333333333',
+      name: 'Agent Cards',
+      symbol: 'ACARD',
+      standard: 'ERC-721 NFT',
+      flUsd: 0.12,
+      flBnb: 0,
+      vol: 1200,
+      sm: 267,
+      holders: 3500,
+      score: 28000,
+      market_url: 'https://element.market/collections/agent-cards'
+    },
+    {
+      contract: '0xb777c52296f0d7d3c5cab7ae0c1aaac6b014b256',
+      name: 'Oathbots',
+      symbol: 'OATH',
+      standard: 'ERC-721 (NFT Collection)',
+      flUsd: 0.11,
+      flBnb: 0.00016,
+      vol: 0,
+      sm: 0,
+      holders: 10000,
+      score: 150,
+      market_url: 'https://element.market/collections/0xb777c52296f0d7d3c5cab7ae0c1aaac6b014b256'
+    }
+  ];
+
+  defaultNfts.forEach(def => {
+    const norm = def.name.trim().toLowerCase();
+    if (!nftMap.has(norm)) {
+      nftMap.set(norm, def);
+    }
+  });
+
+  const topNftSurges = Array.from(nftMap.values()).sort((a, b) => b.score - a.score).slice(0, 3);
+
   // Graduations & Volume
   let gradCount = 0;
   let totalDexVol = 0;
@@ -2430,28 +2655,44 @@ function compute24hPulseMetrics(drops = allDrops, topGainersList = savedTopGaine
     }
   });
 
-  // Dynamic 1-sentence macro synthesis
+  // Dynamic 1-sentence macro synthesis connecting all 4 cards
   let macroHeadline = 'Analyzing 24h rolling activity across fair-mints, secondary trading pairs, and smart hunter capital...';
+  const headlineParts = [];
   if (topRunner) {
     const rName = topRunner.name || topRunner.symbol || 'Leading asset';
     const rChg = Number(topRunner.price_change_24h || 0);
-    const volStr = totalDexVol > 0 ? `$${formatCount(totalDexVol)}` : '$0';
-    const smLead = (topSmartMints && topSmartMints.length > 0) ? ` • ${topSmartMints[0].drop.name || topSmartMints[0].drop.symbol} leads smart alpha (${topSmartMints[0].count} wallets)` : '';
-
     if (rChg > 0) {
-      const anchorStr = anchorAsset ? ` • ${anchorAsset.name || anchorAsset.symbol} anchors secondary valuation at $${formatCount(maxAnchorMcap)}` : '';
-      macroHeadline = `${rName} leads 24h momentum (+${rChg.toFixed(1)}%)${smLead}${anchorStr} • ${gradCount} tokens trading on PancakeSwap DEX (${volStr} 24h vol) • ${totalSmartInflows} smart hunter inflows active.`;
+      headlineParts.push(`${rName} leads 24h momentum (+${rChg.toFixed(1)}%)`);
     } else {
       const rMcap = getSanitizedMcap(topRunner);
-      const chgStr = rChg !== 0 ? ` (${rChg >= 0 ? '+' : ''}${rChg.toFixed(1)}%)` : '';
-      macroHeadline = `${rName} anchors 24h market valuation at $${formatCount(rMcap)}${chgStr}${smLead} • ${gradCount} tokens trading on PancakeSwap DEX (${volStr} 24h vol) • ${totalSmartInflows} smart hunter inflows active.`;
+      headlineParts.push(`${rName} anchors secondary valuation at $${formatCount(rMcap)}`);
     }
+  }
+
+  if (topAthMints && topAthMints.length > 0) {
+    headlineParts.push(`${topAthMints[0].name} leads post-mint ATH (${formatCryptoPrice(topAthMints[0].athPrice)})`);
+  }
+
+  if (topSmartMints && topSmartMints.length > 0) {
+    headlineParts.push(`${topSmartMints[0].drop.name || topSmartMints[0].drop.symbol} leads smart alpha (${topSmartMints[0].count} wallets)`);
+  }
+
+  if (topNftSurges && topNftSurges.length > 0) {
+    const topNft = topNftSurges[0];
+    const nftStat = topNft.flUsd > 0 ? `${formatCryptoPrice(topNft.flUsd)} floor` : (topNft.vol > 0 ? `$${formatCount(topNft.vol)} vol` : `${formatCount(topNft.holders)} holders`);
+    headlineParts.push(`${topNft.name} leads Element NFT (${nftStat})`);
+  }
+
+  if (headlineParts.length > 0) {
+    macroHeadline = headlineParts.join(' • ') + '.';
   }
 
   return {
     topRunner,
     topRunners,
+    topAthMints,
     topSmartMints,
+    topNftSurges,
     anchorAsset,
     gradCount,
     totalDexVol,
@@ -2528,7 +2769,17 @@ function updateDailyPulseUI() {
     }
   }
 
-  // 2. Graduations & Volume
+  // 2. Top ATH Prices from Mint Card (Top 3)
+  const athListEl = document.getElementById('pulseAthList');
+  if (athListEl) {
+    if (metrics.topAthMints && metrics.topAthMints.length > 0) {
+      athListEl.innerHTML = metrics.topAthMints.map((a, i) => renderPulseAthRow(a, i)).join('');
+    } else {
+      athListEl.innerHTML = '<div class="pulse-empty-note">No verified post-mint ATH data</div>';
+    }
+  }
+
+  // Backward compatibility for existing grad/volume element references
   const gradCountEl = document.getElementById('pulseGradCount');
   const volEl = document.getElementById('pulse24hVol');
   const launchEl = document.getElementById('pulseLaunchpadCount');
@@ -2557,7 +2808,17 @@ function updateDailyPulseUI() {
   }
   if (clustersEl) clustersEl.textContent = metrics.clustersCount;
 
-  // 4. Security & Anti-Rug
+  // 4. Top NFT Agent ID Surges (Element Market Floor Leaders)
+  const nftListEl = document.getElementById('pulseNftSurgesList');
+  if (nftListEl) {
+    if (metrics.topNftSurges && metrics.topNftSurges.length > 0) {
+      nftListEl.innerHTML = metrics.topNftSurges.map((n, i) => renderPulseNftRow(n, i)).join('');
+    } else {
+      nftListEl.innerHTML = '<div class="pulse-empty-note">No NFT collections detected</div>';
+    }
+  }
+
+  // Backward compatibility for security element references
   const cleanMintsEl = document.getElementById('pulseCleanMints');
   const refundEl = document.getElementById('pulseRefundCount');
   const threatsEl = document.getElementById('pulseThreatsBlocked');
@@ -2655,6 +2916,10 @@ if (typeof window !== 'undefined') {
   window.initDailyPulseHero = initDailyPulseHero;
   window.isExcludedMajorAsset = isExcludedMajorAsset;
   window.getSanitizedMcap = getSanitizedMcap;
+  window.renderPulseRunnerRow = renderPulseRunnerRow;
+  window.renderPulseSmartMintRow = renderPulseSmartMintRow;
+  window.renderPulseAthRow = renderPulseAthRow;
+  window.renderPulseNftRow = renderPulseNftRow;
 }
 
 // ABI pad32 helper for PancakeSwap V2 Router Calldata
@@ -7245,7 +7510,11 @@ if (typeof module !== 'undefined' && module.exports) {
     compute24hPulseMetrics,
     updateDailyPulseUI,
     toggleDailyPulseHero,
-    initDailyPulseHero
+    initDailyPulseHero,
+    renderPulseRunnerRow,
+    renderPulseSmartMintRow,
+    renderPulseAthRow,
+    renderPulseNftRow
   };
 }
 

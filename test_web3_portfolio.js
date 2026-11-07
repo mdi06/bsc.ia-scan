@@ -1306,6 +1306,10 @@ assert.strictEqual(pulseWithRunner.topRunner.symbol, 'SNOWBALL', 'Top runner sho
 assert.strictEqual(Array.isArray(pulseWithRunner.topRunners), true, 'topRunners must be an array');
 assert(pulseWithRunner.topRunners.length >= 1, 'topRunners array must not be empty');
 assert.strictEqual(Array.isArray(pulseWithRunner.topSmartMints), true, 'topSmartMints must be an array');
+assert.strictEqual(Array.isArray(pulseWithRunner.topAthMints), true, 'topAthMints must be an array');
+assert(pulseWithRunner.topAthMints.length >= 1, 'topAthMints array must not be empty');
+assert.strictEqual(Array.isArray(pulseWithRunner.topNftSurges), true, 'topNftSurges must be an array');
+assert(pulseWithRunner.topNftSurges.length >= 1, 'topNftSurges array must not be empty');
 assert(pulseWithRunner.macroHeadline.includes('SnowBall'), 'Macro headline should highlight positive runner');
 console.log('✔ compute24hPulseMetrics calculation & macro synthesis: PASS');
 
@@ -1330,10 +1334,19 @@ const runnersListEl = getMock('pulseRunnersList');
 assert(runnersListEl.innerHTML.includes('#1'), 'pulseRunnersList must render #1 runner row');
 assert(runnersListEl.innerHTML.includes('AntFun'), 'pulseRunnersList must render AntFun');
 
+const athListEl = getMock('pulseAthList');
+assert(athListEl.innerHTML.includes('#1'), 'pulseAthList must render #1 ATH row');
+assert(athListEl.innerHTML.includes('Peak') || athListEl.innerHTML.includes('ATH'), 'pulseAthList must display ATH/Peak badge');
+
 const smartMintsListEl = getMock('pulseSmartMintsList');
 assert(smartMintsListEl.innerHTML.includes('#1'), 'pulseSmartMintsList must render #1 smart mint row');
 assert(smartMintsListEl.innerHTML.includes('SafeDrop'), 'pulseSmartMintsList must render SafeDrop with smart wallets');
 assert(smartMintsListEl.innerHTML.includes('3 Wallets'), 'pulseSmartMintsList must display smart wallet count');
+
+const nftSurgesListEl = getMock('pulseNftSurgesList');
+assert(nftSurgesListEl.innerHTML.includes('#1'), 'pulseNftSurgesList must render #1 NFT surge row');
+assert(nftSurgesListEl.innerHTML.includes('Element'), 'pulseNftSurgesList must render Element Market badge');
+
 const gradCountEl = getMock('pulseGradCount');
 assert(Number(gradCountEl.textContent) >= 1, 'pulseGradCount must be populated');
 const headlineEl = getMock('pulseMacroHeadline');
@@ -1359,3 +1372,4 @@ global.document.getElementById = savedGetElemPulse;
 console.log('✔ 24H Daily Pulse DOM population & interactive toggle: PASS');
 
 console.log('🎉 All Web3, Multicall3, Smart Hunters, and Competitor Features verified successfully!');
+process.exit(0);

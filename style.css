@@ -2872,6 +2872,7 @@ th.sortable-th:hover .sort-indicator.dim-hint {
   border-top: 2px solid var(--color-yellow);
 }
 
+.pulse-card-ath,
 .pulse-card-grad {
   border-top: 2px solid var(--color-cyan);
 }
@@ -2880,8 +2881,9 @@ th.sortable-th:hover .sort-indicator.dim-hint {
   border-top: 2px solid var(--color-magenta);
 }
 
+.pulse-card-nft,
 .pulse-card-security {
-  border-top: 2px solid var(--color-green);
+  border-top: 2px solid #ec4899;
 }
 
 .pulse-card-header {
@@ -3062,6 +3064,20 @@ th.sortable-th:hover .sort-indicator.dim-hint {
 .pulse-mini-dex-btn:hover {
   opacity: 1;
   transform: scale(1.2);
+}
+
+.pulse-nft-link-btn {
+  text-decoration: none;
+  cursor: pointer;
+  transition: transform 0.15s ease, opacity 0.15s ease, background 0.15s ease;
+  display: inline-flex;
+  align-items: center;
+}
+
+.pulse-nft-link-btn:hover {
+  opacity: 0.95;
+  transform: translateY(-1px);
+  filter: brightness(1.15);
 }
 
 .pulse-footer-note {

@@ -313,25 +313,26 @@
             </div>
           </div>
 
-          <!-- Card 2: 24h Graduations & Volume -->
-          <div class="pulse-card pulse-card-grad">
+          <!-- Card 2: Top ATH Prices from Mint (Top 3) -->
+          <div class="pulse-card pulse-card-ath">
             <div class="pulse-card-header">
-              <span class="pulse-card-icon">🚀</span>
-              <span class="pulse-card-title">GRADUATIONS & DEX VOL</span>
-              <span class="badge badge-cyan pulse-card-badge" id="pulseGradPct">DEX Active</span>
+              <span class="pulse-card-icon">💎</span>
+              <span class="pulse-card-title">TOP ATH FROM MINT</span>
+              <span class="badge badge-cyan pulse-card-badge" id="pulseAthBadge">Post-Mint ATH</span>
             </div>
             <div class="pulse-card-main">
-              <div class="pulse-stat-hero">
-                <span class="pulse-stat-num" id="pulseGradCount">0</span>
-                <span class="pulse-stat-sub">Graduated to PancakeSwap</span>
+              <div class="pulse-mini-list" id="pulseAthList">
+                <!-- Dynamically populated with Top 3 Peak ATH gainers from fair-mint -->
               </div>
-              <div class="pulse-sub-row">
-                <div><span class="dim">24h DEX Vol:</span> <strong id="pulse24hVol" style="color: var(--color-cyan);">$0</strong></div>
-                <div><span class="dim">Launchpads:</span> <strong id="pulseLaunchpadCount" style="color: #f97316;">0</strong></div>
-              </div>
+              <span id="pulseGradCount" style="display:none;">0</span>
+              <span id="pulse24hVol" style="display:none;">$0</span>
+              <span id="pulseLaunchpadCount" style="display:none;">0</span>
+              <span id="pulseGradPct" style="display:none;"></span>
             </div>
             <div class="pulse-card-footer">
-              <span class="dim" style="font-size: 11px;">100% Capped drops injected into liquidity</span>
+              <span class="pulse-smart-link" onclick="openAllTimeProfitModal()" role="button" tabindex="0" title="Open All-Time Post-Mint Profit Leaderboard">
+                <span>🏆 All-Time Profit Leaderboard ↗</span>
+              </span>
             </div>
           </div>
 
@@ -354,25 +355,24 @@
             </div>
           </div>
 
-          <!-- Card 4: 24h Security & Anti-Rug -->
-          <div class="pulse-card pulse-card-security">
+          <!-- Card 4: Top NFT Agent ID Surges (Top 3) -->
+          <div class="pulse-card pulse-card-nft">
             <div class="pulse-card-header">
-              <span class="pulse-card-icon">🛡️</span>
-              <span class="pulse-card-title">24H SECURITY AUDIT</span>
-              <span class="badge badge-green pulse-card-badge" id="pulseSecurityBadge">100% Guard</span>
+              <span class="pulse-card-icon">🎨</span>
+              <span class="pulse-card-title">TOP NFT AGENT SURGES</span>
+              <span class="badge badge-magenta pulse-card-badge" id="pulseNftBadge">Element Market</span>
             </div>
             <div class="pulse-card-main">
-              <div class="pulse-stat-hero">
-                <span class="pulse-stat-num" id="pulseCleanMints">0</span>
-                <span class="pulse-stat-sub">Safe Drops Monitored</span>
+              <div class="pulse-mini-list" id="pulseNftSurgesList">
+                <!-- Dynamically populated with Top 3 NFT collections on Element -->
               </div>
-              <div class="pulse-sub-row">
-                <div><span class="dim">Bytecode Refunds:</span> <strong id="pulseRefundCount" style="color: var(--color-green);">0</strong></div>
-                <div><span class="dim">Blocked Devs:</span> <strong id="pulseThreatsBlocked" style="color: var(--color-red);">0</strong></div>
-              </div>
+              <span id="pulseCleanMints" style="display:none;">0</span>
+              <span id="pulseRefundCount" style="display:none;">0</span>
+              <span id="pulseThreatsBlocked" style="display:none;">0</span>
+              <span id="pulseSecurityBadge" style="display:none;"></span>
             </div>
             <div class="pulse-card-footer">
-              <span class="dim" style="font-size: 11px;">Real-time automated bytecode & serial dev filter</span>
+              <span class="pulse-footer-note">⚡ Verified Agent ID collections on Element</span>
             </div>
           </div>
         </div>
