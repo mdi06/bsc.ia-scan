@@ -3779,9 +3779,9 @@ function renderTable(keepLimit = false) {
       const firstF = followedNames[0] || 'Alpha';
       smBadge = `<span class="badge-followed-star" title="⭐ Followed Alpha Hunter: ${escapeHtml(followedNames.join(', '))}">⭐ ${escapeHtml(firstF)}</span>`;
     } else if (isCluster && isReady) {
-      smBadge = `<span class="badge-cluster" title="🔥 ${smWalletsList.length} Smart Wallets Cluster & Sniper Ready">🔥🎯 CLUSTER (${smWalletsList.length})</span>`;
+      smBadge = `<span class="badge-cluster" title="🔥 ${smWalletsList.length} Smart Money Wallets Cluster & Sniper Ready">🔥🎯 SM CLUSTER (${smWalletsList.length})</span>`;
     } else if (isCluster) {
-      smBadge = `<span class="badge-cluster" title="🔥 ${smWalletsList.length} Smart Wallets Cluster Inflow">🔥 CLUSTER (${smWalletsList.length})</span>`;
+      smBadge = `<span class="badge-cluster" title="🔥 ${smWalletsList.length} Smart Money Wallets Cluster Inflow">🔥 SM CLUSTER (${smWalletsList.length})</span>`;
     } else if (isSm && isReady) {
       smBadge = `<span title="Smart Alpha & Sniper Ready">🧠🎯</span>`;
     } else if (isReady) {
@@ -4130,9 +4130,9 @@ function appendNextTableBatch() {
       const firstF = followedNames[0] || 'Alpha';
       smBadge = `<span class="badge-followed-star" title="⭐ Followed Alpha Hunter: ${escapeHtml(followedNames.join(', '))}">⭐ ${escapeHtml(firstF)}</span>`;
     } else if (isCluster && isReady) {
-      smBadge = `<span class="badge-cluster" title="🔥 ${smWalletsList.length} Smart Wallets Cluster & Sniper Ready">🔥🎯 CLUSTER (${smWalletsList.length})</span>`;
+      smBadge = `<span class="badge-cluster" title="🔥 ${smWalletsList.length} Smart Money Wallets Cluster & Sniper Ready">🔥🎯 SM CLUSTER (${smWalletsList.length})</span>`;
     } else if (isCluster) {
-      smBadge = `<span class="badge-cluster" title="🔥 ${smWalletsList.length} Smart Wallets Cluster Inflow">🔥 CLUSTER (${smWalletsList.length})</span>`;
+      smBadge = `<span class="badge-cluster" title="🔥 ${smWalletsList.length} Smart Money Wallets Cluster Inflow">🔥 SM CLUSTER (${smWalletsList.length})</span>`;
     } else if (isSm && isReady) {
       smBadge = `<span title="Smart Alpha & Sniper Ready">🧠🎯</span>`;
     } else if (isReady) {
@@ -4841,7 +4841,10 @@ function openModal(item) {
     ${smList.length > 0 ? `
     <div class="modal-section">
       <div class="modal-section-title" style="display: flex; justify-content: space-between; align-items: center;">
-        <span>🧠 Smart Money Activity (${smList.length} Tracked Wallets)</span>
+        <span style="display: inline-flex; align-items: center; gap: 8px;">
+          🧠 Smart Money Activity (${smList.length} Tracked Wallets)
+          ${smList.length >= 3 ? `<span class="badge-cluster" style="font-size: 10px;" title="3+ Smart Money Alpha Wallets Inflow Detected">🔥 SM Cluster (${smList.length})</span>` : ''}
+        </span>
         <button class="btn-sm-view-leaderboard" onclick="document.getElementById('inspectModal').close(); openSmartLeaderboardModal('ALL')">🏆 View All Smart Hunters (Win Rates) ↗</button>
       </div>
       <div style="color: var(--color-cyan); font-size: 12px; margin-top: 8px; display: flex; flex-wrap: wrap; gap: 6px;">
