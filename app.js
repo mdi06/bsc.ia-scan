@@ -418,6 +418,29 @@ function getElementUrl(name, contract) {
   return `https://element.market/collections/${contract}`;
 }
 
+// Universal DexScreener BSC Pair / Contract URL Resolver
+function getDexScreenerUrl(item) {
+  if (!item) return '';
+  if (typeof item === 'string') {
+    const s = item.trim();
+    if (s.startsWith('http')) return s;
+    if (s.startsWith('0x')) return `https://dexscreener.com/bsc/${s.toLowerCase()}`;
+    return '';
+  }
+  if (item.pair_url && item.pair_url.includes('dexscreener.com')) return item.pair_url;
+  if (item.pair_address && item.pair_address.startsWith('0x')) {
+    return `https://dexscreener.com/bsc/${item.pair_address.toLowerCase()}`;
+  }
+  const contract = item.contract || item.address || '';
+  if (contract && contract.startsWith('0x') && contract.toLowerCase() !== '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee') {
+    return `https://dexscreener.com/bsc/${contract.toLowerCase()}`;
+  }
+  return '';
+}
+if (typeof window !== 'undefined') {
+  window.getDexScreenerUrl = getDexScreenerUrl;
+}
+
 // Format numbers nicely (e.g. 1.2K, 500)
 function formatCount(val) {
   const n = Number(val || 0);
@@ -1519,7 +1542,7 @@ function renderWalletsTabLeaderboard() {
 }
 if (typeof window !== 'undefined') window.renderWalletsTabLeaderboard = renderWalletsTabLeaderboard;
 
-function toggleDexChart(contract) {
+function toggleDexChart(contract, customUrl) {
   const wrap = document.getElementById('dexChartWrap');
   const label = document.getElementById('chartToggleLabel');
   const icon = document.getElementById('chartToggleIcon');
@@ -1527,8 +1550,11 @@ function toggleDexChart(contract) {
 
   if (wrap.style.display === 'none') {
     wrap.style.display = 'block';
+    const chartSrc = (customUrl && customUrl.includes('dexscreener.com'))
+      ? `${customUrl}?embed=1&theme=dark&trades=0&info=0`
+      : `https://dexscreener.com/bsc/${contract}?embed=1&theme=dark&trades=0&info=0`;
     wrap.innerHTML = `
-      <iframe src="https://dexscreener.com/bsc/${contract}?embed=1&theme=dark&trades=0&info=0" width="100%" height="340" style="border:0;" loading="lazy"></iframe>
+      <iframe src="${chartSrc}" width="100%" height="340" style="border:0;" loading="lazy"></iframe>
     `;
     if (label) label.textContent = 'Hide Live Chart';
     if (icon) icon.textContent = '✕';
@@ -2683,8 +2709,13 @@ function renderTable(keepLimit = false) {
   if (thColInterest) makeHeaderSortable(thColInterest, 'INTEREST', 'INTEREST_DESC', 'INTEREST_ASC');
 
   const dropsTable = document.getElementById('dropsTable');
-  if (dropsTable) {
-    dropsTable.classList.toggle('secondary-mode', activeTab === 'SECONDARY');
+  if (dropsTable && dropsTable.classList) {
+    if (typeof dropsTable.classList.toggle === 'function') {
+      dropsTable.classList.toggle('secondary-mode', activeTab === 'SECONDARY');
+    } else {
+      if (activeTab === 'SECONDARY') dropsTable.classList.add('secondary-mode');
+      else dropsTable.classList.remove('secondary-mode');
+    }
   }
 
   if (activeTab === 'SECONDARY') {
@@ -2709,7 +2740,7 @@ function renderTable(keepLimit = false) {
       makeHeaderSortable(thCol13, '👥 HOLDERS / BUYS', 'HOLDERS_DESC', 'HOLDERS_ASC');
     }
     if (thAction) {
-      thAction.textContent = '🥞 TRADE DEX';
+      thAction.textContent = '📈 DEXSCREENER';
     }
   } else {
     if (thCol9) {
@@ -2918,9 +2949,10 @@ function renderTable(keepLimit = false) {
     const secVol = Number(item.secondary_vol_bnb || 0);
     let lpStr = `<span class="dim">—</span>`;
     if (lpUsd > 0) {
-      lpStr = `<span style="color: var(--color-green); font-weight:600;">$${lpUsd.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>`;
+      const dexScreenerUrl = getDexScreenerUrl(item);
+      lpStr = `<a href="${dexScreenerUrl}" target="_blank" rel="noopener" onclick="event.stopPropagation();" style="color: var(--color-green); font-weight:600; text-decoration: none;" title="View Liquidity on DexScreener">$${lpUsd.toLocaleString(undefined, { maximumFractionDigits: 0 })} ↗</a>`;
       if (mcapUsd > 0) {
-        lpStr += `<div class="sub-mcap" style="font-size: 10px; color: var(--color-cyan); font-weight:600;" title="Market Cap / FDV: $${formatCount(mcapUsd)}">MC: $${formatCount(mcapUsd)}</div>`;
+        lpStr += `<div class="sub-mcap" style="font-size: 10px; color: var(--color-cyan); font-weight:600;" title="Market Cap / FDV: $${formatCount(mcapUsd)}"><a href="${dexScreenerUrl}" target="_blank" rel="noopener" onclick="event.stopPropagation();" style="color: var(--color-cyan); text-decoration: none;">MC: $${formatCount(mcapUsd)}</a></div>`;
       }
     } else if (item.is_nft_surge && secVol > 0) {
       lpStr = `<span style="color: var(--color-magenta); font-weight:700;" title="${item.secondary_sales_count || 0} Element sales">${secVol.toFixed(3)} BNB 🦋</span>`;
@@ -3015,7 +3047,8 @@ function renderTable(keepLimit = false) {
         floorStr = `<span style="color: var(--color-cyan); font-weight:600;">${flBnb} BNB</span>`;
       }
     } else if (tkUsd > 0) {
-      floorStr = `<span style="color: var(--color-green); font-weight:600;">$${tkUsd < 0.001 ? tkUsd.toFixed(6) : tkUsd.toFixed(4)}</span>`;
+      const dexScreenerUrl = getDexScreenerUrl(item);
+      floorStr = `<a href="${dexScreenerUrl}" target="_blank" rel="noopener" onclick="event.stopPropagation();" style="color: var(--color-green); font-weight:600; text-decoration: none;" title="View Live Chart on DexScreener">$${tkUsd < 0.001 ? tkUsd.toFixed(6) : tkUsd.toFixed(4)} ↗</a>`;
       const chg24 = Number(item.price_change_24h || 0);
       if (chg24 !== 0) {
         const isUp = chg24 > 0;
@@ -3053,8 +3086,9 @@ function renderTable(keepLimit = false) {
     let actBtn = `<button class="inspect-btn"><span class="desktop-only">Inspect</span><span class="mobile-only">🔍 Deep Dive & Snipe CLI ➔</span></button>`;
 
     if (isSec) {
+      const dexScreenerUrl = getDexScreenerUrl(item);
       if (lpUsd > 0) {
-        cellLp = `<span style="color: var(--color-green); font-weight:700;">$${formatCount(lpUsd)}</span>`;
+        cellLp = `<a href="${dexScreenerUrl}" target="_blank" rel="noopener" onclick="event.stopPropagation();" style="color: var(--color-green); font-weight:700; text-decoration: none;" title="View Liquidity Pool on DexScreener">$${formatCount(lpUsd)} ↗</a>`;
       } else if (secVol > 0) {
         cellLp = `<span style="color: var(--color-magenta); font-weight:600;">${secVol.toFixed(2)} BNB</span>`;
       } else {
@@ -3066,7 +3100,7 @@ function renderTable(keepLimit = false) {
         const hasFdvDiff = item.fdv && item.market_cap && Math.abs(Number(item.fdv) - Number(item.market_cap)) > 100;
         cellProg = `
           <div style="display: flex; flex-direction: column; gap: 2px;">
-            <span style="color: var(--color-green); font-weight: 700; font-size: 13px; letter-spacing: 0.3px;">$${formatCount(mcapVal)}</span>
+            <a href="${dexScreenerUrl}" target="_blank" rel="noopener" onclick="event.stopPropagation();" style="color: var(--color-green); font-weight: 700; font-size: 13px; letter-spacing: 0.3px; text-decoration: none;" title="View Market Cap on DexScreener">$${formatCount(mcapVal)} ↗</a>
             ${hasFdvDiff ? `<span class="dim" style="font-size: 9px;">FDV: $${formatCount(item.fdv)}</span>` : ''}
           </div>
         `;
@@ -3076,7 +3110,7 @@ function renderTable(keepLimit = false) {
 
       const volVal = Number(item.volume_24h || 0);
       if (volVal > 0) {
-        cellPrice = `<span style="color: var(--color-cyan); font-weight: 700;">$${formatCount(volVal)}</span>`;
+        cellPrice = `<a href="${dexScreenerUrl}" target="_blank" rel="noopener" onclick="event.stopPropagation();" style="color: var(--color-cyan); font-weight: 700; text-decoration: none;" title="View 24h Volume on DexScreener">$${formatCount(volVal)} ↗</a>`;
       } else {
         cellPrice = `<span class="dim">—</span>`;
       }
@@ -3090,7 +3124,7 @@ function renderTable(keepLimit = false) {
           : '';
         cellFloor = `
           <div style="display: flex; align-items: center; gap: 2px;">
-            <span style="color: var(--color-green); font-weight: 700;">$${tkUsd < 0.001 ? tkUsd.toFixed(6) : tkUsd.toFixed(4)}</span>
+            <a href="${dexScreenerUrl}" target="_blank" rel="noopener" onclick="event.stopPropagation();" style="color: var(--color-green); font-weight: 700; text-decoration: none;" title="Open live chart on DexScreener">$${tkUsd < 0.001 ? tkUsd.toFixed(6) : tkUsd.toFixed(4)} ↗</a>
             ${chgBadge}
           </div>
         `;
@@ -3098,8 +3132,8 @@ function renderTable(keepLimit = false) {
         cellFloor = `<span class="dim">—</span>`;
       }
 
-      const dexUrl = `https://pancakeswap.finance/swap?outputCurrency=${item.contract}`;
-      actBtn = `<button class="inspect-btn trade-dex-btn" onclick="event.stopPropagation(); window.open('${dexUrl}', '_blank')" style="border-color: #f59e0b; color: #f59e0b; font-weight: 700;" title="Trade on PancakeSwap DEX"><span class="desktop-only">🥞 Trade DEX ↗</span><span class="mobile-only">🥞 Trade ↗</span></button>`;
+      const dexUrl = dexScreenerUrl || `https://pancakeswap.finance/swap?outputCurrency=${item.contract}`;
+      actBtn = `<button class="inspect-btn trade-dex-btn dex-screener-btn" onclick="event.stopPropagation(); window.open('${dexUrl}', '_blank')" style="border-color: var(--color-cyan); color: var(--color-cyan); font-weight: 700; background: rgba(0, 240, 255, 0.08);" title="View Live Chart & Order Book on DexScreener"><span class="desktop-only">📈 DexScreener ↗</span><span class="mobile-only">📈 Chart ↗</span></button>`;
     } else if (isPort) {
       if (item.contract === '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee') {
         cellHolders = `<span style="color: var(--color-green); font-weight:700;">Gas: ${Number(item.user_balance || 0).toFixed(4)} BNB</span>`;
@@ -3311,7 +3345,8 @@ function appendNextTableBatch() {
         floorStr = `<span style="color: var(--color-cyan); font-weight:600;">${flBnb} BNB</span>`;
       }
     } else if (tkUsd > 0) {
-      floorStr = `<span style="color: var(--color-green); font-weight:600;">$${tkUsd < 0.001 ? tkUsd.toFixed(6) : tkUsd.toFixed(4)}</span>`;
+      const dexScreenerUrl = getDexScreenerUrl(item);
+      floorStr = `<a href="${dexScreenerUrl}" target="_blank" rel="noopener" onclick="event.stopPropagation();" style="color: var(--color-green); font-weight:600; text-decoration: none;" title="View Live Chart on DexScreener">$${tkUsd < 0.001 ? tkUsd.toFixed(6) : tkUsd.toFixed(4)} ↗</a>`;
       const chg24 = Number(item.price_change_24h || 0);
       if (chg24 !== 0) {
         const isUp = chg24 > 0;
@@ -3356,9 +3391,10 @@ function appendNextTableBatch() {
     const mcapUsdBatch = Number(item.market_cap || item.fdv || 0);
     let lpStr = '—';
     if (Number(item.lp_usd || 0) > 0) {
-      lpStr = `<span style="color: var(--color-green); font-weight:600;">$${formatCount(item.lp_usd)}</span>`;
+      const dexScreenerUrl = getDexScreenerUrl(item);
+      lpStr = `<a href="${dexScreenerUrl}" target="_blank" rel="noopener" onclick="event.stopPropagation();" style="color: var(--color-green); font-weight:600; text-decoration: none;" title="View Liquidity on DexScreener">$${formatCount(item.lp_usd)} ↗</a>`;
       if (mcapUsdBatch > 0) {
-        lpStr += `<div class="sub-mcap" style="font-size: 10px; color: var(--color-cyan); font-weight:600;" title="Market Cap / FDV: $${formatCount(mcapUsdBatch)}">MC: $${formatCount(mcapUsdBatch)}</div>`;
+        lpStr += `<div class="sub-mcap" style="font-size: 10px; color: var(--color-cyan); font-weight:600;" title="Market Cap / FDV: $${formatCount(mcapUsdBatch)}"><a href="${dexScreenerUrl}" target="_blank" rel="noopener" onclick="event.stopPropagation();" style="color: var(--color-cyan); text-decoration: none;">MC: $${formatCount(mcapUsdBatch)}</a></div>`;
       }
     } else if (item.is_nft_surge && Number(item.secondary_vol_bnb || 0) > 0) {
       lpStr = `<span style="color: var(--color-magenta); font-weight:600;">${Number(item.secondary_vol_bnb).toFixed(2)} BNB</span>`;
@@ -3373,8 +3409,9 @@ function appendNextTableBatch() {
     let actBtn = `<button class="inspect-btn" onclick="openModal(allDrops[${index}] || allDrops.find(x => x.contract === '${item.contract}'))"><span class="desktop-only">Inspect</span><span class="mobile-only">➔</span></button>`;
 
     if (isSec) {
+      const dexScreenerUrl = getDexScreenerUrl(item);
       if (Number(item.lp_usd || 0) > 0) {
-        cellLp = `<span style="color: var(--color-green); font-weight:700;">$${formatCount(item.lp_usd)}</span>`;
+        cellLp = `<a href="${dexScreenerUrl}" target="_blank" rel="noopener" onclick="event.stopPropagation();" style="color: var(--color-green); font-weight:700; text-decoration: none;" title="View Liquidity Pool on DexScreener">$${formatCount(item.lp_usd)} ↗</a>`;
       } else if (Number(item.secondary_vol_bnb || 0) > 0) {
         cellLp = `<span style="color: var(--color-magenta); font-weight:600;">${Number(item.secondary_vol_bnb).toFixed(2)} BNB</span>`;
       } else {
@@ -3386,7 +3423,7 @@ function appendNextTableBatch() {
         const hasFdvDiff = item.fdv && item.market_cap && Math.abs(Number(item.fdv) - Number(item.market_cap)) > 100;
         cellProg = `
           <div style="display: flex; flex-direction: column; gap: 2px;">
-            <span style="color: var(--color-green); font-weight: 700; font-size: 13px; letter-spacing: 0.3px;">$${formatCount(mcapVal)}</span>
+            <a href="${dexScreenerUrl}" target="_blank" rel="noopener" onclick="event.stopPropagation();" style="color: var(--color-green); font-weight: 700; font-size: 13px; letter-spacing: 0.3px; text-decoration: none;" title="View Market Cap on DexScreener">$${formatCount(mcapVal)} ↗</a>
             ${hasFdvDiff ? `<span class="dim" style="font-size: 9px;">FDV: $${formatCount(item.fdv)}</span>` : ''}
           </div>
         `;
@@ -3396,7 +3433,7 @@ function appendNextTableBatch() {
 
       const volVal = Number(item.volume_24h || 0);
       if (volVal > 0) {
-        cellPrice = `<span style="color: var(--color-cyan); font-weight: 700;">$${formatCount(volVal)}</span>`;
+        cellPrice = `<a href="${dexScreenerUrl}" target="_blank" rel="noopener" onclick="event.stopPropagation();" style="color: var(--color-cyan); font-weight: 700; text-decoration: none;" title="View 24h Volume on DexScreener">$${formatCount(volVal)} ↗</a>`;
       } else {
         cellPrice = `<span class="dim">—</span>`;
       }
@@ -3410,7 +3447,7 @@ function appendNextTableBatch() {
           : '';
         cellFloor = `
           <div style="display: flex; align-items: center; gap: 2px;">
-            <span style="color: var(--color-green); font-weight: 700;">$${tkUsd < 0.001 ? tkUsd.toFixed(6) : tkUsd.toFixed(4)}</span>
+            <a href="${dexScreenerUrl}" target="_blank" rel="noopener" onclick="event.stopPropagation();" style="color: var(--color-green); font-weight: 700; text-decoration: none;" title="Open live chart on DexScreener">$${tkUsd < 0.001 ? tkUsd.toFixed(6) : tkUsd.toFixed(4)} ↗</a>
             ${chgBadge}
           </div>
         `;
@@ -3418,8 +3455,8 @@ function appendNextTableBatch() {
         cellFloor = `<span class="dim">—</span>`;
       }
 
-      const dexUrl = `https://pancakeswap.finance/swap?outputCurrency=${item.contract}`;
-      actBtn = `<button class="inspect-btn trade-dex-btn" onclick="event.stopPropagation(); window.open('${dexUrl}', '_blank')" style="border-color: #f59e0b; color: #f59e0b; font-weight: 700;" title="Trade on PancakeSwap DEX"><span class="desktop-only">🥞 Trade DEX ↗</span><span class="mobile-only">🥞 Trade ↗</span></button>`;
+      const dexUrl = dexScreenerUrl || `https://pancakeswap.finance/swap?outputCurrency=${item.contract}`;
+      actBtn = `<button class="inspect-btn trade-dex-btn dex-screener-btn" onclick="event.stopPropagation(); window.open('${dexUrl}', '_blank')" style="border-color: var(--color-cyan); color: var(--color-cyan); font-weight: 700; background: rgba(0, 240, 255, 0.08);" title="View Live Chart & Order Book on DexScreener"><span class="desktop-only">📈 DexScreener ↗</span><span class="mobile-only">📈 Chart ↗</span></button>`;
     } else if (isPort && item.user_balance > 0) {
       if (item.is_native_gas) {
         cellHolders = `<span style="color: var(--color-green); font-weight:700;">Gas: ${Number(item.user_balance || 0).toFixed(4)} BNB</span>`;
@@ -3614,9 +3651,10 @@ function openModal(item) {
   const name = item.name || 'Unknown';
   const sym = item.symbol || '';
 
+  const dexScreenerUrl = getDexScreenerUrl(item);
   const mktUrl = isNft
     ? getElementUrl(name, cAddr)
-    : (item.market_url || `https://pancakeswap.finance/swap?outputCurrency=${cAddr}`);
+    : (dexScreenerUrl || item.market_url || `https://pancakeswap.finance/swap?outputCurrency=${cAddr}`);
 
   const smList = item.smart_wallets || item.smart_minters || [];
   const sEval = getSniperEval(item);
@@ -3761,24 +3799,35 @@ function openModal(item) {
         <span style="color: var(--color-cyan); font-weight: 700; display: inline-flex; align-items: center; gap: 6px;">
           💎 Market Valuation & Trading Dynamics
         </span>
-        ${chg24Badge}
+        <div style="display: flex; gap: 6px; align-items: center;">
+          ${dexScreenerUrl ? `<a href="${dexScreenerUrl}" target="_blank" rel="noopener" class="badge badge-cyan" style="text-decoration: none; font-weight: 700; padding: 3px 8px; font-size: 11px;" title="Open live chart and trades on DexScreener">📈 DexScreener ↗</a>` : ''}
+          ${chg24Badge}
+        </div>
       </div>
       <div class="modal-grid" style="grid-template-columns: repeat(4, 1fr); gap: 10px; margin-top: 6px;">
         <div class="market-metric-box">
           <span class="dim">Market Cap / FDV</span>
-          <strong style="color: ${mcapNum > 0 ? 'var(--color-green)' : 'var(--text-primary)'}; font-size: 15px; display: block; margin-top: 2px;">${mcapFormatted}</strong>
+          <strong style="color: ${mcapNum > 0 ? 'var(--color-green)' : 'var(--text-primary)'}; font-size: 15px; display: block; margin-top: 2px;">
+            ${dexScreenerUrl && mcapNum > 0 ? `<a href="${dexScreenerUrl}" target="_blank" rel="noopener" style="color: var(--color-green); text-decoration: none;" title="View Valuation on DexScreener">${mcapFormatted} ↗</a>` : mcapFormatted}
+          </strong>
         </div>
         <div class="market-metric-box">
           <span class="dim">24h Trading Vol</span>
-          <strong style="color: ${vol24Num > 0 ? 'var(--color-cyan)' : 'var(--text-dim)'}; font-size: 15px; display: block; margin-top: 2px;">${vol24Formatted}</strong>
+          <strong style="color: ${vol24Num > 0 ? 'var(--color-cyan)' : 'var(--text-dim)'}; font-size: 15px; display: block; margin-top: 2px;">
+            ${dexScreenerUrl && vol24Num > 0 ? `<a href="${dexScreenerUrl}" target="_blank" rel="noopener" style="color: var(--color-cyan); text-decoration: none;" title="View Volume on DexScreener">${vol24Formatted} ↗</a>` : vol24Formatted}
+          </strong>
         </div>
         <div class="market-metric-box">
           <span class="dim">PancakeSwap LP</span>
-          <strong style="color: ${lp > 0 ? 'var(--color-yellow)' : 'var(--text-dim)'}; font-size: 15px; display: block; margin-top: 2px;">${lp > 0 ? `$${formatCount(lp)}` : '$0'}</strong>
+          <strong style="color: ${lp > 0 ? 'var(--color-yellow)' : 'var(--text-dim)'}; font-size: 15px; display: block; margin-top: 2px;">
+            ${dexScreenerUrl && lp > 0 ? `<a href="${dexScreenerUrl}" target="_blank" rel="noopener" style="color: var(--color-yellow); text-decoration: none;" title="View Liquidity Pool on DexScreener">$${formatCount(lp)} ↗</a>` : (lp > 0 ? `$${formatCount(lp)}` : '$0')}
+          </strong>
         </div>
         <div class="market-metric-box">
           <span class="dim">Current Price</span>
-          <strong style="font-size: 15px; display: block; margin-top: 2px;">${tkPriceNum > 0 ? formatCryptoPrice(tkPriceNum) : (Number(item.floor_price_usd || 0) > 0 ? `$${Number(item.floor_price_usd).toFixed(2)}` : '<span class="dim">—</span>')}</strong>
+          <strong style="font-size: 15px; display: block; margin-top: 2px;">
+            ${dexScreenerUrl && tkPriceNum > 0 ? `<a href="${dexScreenerUrl}" target="_blank" rel="noopener" style="color: var(--color-green); text-decoration: none;" title="Open live chart on DexScreener">${formatCryptoPrice(tkPriceNum)} ↗</a>` : (tkPriceNum > 0 ? formatCryptoPrice(tkPriceNum) : (Number(item.floor_price_usd || 0) > 0 ? `$${Number(item.floor_price_usd).toFixed(2)}` : '<span class="dim">—</span>'))}
+          </strong>
         </div>
       </div>
     </div>
@@ -3796,7 +3845,7 @@ function openModal(item) {
       </div>
       <div class="bonding-gauge-stats">
         <span>${bondingGraduated ? `Secondary Liquidity Pool: $${formatCount(lp)}` : `Primary Minting: ${formatCount(tm)} / ${formatCount(ms) || 'Target Cap'}`}</span>
-        <span>${bondingGraduated ? '🟢 Active Trading on PancakeSwap V2' : (bondingPct >= 80 ? '🔥 Near DEX Pool Injection (≥80%)' : (bondingPct >= 50 ? '⚡ Strong Momentum (≥50%)' : '🌱 Early Fair-Mint Phase'))}</span>
+        <span>${bondingGraduated ? (dexScreenerUrl ? `<a href="${dexScreenerUrl}" target="_blank" rel="noopener" style="color: var(--color-green); font-weight: 600; text-decoration: none;" title="View pair on DexScreener">🟢 Active Trading on PancakeSwap V2 ➔ View on DexScreener ↗</a>` : '🟢 Active Trading on PancakeSwap V2') : (bondingPct >= 80 ? '🔥 Near DEX Pool Injection (≥80%)' : (bondingPct >= 50 ? '⚡ Strong Momentum (≥50%)' : '🌱 Early Fair-Mint Phase'))}</span>
       </div>
     </div>
     ` : ''}
@@ -3958,7 +4007,8 @@ function openModal(item) {
     <div class="modal-section">
       <div class="modal-section-title">🔗 Official Secondary Links</div>
       <div class="modal-links">
-        <a href="${mktUrl}" target="_blank" rel="noopener" class="modal-btn btn-element">🛒 ${isNft ? 'Element NFT Collection' : 'PancakeSwap / DEX'}</a>
+        ${!isNft && dexScreenerUrl ? `<a href="${dexScreenerUrl}" target="_blank" rel="noopener" class="modal-btn" style="background: rgba(0, 240, 255, 0.15); border: 1px solid var(--color-cyan); color: var(--color-cyan); font-weight: 700;">📈 View on DexScreener ↗</a>` : ''}
+        <a href="${isNft ? mktUrl : `https://pancakeswap.finance/swap?outputCurrency=${cAddr}`}" target="_blank" rel="noopener" class="modal-btn btn-element">🛒 ${isNft ? 'Element NFT Collection' : 'Trade on PancakeSwap DEX'}</a>
         ${!isNft ? `<a href="https://pancakeswap.finance/swap?inputCurrency=${cAddr}&outputCurrency=BNB" target="_blank" rel="noopener" class="modal-btn" style="background: rgba(240, 185, 11, 0.15); border: 1px solid #f0b90b; color: #f0b90b;">🥞 Swap to BNB (PancakeSwap)</a>` : ''}
         <a href="https://bscscan.com/address/${cAddr}" target="_blank" rel="noopener" class="modal-btn btn-bscscan">🔍 View on BscScan</a>
         ${item.website ? `<a href="${item.website}" target="_blank" rel="noopener" class="modal-btn btn-bscscan">🌐 Website</a>` : ''}
@@ -3970,9 +4020,16 @@ function openModal(item) {
     <div class="modal-section dex-chart-section">
       <div style="display: flex; justify-content: space-between; align-items: center;">
         <span style="font-size: 12px; font-weight: 700; color: var(--color-cyan);">📈 Live DEX Candlestick Price Action Chart</span>
-        <button class="dex-chart-toggle-btn" id="chartToggleBtn" onclick="toggleDexChart('${cAddr}')">
-          <span id="chartToggleIcon">📊</span> <span id="chartToggleLabel">Show Live DEX Chart</span>
-        </button>
+        <div style="display: flex; gap: 8px; align-items: center;">
+          ${dexScreenerUrl ? `
+            <a href="${dexScreenerUrl}" target="_blank" rel="noopener" class="dex-chart-toggle-btn" style="color: var(--color-cyan); text-decoration: none; padding: 4px 8px; border: 1px solid rgba(0, 240, 255, 0.3); border-radius: 4px; font-size: 11px; display: inline-flex; align-items: center; gap: 4px;" title="Open live pair on DexScreener in new window">
+              <span>↗</span> <span>Open DexScreener</span>
+            </a>
+          ` : ''}
+          <button class="dex-chart-toggle-btn" id="chartToggleBtn" onclick="toggleDexChart('${cAddr}', '${dexScreenerUrl}')">
+            <span id="chartToggleIcon">📊</span> <span id="chartToggleLabel">Show Live DEX Chart</span>
+          </button>
+        </div>
       </div>
       <div id="dexChartWrap" class="dex-chart-frame-wrap" style="display: none;"></div>
     </div>
@@ -4015,8 +4072,8 @@ function openModal(item) {
 
       ${isSoldOut ? `
         <div style="display: flex; gap: 10px; margin-top: 8px;">
-          <a href="${mktUrl}" target="_blank" rel="noopener" class="web3-mint-btn sold-out" style="text-align: center; text-decoration: none; display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%;">
-            <span>🔒 Sold Out (100% Capped) ➔ Trade on Secondary Market</span>
+          <a href="${!isNft ? (dexScreenerUrl || mktUrl) : mktUrl}" target="_blank" rel="noopener" class="web3-mint-btn sold-out" style="text-align: center; text-decoration: none; display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%;">
+            <span>🔒 Sold Out (100% Capped) ➔ ${!isNft ? 'View Chart & Trade on DexScreener ↗' : 'Trade on Secondary Market'}</span>
           </a>
         </div>
       ` : `
@@ -4048,6 +4105,7 @@ function openModal(item) {
         <strong style="color: var(--text-white);">Exit Strategy:</strong> ${exitEval.recommendation}
       </div>
       <div class="modal-links" style="margin-bottom: 10px;">
+        ${dexScreenerUrl ? `<a href="${dexScreenerUrl}" target="_blank" rel="noopener" class="modal-btn" style="background: rgba(0, 240, 255, 0.15); border: 1px solid var(--color-cyan); color: var(--color-cyan); font-weight: 700; text-decoration: none;">📈 DexScreener Live Chart ↗</a>` : ''}
         <a href="https://pancakeswap.finance/swap?inputCurrency=${cAddr}&outputCurrency=BNB" target="_blank" rel="noopener" class="modal-btn" style="background: rgba(240, 185, 11, 0.2); border: 1px solid #f0b90b; color: #f0b90b; text-decoration: none;">🥞 1-Click Swap on PancakeSwap ↗</a>
       </div>
       <div class="cli-box">
@@ -6707,7 +6765,9 @@ if (typeof module !== 'undefined' && module.exports) {
     DONATION_WALLET,
     setSortMode,
     getSortMode: () => sortMode,
-    renderTable
+    renderTable,
+    getDexScreenerUrl,
+    isSecondaryMarketAsset
   };
 }
 

@@ -659,6 +659,13 @@ class MockElement {
     this.tagName = tag.toUpperCase();
     this.attributes = { ...attrs };
     this.classList = new Set();
+    this.classList.toggle = (cls, force) => {
+      const has = this.classList.has(cls);
+      const shouldHave = force !== undefined ? force : !has;
+      if (shouldHave) this.classList.add(cls);
+      else this.classList.delete(cls);
+      return shouldHave;
+    };
     this.children = [];
     this.parentNode = null;
     this._textContent = attrs.textContent || '';
@@ -674,7 +681,10 @@ class MockElement {
     this._textContent = String(val);
   }
   get innerHTML() {
-    return this._innerHTML !== undefined ? this._innerHTML : this.children.map(c => c.textContent).join('');
+    if (this.children.length > 0) {
+      return this.children.map(c => c.innerHTML || c.textContent || '').join('');
+    }
+    return this._innerHTML !== undefined ? this._innerHTML : '';
   }
   set innerHTML(val) {
     this._innerHTML = val;
@@ -703,6 +713,13 @@ class MockElement {
     this.eventListeners[event].push(fn);
   }
   appendChild(child) {
+    if (child.tagName === 'FRAGMENT') {
+      while (child.children.length > 0) {
+        const c = child.children.shift();
+        this.appendChild(c);
+      }
+      return;
+    }
     if (child.parentNode) {
       child.parentNode.removeChild(child);
     }
@@ -1079,5 +1096,128 @@ assert.strictEqual(getSortMode(), 'NEWEST', '3rd click on HOLDERS must reset to 
 
 global.document.getElementById = savedGetElem;
 console.log('✔ Interactive Table Column Header Sorting: PASS');
+
+// ==========================================
+// Test Universal DexScreener Integration for Trading Assets
+// ==========================================
+console.log('Testing Universal DexScreener Integration for Trading Assets...');
+const { getDexScreenerUrl } = app;
+
+// 1. Test getDexScreenerUrl Resolver
+assert.strictEqual(
+  getDexScreenerUrl('0x6ced5c6d3f913b48d59fa07abbfe9060c409087c'),
+  'https://dexscreener.com/bsc/0x6ced5c6d3f913b48d59fa07abbfe9060c409087c',
+  'String address must resolve to BSC DexScreener URL'
+);
+
+const dropCustomPair = {
+  contract: '0x1111111111111111111111111111111111111111',
+  pair_url: 'https://dexscreener.com/bsc/0xpair123456789'
+};
+assert.strictEqual(
+  getDexScreenerUrl(dropCustomPair),
+  'https://dexscreener.com/bsc/0xpair123456789',
+  'Item with pair_url must use exact pair_url'
+);
+
+const dropPairAddr = {
+  contract: '0x2222222222222222222222222222222222222222',
+  pair_address: '0x9876543210987654321098765432109876543210'
+};
+assert.strictEqual(
+  getDexScreenerUrl(dropPairAddr),
+  'https://dexscreener.com/bsc/0x9876543210987654321098765432109876543210',
+  'Item with pair_address must resolve to BSC pair URL'
+);
+
+const dropNative = {
+  contract: '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee'
+};
+assert.strictEqual(
+  getDexScreenerUrl(dropNative),
+  '',
+  'Native BNB placeholder must not resolve to token DexScreener'
+);
+console.log('✔ getDexScreenerUrl URL resolution: PASS');
+
+// 2. Test Secondary Market Table Rendering
+const tradingDrop = {
+  contract: '0x6ced5c6d3f913b48d59fa07abbfe9060c409087c',
+  name: 'AntFun',
+  symbol: 'ANTFUN',
+  standard: 'BEP-20 Token (18 decimals)',
+  token_price_usd: 0.01709,
+  market_cap: 32200000,
+  fdv: 21200000,
+  volume_24h: 551000,
+  lp_usd: 2000000,
+  holders: 268200,
+  total_minted: 1200000000,
+  max_supply: 1200000000,
+  is_graduated: true
+};
+
+assert(isSecondaryMarketAsset(tradingDrop), 'AntFun must be recognized as secondary market asset');
+
+const savedGetElem2 = global.document.getElementById;
+const mockTbodyDex = new MockElement('tbody');
+const mockThActionDex = new MockElement('th');
+mockThActionDex.textContent = 'ACTION';
+
+global.document.getElementById = (id) => {
+  if (id === 'tableBody') return mockTbodyDex;
+  if (id === 'thAction') return mockThActionDex;
+  if (id === 'thColBlock') return new MockElement('th');
+  if (id === 'thColProject') return new MockElement('th');
+  if (id === 'thColInterest') return new MockElement('th');
+  if (id === 'thCol9' || id === 'thHolders') return new MockElement('th');
+  if (id === 'thCol10' || id === 'thProg') return new MockElement('th');
+  if (id === 'thCol11' || id === 'thPrice') return new MockElement('th');
+  if (id === 'thCol12' || id === 'thLp') return new MockElement('th');
+  if (id === 'thCol13' || id === 'thFloor') return new MockElement('th');
+  if (id === 'footerCount') return new MockElement('div');
+  if (id === 'dropsTable') return new MockElement('table');
+  if (id === 'secondaryMarketBanner') return new MockElement('div');
+  return savedGetElem2 ? savedGetElem2(id) : null;
+};
+
+// Render in SECONDARY mode
+setActiveTab('SECONDARY');
+setAllDrops([tradingDrop]);
+renderTable();
+
+// Verify Secondary Table Header has DEXSCREENER
+assert.strictEqual(mockThActionDex.textContent, '📈 DEXSCREENER', 'Secondary tab action header must be 📈 DEXSCREENER');
+
+// Verify table row contains DexScreener links
+const renderedHtml = mockTbodyDex.innerHTML;
+assert(renderedHtml.includes('https://dexscreener.com/bsc/0x6ced5c6d3f913b48d59fa07abbfe9060c409087c'), 'Rendered table must include DexScreener URL for AntFun');
+assert(renderedHtml.includes('📈 DexScreener ↗'), 'Action button must render 📈 DexScreener ↗');
+assert(renderedHtml.includes('col-floor'), 'Must include floor price column');
+assert(renderedHtml.includes('title="Open live chart on DexScreener"'), 'DEX price must be wrapped with DexScreener link');
+console.log('✔ Secondary Market Table DexScreener rendering: PASS');
+
+// 3. Test Deep Dive Inspection Modal Links
+const mockInspectModalDex = new MockElement('dialog');
+mockInspectModalDex.showModal = () => {};
+mockInspectModalDex.close = () => {};
+const mockInspectModalContentDex = new MockElement('div');
+
+global.document.getElementById = (id) => {
+  if (id === 'inspectModal') return mockInspectModalDex;
+  if (id === 'modalContent') return mockInspectModalContentDex;
+  return savedGetElem2 ? savedGetElem2(id) : null;
+};
+
+openModal(tradingDrop);
+const modalHtml = mockInspectModalContentDex.innerHTML;
+
+assert(modalHtml.includes('📈 View on DexScreener ↗'), 'Inspection modal must contain 📈 View on DexScreener ↗ link');
+assert(modalHtml.includes('Open DexScreener'), 'Chart section must contain Open DexScreener link');
+assert(modalHtml.includes('📈 DexScreener Live Chart ↗'), 'Exit command section must contain DexScreener live chart link');
+assert(modalHtml.includes('View Chart & Trade on DexScreener ↗'), 'Sold out banner must link to DexScreener for BEP-20');
+console.log('✔ Inspection Modal DexScreener links: PASS');
+
+global.document.getElementById = savedGetElem2;
 
 console.log('🎉 All Web3, Multicall3, Smart Hunters, and Competitor Features verified successfully!');
