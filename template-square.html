@@ -2,245 +2,363 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
+  <title>BNB Chain .ai Agent ID Radar (Square)</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
       width: 1080px;
       height: 1080px;
-      background: #03080c;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-      color: #e2e8f0;
+      background: #020408;
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      color: #E2E8F0;
       position: relative;
       overflow: hidden;
       display: flex;
       flex-direction: column;
       align-items: center;
       justify-content: center;
-      padding: 70px;
+      padding: 60px 48px;
       text-align: center;
     }
 
-    .bg-glow-1 {
-      position: absolute;
-      width: 800px;
-      height: 800px;
-      border-radius: 50%;
-      background: radial-gradient(circle, rgba(0, 240, 255, 0.18) 0%, rgba(0, 240, 255, 0) 70%);
-      top: -150px;
-      left: 140px;
-      pointer-events: none;
-    }
-    .bg-glow-2 {
-      position: absolute;
-      width: 800px;
-      height: 800px;
-      border-radius: 50%;
-      background: radial-gradient(circle, rgba(240, 185, 11, 0.16) 0%, rgba(240, 185, 11, 0) 70%);
-      bottom: -200px;
-      right: 140px;
-      pointer-events: none;
-    }
-    .grid-lines {
+    /* Tactical Telemetry Grid Background */
+    .telemetry-grid {
       position: absolute;
       inset: 0;
       background-image: 
-        linear-gradient(rgba(0, 240, 255, 0.05) 1px, transparent 1px),
-        linear-gradient(90deg, rgba(0, 240, 255, 0.05) 1px, transparent 1px);
-      background-size: 50px 50px;
+        linear-gradient(rgba(240, 185, 11, 0.04) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(240, 185, 11, 0.04) 1px, transparent 1px);
+      background-size: 40px 40px;
+      pointer-events: none;
+    }
+
+    /* Radar Rings */
+    .radar-ring {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      border-radius: 50%;
+      pointer-events: none;
+    }
+    .r-ring-1 { width: 500px; height: 500px; border: 1.5px dashed rgba(240, 185, 11, 0.18); }
+    .r-ring-2 { width: 800px; height: 800px; border: 1.5px solid rgba(240, 185, 11, 0.10); }
+    .r-ring-3 { width: 1050px; height: 1050px; border: 1.5px dashed rgba(0, 255, 157, 0.08); }
+    
+    .radar-crosshair-h {
+      position: absolute;
+      top: 50%;
+      left: 0;
+      right: 0;
+      height: 1px;
+      background: linear-gradient(90deg, transparent 0%, rgba(240, 185, 11, 0.2) 25%, rgba(240, 185, 11, 0.2) 75%, transparent 100%);
+      pointer-events: none;
+    }
+    .radar-crosshair-v {
+      position: absolute;
+      left: 50%;
+      top: 0;
+      bottom: 0;
+      width: 1px;
+      background: linear-gradient(180deg, transparent 0%, rgba(240, 185, 11, 0.2) 25%, rgba(240, 185, 11, 0.2) 75%, transparent 100%);
+      pointer-events: none;
+    }
+
+    .glow-gold-top {
+      position: absolute;
+      width: 800px;
+      height: 600px;
+      border-radius: 50%;
+      background: radial-gradient(circle, rgba(240, 185, 11, 0.20) 0%, rgba(240, 185, 11, 0) 70%);
+      top: -150px;
+      left: 140px;
+      pointer-events: none;
+      filter: blur(35px);
+    }
+    .glow-emerald-bottom {
+      position: absolute;
+      width: 700px;
+      height: 500px;
+      border-radius: 50%;
+      background: radial-gradient(circle, rgba(0, 255, 157, 0.14) 0%, rgba(0, 255, 157, 0) 70%);
+      bottom: -100px;
+      right: 140px;
+      pointer-events: none;
+      filter: blur(35px);
+    }
+
+    /* Corner HUD Technical Framing */
+    .hud-corner {
+      position: absolute;
+      width: 44px;
+      height: 44px;
+      border-color: #F0B90B;
+      border-style: solid;
+      pointer-events: none;
+    }
+    .hud-corner.tl { top: 32px; left: 32px; border-width: 3px 0 0 3px; }
+    .hud-corner.tr { top: 32px; right: 32px; border-width: 3px 3px 0 0; }
+    .hud-corner.bl { bottom: 32px; left: 32px; border-width: 0 0 3px 3px; }
+    .hud-corner.br { bottom: 32px; right: 32px; border-width: 0 3px 3px 0; }
+
+    .ruler-top {
+      position: absolute;
+      top: 36px;
+      left: 120px;
+      right: 120px;
+      display: flex;
+      justify-content: space-between;
+      color: rgba(148, 163, 184, 0.6);
+      font-family: "SF Mono", "Roboto Mono", Menlo, Consolas, monospace;
+      font-size: 13px;
+      letter-spacing: 2px;
       pointer-events: none;
     }
 
     .card-wrap {
-      z-index: 2;
+      z-index: 10;
       width: 100%;
+      max-width: 900px;
       display: flex;
       flex-direction: column;
       align-items: center;
-      gap: 32px;
+      gap: 30px;
     }
 
-    .top-badge-row {
+    /* Header Badges */
+    .header-pills {
       display: flex;
       align-items: center;
       gap: 16px;
     }
-    .badge-live {
+    .pill-live {
       display: inline-flex;
       align-items: center;
       gap: 10px;
-      padding: 10px 24px;
-      border-radius: 30px;
-      background: rgba(0, 255, 136, 0.15);
-      border: 1.5px solid rgba(0, 255, 136, 0.5);
-      color: #00ff88;
-      font-size: 20px;
+      padding: 9px 24px;
+      border-radius: 9999px;
+      background: rgba(0, 255, 157, 0.12);
+      border: 1.5px solid rgba(0, 255, 157, 0.55);
+      color: #00FF9D;
+      font-size: 14px;
+      font-weight: 800;
+      letter-spacing: 1.4px;
+      text-transform: uppercase;
+    }
+    .live-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: #00FF9D;
+      box-shadow: 0 0 12px #00FF9D;
+    }
+    .pill-bnb {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 9px 24px;
+      border-radius: 9999px;
+      background: rgba(240, 185, 11, 0.12);
+      border: 1.5px solid rgba(240, 185, 11, 0.55);
+      color: #F0B90B;
+      font-size: 14px;
       font-weight: 800;
       letter-spacing: 1.2px;
       text-transform: uppercase;
     }
-    .badge-live .dot {
-      width: 12px;
-      height: 12px;
-      border-radius: 50%;
-      background: #00ff88;
-      box-shadow: 0 0 16px #00ff88;
-    }
-    .badge-chain {
+
+    /* THE ICONIC AGENTIC WALLET COUNTER PILL */
+    .agentic-wallet-pill {
       display: inline-flex;
       align-items: center;
-      gap: 10px;
-      padding: 10px 24px;
-      border-radius: 30px;
-      background: rgba(240, 185, 11, 0.15);
-      border: 1.5px solid rgba(240, 185, 11, 0.5);
-      color: #f0b90b;
-      font-size: 20px;
+      gap: 14px;
+      padding: 14px 36px;
+      border-radius: 9999px;
+      background: linear-gradient(90deg, #101622 0%, #241D09 100%);
+      border: 2.5px solid #F0B90B;
+      box-shadow: 0 0 45px rgba(240, 185, 11, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.2);
+    }
+    .agentic-wallet-pill .emoji {
+      font-size: 34px;
+      line-height: 1;
+      filter: drop-shadow(0 0 10px rgba(0, 255, 200, 0.7));
+    }
+    .agentic-wallet-pill .label {
+      font-size: 21px;
       font-weight: 800;
+      color: #F0B90B;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+    }
+    .agentic-wallet-pill .count {
+      font-size: 27px;
+      font-weight: 900;
+      color: #FFDF00;
       letter-spacing: 0.8px;
+      font-family: "SF Mono", "Roboto Mono", Menlo, Consolas, monospace;
+      text-shadow: 0 0 18px rgba(255, 223, 0, 0.7);
     }
 
-    .hero-logo-box {
-      width: 180px;
-      height: 180px;
-      border-radius: 44px;
-      background: #081824;
-      border: 3px solid #00f0ff;
-      box-shadow: 0 0 60px rgba(0, 240, 255, 0.5), inset 0 0 30px rgba(0, 240, 255, 0.2);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      margin: 10px 0;
+    /* MAIN HERO TITLE */
+    .hero-title-box {
+      margin: 4px 0;
     }
-
-    .main-title {
+    .hero-title-top {
       font-size: 64px;
       font-weight: 900;
-      line-height: 1.15;
-      letter-spacing: -1px;
-      color: #ffffff;
+      line-height: 1.05;
+      letter-spacing: -1.2px;
+      text-transform: uppercase;
+      color: #FFFFFF;
+      text-shadow: 0 4px 30px rgba(0, 0, 0, 0.9);
     }
-    .main-title .gold {
-      background: linear-gradient(135deg, #f0b90b 0%, #ffde59 100%);
+    .hero-title-bottom {
+      font-size: 70px;
+      font-weight: 900;
+      line-height: 1.05;
+      letter-spacing: -1.2px;
+      text-transform: uppercase;
+      background: linear-gradient(135deg, #FFF6C7 0%, #F0B90B 45%, #D49600 100%);
       -webkit-background-clip: text;
       -webkit-text-fill-color: transparent;
-    }
-    .main-title .cyan {
-      background: linear-gradient(135deg, #00f0ff 0%, #38bdf8 50%, #a855f7 100%);
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
+      text-shadow: 0 0 35px rgba(240, 185, 11, 0.45);
     }
 
-    .sub-title {
-      font-size: 26px;
-      color: #94a3b8;
-      max-width: 820px;
-      line-height: 1.4;
+    .hero-sub {
+      font-size: 22px;
+      line-height: 1.45;
+      color: #94A3B8;
+      max-width: 760px;
       font-weight: 500;
     }
 
-    .feature-grid {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 18px;
-      width: 100%;
-      max-width: 820px;
-      margin-top: 10px;
-    }
-    .feat-card {
-      background: rgba(15, 23, 42, 0.85);
-      border: 1.5px solid rgba(0, 240, 255, 0.3);
-      box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
-      border-radius: 20px;
-      padding: 18px 24px;
+    /* 3 CORE ALPHA CHIPS */
+    .chips-row {
       display: flex;
       align-items: center;
+      justify-content: center;
       gap: 16px;
-      text-align: left;
+      width: 100%;
     }
-    .feat-icon {
-      font-size: 32px;
+    .chip {
+      flex: 1;
+      padding: 18px 14px;
+      border-radius: 18px;
+      box-shadow: 0 10px 28px rgba(0, 0, 0, 0.6);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 6px;
     }
-    .feat-text h4 {
-      font-size: 20px;
-      font-weight: 800;
-      color: #ffffff;
-      margin-bottom: 2px;
+    .chip-gold {
+      background: linear-gradient(180deg, rgba(240, 185, 11, 0.14) 0%, rgba(12, 18, 30, 0.95) 100%);
+      border: 1.5px solid rgba(240, 185, 11, 0.45);
     }
-    .feat-text p {
-      font-size: 15px;
-      color: #00f0ff;
-      font-weight: 600;
-      font-family: monospace;
+    .chip-green {
+      background: linear-gradient(180deg, rgba(0, 255, 157, 0.14) 0%, rgba(12, 18, 30, 0.95) 100%);
+      border: 1.5px solid rgba(0, 255, 157, 0.45);
+    }
+    .chip-cyan {
+      background: linear-gradient(180deg, rgba(56, 189, 248, 0.14) 0%, rgba(12, 18, 30, 0.95) 100%);
+      border: 1.5px solid rgba(56, 189, 248, 0.45);
+    }
+    .chip-val {
+      font-size: 26px;
+      font-weight: 900;
+      letter-spacing: -0.3px;
+      font-family: "SF Mono", "Roboto Mono", Menlo, Consolas, monospace;
+    }
+    .chip-sub {
+      font-size: 14px;
+      font-weight: 700;
+      color: #94A3B8;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+    }
+
+    /* FOOTER TELEMETRY */
+    .footer-bar {
+      margin-top: 10px;
+      display: flex;
+      align-items: center;
+      gap: 24px;
+      color: #64748B;
+      font-family: "SF Mono", "Roboto Mono", Menlo, Consolas, monospace;
+      font-size: 14px;
+      letter-spacing: 1px;
+    }
+    .footer-bar span {
+      display: flex;
+      align-items: center;
+      gap: 6px;
     }
   </style>
 </head>
 <body>
-  <div class="bg-glow-1"></div>
-  <div class="bg-glow-2"></div>
-  <div class="grid-lines"></div>
+  <div class="telemetry-grid"></div>
+  <div class="radar-ring r-ring-1"></div>
+  <div class="radar-ring r-ring-2"></div>
+  <div class="radar-ring r-ring-3"></div>
+  <div class="radar-crosshair-h"></div>
+  <div class="radar-crosshair-v"></div>
+
+  <div class="glow-gold-top"></div>
+  <div class="glow-emerald-bottom"></div>
+
+  <div class="hud-corner tl"></div>
+  <div class="hud-corner tr"></div>
+  <div class="hud-corner bl"></div>
+  <div class="hud-corner br"></div>
+
+  <div class="ruler-top">
+    <span>SYSTEM: RADAR_V4.2</span>
+    <span>CHAIN_ID: 56 (BSC_MAINNET)</span>
+    <span>STATUS: REALTIME_ACTIVE</span>
+  </div>
 
   <div class="card-wrap">
-    <div class="top-badge-row">
-      <div class="badge-live"><span class="dot"></span> 24/7 Cloud Scanner</div>
-      <div class="badge-chain">⚡ BNB Chain Alpha</div>
+    <div class="header-pills">
+      <div class="pill-live"><span class="live-dot"></span> LIVE 24/7 RADAR</div>
+      <div class="pill-bnb">⚡ BNB CHAIN PROTOCOL</div>
     </div>
 
-    <div class="hero-logo-box">
-      <svg width="116" height="116" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg">
-        <polygon points="14,3 24,8.5 24,19.5 14,25 4,19.5 4,8.5" stroke="url(#logoGradSquare)" stroke-width="1.8" fill="#081824" stroke-linejoin="round"/>
-        <circle cx="14" cy="14" r="6.8" stroke="#00f0ff" stroke-width="1.2" stroke-dasharray="2 2" opacity="0.8"/>
-        <line x1="14" y1="3" x2="14" y2="25" stroke="#00f0ff" stroke-width="0.8" opacity="0.4"/>
-        <line x1="4" y1="14" x2="24" y2="14" stroke="#00f0ff" stroke-width="0.8" opacity="0.4"/>
-        <circle cx="14" cy="14" r="3.2" fill="#00ff88"/>
-        <circle cx="14" cy="14" r="5.2" stroke="#00ff88" stroke-width="0.8" opacity="0.6"/>
-        <defs>
-          <linearGradient id="logoGradSquare" x1="4" y1="3" x2="24" y2="25" gradientUnits="userSpaceOnUse">
-            <stop offset="0%" stop-color="#f0b90b"/>
-            <stop offset="50%" stop-color="#00f0ff"/>
-            <stop offset="100%" stop-color="#ff0077"/>
-          </linearGradient>
-        </defs>
-      </svg>
+    <!-- THE ICONIC WALLET BADGE -->
+    <div class="agentic-wallet-pill">
+      <span class="emoji">🤖</span>
+      <span class="label">Binance Agentic Wallets:</span>
+      <span class="count">175,842+</span>
     </div>
 
-    <h1 class="main-title">
-      <span class="gold">BNB Chain</span><br>
-      <span class="cyan">.ai Agent ID Suite</span>
-    </h1>
+    <div class="hero-title-box">
+      <div class="hero-title-top">.AI AGENT ID</div>
+      <div class="hero-title-bottom">RADAR & SNIPER</div>
+    </div>
 
-    <p class="sub-title">
-      Autonomous discovery radar tracking 5,000 smart wallets & stealth fair-mints on BNB Chain.
+    <p class="hero-sub">
+      Autonomous on-chain radar detecting agent wallet creation, stealth fair-mints, and secondary DEX breakout multipliers.
     </p>
 
-    <div class="feature-grid">
-      <div class="feat-card">
-        <span class="feat-icon">🧠</span>
-        <div class="feat-text">
-          <h4>5,000 Smart Wallets</h4>
-          <p>Real-Time Inflow Alerts</p>
-        </div>
+    <div class="chips-row">
+      <div class="chip chip-gold">
+        <span class="chip-val" style="color: #FFDF00;">+2,427%</span>
+        <span class="chip-sub">Top Peak ATH</span>
       </div>
-      <div class="feat-card" style="border-color: rgba(74, 222, 128, 0.4);">
-        <span class="feat-icon">🎯</span>
-        <div class="feat-text">
-          <h4>Sniper Ready</h4>
-          <p>Instant Honeypot Audits</p>
-        </div>
+      <div class="chip chip-green">
+        <span class="chip-val" style="color: #00FF9D;">BLOCK 0</span>
+        <span class="chip-sub">Stealth Sniper</span>
       </div>
-      <div class="feat-card" style="border-color: rgba(217, 70, 239, 0.4);">
-        <span class="feat-icon">🦋</span>
-        <div class="feat-text">
-          <h4>NFT Surge Radar</h4>
-          <p>Element Volume Spikes</p>
-        </div>
+      <div class="chip chip-cyan">
+        <span class="chip-val" style="color: #38BDF8;">105+ ASSETS</span>
+        <span class="chip-sub">Live Tracked</span>
       </div>
-      <div class="feat-card" style="border-color: rgba(240, 185, 11, 0.4);">
-        <span class="feat-icon">⚡</span>
-        <div class="feat-text">
-          <h4>1-Click Take-Profit</h4>
-          <p>Binance Agentic Calldata</p>
-        </div>
-      </div>
+    </div>
+
+    <div class="footer-bar">
+      <span>🛡️ Anti-Rug Shield</span>
+      <span>•</span>
+      <span>⚡ 15s Latency</span>
+      <span>•</span>
+      <span>🥞 PancakeSwap V3</span>
     </div>
   </div>
 </body>

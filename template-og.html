@@ -2,53 +2,145 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
+  <title>BNB Chain .ai Agent ID Radar</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
       width: 1200px;
       height: 630px;
-      background: #03080c;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-      color: #e2e8f0;
+      background: #020408;
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      color: #E2E8F0;
       position: relative;
       overflow: hidden;
+      display: flex;
+      align-items: center;
+      justify-content: center;
     }
 
-    /* Ambient cyber glows */
-    .bg-glow-center {
-      position: absolute;
-      width: 700px;
-      height: 700px;
-      border-radius: 50%;
-      background: radial-gradient(circle, rgba(0, 240, 255, 0.16) 0%, rgba(0, 240, 255, 0) 70%);
-      top: -150px;
-      left: 250px;
-      pointer-events: none;
-    }
-    .bg-glow-gold {
-      position: absolute;
-      width: 500px;
-      height: 500px;
-      border-radius: 50%;
-      background: radial-gradient(circle, rgba(240, 185, 11, 0.12) 0%, rgba(240, 185, 11, 0) 70%);
-      bottom: -100px;
-      left: 350px;
-      pointer-events: none;
-    }
-    .grid-lines {
+    /* Tactical Telemetry Grid Background */
+    .telemetry-grid {
       position: absolute;
       inset: 0;
       background-image: 
-        linear-gradient(rgba(0, 240, 255, 0.04) 1px, transparent 1px),
-        linear-gradient(90deg, rgba(0, 240, 255, 0.04) 1px, transparent 1px);
-      background-size: 35px 35px;
+        linear-gradient(rgba(240, 185, 11, 0.04) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(240, 185, 11, 0.04) 1px, transparent 1px);
+      background-size: 32px 32px;
+      pointer-events: none;
+    }
+
+    /* Radar Background Concentric Waves */
+    .radar-background-ring {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      border-radius: 50%;
+      pointer-events: none;
+    }
+    .ring-1 {
+      width: 380px;
+      height: 380px;
+      border: 1px dashed rgba(240, 185, 11, 0.15);
+    }
+    .ring-2 {
+      width: 620px;
+      height: 620px;
+      border: 1px solid rgba(240, 185, 11, 0.08);
+    }
+    .ring-3 {
+      width: 900px;
+      height: 900px;
+      border: 1px dashed rgba(0, 255, 157, 0.06);
+    }
+    .radar-crosshair-h {
+      position: absolute;
+      top: 50%;
+      left: 0;
+      right: 0;
+      height: 1px;
+      background: linear-gradient(90deg, transparent 0%, rgba(240, 185, 11, 0.15) 30%, rgba(240, 185, 11, 0.15) 70%, transparent 100%);
+      pointer-events: none;
+    }
+    .radar-crosshair-v {
+      position: absolute;
+      left: 50%;
+      top: 0;
+      bottom: 0;
+      width: 1px;
+      background: linear-gradient(180deg, transparent 0%, rgba(240, 185, 11, 0.15) 30%, rgba(240, 185, 11, 0.15) 70%, transparent 100%);
+      pointer-events: none;
+    }
+
+    /* Ambient Gold & Emerald Glows */
+    .glow-gold-top {
+      position: absolute;
+      width: 700px;
+      height: 480px;
+      border-radius: 50%;
+      background: radial-gradient(circle, rgba(240, 185, 11, 0.18) 0%, rgba(240, 185, 11, 0) 70%);
+      top: -140px;
+      left: 250px;
+      pointer-events: none;
+      filter: blur(25px);
+    }
+    .glow-emerald-bottom {
+      position: absolute;
+      width: 600px;
+      height: 400px;
+      border-radius: 50%;
+      background: radial-gradient(circle, rgba(0, 255, 157, 0.12) 0%, rgba(0, 255, 157, 0) 70%);
+      bottom: -100px;
+      right: 250px;
+      pointer-events: none;
+      filter: blur(25px);
+    }
+
+    /* Precision Technical Reticles at Corners */
+    .corner-reticle {
+      position: absolute;
+      width: 28px;
+      height: 28px;
+      border-color: #F0B90B;
+      border-style: solid;
+      pointer-events: none;
+    }
+    .corner-reticle.tl { top: 20px; left: 20px; border-width: 2px 0 0 2px; }
+    .corner-reticle.tr { top: 20px; right: 20px; border-width: 2px 2px 0 0; }
+    .corner-reticle.bl { bottom: 20px; left: 20px; border-width: 0 0 2px 2px; }
+    .corner-reticle.br { bottom: 20px; right: 20px; border-width: 0 2px 2px 0; }
+
+    /* Technical Ruler Labels */
+    .ruler-top {
+      position: absolute;
+      top: 22px;
+      left: 100px;
+      right: 100px;
+      display: flex;
+      justify-content: space-between;
+      color: rgba(148, 163, 184, 0.55);
+      font-family: "SF Mono", "Roboto Mono", Menlo, Consolas, monospace;
+      font-size: 11px;
+      letter-spacing: 1.5px;
+      pointer-events: none;
+    }
+    .ruler-bottom {
+      position: absolute;
+      bottom: 22px;
+      left: 100px;
+      right: 100px;
+      display: flex;
+      justify-content: space-between;
+      color: rgba(148, 163, 184, 0.55);
+      font-family: "SF Mono", "Roboto Mono", Menlo, Consolas, monospace;
+      font-size: 11px;
+      letter-spacing: 1.5px;
       pointer-events: none;
     }
 
     /* 
-      CENTRAL 1:1 SAFE ZONE
-      Covers x: 285px to 915px (Width: 630px, Height: 630px).
-      Centered exactly at x: 600px.
+      1:1 CENTRAL SAFE ZONE (Strictly between x: 285px and 915px = 630px width)
+      Guarantees 100% legibility in Telegram / WhatsApp / iMessage chat bubbles
     */
     .safe-zone {
       position: absolute;
@@ -61,255 +153,319 @@
       align-items: center;
       justify-content: center;
       text-align: center;
-      padding: 40px 30px;
+      padding: 24px 20px;
       z-index: 10;
     }
 
-    .top-badges {
+    /* Live Header Strip */
+    .header-row {
       display: flex;
       align-items: center;
-      gap: 10px;
-      margin-bottom: 20px;
+      gap: 12px;
+      margin-bottom: 14px;
     }
     .badge-live {
       display: inline-flex;
       align-items: center;
       gap: 7px;
-      padding: 6px 14px;
-      border-radius: 20px;
-      background: rgba(0, 255, 136, 0.14);
-      border: 1px solid rgba(0, 255, 136, 0.45);
-      color: #00ff88;
-      font-size: 13px;
+      padding: 5px 14px;
+      border-radius: 9999px;
+      background: rgba(0, 255, 157, 0.12);
+      border: 1px solid rgba(0, 255, 157, 0.5);
+      color: #00FF9D;
+      font-size: 11px;
       font-weight: 800;
-      letter-spacing: 0.8px;
+      letter-spacing: 1px;
       text-transform: uppercase;
     }
-    .badge-live .dot {
-      width: 8px;
-      height: 8px;
+    .pulse-dot {
+      width: 7px;
+      height: 7px;
       border-radius: 50%;
-      background: #00ff88;
-      box-shadow: 0 0 10px #00ff88;
+      background: #00FF9D;
+      box-shadow: 0 0 10px #00FF9D;
     }
     .badge-chain {
       display: inline-flex;
       align-items: center;
       gap: 6px;
-      padding: 6px 14px;
-      border-radius: 20px;
-      background: rgba(240, 185, 11, 0.14);
-      border: 1px solid rgba(240, 185, 11, 0.45);
-      color: #f0b90b;
-      font-size: 13px;
+      padding: 5px 14px;
+      border-radius: 9999px;
+      background: rgba(240, 185, 11, 0.12);
+      border: 1px solid rgba(240, 185, 11, 0.5);
+      color: #F0B90B;
+      font-size: 11px;
       font-weight: 800;
-      letter-spacing: 0.5px;
+      letter-spacing: 1px;
+      text-transform: uppercase;
     }
 
-    .logo-box {
-      width: 90px;
-      height: 90px;
-      border-radius: 24px;
-      background: #081824;
-      border: 2px solid #00f0ff;
-      box-shadow: 0 0 35px rgba(0, 240, 255, 0.5), inset 0 0 15px rgba(0, 240, 255, 0.2);
-      display: flex;
+    /* THE ICONIC AGENTIC WALLET COUNTER PILL */
+    .agentic-wallet-pill {
+      display: inline-flex;
       align-items: center;
-      justify-content: center;
+      gap: 10px;
+      padding: 10px 24px;
+      border-radius: 9999px;
+      background: linear-gradient(90deg, #101622 0%, #241D09 100%);
+      border: 2px solid #F0B90B;
+      box-shadow: 0 0 35px rgba(240, 185, 11, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.2);
       margin-bottom: 18px;
     }
-
-    .main-title {
-      font-size: 40px;
+    .agentic-wallet-pill .emoji {
+      font-size: 22px;
+      line-height: 1;
+      filter: drop-shadow(0 0 6px rgba(0, 255, 200, 0.7));
+    }
+    .agentic-wallet-pill .label {
+      font-size: 14px;
+      font-weight: 800;
+      color: #F0B90B;
+      letter-spacing: 0.8px;
+      text-transform: uppercase;
+    }
+    .agentic-wallet-pill .count {
+      font-size: 18px;
       font-weight: 900;
-      line-height: 1.15;
-      letter-spacing: -0.5px;
-      color: #ffffff;
+      color: #FFDF00;
+      letter-spacing: 0.5px;
+      font-family: "SF Mono", "Roboto Mono", Menlo, Consolas, monospace;
+      text-shadow: 0 0 12px rgba(255, 223, 0, 0.6);
+    }
+
+    /* HERO TITLE SECTION */
+    .title-box {
       margin-bottom: 12px;
     }
-    .main-title .gold {
-      background: linear-gradient(135deg, #f0b90b 0%, #ffde59 100%);
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
+    .hero-title-top {
+      font-size: 42px;
+      font-weight: 900;
+      line-height: 1.05;
+      letter-spacing: -0.5px;
+      text-transform: uppercase;
+      color: #FFFFFF;
+      text-shadow: 0 2px 24px rgba(0, 0, 0, 0.9);
     }
-    .main-title .cyan {
-      background: linear-gradient(135deg, #00f0ff 0%, #38bdf8 50%, #c084fc 100%);
+    .hero-title-bottom {
+      font-size: 46px;
+      font-weight: 900;
+      line-height: 1.05;
+      letter-spacing: -0.5px;
+      text-transform: uppercase;
+      background: linear-gradient(135deg, #FFF6C7 0%, #F0B90B 45%, #D49600 100%);
       -webkit-background-clip: text;
       -webkit-text-fill-color: transparent;
+      text-shadow: 0 0 30px rgba(240, 185, 11, 0.4);
     }
 
-    .sub-title {
-      font-size: 16px;
-      color: #94a3b8;
+    .hero-sub {
+      font-size: 14px;
       line-height: 1.45;
+      color: #94A3B8;
+      max-width: 480px;
       font-weight: 500;
-      max-width: 520px;
       margin-bottom: 22px;
     }
 
-    .feature-pills {
+    /* 3 TACTICAL ALPHA CHIPS */
+    .chips-row {
       display: flex;
-      flex-wrap: wrap;
+      align-items: center;
       justify-content: center;
       gap: 10px;
-      max-width: 540px;
+      width: 100%;
+      max-width: 530px;
     }
-    .feat-pill {
-      display: inline-flex;
+    .chip {
+      flex: 1;
+      padding: 10px 8px;
+      border-radius: 12px;
+      box-shadow: 0 6px 20px rgba(0, 0, 0, 0.6);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 3px;
+    }
+    .chip-gold {
+      background: linear-gradient(180deg, rgba(240, 185, 11, 0.12) 0%, rgba(12, 18, 30, 0.95) 100%);
+      border: 1px solid rgba(240, 185, 11, 0.4);
+    }
+    .chip-green {
+      background: linear-gradient(180deg, rgba(0, 255, 157, 0.12) 0%, rgba(12, 18, 30, 0.95) 100%);
+      border: 1px solid rgba(0, 255, 157, 0.4);
+    }
+    .chip-cyan {
+      background: linear-gradient(180deg, rgba(56, 189, 248, 0.12) 0%, rgba(12, 18, 30, 0.95) 100%);
+      border: 1px solid rgba(56, 189, 248, 0.4);
+    }
+    .chip-val {
+      font-size: 15px;
+      font-weight: 900;
+      letter-spacing: -0.2px;
+      font-family: "SF Mono", "Roboto Mono", Menlo, Consolas, monospace;
+    }
+    .chip-sub {
+      font-size: 10px;
+      font-weight: 700;
+      color: #94A3B8;
+      text-transform: uppercase;
+      letter-spacing: 0.6px;
+    }
+
+    /* LATERAL WIDE WINGS (Visible on full 1200x630 cards) */
+    .side-wing {
+      position: absolute;
+      top: 54px;
+      bottom: 54px;
+      width: 236px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      z-index: 5;
+    }
+    .side-wing.left { left: 28px; }
+    .side-wing.right { right: 28px; }
+
+    .hud-card {
+      background: rgba(8, 14, 24, 0.82);
+      border: 1px solid rgba(240, 185, 11, 0.2);
+      border-radius: 12px;
+      padding: 13px 15px;
+      backdrop-filter: blur(12px);
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.55);
+    }
+    .hud-card-label {
+      font-size: 10px;
+      color: #64748B;
+      font-family: "SF Mono", "Roboto Mono", Menlo, Consolas, monospace;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      margin-bottom: 4px;
+      display: flex;
       align-items: center;
       gap: 6px;
-      padding: 7px 14px;
-      border-radius: 20px;
-      background: rgba(15, 23, 42, 0.85);
-      border: 1px solid rgba(0, 240, 255, 0.25);
-      color: #cbd5e1;
-      font-size: 13px;
-      font-weight: 700;
-      box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
     }
-    .feat-pill strong {
-      color: #00f0ff;
+    .hud-card-value {
+      font-size: 16px;
+      font-weight: 800;
+      color: #F8FAFC;
+      letter-spacing: -0.2px;
     }
-
-    /* LEFT DECORATIVE WING (Visible on wide screens, e.g. Twitter/Discord) */
-    .wing-left {
-      position: absolute;
-      left: 25px;
-      top: 50px;
-      bottom: 50px;
-      width: 235px;
-      display: flex;
-      flex-direction: column;
-      justify-content: space-around;
-      opacity: 0.85;
-      z-index: 5;
-    }
-    .stat-card-left {
-      background: rgba(8, 20, 28, 0.75);
-      border: 1px solid rgba(0, 240, 255, 0.2);
-      border-radius: 12px;
-      padding: 14px;
-      backdrop-filter: blur(8px);
-    }
-    .stat-label {
+    .hud-card-meta {
       font-size: 11px;
-      color: #64748b;
-      font-family: monospace;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-      margin-bottom: 4px;
-    }
-    .stat-value {
-      font-size: 18px;
-      font-weight: 800;
-      color: #00ff88;
-      font-family: monospace;
-    }
-
-    /* RIGHT DECORATIVE WING (Visible on wide screens, e.g. Twitter/Discord) */
-    .wing-right {
-      position: absolute;
-      right: 25px;
-      top: 50px;
-      bottom: 50px;
-      width: 235px;
-      display: flex;
-      flex-direction: column;
-      justify-content: space-around;
-      opacity: 0.85;
-      z-index: 5;
-    }
-    .stat-card-right {
-      background: rgba(8, 20, 28, 0.75);
-      border: 1px solid rgba(240, 185, 11, 0.25);
-      border-radius: 12px;
-      padding: 14px;
-      backdrop-filter: blur(8px);
-    }
-    .stat-value-gold {
-      font-size: 18px;
-      font-weight: 800;
-      color: #f0b90b;
-      font-family: monospace;
+      color: #94A3B8;
+      margin-top: 3px;
+      font-family: "SF Mono", "Roboto Mono", Menlo, Consolas, monospace;
     }
   </style>
 </head>
 <body>
-  <div class="bg-glow-center"></div>
-  <div class="bg-glow-gold"></div>
-  <div class="grid-lines"></div>
+  <!-- Ambient & Radar Background Elements -->
+  <div class="telemetry-grid"></div>
+  <div class="radar-background-ring ring-1"></div>
+  <div class="radar-background-ring ring-2"></div>
+  <div class="radar-background-ring ring-3"></div>
+  <div class="radar-crosshair-h"></div>
+  <div class="radar-crosshair-v"></div>
 
-  <!-- Left Wide Wing -->
-  <div class="wing-left">
-    <div class="stat-card-left">
-      <div class="stat-label">📡 ENGINE STATUS</div>
-      <div class="stat-value">FLY.IO 24/7</div>
+  <div class="glow-gold-top"></div>
+  <div class="glow-emerald-bottom"></div>
+
+  <!-- Corner Reticles -->
+  <div class="corner-reticle tl"></div>
+  <div class="corner-reticle tr"></div>
+  <div class="corner-reticle bl"></div>
+  <div class="corner-reticle br"></div>
+
+  <!-- Technical Telemetry Strings -->
+  <div class="ruler-top">
+    <span>RADAR_PROTOCOL: v4.2</span>
+    <span>NETWORK: BSC_CHAIN_56</span>
+    <span>SCAN: REALTIME_LIVE</span>
+  </div>
+  <div class="ruler-bottom">
+    <span>MEV_GUARD: SHIELDED</span>
+    <span>CONTRACT: VERIFIED</span>
+    <span>FLOOR_DEX: INDEXED</span>
+  </div>
+
+  <!-- Left Lateral Wing -->
+  <div class="side-wing left">
+    <div class="hud-card">
+      <div class="hud-card-label">⚡ ENGINE STATUS</div>
+      <div class="hud-card-value" style="color: #00FF9D;">FLY.IO 24/7</div>
+      <div class="hud-card-meta">Realtime Stream Active</div>
     </div>
-    <div class="stat-card-left" style="border-color: rgba(56, 189, 248, 0.3);">
-      <div class="stat-label">🧠 TRACKED WALLETS</div>
-      <div class="stat-value" style="color: #38bdf8;">5,000 ACTIVE</div>
+    <div class="hud-card" style="border-color: rgba(56, 189, 248, 0.3);">
+      <div class="hud-card-label">🎯 FAIR-MINT DISCOVERY</div>
+      <div class="hud-card-value" style="color: #38BDF8;">BLOCK 0 SNIPER</div>
+      <div class="hud-card-meta">Sub-Second Detection</div>
     </div>
-    <div class="stat-card-left" style="border-color: rgba(0, 255, 136, 0.3);">
-      <div class="stat-label">⚡ SCAN FREQUENCY</div>
-      <div class="stat-value">15s REALTIME</div>
+    <div class="hud-card" style="border-color: rgba(0, 255, 157, 0.3);">
+      <div class="hud-card-label">🛡️ AUDIT PROTOCOL</div>
+      <div class="hud-card-value" style="color: #00FF9D;">ANTI-RUG HONEYPOT</div>
+      <div class="hud-card-meta">100% On-Chain Scanned</div>
     </div>
   </div>
 
-  <!-- Central 1:1 Safe Zone for Linktree -->
+  <!-- 1:1 Central Safe Zone (Cropped on Mobile Messengers) -->
   <div class="safe-zone">
-    <div class="top-badges">
-      <div class="badge-live"><span class="dot"></span> 24/7 Live Radar</div>
-      <div class="badge-chain">⚡ BNB Chain Alpha</div>
+    <!-- Status Row -->
+    <div class="header-row">
+      <div class="badge-live"><span class="pulse-dot"></span> LIVE 24/7 RADAR</div>
+      <div class="badge-chain">⚡ BNB CHAIN ALPHA</div>
     </div>
 
-    <div class="logo-box">
-      <svg width="58" height="58" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg">
-        <polygon points="14,3 24,8.5 24,19.5 14,25 4,19.5 4,8.5" stroke="url(#logoGradC)" stroke-width="1.8" fill="#081824" stroke-linejoin="round"/>
-        <circle cx="14" cy="14" r="6.8" stroke="#00f0ff" stroke-width="1.2" stroke-dasharray="2 2" opacity="0.8"/>
-        <line x1="14" y1="3" x2="14" y2="25" stroke="#00f0ff" stroke-width="0.8" opacity="0.4"/>
-        <line x1="4" y1="14" x2="24" y2="14" stroke="#00f0ff" stroke-width="0.8" opacity="0.4"/>
-        <circle cx="14" cy="14" r="3.2" fill="#00ff88"/>
-        <circle cx="14" cy="14" r="5.2" stroke="#00ff88" stroke-width="0.8" opacity="0.6"/>
-        <defs>
-          <linearGradient id="logoGradC" x1="4" y1="3" x2="24" y2="25" gradientUnits="userSpaceOnUse">
-            <stop offset="0%" stop-color="#f0b90b"/>
-            <stop offset="50%" stop-color="#00f0ff"/>
-            <stop offset="100%" stop-color="#ff0077"/>
-          </linearGradient>
-        </defs>
-      </svg>
+    <!-- The Iconic Agentic Wallets Counter Pill -->
+    <div class="agentic-wallet-pill">
+      <span class="emoji">🤖</span>
+      <span class="label">Binance Agentic Wallets:</span>
+      <span class="count">175,842+</span>
     </div>
 
-    <h1 class="main-title">
-      <span class="gold">BNB Chain</span><br>
-      <span class="cyan">.ai Agent ID Suite</span>
-    </h1>
+    <!-- Main Title -->
+    <div class="title-box">
+      <div class="hero-title-top">.AI AGENT ID</div>
+      <div class="hero-title-bottom">RADAR & SNIPER</div>
+    </div>
 
-    <p class="sub-title">
-      Autonomous discovery radar tracking 5,000 smart wallets & stealth fair-mints on BNB Chain.
+    <p class="hero-sub">
+      Autonomous on-chain telemetry detecting agent wallet creation, stealth fair-mints, and secondary DEX breakout multipliers.
     </p>
 
-    <div class="feature-pills">
-      <div class="feat-pill">🧠 <strong>5,000</strong> Wallets</div>
-      <div class="feat-pill">🎯 <strong>SNIPER READY</strong></div>
-      <div class="feat-pill">🦋 <strong>NFT Surge</strong></div>
-      <div class="feat-pill">⚡ <strong>1-Click</strong> Exit</div>
+    <!-- 3 Core Metric Chips -->
+    <div class="chips-row">
+      <div class="chip chip-gold">
+        <span class="chip-val" style="color: #FFDF00;">+2,427%</span>
+        <span class="chip-sub">Top Peak ATH</span>
+      </div>
+      <div class="chip chip-green">
+        <span class="chip-val" style="color: #00FF9D;">BLOCK 0</span>
+        <span class="chip-sub">Stealth Sniper</span>
+      </div>
+      <div class="chip chip-cyan">
+        <span class="chip-val" style="color: #38BDF8;">105+ ASSETS</span>
+        <span class="chip-sub">Live Tracked</span>
+      </div>
     </div>
   </div>
 
-  <!-- Right Wide Wing -->
-  <div class="wing-right">
-    <div class="stat-card-right">
-      <div class="stat-label">🏆 TOP POST-MINT ATH</div>
-      <div class="stat-value-gold">+12.4x PEAK</div>
+  <!-- Right Lateral Wing -->
+  <div class="side-wing right">
+    <div class="hud-card" style="border-color: rgba(240, 185, 11, 0.35);">
+      <div class="hud-card-label">🏆 TOP POST-MINT RUNNER</div>
+      <div class="hud-card-value" style="color: #F0B90B;">+$6.75 / TOKEN</div>
+      <div class="hud-card-meta">FishingAi Rod (ROD)</div>
     </div>
-    <div class="stat-card-right" style="border-color: rgba(217, 70, 239, 0.3);">
-      <div class="stat-label">🦋 ELEMENT MARKET</div>
-      <div class="stat-value-gold" style="color: #d946ef;">SURGE RADAR</div>
+    <div class="hud-card" style="border-color: rgba(217, 70, 239, 0.3);">
+      <div class="hud-card-label">🦋 NFT SURGE RADAR</div>
+      <div class="hud-card-value" style="color: #E879F9;">ELEMENT MARKET</div>
+      <div class="hud-card-meta">Instant Floor Tracker</div>
     </div>
-    <div class="stat-card-right" style="border-color: rgba(74, 222, 128, 0.3);">
-      <div class="stat-label">🛡️ AUDIT ENGINE</div>
-      <div class="stat-value-gold" style="color: #4ade80;">ANTI-RUG HONEYPOT</div>
+    <div class="hud-card" style="border-color: rgba(251, 191, 36, 0.3);">
+      <div class="hud-card-label">⚡ 1-CLICK SNIPER</div>
+      <div class="hud-card-value" style="color: #FDE047;">PANCAKESWAP V3</div>
+      <div class="hud-card-meta">Zero Friction Routing</div>
     </div>
   </div>
 </body>
