@@ -4037,23 +4037,23 @@ function renderTable(keepLimit = false) {
   if (activeTab === 'SECONDARY') {
     if (thCol9) {
       thCol9.className = 'col-floor';
-      makeHeaderSortable(thCol9, '📈 DEX PRICE / 24H', 'PRICE_DESC', 'PRICE_ASC');
+      makeHeaderSortable(thCol9, '📈 DEX PRICE', 'PRICE_DESC', 'PRICE_ASC');
     }
     if (thCol10) {
       thCol10.className = 'col-progress';
-      makeHeaderSortable(thCol10, '💎 MARKET CAP / FDV', 'MCAP_DESC', 'MCAP_ASC');
+      makeHeaderSortable(thCol10, '💎 MARKET CAP', 'MCAP_DESC', 'MCAP_ASC');
     }
     if (thCol11) {
       thCol11.className = 'col-price';
-      makeHeaderSortable(thCol11, '🌊 24H VOLUME', 'VOLUME_DESC', 'VOLUME_ASC');
+      makeHeaderSortable(thCol11, '🌊 24H VOL', 'VOLUME_DESC', 'VOLUME_ASC');
     }
     if (thCol12) {
       thCol12.className = 'col-lp';
-      makeHeaderSortable(thCol12, '🥞 PANCAKESWAP LP', 'LP_DESC', 'LP_ASC');
+      makeHeaderSortable(thCol12, '🥞 DEX LP', 'LP_DESC', 'LP_ASC');
     }
     if (thCol13) {
       thCol13.className = 'col-holders';
-      makeHeaderSortable(thCol13, '👥 HOLDERS / BUYS', 'HOLDERS_DESC', 'HOLDERS_ASC');
+      makeHeaderSortable(thCol13, '👥 HOLDERS', 'HOLDERS_DESC', 'HOLDERS_ASC');
     }
     if (thAction) {
       thAction.textContent = '📈 DEXSCREENER';

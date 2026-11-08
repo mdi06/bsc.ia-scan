@@ -1406,6 +1406,44 @@ table {
     width: 85px;
     text-align: center;
   }
+
+  /* Dedicated Column Sizing for Secondary Market Mode to prevent header overlap */
+  #dropsTable.secondary-mode th:nth-child(9),
+  #dropsTable.secondary-mode td:nth-child(9) {
+    width: 120px !important;
+    min-width: 120px !important;
+  }
+
+  #dropsTable.secondary-mode th:nth-child(10),
+  #dropsTable.secondary-mode td:nth-child(10) {
+    width: 145px !important;
+    min-width: 145px !important;
+  }
+
+  #dropsTable.secondary-mode th:nth-child(11),
+  #dropsTable.secondary-mode td:nth-child(11) {
+    width: 115px !important;
+    min-width: 115px !important;
+  }
+
+  #dropsTable.secondary-mode th:nth-child(12),
+  #dropsTable.secondary-mode td:nth-child(12) {
+    width: 120px !important;
+    min-width: 120px !important;
+  }
+
+  #dropsTable.secondary-mode th:nth-child(13),
+  #dropsTable.secondary-mode td:nth-child(13) {
+    width: 115px !important;
+    min-width: 115px !important;
+  }
+
+  #dropsTable.secondary-mode th:nth-child(14),
+  #dropsTable.secondary-mode td:nth-child(14) {
+    width: 110px !important;
+    min-width: 110px !important;
+    text-align: center;
+  }
 }
 
 thead {
@@ -1417,15 +1455,18 @@ thead {
 }
 
 th {
-  padding: 12px 14px;
+  padding: 12px 8px;
   color: #94a3b8;
   font-family: var(--font-sans);
   font-size: 11px;
   font-weight: 800;
-  letter-spacing: 0.8px;
+  letter-spacing: 0.5px;
   text-transform: uppercase;
   border-bottom: 2px solid rgba(240, 185, 11, 0.45);
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  box-sizing: border-box;
 }
 
 /* Base column classes */
@@ -1681,6 +1722,9 @@ th.sortable-th {
   user-select: none;
   transition: background 0.15s ease, color 0.15s ease;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  box-sizing: border-box;
 }
 
 th.sortable-th:hover {
