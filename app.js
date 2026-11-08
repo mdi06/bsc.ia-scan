@@ -2404,6 +2404,7 @@ function updateSecondaryTabCount() {
   const count = (globalStats && globalStats.secondary) ? Math.max(localCnt, globalStats.secondary) : localCnt;
   const tabEl = document.getElementById('secondaryTabCount');
   if (tabEl) tabEl.textContent = count;
+  if (typeof syncMobileTabSelector === 'function') syncMobileTabSelector();
 }
 
 function updateSecondaryBannerUI() {
@@ -3356,6 +3357,113 @@ function initDailyPulseHero() {
   }
 
   updateDailyPulseUI();
+  setupPulseCarousel();
+}
+
+function updateActivePulseDot(activeIdx) {
+  if (typeof document === 'undefined') return;
+  const dots = document.querySelectorAll('#pulseCarouselDots .pulse-carousel-pill, #pulseCarouselDots .pulse-dot');
+  if (!dots || !dots.length) return;
+  dots.forEach((dot, idx) => {
+    if (idx === activeIdx) {
+      dot.classList.add('active');
+      dot.setAttribute('aria-current', 'true');
+    } else {
+      dot.classList.remove('active');
+      dot.removeAttribute('aria-current');
+    }
+  });
+}
+
+function scrollPulseCarousel(dir) {
+  if (typeof document === 'undefined') return;
+  const grid = document.getElementById('dailyPulseGrid') || document.querySelector('.daily-pulse-grid');
+  if (!grid) return;
+  const cards = grid.querySelectorAll('.pulse-card');
+  if (!cards || !cards.length) return;
+
+  const scrollLeft = grid.scrollLeft;
+  const cardWidth = (cards[0].offsetWidth || 300) + 12;
+  const currentIdx = Math.round(scrollLeft / cardWidth);
+  const targetIdx = Math.max(0, Math.min(cards.length - 1, currentIdx + dir));
+
+  if (cards[targetIdx] && typeof cards[targetIdx].scrollIntoView === 'function') {
+    cards[targetIdx].scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+  } else if (typeof grid.scrollTo === 'function') {
+    grid.scrollTo({ left: targetIdx * cardWidth, behavior: 'smooth' });
+  }
+  updateActivePulseDot(targetIdx);
+}
+
+function setupPulseCarousel() {
+  if (typeof document === 'undefined') return;
+  const grid = document.getElementById('dailyPulseGrid') || document.querySelector('.daily-pulse-grid');
+  const dots = document.querySelectorAll('#pulseCarouselDots .pulse-carousel-pill, #pulseCarouselDots .pulse-dot');
+  if (!grid) return;
+
+  // Dot click navigation
+  if (dots && dots.length) {
+    dots.forEach((dot) => {
+      if (dot._hasCarouselListener) return;
+      dot._hasCarouselListener = true;
+      dot.addEventListener('click', () => {
+        const idx = parseInt(dot.getAttribute('data-index'), 10);
+        if (isNaN(idx)) return;
+        const cards = grid.querySelectorAll('.pulse-card');
+        if (cards[idx]) {
+          if (typeof cards[idx].scrollIntoView === 'function') {
+            cards[idx].scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+          } else if (typeof grid.scrollTo === 'function') {
+            const cardWidth = (cards[0].offsetWidth || 300) + 12;
+            grid.scrollTo({ left: idx * cardWidth, behavior: 'smooth' });
+          }
+          updateActivePulseDot(idx);
+        }
+      });
+    });
+  }
+
+  // Real-time scroll indicator update with requestAnimationFrame
+  if (!grid._hasScrollSnapListener) {
+    grid._hasScrollSnapListener = true;
+    let isTicking = false;
+    grid.addEventListener('scroll', () => {
+      if (!isTicking) {
+        if (typeof window !== 'undefined' && window.requestAnimationFrame) {
+          window.requestAnimationFrame(() => {
+            const cards = grid.querySelectorAll('.pulse-card');
+            if (cards && cards.length) {
+              const cardWidth = (cards[0].offsetWidth || 300) + 12;
+              const activeIdx = Math.max(0, Math.min(cards.length - 1, Math.round(grid.scrollLeft / cardWidth)));
+              updateActivePulseDot(activeIdx);
+            }
+            isTicking = false;
+          });
+        } else {
+          const cards = grid.querySelectorAll('.pulse-card');
+          if (cards && cards.length) {
+            const cardWidth = (cards[0].offsetWidth || 300) + 12;
+            const activeIdx = Math.max(0, Math.min(cards.length - 1, Math.round(grid.scrollLeft / cardWidth)));
+            updateActivePulseDot(activeIdx);
+          }
+          isTicking = false;
+        }
+        isTicking = true;
+      }
+    }, { passive: true });
+
+    // Modern scrollsnapchange support
+    if ('onscrollsnapchange' in grid) {
+      grid.addEventListener('scrollsnapchange', () => {
+        const cards = grid.querySelectorAll('.pulse-card');
+        if (cards && cards.length) {
+          const cardWidth = (cards[0].offsetWidth || 300) + 12;
+          const activeIdx = Math.max(0, Math.min(cards.length - 1, Math.round(grid.scrollLeft / cardWidth)));
+          updateActivePulseDot(activeIdx);
+        }
+      });
+    }
+  }
 }
 
 if (typeof window !== 'undefined') {
@@ -3369,6 +3477,9 @@ if (typeof window !== 'undefined') {
   window.renderPulseSmartMintRow = renderPulseSmartMintRow;
   window.renderPulseAthRow = renderPulseAthRow;
   window.renderPulseNftRow = renderPulseNftRow;
+  window.setupPulseCarousel = setupPulseCarousel;
+  window.scrollPulseCarousel = scrollPulseCarousel;
+  window.updateActivePulseDot = updateActivePulseDot;
 }
 
 // ABI pad32 helper for PancakeSwap V2 Router Calldata
@@ -3855,7 +3966,6 @@ function renderTable(keepLimit = false) {
   if (!keepLimit) {
     tableRenderLimit = TABLE_RENDER_CHUNK;
   }
-  tbody.innerHTML = '';
   const filtered = getFilteredDrops();
 
   updateFavPillCount();
@@ -4042,7 +4152,12 @@ function renderTable(keepLimit = false) {
     } else {
       tr.innerHTML = `<td colspan="14" style="text-align: center; padding: 30px; color: var(--text-dim);">No agentic projects match current filter [${activeFilter}] or search.</td>`;
     }
-    tbody.appendChild(tr);
+    if (typeof tbody.replaceChildren === 'function') {
+      tbody.replaceChildren(tr);
+    } else {
+      tbody.innerHTML = '';
+      tbody.appendChild(tr);
+    }
     return;
   }
 
@@ -4218,7 +4333,7 @@ function renderTable(keepLimit = false) {
     const flUsd = Number(item.floor_price_usd || 0);
     const flBnb = Number(item.floor_price_bnb || 0);
     const tkUsd = Number(item.token_price_usd || item.market_price_usd || 0);
-    let floorStr = `<span class="dim">—</span>`;
+    let floorStr = '';
     if (flUsd > 0) {
       floorStr = `<span style="color: var(--color-cyan); font-weight:600;">$${flUsd.toFixed(2)}</span>`;
     } else if (flBnb > 0) {
@@ -4234,6 +4349,12 @@ function renderTable(keepLimit = false) {
       if (chg24 !== 0) {
         const isUp = chg24 > 0;
         floorStr += ` <span class="badge ${isUp ? 'badge-green' : 'badge-red'}" style="font-size: 9px; padding: 1px 3px;" title="24h Price Change: ${chg24.toFixed(1)}%">${isUp ? '+' : ''}${chg24.toFixed(1)}%</span>`;
+      }
+    } else {
+      if (ms > 0 && tm >= ms) {
+        floorStr = `<span style="color: var(--color-yellow); font-weight:600;">100% Sold</span>`;
+      } else {
+        floorStr = `<span style="color: var(--color-cyan); font-weight:600;">Fair Mint</span>`;
       }
     }
 
@@ -4360,17 +4481,22 @@ function renderTable(keepLimit = false) {
         <td class="col-type">${stdBadge}</td>
         <td class="col-safety">${safeBadge}</td>
         <td class="col-interest">${intBadge}</td>
-        <td class="col-holders" data-label="${isPort ? 'HOLDINGS' : 'HOLDERS'}"><span class="cell-val">${cellHolders}</span></td>
+        <td class="col-holders" data-label="${isPort ? 'HOLDINGS' : 'HOLDERS / BUYS'}"><span class="cell-val">${cellHolders}</span></td>
         <td class="col-lp" data-label="LIQUIDITY"><span class="cell-val">${cellLp}</span></td>
         <td class="col-progress" data-label="PROGRESS">${cellProg}</td>
-        <td class="col-price" data-label="MINT"><span class="cell-val">${cellPrice}</span></td>
-        <td class="col-floor" data-label="FLOOR"><span class="cell-val">${cellFloor}</span></td>
+        <td class="col-price" data-label="MINT PRICE"><span class="cell-val">${cellPrice}</span></td>
+        <td class="col-floor" data-label="${isSec ? 'DEX PRICE' : (isPort ? 'RECOMMEND' : 'STATUS')}"><span class="cell-val">${cellFloor}</span></td>
         <td class="col-action">${actBtn}</td>
       `;
     }
     fragment.appendChild(tr);
   });
-  tbody.appendChild(fragment);
+  if (typeof tbody.replaceChildren === 'function') {
+    tbody.replaceChildren(fragment);
+  } else {
+    tbody.innerHTML = '';
+    tbody.appendChild(fragment);
+  }
 
   // Update pagination button visibility and progress
   if (loadMoreWrap) {
@@ -4387,11 +4513,15 @@ function renderTable(keepLimit = false) {
 }
 
 // Progressive Batch Appender for smooth 60 FPS scrolling
+let isBatchAppending = false;
 function appendNextTableBatch() {
-  const filtered = getFilteredDrops();
-  if (tableRenderLimit >= filtered.length) return;
-  const nextBatch = filtered.slice(tableRenderLimit, tableRenderLimit + TABLE_RENDER_CHUNK);
-  if (nextBatch.length === 0) return;
+  if (isBatchAppending) return;
+  isBatchAppending = true;
+  try {
+    const filtered = getFilteredDrops();
+    if (tableRenderLimit >= filtered.length) return;
+    const nextBatch = filtered.slice(tableRenderLimit, tableRenderLimit + TABLE_RENDER_CHUNK);
+    if (nextBatch.length === 0) return;
 
   const tbody = document.getElementById('tableBody');
   if (!tbody) return;
@@ -4515,7 +4645,7 @@ function appendNextTableBatch() {
     const flUsd = Number(item.floor_price_usd || 0);
     const flBnb = Number(item.floor_price_bnb || 0);
     const tkUsd = Number(item.token_price_usd || item.market_price_usd || 0);
-    let floorStr = `<span class="dim">—</span>`;
+    let floorStr = '';
     if (flUsd > 0) {
       floorStr = `<span style="color: var(--color-cyan); font-weight:600;">$${flUsd.toFixed(2)}</span>`;
     } else if (flBnb > 0) {
@@ -4531,6 +4661,12 @@ function appendNextTableBatch() {
       if (chg24 !== 0) {
         const isUp = chg24 > 0;
         floorStr += ` <span class="badge ${isUp ? 'badge-green' : 'badge-red'}" style="font-size: 9px; padding: 1px 3px;" title="24h Price Change: ${chg24.toFixed(1)}%">${isUp ? '+' : ''}${chg24.toFixed(1)}%</span>`;
+      }
+    } else {
+      if (ms > 0 && tm >= ms) {
+        floorStr = `<span style="color: var(--color-yellow); font-weight:600;">100% Sold</span>`;
+      } else {
+        floorStr = `<span style="color: var(--color-cyan); font-weight:600;">Fair Mint</span>`;
       }
     }
 
@@ -4682,11 +4818,11 @@ function appendNextTableBatch() {
         <td class="col-type">${stdBadge}</td>
         <td class="col-safety">${safeBadge}</td>
         <td class="col-interest">${intBadge}</td>
-        <td class="col-holders" data-label="${isPort ? 'HOLDINGS' : 'HOLDERS'}"><span class="cell-val">${cellHolders}</span></td>
+        <td class="col-holders" data-label="${isPort ? 'HOLDINGS' : 'HOLDERS / BUYS'}"><span class="cell-val">${cellHolders}</span></td>
         <td class="col-lp" data-label="LIQUIDITY"><span class="cell-val">${cellLp}</span></td>
         <td class="col-progress" data-label="PROGRESS">${cellProg}</td>
-        <td class="col-price" data-label="MINT"><span class="cell-val">${cellPrice}</span></td>
-        <td class="col-floor" data-label="FLOOR"><span class="cell-val">${cellFloor}</span></td>
+        <td class="col-price" data-label="MINT PRICE"><span class="cell-val">${cellPrice}</span></td>
+        <td class="col-floor" data-label="${isSec ? 'DEX PRICE' : (isPort ? 'RECOMMEND' : 'STATUS')}"><span class="cell-val">${cellFloor}</span></td>
         <td class="col-action">${actBtn}</td>
       `;
     }
@@ -4709,6 +4845,9 @@ function appendNextTableBatch() {
     if (tableRenderLimit >= filtered.length && !hasMoreDrops) {
       loadMoreWrap.style.display = 'none';
     }
+  }
+  } finally {
+    isBatchAppending = false;
   }
 }
 if (typeof window !== 'undefined') window.appendNextTableBatch = appendNextTableBatch;
@@ -7429,7 +7568,7 @@ function setSortMode(val) {
   if (nativeSelect) nativeSelect.value = val;
 
   const label = document.getElementById('customSortLabel');
-  const options = document.querySelectorAll('.custom-option');
+  const options = document.querySelectorAll('#customSortOptions .custom-option');
 
   options.forEach(o => {
     const oVal = o.getAttribute('data-value');
@@ -7456,7 +7595,7 @@ function setupCustomDropdown() {
   const wrapper = document.getElementById('customSortWrapper');
   const trigger = document.getElementById('customSortTrigger');
   const label = document.getElementById('customSortLabel');
-  const options = document.querySelectorAll('.custom-option');
+  const options = wrapper ? wrapper.querySelectorAll('.custom-option') : [];
   const nativeSelect = document.getElementById('sortSelect');
 
   if (!wrapper || !trigger) return;
@@ -7475,6 +7614,95 @@ function setupCustomDropdown() {
 
       wrapper.classList.remove('open');
       trigger.setAttribute('aria-expanded', 'false');
+    });
+  });
+
+  // Light dismiss: Close on click outside
+  document.addEventListener('click', (e) => {
+    if (!wrapper.contains(e.target)) {
+      wrapper.classList.remove('open');
+      trigger.setAttribute('aria-expanded', 'false');
+    }
+  });
+
+  // Close on Escape key
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && wrapper.classList.contains('open')) {
+      wrapper.classList.remove('open');
+      trigger.setAttribute('aria-expanded', 'false');
+      trigger.focus();
+    }
+  });
+}
+
+// Synchronize Mobile Tab Selector UI with active tab and live badge counts
+function syncMobileTabSelector() {
+  const trigger = document.getElementById('customMobileTabTrigger');
+  const activeLabel = document.getElementById('mobileTabActiveLabel');
+  if (!trigger || !activeLabel) return;
+
+  const tabDefs = {
+    RADAR: { label: '1: 📡 Live Radar', countId: 'radarCount', badgeClass: 'badge-yellow' },
+    SECONDARY: { label: '2: 📈 Secondary Market', countId: 'secondaryTabCount', badgeClass: 'badge-yellow' },
+    LAUNCHPAD: { label: '3: 🚀 Launchpads', countId: 'launchpadTabCount', badgeClass: 'badge-yellow' },
+    SMART: { label: '4: 🧠 Smart Alpha', countId: 'smartCount', badgeClass: 'badge-yellow' },
+    WALLETS: { label: '5: 🏆 Wallet Leaderboard', countId: 'walletsTabCount', badgeClass: 'badge-yellow' },
+    PORTFOLIO: { label: '6: 🎒 My Portfolio', countId: 'portfolioCount', badgeClass: 'badge-cyan' }
+  };
+
+  const curr = tabDefs[activeTab] || tabDefs.RADAR;
+  const countEl = document.getElementById(curr.countId);
+  const countVal = countEl ? countEl.textContent : '0';
+
+  activeLabel.innerHTML = `
+    <span class="mobile-tab-curr-name">${curr.label}</span>
+    <span class="badge ${curr.badgeClass}">${countVal}</span>
+  `;
+
+  // Update selected class and counts in mobile dropdown options
+  document.querySelectorAll('.mobile-tab-option').forEach(opt => {
+    const t = opt.getAttribute('data-tab');
+    const isSel = (t === activeTab);
+    opt.classList.toggle('selected', isSel);
+    opt.setAttribute('aria-selected', isSel ? 'true' : 'false');
+
+    const optDef = tabDefs[t];
+    if (optDef) {
+      const optCountEl = document.getElementById(optDef.countId);
+      const optBadge = opt.querySelector('.mobile-opt-badge');
+      if (optBadge && optCountEl) {
+        optBadge.textContent = optCountEl.textContent;
+      }
+    }
+  });
+}
+
+// Setup Mobile Tab Dropdown Handler
+function setupMobileTabDropdown() {
+  const wrapper = document.getElementById('customMobileTabWrapper');
+  const trigger = document.getElementById('customMobileTabTrigger');
+  if (!wrapper || !trigger) return;
+
+  trigger.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const isOpen = wrapper.classList.toggle('open');
+    trigger.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+    if (isOpen) {
+      syncMobileTabSelector();
+    }
+  });
+
+  document.querySelectorAll('.mobile-tab-option').forEach(opt => {
+    opt.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const tabKey = opt.getAttribute('data-tab');
+      const targetBtn = document.querySelector(`.tab-btn[data-tab="${tabKey}"]`);
+      if (targetBtn) {
+        targetBtn.click();
+      }
+      wrapper.classList.remove('open');
+      trigger.setAttribute('aria-expanded', 'false');
+      syncMobileTabSelector();
     });
   });
 
@@ -7560,26 +7788,44 @@ async function init() {
     document.addEventListener('click', unlockAudio, { once: true });
     document.addEventListener('keydown', unlockAudio, { once: true });
 
-    // Infinite scroll: smoothly append batches and load older drops as user scrolls down
+    // Infinite scroll: smoothly append batches and load older drops with RAF throttle
+    let isScrollTicking = false;
     const handleInfiniteScroll = (target) => {
-      const isNearBottom = target === window
-        ? (window.innerHeight + window.scrollY >= document.body.offsetHeight - 600)
-        : (target.scrollTop + target.clientHeight >= target.scrollHeight - 300);
+      if (isScrollTicking) return;
+      isScrollTicking = true;
+      requestAnimationFrame(() => {
+        try {
+          const isNearBottom = target === window
+            ? (window.innerHeight + window.scrollY >= document.body.offsetHeight - 600)
+            : (target.scrollTop + target.clientHeight >= target.scrollHeight - 300);
 
-      if (!isNearBottom) return;
+          if (!isNearBottom) return;
 
-      const filtered = getFilteredDrops();
-      if (tableRenderLimit < filtered.length) {
-        appendNextTableBatch();
-      } else if (activeTab === 'RADAR' && activeFilter === 'ALL' && !searchQuery && hasMoreDrops && !isLoadingMore) {
-        loadMoreDrops();
-      }
+          const filtered = getFilteredDrops();
+          if (tableRenderLimit < filtered.length) {
+            appendNextTableBatch();
+          } else if (activeTab === 'RADAR' && activeFilter === 'ALL' && !searchQuery && hasMoreDrops && !isLoadingMore) {
+            loadMoreDrops();
+          }
+        } finally {
+          isScrollTicking = false;
+        }
+      });
     };
 
     window.addEventListener('scroll', () => handleInfiniteScroll(window), { passive: true });
     const tableWrap = document.querySelector('.table-wrapper');
     if (tableWrap) {
       tableWrap.addEventListener('scroll', () => handleInfiniteScroll(tableWrap), { passive: true });
+      tableWrap.addEventListener('wheel', (e) => {
+        if (!e.deltaY) return;
+        const isAtTop = tableWrap.scrollTop <= 0;
+        const isAtBottom = Math.ceil(tableWrap.scrollTop + tableWrap.clientHeight) >= tableWrap.scrollHeight - 2;
+
+        if ((isAtTop && e.deltaY < 0) || (isAtBottom && e.deltaY > 0)) {
+          window.scrollBy({ top: e.deltaY, behavior: 'auto' });
+        }
+      }, { passive: true });
     }
 
     // Tab buttons
@@ -7626,6 +7872,7 @@ async function init() {
           window.va('event', { name: 'tab_switch', data: { tab: activeTab } });
         }
         renderTable();
+        syncMobileTabSelector();
       });
     });
 
@@ -7724,6 +7971,8 @@ async function init() {
 
     // Custom Cyberpunk Sort Dropdown
     setupCustomDropdown();
+    setupMobileTabDropdown();
+    syncMobileTabSelector();
 
     // Sort select fallback
     const sortSel = document.getElementById('sortSelect');
@@ -7971,6 +8220,9 @@ if (typeof module !== 'undefined' && module.exports) {
     renderPulseSmartMintRow,
     renderPulseAthRow,
     renderPulseNftRow,
+    setupPulseCarousel,
+    scrollPulseCarousel,
+    updateActivePulseDot,
     formatCryptoPrice,
     registerPulseItem,
     pulseItemsMap

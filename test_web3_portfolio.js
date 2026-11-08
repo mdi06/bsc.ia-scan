@@ -1423,6 +1423,69 @@ assert.strictEqual(toggleIcon.textContent, '▾', 'Toggle icon should be ▾');
 global.document.getElementById = savedGetElemPulse;
 console.log('✔ 24H Daily Pulse DOM population & interactive toggle: PASS');
 
+// Test 24H Pulse Mobile Carousel Logic & Dot Synchronization
+const { setupPulseCarousel, scrollPulseCarousel, updateActivePulseDot } = require('./app');
+
+const mockCarouselDots = [0, 1, 2, 3].map(i => ({
+  index: i,
+  classList: new Set(i === 0 ? ['pulse-dot', 'active'] : ['pulse-dot']),
+  getAttribute: (attr) => attr === 'data-index' ? String(i) : null,
+  setAttribute: function(attr, val) { this[attr] = val; },
+  removeAttribute: function(attr) { delete this[attr]; }
+}));
+mockCarouselDots.forEach(d => {
+  d.classList.add = function(c) { Set.prototype.add.call(this, c); };
+  d.classList.remove = function(c) { Set.prototype.delete.call(this, c); };
+});
+
+const mockCards = [0, 1, 2, 3].map(i => ({
+  offsetWidth: 320,
+  scrollIntoViewCalled: false,
+  scrollIntoView: function() { this.scrollIntoViewCalled = true; }
+}));
+
+const mockPulseGrid = {
+  scrollLeft: 0,
+  offsetWidth: 340,
+  querySelectorAll: (selector) => {
+    if (selector === '.pulse-card') return mockCards;
+    return [];
+  },
+  scrollTo: function({ left }) { this.scrollLeft = left; },
+  addEventListener: () => {}
+};
+
+const savedQuerySelectorAll = global.document.querySelectorAll;
+const savedGetElemById = global.document.getElementById;
+
+global.document.querySelectorAll = (selector) => {
+  if (selector.includes('#pulseCarouselDots')) return mockCarouselDots;
+  return [];
+};
+global.document.getElementById = (id) => {
+  if (id === 'dailyPulseGrid') return mockPulseGrid;
+  return null;
+};
+
+// Test dot activation
+updateActivePulseDot(2);
+assert(mockCarouselDots[2].classList.has('active'), 'Dot 2 must have active class');
+assert(!mockCarouselDots[0].classList.has('active'), 'Dot 0 must no longer have active class');
+
+// Test forward carousel scroll
+mockCards.forEach(c => c.scrollIntoViewCalled = false);
+scrollPulseCarousel(1);
+assert(mockCards[3].scrollIntoViewCalled || mockCards[1].scrollIntoViewCalled, 'Card must be scrolled into view');
+
+// Test clamp at boundaries
+mockPulseGrid.scrollLeft = 0;
+scrollPulseCarousel(-1);
+assert(mockCarouselDots[0].classList.has('active'), 'Cannot scroll before index 0');
+
+global.document.querySelectorAll = savedQuerySelectorAll;
+global.document.getElementById = savedGetElemById;
+console.log('✔ 24H Pulse Mobile Carousel Navigation & Active Dot Sync: PASS');
+
 // Test Micro-Price Formatting & Outlier Protection
 console.log('Testing Micro-Price Formatting & Outlier Protection...');
 assert.strictEqual(formatCryptoPrice(0), '$0.00', 'Zero price should format as $0.00');

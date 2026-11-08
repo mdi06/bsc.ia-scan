@@ -141,7 +141,7 @@
       <div class="nav-container">
         <!-- Row 1: Primary Tabs on Left + Search & Sort on Right -->
         <div class="nav-primary-row">
-          <div class="tabs" role="tablist">
+          <div class="tabs desktop-tabs" role="tablist">
             <button class="tab-btn active" id="tabRadar" data-tab="RADAR" role="tab" aria-selected="true">
               <span class="desktop-only">1: 📡 Live Radar</span><span class="mobile-only">📡 Radar</span> (<span
                 id="radarCount">0</span>)
@@ -169,13 +169,59 @@
             </button>
           </div>
 
+          <!-- Mobile Tab Dropdown Selector (Active on screens <= 768px) -->
+          <div class="mobile-tab-selector-wrap" id="mobileTabSelectorWrap">
+            <div class="custom-select-wrapper mobile-tabs-dropdown" id="customMobileTabWrapper">
+              <button type="button" class="custom-select-trigger mobile-tab-trigger" id="customMobileTabTrigger"
+                aria-haspopup="listbox" aria-expanded="false" aria-label="Select Radar View / Tab">
+                <span class="mobile-tab-active-label" id="mobileTabActiveLabel">
+                  <span class="mobile-tab-curr-name">1: 📡 Live Radar</span>
+                  <span class="badge badge-yellow" id="mobileActiveBadge">0</span>
+                </span>
+                <span class="custom-select-arrow">▾</span>
+              </button>
+              <ul class="custom-select-options mobile-tab-options" id="customMobileTabOptions" role="listbox" tabindex="-1">
+                <li class="custom-option mobile-tab-option selected" data-tab="RADAR" role="option" aria-selected="true">
+                  <span class="mobile-opt-title">1: 📡 Live Radar</span>
+                  <span class="badge badge-yellow mobile-opt-badge" id="mobileOptRadarCount">0</span>
+                  <span class="opt-check">✓</span>
+                </li>
+                <li class="custom-option mobile-tab-option" data-tab="SECONDARY" role="option" aria-selected="false">
+                  <span class="mobile-opt-title">2: 📈 Secondary Market</span>
+                  <span class="badge badge-yellow mobile-opt-badge" id="mobileOptSecondaryCount">0</span>
+                  <span class="opt-check">✓</span>
+                </li>
+                <li class="custom-option mobile-tab-option" data-tab="LAUNCHPAD" role="option" aria-selected="false">
+                  <span class="mobile-opt-title">3: 🚀 Launchpads</span>
+                  <span class="badge badge-yellow mobile-opt-badge" id="mobileOptLaunchpadCount">0</span>
+                  <span class="opt-check">✓</span>
+                </li>
+                <li class="custom-option mobile-tab-option" data-tab="SMART" role="option" aria-selected="false">
+                  <span class="mobile-opt-title">4: 🧠 Smart Alpha</span>
+                  <span class="badge badge-yellow mobile-opt-badge" id="mobileOptSmartCount">0</span>
+                  <span class="opt-check">✓</span>
+                </li>
+                <li class="custom-option mobile-tab-option" data-tab="WALLETS" role="option" aria-selected="false">
+                  <span class="mobile-opt-title">5: 🏆 Wallet Leaderboard</span>
+                  <span class="badge badge-yellow mobile-opt-badge" id="mobileOptWalletsCount">0</span>
+                  <span class="opt-check">✓</span>
+                </li>
+                <li class="custom-option mobile-tab-option" data-tab="PORTFOLIO" role="option" aria-selected="false">
+                  <span class="mobile-opt-title">6: 🎒 My Portfolio</span>
+                  <span class="badge badge-cyan mobile-opt-badge" id="mobileOptPortfolioCount">0</span>
+                  <span class="opt-check">✓</span>
+                </li>
+              </ul>
+            </div>
+          </div>
+
           <div class="search-sort-group">
             <div class="sort-box">
               <span class="dim">Sort:</span>
               <div class="custom-select-wrapper" id="customSortWrapper">
                 <button type="button" class="custom-select-trigger" id="customSortTrigger" aria-haspopup="listbox"
                   aria-expanded="false" aria-label="Sort options">
-                  <span id="customSortLabel">Block (Newest)</span>
+                  <span class="sort-trigger-content"><span class="sort-prefix">⇅ Sort:</span> <span id="customSortLabel">Block (Newest)</span></span>
                   <span class="custom-select-arrow">▾</span>
                 </button>
                 <ul class="custom-select-options" id="customSortOptions" role="listbox" tabindex="-1">
@@ -302,7 +348,7 @@
       </div>
 
       <div class="daily-pulse-body" id="dailyPulseBody">
-        <div class="daily-pulse-grid">
+        <div class="daily-pulse-grid" id="dailyPulseGrid">
           <!-- Card 1: Top 24h Runners (Top 3) -->
           <div class="pulse-card pulse-card-runner">
             <div class="pulse-card-header">
@@ -391,6 +437,32 @@
             <div class="pulse-card-footer">
               <span class="pulse-footer-note">⚡ Verified Agent ID collections on Element</span>
             </div>
+          </div>
+        </div>
+
+        <!-- Mobile Carousel Navigation & Slide Indicators (Only visible on mobile <= 768px) -->
+        <div class="pulse-carousel-nav" id="pulseCarouselNav" aria-label="Pulse carousel controls">
+          <div class="pulse-carousel-dots" id="pulseCarouselDots">
+            <button type="button" class="pulse-carousel-pill active" data-index="0" aria-label="Slide 1: Top 24h Runners">
+              <span class="pulse-pill-pip"></span>
+              <span class="pulse-pill-label">1. Runners</span>
+            </button>
+            <button type="button" class="pulse-carousel-pill" data-index="1" aria-label="Slide 2: Top 24h ATH from Mint">
+              <span class="pulse-pill-pip"></span>
+              <span class="pulse-pill-label">2. ATH</span>
+            </button>
+            <button type="button" class="pulse-carousel-pill" data-index="2" aria-label="Slide 3: Top 24h Smart Mints">
+              <span class="pulse-pill-pip"></span>
+              <span class="pulse-pill-label">3. Smart</span>
+            </button>
+            <button type="button" class="pulse-carousel-pill" data-index="3" aria-label="Slide 4: Top 24h NFT Surges">
+              <span class="pulse-pill-pip"></span>
+              <span class="pulse-pill-label">4. NFT</span>
+            </button>
+          </div>
+          <div class="pulse-carousel-arrows">
+            <button type="button" class="pulse-arrow-btn" id="pulsePrevBtn" aria-label="Previous slide" onclick="scrollPulseCarousel(-1)">‹</button>
+            <button type="button" class="pulse-arrow-btn" id="pulseNextBtn" aria-label="Next slide" onclick="scrollPulseCarousel(1)">›</button>
           </div>
         </div>
 
