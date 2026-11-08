@@ -234,8 +234,18 @@ let globalStats = null;
 let isLoadingMore = false;
 let hasMoreDrops = true;
 
+// Responsive client detection helper for mobile-first silence & optimization
+function isMobileClient() {
+  if (typeof window === 'undefined') return false;
+  const isSmall = Boolean(window.innerWidth && window.innerWidth <= 768);
+  const isMobileUa = typeof navigator !== 'undefined' && Boolean(navigator.userAgent) && /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+  return isSmall || isMobileUa;
+}
+if (typeof window !== 'undefined') window.isMobileClient = isMobileClient;
+
 // Native Browser / Desktop Push Notification System
 function requestNotificationPermission() {
+  if (isMobileClient()) return; // Silent on mobile: no push notification prompts
   if (typeof window !== 'undefined' && 'Notification' in window) {
     if (Notification.permission === 'default') {
       Notification.requestPermission().catch(() => {});
@@ -245,6 +255,7 @@ function requestNotificationPermission() {
 if (typeof window !== 'undefined') window.requestNotificationPermission = requestNotificationPermission;
 
 function sendDesktopNotification(title, body) {
+  if (isMobileClient()) return; // Silent on mobile: no system push notifications
   if (typeof window === 'undefined' || !('Notification' in window)) return;
   if (Notification.permission === 'granted') {
     try {
@@ -273,6 +284,7 @@ function escapeHtml(str) {
 
 // Crisp, futuristic Cyberpunk Web Audio Chime (D5 -> A5 -> D6)
 function playMarketAlertSound() {
+  if (isMobileClient()) return; // Silent on mobile: updates table silently without audio disruption
   if (!soundEnabled) return;
   try {
     const AudioCtx = window.AudioContext || window.webkitAudioContext;
@@ -317,11 +329,12 @@ function playMarketAlertSound() {
 
 // Visual Toast notification on new drop
 function showNewMarketToast(item) {
+  if (isMobileClient()) return; // Silent on mobile: updates table silently without toast popups
   const container = document.getElementById('toastContainer');
   if (!container) return;
 
   const toast = document.createElement('div');
-  toast.className = 'market-toast';
+  toast.className = 'market-toast drop-alert';
   const blkStr = item.block ? `#${String(item.block).slice(-6)}` : 'LIVE';
   toast.innerHTML = `
     <div class="toast-icon">🚨</div>
@@ -350,6 +363,10 @@ function showNewMarketToast(item) {
 
 // Generic feedback toast
 function showToast(title, desc, icon = '💎', meta = '') {
+  // Silent market/drop alerts on mobile (allow explicit user actions like copy address)
+  if (isMobileClient() && (String(title).includes('ALERT') || String(title).includes('DROP') || String(title).includes('MARKET'))) {
+    return;
+  }
   const container = document.getElementById('toastContainer');
   if (!container) return;
 
@@ -359,7 +376,7 @@ function showToast(title, desc, icon = '💎', meta = '') {
     : title;
 
   const toast = document.createElement('div');
-  toast.className = 'market-toast';
+  toast.className = 'market-toast drop-alert';
   toast.innerHTML = `
     <div class="toast-icon">${icon}</div>
     <div class="toast-content">
@@ -8286,7 +8303,8 @@ if (typeof module !== 'undefined' && module.exports) {
     registerPulseItem,
     pulseItemsMap,
     updateDigitalAiCounter,
-    getCurrentAgentWalletsCount: () => currentAgentWalletsCount
+    getCurrentAgentWalletsCount: () => currentAgentWalletsCount,
+    isMobileClient
   };
 }
 

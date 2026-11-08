@@ -1565,5 +1565,31 @@ assert.strictEqual(getCurrentAgentWalletsCount(), 175849, 'State must be preserv
 global.document.getElementById = prevGetElemCounter;
 console.log('✔ Live Agentic Wallets Counter Sync: PASS');
 
+// Testing Mobile Notification Alert Suppression
+console.log('Testing Mobile Notification Alert Suppression...');
+const { isMobileClient } = require('./app.js');
+
+global.window.innerWidth = 390;
+assert.strictEqual(isMobileClient(), true, 'isMobileClient must be true for 390px width');
+
+let toastAppended = false;
+const prevGetElemToast = global.document.getElementById;
+global.document.getElementById = (id) => {
+  if (id === 'toastContainer') return { appendChild: () => { toastAppended = true; } };
+  return null;
+};
+
+// On mobile, drop/market alerts must NOT create toasts
+toastAppended = false;
+showToast('🎯 SNIPER READY ALERT', 'Should not display on mobile');
+assert.strictEqual(toastAppended, false, 'Drop alerts must be silently suppressed on mobile');
+
+// Restore desktop width
+global.window.innerWidth = 1280;
+assert.strictEqual(isMobileClient(), false, 'isMobileClient must be false for 1280px width');
+
+global.document.getElementById = prevGetElemToast;
+console.log('✔ Mobile Notification Alert Suppression: PASS');
+
 console.log('🎉 All Web3, Multicall3, Smart Hunters, and Competitor Features verified successfully!');
 process.exit(0);

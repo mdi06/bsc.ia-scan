@@ -3497,16 +3497,16 @@ transition: all 0.15s ease;
     align-self: flex-end;
   }
 
-  /* Toast notification on mobile */
+  /* Toast notification on mobile: silence drop alerts */
   .toast-container {
     bottom: 20px;
     right: 14px;
     left: 14px;
+    pointer-events: none;
   }
 
-  .market-toast {
-    min-width: unset;
-    max-width: 100%;
+  .market-toast.drop-alert {
+    display: none !important;
   }
 
   /* Hall of Fame Modal Mobile Overhaul */
