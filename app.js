@@ -1794,6 +1794,8 @@ function updateDigitalAiCounter(count = 175842) {
   }
   const hdrCount = document.getElementById('headerAiWalletsCount');
   if (hdrCount) hdrCount.textContent = formatted;
+  const tickerEl = document.getElementById('tickerAiWallets');
+  if (tickerEl) tickerEl.textContent = `🤖 ${formatted} .ai`;
 }
 
 // Update DOM Header with Macro Stats
