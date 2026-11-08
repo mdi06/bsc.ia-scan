@@ -1775,9 +1775,32 @@ function computeStats(drops) {
   };
 }
 
+function updateDigitalAiCounter(count = 175842) {
+  const formatted = count.toLocaleString('en-US');
+  const screen = document.getElementById('digitalLcdScreen');
+  if (screen) {
+    screen.innerHTML = '';
+    for (const char of formatted) {
+      const span = document.createElement('span');
+      if (char === ',') {
+        span.className = 'dcb-comma';
+        span.textContent = ',';
+      } else {
+        span.className = 'dcb-digit';
+        span.textContent = char;
+      }
+      screen.appendChild(span);
+    }
+  }
+  const hdrCount = document.getElementById('headerAiWalletsCount');
+  if (hdrCount) hdrCount.textContent = formatted;
+}
+
 // Update DOM Header with Macro Stats
 function renderStats(drops) {
   const stats = computeStats(drops);
+
+  updateDigitalAiCounter(175842);
 
   document.getElementById('fillRatePct').textContent = `${stats.fillRatePct.toFixed(1)}%`;
   document.getElementById('fillRateRatio').textContent = `(${stats.soldOutCount} / ${stats.cappedTotal} Sold Out)`;
