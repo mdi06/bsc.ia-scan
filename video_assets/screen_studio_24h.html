@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>24H Market Briefing Screen Studio Zoom</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      width: 1920px;
+      height: 1080px;
+      background: #02070c;
+      overflow: hidden;
+      position: relative;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      user-select: none;
+    }
+
+    /* Ambient background gradient & soft edge glow */
+    .bg-gradient {
+      position: absolute;
+      inset: 0;
+      background: radial-gradient(circle at 18% 25%, rgba(0, 240, 255, 0.16) 0%, transparent 45%),
+                  radial-gradient(circle at 82% 75%, rgba(240, 185, 11, 0.12) 0%, transparent 45%),
+                  radial-gradient(circle at 50% 50%, rgba(2, 32, 28, 0.5) 0%, transparent 70%);
+      pointer-events: none;
+    }
+    .bg-grid {
+      position: absolute;
+      inset: 0;
+      background-image: 
+        linear-gradient(rgba(0, 240, 255, 0.035) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(0, 240, 255, 0.035) 1px, transparent 1px);
+      background-size: 40px 40px;
+      pointer-events: none;
+    }
+
+    /* Virtual Camera Stage */
+    #camera-stage {
+      position: absolute;
+      left: 0;
+      top: 0;
+      width: 1920px;
+      height: 1080px;
+      transform-origin: 0 0;
+      will-change: transform;
+    }
+
+    /* macOS Window Container */
+    .window-container {
+      position: absolute;
+      left: 200px;
+      top: 90px;
+      width: 1520px;
+      height: 900px;
+      background: #040c12;
+      border-radius: 16px;
+      box-shadow: 0 35px 110px rgba(0, 0, 0, 0.9), 0 0 0 1px rgba(255, 255, 255, 0.12);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    /* macOS Window Titlebar */
+    .window-titlebar {
+      height: 42px;
+      background: #07131d;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      display: flex;
+      align-items: center;
+      padding: 0 16px;
+      position: relative;
+    }
+    .window-dots {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .dot {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+    }
+    .dot-red { background: #ff5f56; border: 1px solid #e0443e; }
+    .dot-yellow { background: #ffbd2e; border: 1px solid #dea123; }
+    .dot-green { background: #27c93f; border: 1px solid #1aab29; }
+
+    .window-urlbar {
+      position: absolute;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 440px;
+      height: 26px;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 7px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      font-size: 12px;
+      font-family: monospace;
+      color: #94a3b8;
+    }
+    .url-lock {
+      font-size: 11px;
+      color: #00ff88;
+    }
+
+    /* App Frame */
+    .app-frame {
+      flex: 1;
+      width: 100%;
+      height: calc(100% - 42px);
+      border: none;
+      background: #03080c;
+    }
+
+    /* Custom Floating Mouse Cursor */
+    #cursor-wrapper {
+      position: absolute;
+      left: 0;
+      top: 0;
+      pointer-events: none;
+      z-index: 999999;
+      transform-origin: 3px 3px;
+    }
+    .cursor-svg {
+      width: 26px;
+      height: 26px;
+      filter: drop-shadow(0 3px 8px rgba(0, 0, 0, 0.6));
+    }
+    .click-ripple {
+      position: absolute;
+      left: 3px;
+      top: 3px;
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      border: 2px solid rgba(0, 240, 255, 0.9);
+      transform: translate(-50%, -50%) scale(0);
+      opacity: 0;
+      pointer-events: none;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="bg-gradient"></div>
+  <div class="bg-grid"></div>
+
+  <!-- Virtual Camera Stage -->
+  <div id="camera-stage">
+    <div class="window-container">
+      <div class="window-titlebar">
+        <div class="window-dots">
+          <div class="dot dot-red"></div>
+          <div class="dot dot-yellow"></div>
+          <div class="dot dot-green"></div>
+        </div>
+        <div class="window-urlbar">
+          <span class="url-lock">🔒</span> agent-id-monitor.vercel.app
+        </div>
+      </div>
+      <iframe class="app-frame" id="appIframe" src="http://127.0.0.1:8099/index.html"></iframe>
+    </div>
+
+    <!-- Animated High-DPI Cursor -->
+    <div id="cursor-wrapper">
+      <svg class="cursor-svg" viewBox="0 0 24 24" fill="none">
+        <path d="M3 2L19 14L11.5 15.5L8 22L3 2Z" fill="#ffffff" stroke="#111111" stroke-width="1.8" stroke-linejoin="round"/>
+      </svg>
+      <div class="click-ripple" id="clickRipple"></div>
+    </div>
+  </div>
+
+  <script>
+    // Smoothstep interpolation
+    function smoothstep(min, max, value) {
+      const x = Math.max(0, Math.min(1, (value - min) / (max - min)));
+      return x * x * (3 - 2 * x);
+    }
+    function lerp(a, b, t) {
+      return a + (b - a) * t;
+    }
+
+    const stage = document.getElementById("camera-stage");
+    const cursor = document.getElementById("cursor-wrapper");
+    const ripple = document.getElementById("clickRipple");
+    const iframe = document.getElementById("appIframe");
+
+    // Dynamic keyframe generator for the 4 24H overview cards
+    function getDynamicTrajectories() {
+      // Coordinates of the 4 cards in global 1920x1080 stage:
+      // Card 1 (Runners): center around (400, 470)
+      // Card 2 (ATH from Mint): center around (773, 470)
+      // Card 3 (Smart Mints): center around (1146, 470)
+      // Card 4 (NFT Surges): center around (1520, 470)
+      // Wide overview: center around (960, 480)
+
+      const cameraKeyframes = [
+        // 0.0s - 0.9s: Establishing shot of entire 24H Overview Hero Card
+        [0.0,  1.12,  960, 480],
+        [0.8,  1.12,  960, 480],
+
+        // 0.8s - 1.4s: Smooth cinematic glide & zoom into Card 1: TOP 24H RUNNERS
+        [1.4,  1.82,  410, 465],
+        [2.7,  1.82,  410, 465],
+
+        // 2.7s - 3.4s: Pan & Zoom into Card 2: TOP 24H ATH FROM MINT
+        [3.4,  1.82,  775, 465],
+        [4.7,  1.82,  775, 465],
+
+        // 4.7s - 5.4s: Pan & Zoom into Card 3: TOP 24H SMART MINTS
+        [5.4,  1.82,  1145, 465],
+        [6.7,  1.82,  1145, 465],
+
+        // 6.7s - 7.4s: Pan & Zoom into Card 4: TOP 24H NFT SURGES
+        [7.4,  1.82,  1515, 465],
+        [8.7,  1.82,  1515, 465],
+
+        // 8.7s - 9.6s: Smooth pull-back framing all 4 cards + live macro headline
+        [9.6,  1.15,  960, 485],
+        [10.0, 1.15,  960, 485]
+      ];
+
+      const cursorKeyframes = [
+        [0.0,  1150, 680, false],
+        [0.8,  820,  550, false],
+
+        // Card 1 hover & inspect
+        [1.4,  410,  440, false],
+        [1.6,  410,  440, true],  // subtle tap
+        [1.8,  410,  440, false],
+        [2.7,  450,  470, false],
+
+        // Card 2 hover & inspect
+        [3.4,  775,  440, false],
+        [3.6,  775,  440, true],  // subtle tap
+        [3.8,  775,  440, false],
+        [4.7,  810,  470, false],
+
+        // Card 3 hover & inspect
+        [5.4,  1145, 440, false],
+        [5.6,  1145, 440, true],  // subtle tap
+        [5.8,  1145, 440, false],
+        [6.7,  1180, 470, false],
+
+        // Card 4 hover & inspect
+        [7.4,  1515, 440, false],
+        [7.6,  1515, 440, true],  // subtle tap
+        [7.8,  1515, 440, false],
+        [8.7,  1530, 470, false],
+
+        // Pull back & highlight macro headline
+        [9.6,  960,  580, false],
+        [10.0, 960,  580, false]
+      ];
+
+      return { cameraKeyframes, cursorKeyframes };
+    }
+
+    function evaluateTrajectory(keyframes, t) {
+      if (t <= keyframes[0][0]) return keyframes[0].slice(1);
+      if (t >= keyframes[keyframes.length - 1][0]) return keyframes[keyframes.length - 1].slice(1);
+
+      for (let i = 0; i < keyframes.length - 1; i++) {
+        const k0 = keyframes[i];
+        const k1 = keyframes[i + 1];
+        if (t >= k0[0] && t <= k1[0]) {
+          const progress = smoothstep(k0[0], k1[0], t);
+          const result = [];
+          for (let j = 1; j < k0.length; j++) {
+            if (typeof k0[j] === 'boolean') {
+              result.push(k0[j] || (k1[j] && progress > 0.85));
+            } else {
+              result.push(lerp(k0[j], k1[j], progress));
+            }
+          }
+          return result;
+        }
+      }
+      return keyframes[0].slice(1);
+    }
+
+    let cachedTrajectories = null;
+
+    window.setVideoTime = function(t) {
+      if (!cachedTrajectories || t < 0.1) {
+        cachedTrajectories = getDynamicTrajectories();
+      }
+      const { cameraKeyframes, cursorKeyframes } = cachedTrajectories;
+
+      // 1. Evaluate Camera Position
+      const [scale, focusX, focusY] = evaluateTrajectory(cameraKeyframes, t);
+      const transX = 960 - (focusX * scale);
+      const transY = 540 - (focusY * scale);
+      stage.style.transform = `translate(${transX.toFixed(2)}px, ${transY.toFixed(2)}px) scale(${scale.toFixed(3)})`;
+
+      // 2. Evaluate Cursor Position & Click Ripple
+      const [curX, curY, isClick] = evaluateTrajectory(cursorKeyframes, t);
+      cursor.style.transform = `translate(${curX.toFixed(1)}px, ${curY.toFixed(1)}px)`;
+
+      if (isClick) {
+        cursor.style.transform += ` scale(0.88)`;
+        ripple.style.opacity = "1";
+        ripple.style.transform = "translate(-50%, -50%) scale(2.4)";
+        ripple.style.borderColor = "rgba(0, 240, 255, 0.9)";
+      } else {
+        ripple.style.opacity = "0";
+        ripple.style.transform = "translate(-50%, -50%) scale(0)";
+      }
+    };
+  </script>
+</body>
+</html>
+

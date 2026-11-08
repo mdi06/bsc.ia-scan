@@ -2104,11 +2104,12 @@ function renderSmartStreamTicker(drops) {
         time,
         tagClass: 'tag-smart',
         tagText: '🧠 SMART MONEY',
-        text: `🔥 <strong>${smartWallets.length} Smart Wallets</strong> entered <strong>$${symbol}</strong> simultaneously`,
+        text: `🔥 <span class="ticker-wallet">${smartWallets.length} Smart Wallets</span> entered <strong>$${symbol}</strong> simultaneously`,
         contract
       });
     } else if (smartWallets.length === 1) {
       const w = smartWallets[0];
+      const isF = typeof followedWallets !== 'undefined' && followedWallets.has(String(w).toLowerCase());
       const wLabel = w.length > 18 ? `${w.slice(0, 6)}...${w.slice(-4)}` : w;
       const action = tm >= 1 ? `minted ${formatCount(tm)} ` : 'entered ';
       events.push({
@@ -2116,7 +2117,7 @@ function renderSmartStreamTicker(drops) {
         time,
         tagClass: 'tag-smart',
         tagText: '🧠 SMART MONEY',
-        text: `🧠 Smart Wallet <strong>${escapeHtml(wLabel)}</strong> ${action}<strong>$${symbol}</strong>`,
+        text: `🧠 Smart Hunter <span class="ticker-wallet${isF ? ' followed' : ''}">${isF ? '⭐ ' : ''}${escapeHtml(wLabel)}</span> ${action}<strong>$${symbol}</strong>`,
         contract
       });
     }
@@ -2526,7 +2527,8 @@ function renderPulseSmartMintRow(sm, idx) {
       <span class="pulse-row-sub">${subStr}</span>
     </div>
     <div class="pulse-row-right">
-      <span class="badge badge-yellow pulse-row-badge">🧠 ${count} Wallets</span>
+      <span class="badge badge-yellow pulse-row-badge">${count} Wallets</span>
+      <a href="javascript:void(0)" class="pulse-mini-dex-btn" title="Inspect Smart Minters" onclick="event.stopPropagation(); openInspectModalByContract('${cAddr}')">🧠</a>
     </div>
   </div>`;
 }
@@ -2541,16 +2543,37 @@ function renderPulseAthRow(item, idx) {
   const athPrice = Number(item.athPrice || item.ath_price_usd || item.token_price_usd || item.secUsd || 0);
   const athStr = athPrice > 0 ? formatCryptoPrice(athPrice) : '$0.00';
   const mintCost = Number(item.mintUsd || item.mint_cost_usd || 0);
-  const mintStr = (item.isFree || mintCost === 0) ? 'Mint: Free' : ('Mint: ' + formatCryptoPrice(mintCost));
-  const mult = Number(item.multiplier || 0);
-  const multStr = mult > 1 ? (Math.round(mult) + 'x') : '💎 Peak';
+  const isFree = Boolean(item.isFree || mintCost === 0 || (item.mint_price_str && item.mint_price_str.includes('FREE')));
+  const mintStr = isFree ? 'Mint: Free' : ('Mint: ' + formatCryptoPrice(mintCost));
+
+  // Compute % profit ATH gave
+  let gainPct = 0;
+  if (mintCost > 0 && athPrice > 0) {
+    gainPct = ((athPrice - mintCost) / mintCost) * 100;
+  } else if (isFree && athPrice > 0) {
+    if (item.multiplier && item.multiplier > 1) {
+      gainPct = (item.multiplier - 1) * 100;
+    } else if (item.item && Number(item.item.price_change_24h) > 0) {
+      gainPct = Number(item.item.price_change_24h);
+    } else if (item.price_change_24h && Number(item.price_change_24h) > 0) {
+      gainPct = Number(item.price_change_24h);
+    } else {
+      const basePrice = athPrice >= 0.01 ? 0.01 : 0.0001;
+      const mult = athPrice / basePrice;
+      gainPct = mult * 100;
+    }
+  }
+
+  const isUp = gainPct >= 0;
+  const gainBadgeClass = isUp ? 'badge-green' : 'badge-red';
+  const gainText = (isUp ? '+' : '') + (gainPct >= 1000 ? Math.round(gainPct).toLocaleString() : gainPct.toFixed(1)) + '%';
   const dexUrl = getDexScreenerUrl(item) || item.pair_url || item.market_url || ('https://pancakeswap.finance/swap?outputCurrency=' + (item.contract || ''));
 
   if (cAddr) {
     registerPulseItem(cAddr, item.item || item);
   }
 
-  return `<div class="pulse-list-row pulse-ath-row" onclick="openInspectModalByContract('${cAddr}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openInspectModalByContract('${cAddr}');}" role="button" tabindex="0" title="Click to inspect ${name} (ATH: ${athStr})">
+  return `<div class="pulse-list-row pulse-ath-row" onclick="openInspectModalByContract('${cAddr}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openInspectModalByContract('${cAddr}');}" role="button" tabindex="0" title="Click to inspect ${name} (ATH: ${athStr}, Profit: ${gainText})">
     <div class="pulse-row-left">
       <span class="pulse-rank-tag ${rankClass}">${rankLabel}</span>
       <div class="pulse-row-identity">
@@ -2559,11 +2582,11 @@ function renderPulseAthRow(item, idx) {
       </div>
     </div>
     <div class="pulse-row-mid">
-      <span class="pulse-row-price" style="color: var(--color-cyan);">${athStr}</span>
+      <span class="pulse-row-price" style="color: var(--color-gold); font-weight: 800;">${athStr}</span>
       <span class="pulse-row-mcap">${mintStr}</span>
     </div>
     <div class="pulse-row-right">
-      <span class="badge badge-cyan pulse-row-badge">${multStr}</span>
+      <span class="badge ${gainBadgeClass} pulse-row-badge">${gainText}</span>
       <a href="${dexUrl}" target="_blank" rel="noopener" class="pulse-mini-dex-btn" title="Live Chart / Market" onclick="event.stopPropagation()">📈</a>
     </div>
   </div>`;
@@ -2770,9 +2793,12 @@ function compute24hPulseMetrics(drops = allDrops, topGainersList = savedTopGaine
     const is24hMint = min24hBlock > 0 ? (blk >= min24hBlock) : true;
     if (!is24hMint) return;
 
-    seenAthContracts.add(c);
     const athPrice = Number(item.ath_price_usd || entry.athPrice || item.token_price_usd || entry.secUsd || 0);
-    const profit = Number(entry.athProfit || entry.profit || (athPrice - Number(item.mint_cost_usd || entry.mintUsd || 0)) || athPrice);
+    const mintUsd = Number(item.mint_cost_usd || entry.mintUsd || 0);
+    if (mintUsd > 0 && athPrice <= mintUsd) return; // Only positive ATH gains from mint
+
+    seenAthContracts.add(c);
+    const profit = Number(entry.athProfit || entry.profit || (athPrice - mintUsd) || athPrice);
     const multiplier = Number(entry.multiplier || item.multiplier || 0);
 
     athCandidates.push({
@@ -2784,8 +2810,8 @@ function compute24hPulseMetrics(drops = allDrops, topGainersList = savedTopGaine
       profit,
       multiplier,
       block: blk,
-      mintUsd: Number(item.mint_cost_usd || entry.mintUsd || 0),
-      isFree: entry.isFree || item.isFree || (Number(item.mint_cost_usd || entry.mintUsd || 0) === 0),
+      mintUsd,
+      isFree: entry.isFree || item.isFree || (mintUsd === 0),
       standard: item.standard || entry.standard || '',
       pair_url: item.pair_url || entry.pair_url,
       market_url: item.market_url || entry.market_url
@@ -2804,9 +2830,12 @@ function compute24hPulseMetrics(drops = allDrops, topGainersList = savedTopGaine
       const chg = item.price_change_24h || entry.price_change_24h;
       if (vol <= 0 && (chg === undefined || chg === 0)) return;
 
-      seenAthContracts.add(c);
       const athPrice = Number(item.ath_price_usd || entry.athPrice || item.token_price_usd || entry.secUsd || 0);
-      const profit = Number(entry.athProfit || entry.profit || (athPrice - Number(item.mint_cost_usd || entry.mintUsd || 0)) || athPrice);
+      const mintUsd = Number(item.mint_cost_usd || entry.mintUsd || 0);
+      if (mintUsd > 0 && athPrice <= mintUsd) return; // Only positive ATH gains
+
+      seenAthContracts.add(c);
+      const profit = Number(entry.athProfit || entry.profit || (athPrice - mintUsd) || athPrice);
       const multiplier = Number(entry.multiplier || item.multiplier || 0);
 
       athCandidates.push({
@@ -2818,8 +2847,8 @@ function compute24hPulseMetrics(drops = allDrops, topGainersList = savedTopGaine
         profit,
         multiplier,
         block: Number(item.block || entry.block || 0),
-        mintUsd: Number(item.mint_cost_usd || entry.mintUsd || 0),
-        isFree: entry.isFree || item.isFree || (Number(item.mint_cost_usd || entry.mintUsd || 0) === 0),
+        mintUsd,
+        isFree: entry.isFree || item.isFree || (mintUsd === 0),
         standard: item.standard || entry.standard || '',
         pair_url: item.pair_url || entry.pair_url,
         market_url: item.market_url || entry.market_url
@@ -4036,18 +4065,17 @@ function renderTable(keepLimit = false) {
     let smBadge = '';
     if (hasFollowed) {
       const followedNames = smWalletsList.filter(w => followedWallets.has(String(w).toLowerCase()));
-      const firstF = followedNames[0] || 'Alpha';
-      smBadge = `<span class="badge-followed-star" title="⭐ Followed Alpha Hunter: ${escapeHtml(followedNames.join(', '))}">⭐ ${escapeHtml(firstF)}</span>`;
+      smBadge = `<span class="badge-cluster" style="background: rgba(240, 185, 11, 0.2); border-color: rgba(240, 185, 11, 0.7); color: #ffd000;" title="⭐ Followed Alpha Hunter: ${escapeHtml(followedNames.join(', '))}">⭐</span>`;
     } else if (isCluster && isReady) {
-      smBadge = `<span class="badge-cluster" title="🔥 ${smWalletsList.length} Smart Money Wallets Cluster & Sniper Ready">🔥🎯 SM CLUSTER (${smWalletsList.length})</span>`;
+      smBadge = `<span class="badge-cluster" title="🔥 ${smWalletsList.length} Smart Money Wallets Cluster & Sniper Ready">🔥${smWalletsList.length}🎯</span>`;
     } else if (isCluster) {
-      smBadge = `<span class="badge-cluster" title="🔥 ${smWalletsList.length} Smart Money Wallets Cluster Inflow">🔥 SM CLUSTER (${smWalletsList.length})</span>`;
+      smBadge = `<span class="badge-cluster" title="🔥 ${smWalletsList.length} Smart Money Wallets Cluster Inflow">🔥${smWalletsList.length}</span>`;
     } else if (isSm && isReady) {
-      smBadge = `<span title="Smart Alpha & Sniper Ready">🧠🎯</span>`;
+      smBadge = `<span title="Smart Alpha & Sniper Ready: ${escapeHtml(smWalletsList.join(', '))}">🧠🎯</span>`;
     } else if (isReady) {
       smBadge = `<span title="Sniper Ready">🎯</span>`;
     } else if (isSm) {
-      smBadge = `<span title="${smWalletsList.join(', ')}">🧠</span>`;
+      smBadge = `<span title="${escapeHtml(smWalletsList.join(', '))}">🧠</span>`;
     }
 
     // Standard badge
@@ -4056,7 +4084,7 @@ function renderTable(keepLimit = false) {
     if (item.is_nft_surge) {
       stdBadge = `<span class="badge badge-magenta" style="box-shadow: 0 0 8px rgba(217, 70, 239, 0.4); font-weight:700;">🦋 SURGE (${item.secondary_sales_count || 0})</span>`;
     } else if (item.is_proxy_clone) {
-      stdBadge = `<span class="badge badge-cyan" style="box-shadow: 0 0 8px rgba(56, 189, 248, 0.4); font-weight:700;" title="${escapeHtml(item.proxy_type || 'Proxy')} Master: ${escapeHtml(item.master_implementation || '')}">🧩 PROXY</span>`;
+      stdBadge = `<span class="badge badge-cyan" style="color: #00f0ff !important; background: rgba(0, 240, 255, 0.18) !important; border: 1px solid rgba(0, 240, 255, 0.5) !important; box-shadow: 0 0 10px rgba(0, 240, 255, 0.3); font-weight:800;" title="${escapeHtml(item.proxy_type || 'Proxy')} Master: ${escapeHtml(item.master_implementation || '')}">🧩 PROXY</span>`;
     } else if (std.includes('BEP-20')) {
       stdBadge = `<span style="color: var(--color-cyan); font-weight:600;">BEP-20</span>`;
     } else if (std.includes('Fair-Mint')) {
@@ -4387,18 +4415,17 @@ function appendNextTableBatch() {
     let smBadge = '';
     if (hasFollowed) {
       const followedNames = smWalletsList.filter(w => followedWallets.has(String(w).toLowerCase()));
-      const firstF = followedNames[0] || 'Alpha';
-      smBadge = `<span class="badge-followed-star" title="⭐ Followed Alpha Hunter: ${escapeHtml(followedNames.join(', '))}">⭐ ${escapeHtml(firstF)}</span>`;
+      smBadge = `<span class="badge-cluster" style="background: rgba(240, 185, 11, 0.2); border-color: rgba(240, 185, 11, 0.7); color: #ffd000;" title="⭐ Followed Alpha Hunter: ${escapeHtml(followedNames.join(', '))}">⭐</span>`;
     } else if (isCluster && isReady) {
-      smBadge = `<span class="badge-cluster" title="🔥 ${smWalletsList.length} Smart Money Wallets Cluster & Sniper Ready">🔥🎯 SM CLUSTER (${smWalletsList.length})</span>`;
+      smBadge = `<span class="badge-cluster" title="🔥 ${smWalletsList.length} Smart Money Wallets Cluster & Sniper Ready">🔥${smWalletsList.length}🎯</span>`;
     } else if (isCluster) {
-      smBadge = `<span class="badge-cluster" title="🔥 ${smWalletsList.length} Smart Money Wallets Cluster Inflow">🔥 SM CLUSTER (${smWalletsList.length})</span>`;
+      smBadge = `<span class="badge-cluster" title="🔥 ${smWalletsList.length} Smart Money Wallets Cluster Inflow">🔥${smWalletsList.length}</span>`;
     } else if (isSm && isReady) {
-      smBadge = `<span title="Smart Alpha & Sniper Ready">🧠🎯</span>`;
+      smBadge = `<span title="Smart Alpha & Sniper Ready: ${escapeHtml(smWalletsList.join(', '))}">🧠🎯</span>`;
     } else if (isReady) {
       smBadge = `<span title="Sniper Ready">🎯</span>`;
     } else if (isSm) {
-      smBadge = `<span title="${smWalletsList.join(', ')}">🧠</span>`;
+      smBadge = `<span title="${escapeHtml(smWalletsList.join(', '))}">🧠</span>`;
     }
 
     // Standard badge
@@ -4407,7 +4434,7 @@ function appendNextTableBatch() {
     if (item.is_nft_surge) {
       stdBadge = `<span class="badge badge-magenta" style="box-shadow: 0 0 8px rgba(217, 70, 239, 0.4); font-weight:700;">🦋 SURGE (${item.secondary_sales_count || 0})</span>`;
     } else if (item.is_proxy_clone) {
-      stdBadge = `<span class="badge badge-cyan" style="box-shadow: 0 0 8px rgba(56, 189, 248, 0.4); font-weight:700;" title="${escapeHtml(item.proxy_type || 'Proxy')} Master: ${escapeHtml(item.master_implementation || '')}">🧩 PROXY</span>`;
+      stdBadge = `<span class="badge badge-cyan" style="color: #00f0ff !important; background: rgba(0, 240, 255, 0.18) !important; border: 1px solid rgba(0, 240, 255, 0.5) !important; box-shadow: 0 0 10px rgba(0, 240, 255, 0.3); font-weight:800;" title="${escapeHtml(item.proxy_type || 'Proxy')} Master: ${escapeHtml(item.master_implementation || '')}">🧩 PROXY</span>`;
     } else if (std.includes('BEP-20')) {
       stdBadge = `<span style="color: var(--color-cyan); font-weight:600;">BEP-20</span>`;
     } else if (std.includes('Fair-Mint')) {
@@ -6692,7 +6719,7 @@ async function pollLatestBlock() {
       const data = await res.json();
       if (data && data.result) {
         const blkNum = parseInt(data.result, 16);
-        document.getElementById('latestBlock').textContent = `#${blkNum.toLocaleString()}`;
+        document.getElementById('latestBlock').textContent = `${blkNum.toLocaleString()}`;
         return;
       }
     } catch (err) {

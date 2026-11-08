@@ -4,8 +4,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>BNB Chain .ai Agent ID Suite | 24/7 Live Radar & Alpha Tracker</title>
-  <meta name="title" content="BNB Chain .ai Agent ID Suite | 24/7 Live Radar & Alpha Tracker">
+  <title>Binance Agent Radar | 24/7 Live Tracker & Alpha Suite</title>
+  <meta name="title" content="Binance Agent Radar | 24/7 Live Tracker & Alpha Suite">
   <meta name="description"
     content="24/7 Autonomous Scanner for Binance .ai Agent ID drops, real-time smart wallet inflow (5,000 tracked wallets), instant honeypot/anti-rug audits, and fair-mint tracker on BNB Chain.">
   <meta name="theme-color" content="#03080c">
@@ -16,7 +16,7 @@
   <!-- Open Graph / Facebook -->
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://agent-id-monitor.vercel.app">
-  <meta property="og:title" content="BNB Chain .ai Agent ID Suite | 24/7 Live Radar & Alpha Tracker">
+  <meta property="og:title" content="Binance Agent Radar | 24/7 Live Tracker & Alpha Suite">
   <meta property="og:description"
     content="Real-time autonomous discovery engine tracking 5,000 smart wallets, instant honeypot audits, and new .ai agent deployments on BNB Chain.">
   <meta property="og:image" content="https://agent-id-monitor.vercel.app/og-preview.png?v=2">
@@ -26,12 +26,19 @@
   <!-- Twitter / X -->
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:url" content="https://agent-id-monitor.vercel.app">
-  <meta name="twitter:title" content="BNB Chain .ai Agent ID Suite | 24/7 Live Radar & Alpha Tracker">
+  <meta name="twitter:title" content="Binance Agent Radar | 24/7 Live Tracker & Alpha Suite">
   <meta name="twitter:description"
     content="Real-time autonomous discovery engine tracking 5,000 smart wallets, instant honeypot audits, and new .ai agent deployments on BNB Chain.">
   <meta name="twitter:image" content="https://agent-id-monitor.vercel.app/og-preview.png?v=2">
 
-  <link rel="stylesheet" href="style.css?v=3.0">
+  <!-- Fonts: Inter & JetBrains Mono with Asian Glyphs -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link
+    href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700;800&family=Noto+Sans+SC:wght@500;700;900&display=swap"
+    rel="stylesheet">
+
+  <link rel="stylesheet" href="style.css">
   <link rel="icon" type="image/svg+xml" href="icon.svg">
   <link rel="apple-touch-icon" href="/thumbnail-square.png">
   <!-- Google Web Analytics & Speed Insights -->
@@ -80,10 +87,8 @@
             </svg>
           </span>
           <div class="suite-title-wrap">
-            <strong class="suite-title-text"><span class="desktop-only">BNB CHAIN .AI AGENT ID SUITE</span><span
-                class="mobile-only">BNB .AI AGENT ID</span></strong>
-            <span class="meta-item registry-meta"
-              title="Official Space ID / Binance .ai Agent ID Registry: 0x60B9262456dE011F7d15a54CdD8c48bAaa8B022F"><code>0x60B9...022F</code></span>
+            <strong class="suite-title-text"><span class="desktop-only">BINANCE AGENT RADAR</span><span
+                class="mobile-only">AGENT RADAR</span></strong>
           </div>
         </div>
 
@@ -91,8 +96,10 @@
         <div class="suite-search-wrap">
           <div class="search-box suite-search-box">
             <span class="search-icon">🔍</span>
-            <input type="text" id="searchInput" placeholder="Search name, symbol, contract 0x..." aria-label="Search Drops" autocomplete="off" spellcheck="false">
-            <button type="button" id="searchClearBtn" class="search-clear-btn" aria-label="Clear search" title="Clear search" style="display: none;">✕</button>
+            <input type="text" id="searchInput" placeholder="Search name, symbol, contract 0x..."
+              aria-label="Search Drops" autocomplete="off" spellcheck="false">
+            <button type="button" id="searchClearBtn" class="search-clear-btn" aria-label="Clear search"
+              title="Clear search" style="display: none;">✕</button>
             <span class="search-kbd-badge" title="Press / to search">/</span>
           </div>
         </div>
@@ -101,7 +108,10 @@
           <div class="suite-telemetry">
             <span class="meta-item live-pill" id="liveBlockBadge" title="Live BSC Block Height">📡 <span
                 id="latestBlock">Loading...</span></span>
-            <span class="meta-item ai-wallets-header-pill" id="headerAiWalletsPill" title="Total Registered .ai Wallets on BNB Chain">🤖 <span class="desktop-only">.AI WALLETS:</span> <strong id="headerAiWalletsCount" style="color: #ffd600; text-shadow: 0 0 6px rgba(255,214,0,0.5);">175,842</strong></span>
+            <span class="meta-item ai-wallets-header-pill" id="headerAiWalletsPill"
+              title="Total Registered Binance Agentic Wallets on BNB Chain">🤖 <span class="desktop-only">BINANCE AGENTIC WALLETS:</span>
+              <strong id="headerAiWalletsCount"
+                style="color: #ffd600; text-shadow: 0 0 6px rgba(255,214,0,0.5);">175,842</strong></span>
             <span class="meta-item sync-time-item visually-hidden" id="syncTime">Synced just now</span>
           </div>
           <div class="suite-actions-group">
@@ -229,13 +239,13 @@
           <div class="filter-pills" id="filterPillsContainer" role="toolbar" aria-label="Filter Drops">
             <button class="pill active" draggable="true" data-filter="ALL" id="pillAll">ALL</button>
             <button class="pill" draggable="true" data-filter="LAUNCHPAD" id="pillLaunchpad"
-              style="color: #f97316; border-color: rgba(249, 115, 22, 0.4); font-weight: 700;">🚀 LAUNCHPAD (<span
+              style="color: #f0b90b; border-color: rgba(240, 185, 11, 0.45); font-weight: 700;">🚀 LAUNCHPAD (<span
                 id="launchpadCount">0</span>)</button>
             <button class="pill" draggable="true" data-filter="SNIPER_READY" id="pillSniperReady"
-              style="color: #4ade80; border-color: rgba(74, 222, 128, 0.4); font-weight: 700;">🎯 SNIPE READY (<span
+              style="color: #00f58c; border-color: rgba(0, 245, 140, 0.45); font-weight: 700;">🎯 SNIPE READY (<span
                 id="sniperReadyCount">0</span>)</button>
             <button class="pill" draggable="true" data-filter="NFT_SURGE" id="pillNftSurge"
-              style="color: #d946ef; border-color: rgba(217, 70, 239, 0.4); font-weight: 700;">🦋 NFT SURGE (<span
+              style="color: #c084fc; border-color: rgba(192, 132, 252, 0.45); font-weight: 700;">🦋 NFT SURGE (<span
                 id="nftSurgeCount">0</span>)</button>
             <button class="pill" draggable="true" data-filter="PROXY" id="pillProxy"
               style="color: #38bdf8; border-color: rgba(56, 189, 248, 0.4); font-weight: 700;">🧩 PROXY (<span
@@ -256,7 +266,7 @@
             <button id="resetPillOrderBtn" class="pill-order-control-btn" onclick="resetPillSequence()"
               title="Restore default tab order" style="display: none;">↺ Reset Sequence</button>
             <button id="reorderPillsBtn" class="pill-order-control-btn" onclick="openReorderModal()"
-              title="Customize and reorder tab sequence">⚙️ Reorder</button>
+              title="Customize and reorder tab sequence">⚙️ REORDER</button>
           </div>
         </div>
       </div>
@@ -284,7 +294,8 @@
         </div>
 
         <div class="daily-pulse-controls">
-          <button type="button" class="daily-pulse-toggle-btn" id="dailyPulseToggleBtn" onclick="toggleDailyPulseHero()" aria-expanded="true" aria-controls="dailyPulseBody" title="Collapse or expand 24h summary card">
+          <button type="button" class="daily-pulse-toggle-btn" id="dailyPulseToggleBtn" onclick="toggleDailyPulseHero()"
+            aria-expanded="true" aria-controls="dailyPulseBody" title="Collapse or expand 24h summary card">
             <span id="dailyPulseToggleIcon">▾</span> <span id="dailyPulseToggleText">Collapse</span>
           </button>
         </div>
@@ -302,7 +313,8 @@
             <div class="pulse-card-main">
               <div class="pulse-mini-list" id="pulseRunnersList">
                 <div class="pulse-runner-identity" style="display:none;">
-                  <strong class="pulse-runner-name" id="pulseRunnerName" role="button" tabindex="0" title="Click to inspect">—</strong>
+                  <strong class="pulse-runner-name" id="pulseRunnerName" role="button" tabindex="0"
+                    title="Click to inspect">—</strong>
                   <span class="pulse-runner-sym" id="pulseRunnerSym">(-)</span>
                   <strong id="pulseRunnerPrice">$0.00</strong>
                   <strong id="pulseRunnerMcap">$0</strong>
@@ -333,7 +345,8 @@
               <span id="pulseGradPct" style="display:none;"></span>
             </div>
             <div class="pulse-card-footer">
-              <span class="pulse-smart-link" onclick="openAllTimeProfitModal()" role="button" tabindex="0" title="Open All-Time Post-Mint Profit Leaderboard">
+              <span class="pulse-smart-link" onclick="openAllTimeProfitModal()" role="button" tabindex="0"
+                title="Open All-Time Post-Mint Profit Leaderboard">
                 <span>🏆 24h ATH • View All-Time ↗</span>
               </span>
             </div>
@@ -352,7 +365,8 @@
               </div>
             </div>
             <div class="pulse-card-footer">
-              <span class="pulse-smart-link" onclick="openSmartLeaderboardModal()" role="button" tabindex="0" title="Open 2,100+ Smart Wallet Leaderboard">
+              <span class="pulse-smart-link" onclick="openSmartLeaderboardModal()" role="button" tabindex="0"
+                title="Open 2,100+ Smart Wallet Leaderboard">
                 <span>🏆 Smart Leaderboard (<span id="pulseSmartInflows">0</span> Inflows) ↗</span>
               </span>
             </div>
@@ -383,7 +397,8 @@
         <!-- 24h Macro Executive Headline -->
         <div class="daily-pulse-headline-row">
           <span class="headline-tag">⚡ 24H MACRO INSIGHT</span>
-          <span class="headline-text" id="pulseMacroHeadline">Analyzing rolling 24-hour liquidity rotation and smart minting patterns...</span>
+          <span class="headline-text" id="pulseMacroHeadline">Analyzing rolling 24-hour liquidity rotation and smart
+            minting patterns...</span>
         </div>
       </div>
     </section>
@@ -532,12 +547,21 @@
 
         <div class="wallets-tab-toolbar">
           <div class="wallets-tab-filters">
-            <button class="filter-pill active" id="tabWalletFilterAll" onclick="setWalletsTabFilter('ALL')" title="All Alpha Hunters ranked by Top PnL">🌟 Top PnL / All</button>
-            <button class="filter-pill" id="tabWalletSortWinRate" onclick="setWalletsTabSort('WIN_RATE')" title="Sort by Win Rate % (Click to toggle Ascending/Descending)">🎯 Win Rate <span class="sort-indicator" id="tabWalletSortIndicatorWinRate">↕</span></button>
-            <button class="filter-pill" id="tabWalletSortWins" onclick="setWalletsTabSort('WINS')" title="Sort by Total Wins and Mints (Click to toggle Ascending/Descending)">🏆 Wins / Mints <span class="sort-indicator" id="tabWalletSortIndicatorWins">↕</span></button>
-            <button class="filter-pill" id="tabWalletSortPicks" onclick="setWalletsTabSort('PICKS')" title="Sort by Number of Winning Token Picks">💎 Top Picks <span class="sort-indicator" id="tabWalletSortIndicatorPicks">↕</span></button>
-            <button class="filter-pill" id="tabWalletFilterHighWin" onclick="setWalletsTabFilter('HIGH_WIN')" title="Show only hunters with ≥50% win rate">🔥 High Win-Rate (≥50%)</button>
-            <button class="filter-pill" id="tabWalletFilterFollowed" onclick="setWalletsTabFilter('FOLLOWED')" title="Show only followed hunters">⭐ Followed Only (<span id="walletsTabFollowedCount">0</span>)</button>
+            <button class="filter-pill active" id="tabWalletFilterAll" onclick="setWalletsTabFilter('ALL')"
+              title="All Alpha Hunters ranked by Top PnL">🌟 Top PnL / All</button>
+            <button class="filter-pill" id="tabWalletSortWinRate" onclick="setWalletsTabSort('WIN_RATE')"
+              title="Sort by Win Rate % (Click to toggle Ascending/Descending)">🎯 Win Rate <span class="sort-indicator"
+                id="tabWalletSortIndicatorWinRate">↕</span></button>
+            <button class="filter-pill" id="tabWalletSortWins" onclick="setWalletsTabSort('WINS')"
+              title="Sort by Total Wins and Mints (Click to toggle Ascending/Descending)">🏆 Wins / Mints <span
+                class="sort-indicator" id="tabWalletSortIndicatorWins">↕</span></button>
+            <button class="filter-pill" id="tabWalletSortPicks" onclick="setWalletsTabSort('PICKS')"
+              title="Sort by Number of Winning Token Picks">💎 Top Picks <span class="sort-indicator"
+                id="tabWalletSortIndicatorPicks">↕</span></button>
+            <button class="filter-pill" id="tabWalletFilterHighWin" onclick="setWalletsTabFilter('HIGH_WIN')"
+              title="Show only hunters with ≥50% win rate">🔥 High Win-Rate (≥50%)</button>
+            <button class="filter-pill" id="tabWalletFilterFollowed" onclick="setWalletsTabFilter('FOLLOWED')"
+              title="Show only followed hunters">⭐ Followed Only (<span id="walletsTabFollowedCount">0</span>)</button>
           </div>
           <div class="wallets-tab-search">
             <span class="search-icon">🔍</span>
@@ -550,11 +574,21 @@
           <table class="wallets-table" id="walletsTable">
             <thead>
               <tr>
-                <th style="width: 45px; text-align: center;" class="sortable-th active-sort" id="thWalletRank" onclick="setWalletsTabSort('DEFAULT')" title="Default Rank (Top PnL & Wins)"># <span class="sort-indicator" id="thSortWalletRank">▼</span></th>
-                <th class="sortable-th" id="thWalletName" onclick="setWalletsTabSort('NAME')" title="Sort Alphabetically by Agent ID">AGENT ID / WALLET <span class="sort-indicator" id="thSortWalletName">↕</span></th>
-                <th style="text-align: center;" class="sortable-th" id="thWalletWinRate" onclick="setWalletsTabSort('WIN_RATE')" title="Sort by Win Rate %">WIN RATE <span class="sort-indicator" id="thSortWalletWinRate">↕</span></th>
-                <th style="text-align: center;" class="sortable-th" id="thWalletWinsMints" onclick="setWalletsTabSort('WINS')" title="Sort by Total Wins and Mints">WINS / MINTS <span class="sort-indicator" id="thSortWalletWinsMints">↕</span></th>
-                <th class="sortable-th" id="thWalletTopPicks" onclick="setWalletsTabSort('PICKS')" title="Sort by Top Winning Token Picks">TOP WINNING PICKS <span class="sort-indicator" id="thSortWalletTopPicks">↕</span></th>
+                <th style="width: 45px; text-align: center;" class="sortable-th active-sort" id="thWalletRank"
+                  onclick="setWalletsTabSort('DEFAULT')" title="Default Rank (Top PnL & Wins)"># <span
+                    class="sort-indicator" id="thSortWalletRank">▼</span></th>
+                <th class="sortable-th" id="thWalletName" onclick="setWalletsTabSort('NAME')"
+                  title="Sort Alphabetically by Agent ID">AGENT ID / WALLET <span class="sort-indicator"
+                    id="thSortWalletName">↕</span></th>
+                <th style="text-align: center;" class="sortable-th" id="thWalletWinRate"
+                  onclick="setWalletsTabSort('WIN_RATE')" title="Sort by Win Rate %">WIN RATE <span
+                    class="sort-indicator" id="thSortWalletWinRate">↕</span></th>
+                <th style="text-align: center;" class="sortable-th" id="thWalletWinsMints"
+                  onclick="setWalletsTabSort('WINS')" title="Sort by Total Wins and Mints">WINS / MINTS <span
+                    class="sort-indicator" id="thSortWalletWinsMints">↕</span></th>
+                <th class="sortable-th" id="thWalletTopPicks" onclick="setWalletsTabSort('PICKS')"
+                  title="Sort by Top Winning Token Picks">TOP WINNING PICKS <span class="sort-indicator"
+                    id="thSortWalletTopPicks">↕</span></th>
                 <th style="text-align: center; width: 170px;">ACTIONS</th>
               </tr>
             </thead>
@@ -672,7 +706,7 @@
   <!-- Toast Notifications for New Drops (ARIA live region) -->
   <div id="toastContainer" class="toast-container" aria-live="polite" aria-atomic="true"></div>
 
-  <script src="app.js?v=3.0"></script>
+  <script src="app.js"></script>
 </body>
 
 </html>
