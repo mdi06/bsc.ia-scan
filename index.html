@@ -13,27 +13,25 @@
   <!-- Google Site Verification (Search Console & Webmaster Tools) -->
   <meta name="google-site-verification" content="qVsbZL7x5UeBCqPwGr_Bwaz79gRgJPbKfnoaa0T_jU8">
 
-  <!-- Open Graph / Facebook -->
+  <!-- Open Graph / Facebook / LinkedIn -->
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://agent-id-monitor.vercel.app">
-  <meta property="og:title" content="Binance Agent Radar | 24/7 Live Tracker & Alpha Suite">
-  <meta property="og:description"
-    content="Real-time autonomous discovery engine tracking 5,000 smart wallets, instant honeypot audits, and new .ai agent deployments on BNB Chain.">
-  <meta property="og:image" content="https://agent-id-monitor.vercel.app/og-preview.png?v=2">
+  <meta property="og:title" content="Binance .AI Agent Radar & Sniper | 175k+ Agentic Wallets">
+  <meta property="og:description" content="Autonomous on-chain radar detecting 175,842+ Binance agentic wallets, stealth Block 0 fair-mints, and secondary DEX breakout multipliers.">
+  <meta property="og:image" content="https://agent-id-monitor.vercel.app/og-preview.png?v=4">
+  <meta property="og:image:secure_url" content="https://agent-id-monitor.vercel.app/og-preview.png?v=4">
+  <meta property="og:image:type" content="image/png">
   <meta property="og:image:width" content="1200">
   <meta property="og:image:height" content="630">
 
   <!-- Twitter / X -->
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:url" content="https://agent-id-monitor.vercel.app">
-  <meta name="twitter:title" content="Binance Agent Radar | 24/7 Live Tracker & Alpha Suite">
-  <meta name="twitter:description"
-    content="Real-time autonomous discovery engine tracking 5,000 smart wallets, instant honeypot audits, and new .ai agent deployments on BNB Chain.">
-  <meta name="twitter:image" content="https://agent-id-monitor.vercel.app/og-preview.png?v=2">
+  <meta name="twitter:title" content="Binance .AI Agent Radar & Sniper | 175k+ Agentic Wallets">
+  <meta name="twitter:description" content="Autonomous on-chain radar detecting 175,842+ Binance agentic wallets, stealth Block 0 fair-mints, and secondary DEX breakout multipliers.">
+  <meta name="twitter:image" content="https://agent-id-monitor.vercel.app/og-preview.png?v=4">
 
   <!-- Fonts: Inter & JetBrains Mono with Asian Glyphs -->
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link
     href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700;800&family=Noto+Sans+SC:wght@500;700;900&display=swap"
     rel="stylesheet">
@@ -109,7 +107,8 @@
             <span class="meta-item live-pill" id="liveBlockBadge" title="Live BSC Block Height">📡 <span
                 id="latestBlock">Loading...</span></span>
             <span class="meta-item ai-wallets-header-pill" id="headerAiWalletsPill"
-              title="Total Registered Binance Agentic Wallets on BNB Chain">🤖 <span class="desktop-only">BINANCE AGENTIC WALLETS:</span>
+              title="Total Registered Binance Agentic Wallets on BNB Chain">🤖 <span class="desktop-only">BINANCE
+                AGENTIC WALLETS:</span>
               <strong id="headerAiWalletsCount"
                 style="color: #ffd600; text-shadow: 0 0 6px rgba(255,214,0,0.5);">175,842</strong></span>
             <span class="meta-item sync-time-item visually-hidden" id="syncTime">Synced just now</span>
@@ -180,8 +179,10 @@
                 </span>
                 <span class="custom-select-arrow">▾</span>
               </button>
-              <ul class="custom-select-options mobile-tab-options" id="customMobileTabOptions" role="listbox" tabindex="-1">
-                <li class="custom-option mobile-tab-option selected" data-tab="RADAR" role="option" aria-selected="true">
+              <ul class="custom-select-options mobile-tab-options" id="customMobileTabOptions" role="listbox"
+                tabindex="-1">
+                <li class="custom-option mobile-tab-option selected" data-tab="RADAR" role="option"
+                  aria-selected="true">
                   <span class="mobile-opt-title">1: 📡 Live Radar</span>
                   <span class="badge badge-yellow mobile-opt-badge" id="mobileOptRadarCount">0</span>
                   <span class="opt-check">✓</span>
@@ -221,7 +222,8 @@
               <div class="custom-select-wrapper" id="customSortWrapper">
                 <button type="button" class="custom-select-trigger" id="customSortTrigger" aria-haspopup="listbox"
                   aria-expanded="false" aria-label="Sort options">
-                  <span class="sort-trigger-content"><span class="sort-prefix">⇅ Sort:</span> <span id="customSortLabel">Block (Newest)</span></span>
+                  <span class="sort-trigger-content"><span class="sort-prefix">⇅ Sort:</span> <span
+                      id="customSortLabel">Block (Newest)</span></span>
                   <span class="custom-select-arrow">▾</span>
                 </button>
                 <ul class="custom-select-options" id="customSortOptions" role="listbox" tabindex="-1">
@@ -443,11 +445,13 @@
         <!-- Mobile Carousel Navigation & Slide Indicators (Only visible on mobile <= 768px) -->
         <div class="pulse-carousel-nav" id="pulseCarouselNav" aria-label="Pulse carousel controls">
           <div class="pulse-carousel-dots" id="pulseCarouselDots">
-            <button type="button" class="pulse-carousel-pill active" data-index="0" aria-label="Slide 1: Top 24h Runners">
+            <button type="button" class="pulse-carousel-pill active" data-index="0"
+              aria-label="Slide 1: Top 24h Runners">
               <span class="pulse-pill-pip"></span>
               <span class="pulse-pill-label">1. Runners</span>
             </button>
-            <button type="button" class="pulse-carousel-pill" data-index="1" aria-label="Slide 2: Top 24h ATH from Mint">
+            <button type="button" class="pulse-carousel-pill" data-index="1"
+              aria-label="Slide 2: Top 24h ATH from Mint">
               <span class="pulse-pill-pip"></span>
               <span class="pulse-pill-label">2. ATH</span>
             </button>
@@ -461,8 +465,10 @@
             </button>
           </div>
           <div class="pulse-carousel-arrows">
-            <button type="button" class="pulse-arrow-btn" id="pulsePrevBtn" aria-label="Previous slide" onclick="scrollPulseCarousel(-1)">‹</button>
-            <button type="button" class="pulse-arrow-btn" id="pulseNextBtn" aria-label="Next slide" onclick="scrollPulseCarousel(1)">›</button>
+            <button type="button" class="pulse-arrow-btn" id="pulsePrevBtn" aria-label="Previous slide"
+              onclick="scrollPulseCarousel(-1)">‹</button>
+            <button type="button" class="pulse-arrow-btn" id="pulseNextBtn" aria-label="Next slide"
+              onclick="scrollPulseCarousel(1)">›</button>
           </div>
         </div>
 
