@@ -5508,6 +5508,32 @@ function openHallOfFameModal(filterMode = 'ALL') {
       const athProfitStr = formatCryptoPrice(g.athProfit, true);
       const multStr = g.multiplier ? `<span class="badge badge-yellow" style="font-size: 10px;">${g.multiplier}x</span>` : (g.isFree ? `<span class="badge badge-green" style="font-size: 10px;">FREE ALPHA</span>` : '');
 
+      // Compute profit % from mint
+      let gainPct = 0;
+      const mintCost = Number(g.mintUsd || 0);
+      const athPrice = Math.max(Number(g.athPrice || 0), Number(g.secUsd || 0));
+      const isFree = Boolean(g.isFree || mintCost === 0);
+
+      if (mintCost > 0 && athPrice > 0) {
+        gainPct = ((athPrice - mintCost) / mintCost) * 100;
+      } else if (isFree && athPrice > 0) {
+        if (g.multiplier && g.multiplier > 1) {
+          gainPct = (g.multiplier - 1) * 100;
+        } else if (g.item && Number(g.item.price_change_24h) > 0) {
+          gainPct = Number(g.item.price_change_24h);
+        } else if (g.price_change_24h && Number(g.price_change_24h) > 0) {
+          gainPct = Number(g.price_change_24h);
+        } else {
+          const basePrice = athPrice >= 0.01 ? 0.01 : 0.0001;
+          const mult = athPrice / basePrice;
+          gainPct = mult * 100;
+        }
+      }
+
+      const isUp = gainPct >= 0;
+      const gainPctStr = (isUp ? '+' : '') + (gainPct >= 1000 ? Math.round(gainPct).toLocaleString('en-US') : gainPct.toFixed(1)) + '%';
+      const profitPctBadge = athPrice > 0 ? `<span class="badge ${isUp ? 'badge-green' : 'badge-red'}" style="font-size: 10px; font-weight: 800; padding: 2px 5px; letter-spacing: 0.2px;">${gainPctStr}</span>` : '';
+
       const curPriceStr = g.secUsd > 0 ? formatCryptoPrice(g.secUsd) : '<span class="dim">—</span>';
       const curNetStr = g.profit > 0 ? `<span style="color: var(--color-green); font-weight:600;">${formatCryptoPrice(g.profit, true)}</span>` : '<span class="dim">—</span>';
 
@@ -5545,8 +5571,11 @@ function openHallOfFameModal(filterMode = 'ALL') {
           </td>
           <td class="hof-col-mint">${mintCostStr}</td>
           <td class="hof-col-ath">
-            <div style="font-weight:700; color: var(--color-yellow);">${athPriceStr}</div>
-            <div style="font-size: 10.5px; color: var(--color-green); font-weight: 700;">${athProfitStr} ${multStr}</div>
+            <div style="display: flex; align-items: center; gap: 6px;">
+              <span style="font-weight: 700; color: var(--color-yellow);">${athPriceStr}</span>
+              ${profitPctBadge}
+            </div>
+            <div style="font-size: 10.5px; color: var(--color-green); font-weight: 700; margin-top: 2px;">Net: ${athProfitStr} ${multStr}</div>
           </td>
           <td class="hof-col-current">
             <div>${curPriceStr}</div>
@@ -5594,7 +5623,7 @@ function openHallOfFameModal(filterMode = 'ALL') {
             <th style="width: 60px;">Rank</th>
             <th>Collection / Token</th>
             <th style="width: 100px;">Mint Price</th>
-            <th style="width: 150px;">Peak ATH / Net</th>
+            <th style="width: 165px;">Peak ATH (% Gain)</th>
             <th style="width: 130px;">Current Price</th>
             <th style="width: 110px;">Status</th>
             <th style="width: 185px;">Market Links</th>
