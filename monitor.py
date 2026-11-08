@@ -171,6 +171,37 @@ def save_agent_id_stats(stats: Dict[str, Any]):
     except Exception:
         pass
 
+DIGITS_3ROW = {
+    "0": ["█▀█", "█ █", "█▄█"],
+    "1": [" █ ", " █ ", " █ "],
+    "2": ["▀▀█", "█▀▀", "███"],
+    "3": ["▀▀█", " ▀█", "███"],
+    "4": ["█ █", "▀▀█", "  █"],
+    "5": ["█▀▀", "▀▀█", "███"],
+    "6": ["█▀▀", "█▀█", "█▄█"],
+    "7": ["▀▀█", "  █", "  █"],
+    "8": ["█▀█", "█▀█", "█▄█"],
+    "9": ["█▀█", "▀▀█", "  █"],
+    ",": ["   ", "   ", " ▄ "],
+}
+
+def render_digital_counter_panel(num_str: str) -> Any:
+    """Renders a digital counter box with high-visibility block numbers."""
+    l1, l2, l3 = "", "", ""
+    for ch in num_str:
+        d = DIGITS_3ROW.get(ch, ["   ", "   ", "   "])
+        l1 += d[0] + " "
+        l2 += d[1] + " "
+        l3 += d[2] + " "
+    
+    t = Text(justify="center")
+    t.append("🤖 REGISTERED .AI WALLETS:\n", style="bold bright_white")
+    t.append(l1 + "\n", style="bold bright_yellow")
+    t.append(l2 + "\n", style="bold bright_yellow")
+    t.append(l3 + "\n", style="bold bright_yellow")
+    t.append(f"✦ ON-CHAIN BSC ✦   ({num_str} Claimed)", style="bold bright_cyan")
+    return Panel(t, box=box.HEAVY, border_style="bright_yellow", padding=(0, 2))
+
 def load_smart_wallets() -> Dict[str, str]:
     """Loads smart wallets mapping: {wallet_address_lower: agent_id_name}."""
     if os.path.exists(SMART_WALLETS_FILE):
@@ -2507,11 +2538,30 @@ def print_interest_report(stats: Dict[str, Any]):
 def print_banner():
     stats = load_agent_id_stats()
     ai_wallets_cnt = stats.get("total_created_wallets", 175842)
-    print(f"{C_BOLD}{C_CYAN}╔═══════════════════════════════════════════════════════════════════════╗{C_RESET}")
-    print(f"{C_BOLD}{C_CYAN}║            BNB Chain .ai Agent ID Real-Time Monitor                   ║{C_RESET}")
-    print(f"{C_BOLD}{C_CYAN}║  Target Registry: {C_YELLOW}0x60B9262456dE011F7d15a54CdD8c48bAaa8B022F{C_CYAN}                     ║{C_RESET}")
-    print(f"{C_BOLD}{C_CYAN}║  🤖 Created .ai Wallets: {C_BOLD}{C_YELLOW}▌ {ai_wallets_cnt:,} ▌{C_RESET}{C_CYAN} (Space ID / Binance Ecosystem)  ║{C_RESET}")
-    print(f"{C_BOLD}{C_CYAN}╚═══════════════════════════════════════════════════════════════════════╝{C_RESET}\n")
+    s_cnt = f"{ai_wallets_cnt:,}"
+    l1, l2, l3 = "", "", ""
+    for ch in s_cnt:
+        d = DIGITS_3ROW.get(ch, ["   ", "   ", "   "])
+        l1 += d[0] + " "
+        l2 += d[1] + " "
+        l3 += d[2] + " "
+    l1, l2, l3 = l1.strip(), l2.strip(), l3.strip()
+    inner_w = 63
+
+    def center_line(txt, w):
+        # Count emoji length adjustment
+        display_len = len(txt) + (1 if "🤖" in txt else 0)
+        pad = max(0, (w - display_len) // 2)
+        rem = max(0, w - display_len - pad)
+        return " " * pad + txt + " " * rem
+
+    print(f"{C_BOLD}{C_YELLOW}┏{'━' * inner_w}┓{C_RESET}")
+    print(f"{C_BOLD}{C_YELLOW}┃{C_RESET}{C_BOLD}{center_line('🤖 REGISTERED .AI WALLETS:', inner_w)}{C_RESET}{C_BOLD}{C_YELLOW}┃{C_RESET}")
+    print(f"{C_BOLD}{C_YELLOW}┃{center_line(l1, inner_w)}┃{C_RESET}")
+    print(f"{C_BOLD}{C_YELLOW}┃{center_line(l2, inner_w)}┃{C_RESET}")
+    print(f"{C_BOLD}{C_YELLOW}┃{center_line(l3, inner_w)}┃{C_RESET}")
+    print(f"{C_BOLD}{C_YELLOW}┃{C_RESET}{C_BOLD}{C_CYAN}{center_line(f'✦ ON-CHAIN BSC ✦   ({s_cnt} Claimed)', inner_w)}{C_RESET}{C_BOLD}{C_YELLOW}┃{C_RESET}")
+    print(f"{C_BOLD}{C_YELLOW}┗{'━' * inner_w}┛{C_RESET}\n")
 
 
 def notify_alert():
@@ -3677,8 +3727,8 @@ def get_viewport_max_rows(panel_lines: int = 7) -> int:
             lines = 36
 
     # Fixed non-table overhead:
-    # h_panel (title, big .ai wallet counter, tabs, stats, profit, padding) + nav_bar (1) + status_bar (1) + table header/borders (4) + deep_panel (panel_lines) + margin (1)
-    overhead = 17 + panel_lines
+    # digital counter box (6) + h_panel (title, tabs, stats, profit, padding) (7) + nav_bar (1) + status_bar (1) + table header/borders (4) + deep_panel (panel_lines) + margin (1)
+    overhead = 21 + panel_lines
     avail = lines - overhead
     return max(5, min(avail, 35))
 
@@ -4409,17 +4459,13 @@ def build_interactive_dashboard(
     smart_pill = f" [ 2: 🧠 Smart Alpha ({smart_cnt}) ] "
     port_pill = f" [ 3: 🎒 My Portfolio ({port_cnt} Assets) ] "
 
+    stats = load_agent_id_stats()
+    ai_wallets_cnt = stats.get("total_created_wallets", 175842)
+    c_panel = render_digital_counter_panel(f"{ai_wallets_cnt:,}")
+
     h_text = Text()
     h_text.append("🚀 BNB CHAIN .AI AGENT ID SUITE", style="bold bright_cyan")
     h_text.append(f"   │   Registry: 0x60B9...022F   │   Wallet: {wallet[:6]}...{wallet[-4:]} (nimus.ai)\n", style="bold white")
-
-    # Standout Prominent .AI Wallets Counter
-    stats = load_agent_id_stats()
-    ai_wallets_cnt = stats.get("total_created_wallets", 175842)
-    h_text.append(" 🤖 REGISTERED .AI AGENT WALLETS:  ", style="bold bright_white")
-    h_text.append(f"  ▌ {ai_wallets_cnt:,} ▌  ", style="bold black on bright_yellow")
-    h_text.append("  ✦ SPACE ID / BINANCE ECOSYSTEM ✦  ", style="bold black on bright_cyan")
-    h_text.append("✦ ON-CHAIN BSC ✦\n\n", style="bold green")
 
     if active_tab == "PORTFOLIO":
         radar_tab_style = "dim cyan on grey19"
@@ -4583,7 +4629,7 @@ def build_interactive_dashboard(
         msg = f" | {status_msg}" if status_msg else ""
         nav_bar = Text("⌨️  [TAB / 1 / 2 / 3] Tabs  |  [↑/↓] Row  |  [PgUp/PgDn / [/]] Page  |  [Home/End] Jump  |  [x] 1-Click Exit Sell  |  [m] Market  |  [r] Refresh  |  [b] BscScan  |  [q] Quit", style="bold white on green")
         status_bar = Text(f"📡 BSC Block {curr_block} | Asset {port_selected_idx + 1}/{total_p} | Balance: ${p_sum.get('total_usd', 0.0):.2f} USD ({p_sum.get('native_bnb', 0.0):.6f} BNB){msg}", style="dim green")
-        return Group(h_panel, p_table, p_deep_panel, nav_bar, status_bar)
+        return Group(c_panel, h_panel, p_table, p_deep_panel, nav_bar, status_bar)
 
     # If SMART tab is active, render the dedicated Smart Money Alpha table & inspection panel
     if active_tab == "SMART":
@@ -4695,7 +4741,7 @@ def build_interactive_dashboard(
         msg = f" | {status_msg}" if status_msg else ""
         nav_bar = Text("⌨️  [TAB / 1 / 2] Tabs  |  [s] Snipe  |  [Enter] Modal  |  [q] Quit", style="bold white on magenta")
         status_bar = Text(f"📡 BSC Block {curr_block} | Drop {smart_selected_idx + 1}/{total_smart} | 💎 Donate: {DONATION_WALLET}{msg}", style="dim magenta")
-        return Group(h_panel, s_table, s_deep_panel, nav_bar, status_bar)
+        return Group(c_panel, h_panel, s_table, s_deep_panel, nav_bar, status_bar)
 
     # Standard Interactive Radar Table View
     total_radar = len(disp_history)
@@ -4911,7 +4957,7 @@ def build_interactive_dashboard(
     nav_bar = Text(f"⌨️  [TAB / 1 / 2 / 3] Tabs  |  [↑/↓] Row  |  [s] Snipe/Buy  |  [Enter] Modal  |  [k] 🎯 Ready  |  [u] 🦋 Surge  |  [p] 🧩 Proxy  |  [f] Free  |  [g] Smart  |  [l] LP  |  [a] Active  |  [c] All  |  [o] Sort: {sort_mode}  |  [w] Web  |  [x] X  |  [m] Mkt  |  [b] BscScan  |  [q] Quit", style="bold white on blue")
     status_bar = Text(f"📡 BSC Block {curr_block} | Row {selected_idx + 1}/{total_radar} | 💎 Donate: {DONATION_WALLET}{msg}", style="dim green")
 
-    return Group(h_panel, table, deep_panel, nav_bar, status_bar)
+    return Group(c_panel, h_panel, table, deep_panel, nav_bar, status_bar)
 
 
 def run_live_monitor(rpc: BscRpcClient, wallet: str, plain: bool = False):
