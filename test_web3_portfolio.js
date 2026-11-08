@@ -271,7 +271,32 @@ console.log('✔ renderSmartStreamTicker Populates Infinite Ticker Tape: PASS');
 global.allDrops = sampleDrops;
 openInspectModalByContract('0x2222222222222222222222222222222222222222');
 assert(mockInspectContent.innerHTML.includes('0x2222222222222222222222222222222222222222'), 'Must populate modal content for matching contract');
-console.log('✔ openInspectModalByContract Target Resolution: PASS');
+
+// Test 24H Pulse Item Inspection (Item NOT in allDrops)
+const { renderPulseAthRow, pulseItemsMap } = require('./app');
+const athMockItem = {
+  name: 'Semicon Bull',
+  symbol: 'SOXLB',
+  contract: '0x9999999999999999999999999999999999999999',
+  athPrice: 44.87,
+  mintUsd: 0,
+  isFree: true,
+  standard: 'BEP-20'
+};
+renderPulseAthRow(athMockItem, 2);
+assert(pulseItemsMap.has('0x9999999999999999999999999999999999999999'), 'Must register pulse item in pulseItemsMap');
+
+// Ensure openInspectModalByContract resolves the item even when allDrops is completely empty
+global.allDrops = [];
+openInspectModalByContract('0x9999999999999999999999999999999999999999');
+assert(mockInspectContent.innerHTML.includes('0x9999999999999999999999999999999999999999'), 'Must resolve pulse item from pulseItemsMap');
+assert(mockInspectContent.innerHTML.includes('Semicon Bull'), 'Must display correct asset name in modal');
+
+// Test resilient fallback for unknown contract
+openInspectModalByContract('0x8888888888888888888888888888888888888888', { name: 'Unknown Asset', symbol: 'UNK' });
+assert(mockInspectContent.innerHTML.includes('0x8888888888888888888888888888888888888888'), 'Must open modal with fallback for any contract');
+
+console.log('✔ openInspectModalByContract Target Resolution (allDrops + PulseItems + Fallback): PASS');
 
 // ==========================================
 // Test Persistent Top Gainers Separate Memory
