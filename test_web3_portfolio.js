@@ -1539,5 +1539,31 @@ assert(mockModalContentZero.innerHTML.includes('Unresolved') || mockModalContent
 global.document.getElementById = prevGetElemZero;
 console.log('✔ Micro-Price Formatting, Outlier Guard & Zero-Address Dev Root: PASS');
 
+// Testing Live Agentic Wallets Counter Sync (Zero-Bandwidth Piggyback)
+console.log('Testing Live Agentic Wallets Counter Sync...');
+const { updateDigitalAiCounter, getCurrentAgentWalletsCount } = require('./app.js');
+const mockHdrCount = { textContent: '' };
+const mockTicker = { textContent: '' };
+const mockScreen = { innerHTML: '', appendChild: () => {} };
+const prevGetElemCounter = global.document.getElementById;
+global.document.getElementById = (id) => {
+  if (id === 'headerAiWalletsCount') return mockHdrCount;
+  if (id === 'tickerAiWallets') return mockTicker;
+  if (id === 'digitalLcdScreen') return mockScreen;
+  return null;
+};
+
+updateDigitalAiCounter(175849);
+assert.strictEqual(getCurrentAgentWalletsCount(), 175849, 'Current count must update to 175,849');
+assert.strictEqual(mockHdrCount.textContent, '175,849', 'DOM header count must display formatted 175,849');
+assert(mockTicker.textContent.includes('175,849'), 'Ticker must display formatted 175,849');
+
+// Calling without arguments should preserve state
+updateDigitalAiCounter();
+assert.strictEqual(getCurrentAgentWalletsCount(), 175849, 'State must be preserved without overriding');
+
+global.document.getElementById = prevGetElemCounter;
+console.log('✔ Live Agentic Wallets Counter Sync: PASS');
+
 console.log('🎉 All Web3, Multicall3, Smart Hunters, and Competitor Features verified successfully!');
 process.exit(0);

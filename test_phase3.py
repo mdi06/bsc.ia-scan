@@ -113,6 +113,8 @@ def test_api_feed_endpoint():
     assert data["success"] is True
     assert data["mode"] == "feed"
     assert "stats" in data
+    assert "agent_wallets" in data["stats"]
+    assert data["stats"]["agent_wallets"] >= 175842
     assert "total" in data
     assert "projects" in data
     assert len(data["projects"]) <= 5
@@ -125,6 +127,7 @@ def test_api_feed_endpoint():
         delta_data = res_delta.json()
         assert delta_data["mode"] == "delta"
         assert delta_data["count"] == 0
+        assert delta_data.get("agent_wallets") >= 175842
         assert delta_data["projects"] == []
 
     # 3. Filter mode

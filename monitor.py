@@ -5133,8 +5133,8 @@ def run_live_monitor(rpc: BscRpcClient, wallet: str, plain: bool = False):
                         inp = (tx.get("input") or "").lower()
                         tx_val = int(tx.get("value") or "0", 16)
 
-                        # Track live .ai Agent ID claims / registrations on BSC
-                        if rcv == AGENT_ID_REGISTRY.lower():
+                        # Track live .ai Agent ID claims / registrations on BSC (requires contract call input)
+                        if rcv == AGENT_ID_REGISTRY.lower() and len(inp) >= 10:
                             try:
                                 cur_st = load_agent_id_stats()
                                 cur_st["total_created_wallets"] = cur_st.get("total_created_wallets", 175842) + 1

@@ -1775,7 +1775,14 @@ function computeStats(drops) {
   };
 }
 
-function updateDigitalAiCounter(count = 175842) {
+let currentAgentWalletsCount = 175842;
+
+function updateDigitalAiCounter(count = currentAgentWalletsCount) {
+  if (typeof count === 'number' && !isNaN(count) && count > 0) {
+    currentAgentWalletsCount = count;
+  } else {
+    count = currentAgentWalletsCount;
+  }
   const formatted = count.toLocaleString('en-US');
   const screen = document.getElementById('digitalLcdScreen');
   if (screen) {
@@ -1802,7 +1809,7 @@ function updateDigitalAiCounter(count = 175842) {
 function renderStats(drops) {
   const stats = computeStats(drops);
 
-  updateDigitalAiCounter(175842);
+  updateDigitalAiCounter(currentAgentWalletsCount);
 
   document.getElementById('fillRatePct').textContent = `${stats.fillRatePct.toFixed(1)}%`;
   document.getElementById('fillRateRatio').textContent = `(${stats.soldOutCount} / ${stats.cappedTotal} Sold Out)`;
@@ -6914,6 +6921,9 @@ async function pollDeltaFeed() {
 
     if (data && data.stats) {
       globalStats = data.stats;
+      if (data.stats.agent_wallets) {
+        updateDigitalAiCounter(Number(data.stats.agent_wallets));
+      }
       const rEl = document.getElementById('radarCount');
       if (rEl) rEl.textContent = globalStats.total;
       const sEl = document.getElementById('smartCount');
@@ -6923,6 +6933,9 @@ async function pollDeltaFeed() {
       updateProxyCount();
       updateLaunchpadCount();
       updateSecondaryTabCount();
+    }
+    if (data && data.agent_wallets) {
+      updateDigitalAiCounter(Number(data.agent_wallets));
     }
 
     if (data && data.projects && data.projects.length > 0) {
@@ -7112,6 +7125,15 @@ async function fetchDrops() {
       } catch (e2) {
         source = 'Local Snapshot';
         res = await fetchWithTimeout(`feed_snapshot.json`, { cache: 'default' }, 4000);
+        try {
+          const statsRes = await fetchWithTimeout(`data/agent_id_stats.json`, { cache: 'default' }, 2000);
+          if (statsRes && statsRes.ok) {
+            const stData = await statsRes.json();
+            if (stData && stData.total_created_wallets) {
+              updateDigitalAiCounter(Number(stData.total_created_wallets));
+            }
+          }
+        } catch (eStats) {}
       }
     }
 
@@ -7126,7 +7148,15 @@ async function fetchDrops() {
       freshDrops = payload;
     } else if (payload && Array.isArray(payload.projects)) {
       freshDrops = payload.projects;
-      if (payload.stats) globalStats = payload.stats;
+      if (payload.stats) {
+        globalStats = payload.stats;
+        if (payload.stats.agent_wallets) {
+          updateDigitalAiCounter(Number(payload.stats.agent_wallets));
+        }
+      }
+      if (payload.agent_wallets) {
+        updateDigitalAiCounter(Number(payload.agent_wallets));
+      }
       hasMoreDrops = Boolean(payload.has_more);
       if (payload.latest_block) latestKnownBlock = payload.latest_block;
     }
@@ -8225,7 +8255,9 @@ if (typeof module !== 'undefined' && module.exports) {
     updateActivePulseDot,
     formatCryptoPrice,
     registerPulseItem,
-    pulseItemsMap
+    pulseItemsMap,
+    updateDigitalAiCounter,
+    getCurrentAgentWalletsCount: () => currentAgentWalletsCount
   };
 }
 

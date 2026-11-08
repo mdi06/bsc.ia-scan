@@ -213,6 +213,9 @@ def get_feed(
     nft_surge_count = sum(1 for d in all_projs if d.get("is_nft_surge"))
     secondary_count = sum(1 for d in all_projs if is_secondary_market_asset(d))
 
+    agent_id_stats = monitor.load_agent_id_stats()
+    total_agent_wallets = int(agent_id_stats.get("total_created_wallets", 175842))
+
     stats = {
         "total": total,
         "smart": smart_count,
@@ -220,7 +223,8 @@ def get_feed(
         "proxy": proxy_count,
         "nft_surge": nft_surge_count,
         "secondary": secondary_count,
-        "latest_block": latest_block
+        "latest_block": latest_block,
+        "agent_wallets": total_agent_wallets
     }
 
     client_etag = request.headers.get("if-none-match")
@@ -244,6 +248,7 @@ def get_feed(
                     "total": total,
                     "count": 0,
                     "latest_block": latest_block,
+                    "agent_wallets": total_agent_wallets,
                     "projects": []
                 }
             )
@@ -258,6 +263,7 @@ def get_feed(
                 "total": total,
                 "count": len(delta),
                 "latest_block": latest_block,
+                "agent_wallets": total_agent_wallets,
                 "projects": delta,
                 "stats": stats
             }
