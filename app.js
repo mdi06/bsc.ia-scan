@@ -5538,25 +5538,25 @@ function openHallOfFameModal(filterMode = 'ALL') {
 
       rowsHtml += `
         <tr>
-          <td>${rankBadge}</td>
-          <td>
+          <td class="hof-col-rank">${rankBadge}</td>
+          <td class="hof-col-project">
             <div style="font-weight: 700; color: var(--text-white);">${escapeHtml(g.name)}</div>
             <div style="font-size: 10.5px; color: var(--color-cyan);">${escapeHtml(g.symbol)} <span style="color: var(--text-dim); font-size: 9.5px;">(${g.contract.slice(0, 6)}...${g.contract.slice(-4)})</span></div>
           </td>
-          <td>${mintCostStr}</td>
-          <td>
+          <td class="hof-col-mint">${mintCostStr}</td>
+          <td class="hof-col-ath">
             <div style="font-weight:700; color: var(--color-yellow);">${athPriceStr}</div>
             <div style="font-size: 10.5px; color: var(--color-green); font-weight: 700;">${athProfitStr} ${multStr}</div>
           </td>
-          <td>
+          <td class="hof-col-current">
             <div>${curPriceStr}</div>
             <div style="font-size: 10.5px;">${curNetStr}</div>
           </td>
-          <td>
+          <td class="hof-col-status">
             <div>${statusBadge}</div>
             <div style="font-size: 10px; color: var(--text-dim); margin-top: 2px;">${formatCount(g.holders)} holders</div>
           </td>
-          <td>
+          <td class="hof-col-action">
             <div class="hof-action-links">${actionLinks}</div>
           </td>
         </tr>
