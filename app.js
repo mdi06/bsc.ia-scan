@@ -7869,12 +7869,15 @@ function startDeltaPolling() {
 // Bandwidth Guard: Auto-pause polling when tab is backgrounded, resume when active
 if (typeof document !== 'undefined') {
   document.addEventListener('visibilitychange', () => {
+    const ticker = document.getElementById('tickerTrack');
     if (document.hidden) {
       if (deltaPollTimer) {
         clearInterval(deltaPollTimer);
         deltaPollTimer = null;
       }
+      if (ticker) ticker.style.animationPlayState = 'paused';
     } else {
+      if (ticker) ticker.style.animationPlayState = 'running';
       pollDeltaFeed();
       startDeltaPolling();
     }
@@ -8155,15 +8158,10 @@ async function fetchDrops() {
 // ========================================================
 const DEFAULT_PILLS_SEQUENCE = [
   'ALL',
+  'LAUNCHPAD',
   'SNIPER_READY',
-  'NFT_SURGE',
-  'PROXY',
-  'FAVORITES',
-  'FOLLOWED',
-  'FREE',
-  'pillSmartLeaderboard',
-  'LP',
-  'ACTIVE'
+  'ACTIVE',
+  'FAVORITES'
 ];
 
 const PILL_SEQUENCE_STORAGE_KEY = 'agent_id_pills_sequence';
@@ -8246,6 +8244,12 @@ function applyPillSequence(seq) {
       container.appendChild(el);
     }
   });
+
+  // Always keep moreFiltersWrapper pinned at the end of the quick preset pills
+  const moreFilters = document.getElementById('moreFiltersWrapper');
+  if (moreFilters && moreFilters.parentNode === container) {
+    container.appendChild(moreFilters);
+  }
 
   updateResetPillBtnVisibility(getCurrentPillSequence());
 }
@@ -8504,6 +8508,9 @@ function setupCustomDropdown() {
   });
 }
 
+// Setup More Filters Dropdown (DexScreener / GMGN Model)
+
+
 // Synchronize Mobile Tab Selector UI with active tab and live badge counts
 function syncMobileTabSelector() {
   const trigger = document.getElementById('customMobileTabTrigger');
@@ -8513,10 +8520,8 @@ function syncMobileTabSelector() {
   const tabDefs = {
     RADAR: { label: '1: 📡 Live Radar', countId: 'radarCount', badgeClass: 'badge-yellow' },
     SECONDARY: { label: '2: 📈 Secondary Market', countId: 'secondaryTabCount', badgeClass: 'badge-yellow' },
-    LAUNCHPAD: { label: '3: 🚀 Launchpads', countId: 'launchpadTabCount', badgeClass: 'badge-yellow' },
-    SMART: { label: '4: 🧠 Smart Alpha', countId: 'smartCount', badgeClass: 'badge-yellow' },
-    WALLETS: { label: '5: 🏆 Wallet Leaderboard', countId: 'walletsTabCount', badgeClass: 'badge-yellow' },
-    PORTFOLIO: { label: '5: 🎒 My Portfolio', countId: 'portfolioCount', badgeClass: 'badge-cyan' }
+    WALLETS: { label: '3: 🏆 Wallet Leaderboard', countId: 'walletsTabCount', badgeClass: 'badge-yellow' },
+    PORTFOLIO: { label: '4: 🎒 My Portfolio', countId: 'portfolioCount', badgeClass: 'badge-cyan' }
   };
 
   const curr = tabDefs[activeTab] || tabDefs.RADAR;
@@ -8592,6 +8597,83 @@ function setupMobileTabDropdown() {
     }
   });
 }
+
+// Setup More Filters Dropdown (DexScreener / GMGN Model)
+function setupMoreFiltersDropdown() {
+  const wrapper = document.getElementById('moreFiltersWrapper');
+  const trigger = document.getElementById('moreFiltersTrigger');
+  const labelEl = document.getElementById('moreFiltersLabel');
+  if (!wrapper || !trigger) return;
+
+  trigger.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const isOpen = wrapper.classList.toggle('open');
+    trigger.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+    if (isOpen) {
+      const options = document.getElementById('moreFiltersOptions');
+      if (options) {
+        options.style.left = '0';
+        options.style.right = 'auto';
+        const rect = options.getBoundingClientRect();
+        if (rect.right > window.innerWidth - 10) {
+          options.style.left = 'auto';
+          options.style.right = '0';
+        }
+      }
+    }
+  });
+
+  document.querySelectorAll('#moreFiltersOptions .custom-option').forEach(opt => {
+    opt.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const filterKey = opt.getAttribute('data-filter');
+      if (!filterKey) return;
+
+      // Deselect standard pills
+      document.querySelectorAll('.pill').forEach(b => b.classList.remove('active'));
+
+      // Highlight selected option in dropdown
+      document.querySelectorAll('#moreFiltersOptions .custom-option').forEach(o => o.classList.remove('selected'));
+      opt.classList.add('selected');
+
+      // Update trigger styling and label
+      trigger.classList.add('active');
+      const optText = opt.querySelector('span')?.textContent?.trim() || filterKey;
+      if (labelEl) labelEl.textContent = `⚙️ ${optText}`;
+
+      activeFilter = filterKey;
+      if ((activeFilter === 'FOLLOWED' || activeFilter === 'SMART') && !hasLoadedSmartDrops) {
+        await loadSmartDrops();
+      }
+
+      wrapper.classList.remove('open');
+      trigger.setAttribute('aria-expanded', 'false');
+
+      if (typeof window !== 'undefined' && window.va) {
+        window.va('event', { name: 'filter_changed', data: { filter: activeFilter, source: 'more_dropdown' } });
+      }
+      renderTable();
+    });
+  });
+
+  // Light dismiss: Close on click outside
+  document.addEventListener('click', (e) => {
+    if (!wrapper.contains(e.target)) {
+      wrapper.classList.remove('open');
+      trigger.setAttribute('aria-expanded', 'false');
+    }
+  });
+
+  // Close on Escape key
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && wrapper.classList.contains('open')) {
+      wrapper.classList.remove('open');
+      trigger.setAttribute('aria-expanded', 'false');
+      trigger.focus();
+    }
+  });
+}
+
 
 // Initialize Application
 async function init() {
@@ -8774,12 +8856,9 @@ async function init() {
         const b = document.getElementById('tabSecondary');
         if (b) b.click();
       } else if (e.key === '3') {
-        const b = document.getElementById('tabLaunchpad');
+        const b = document.getElementById('tabWallets');
         if (b) b.click();
       } else if (e.key === '4') {
-        const b = document.getElementById('tabSmart');
-        if (b) b.click();
-      } else if (e.key === '5') {
         const b = document.getElementById('tabPortfolio');
         if (b) b.click();
       }
@@ -8791,6 +8870,14 @@ async function init() {
         if (isDraggingPill || justFinishedDrag) return;
         document.querySelectorAll('.pill').forEach(b => b.classList.remove('active'));
         btn.classList.add('active');
+
+        // Reset More Filters dropdown active state
+        const mfTrigger = document.getElementById('moreFiltersTrigger');
+        const mfLabel = document.getElementById('moreFiltersLabel');
+        if (mfTrigger) mfTrigger.classList.remove('active');
+        if (mfLabel) mfLabel.textContent = '⚙️ More Filters';
+        document.querySelectorAll('#moreFiltersOptions .custom-option').forEach(o => o.classList.remove('selected'));
+
         activeFilter = btn.getAttribute('data-filter');
         if (activeFilter === 'FOLLOWED' && !hasLoadedSmartDrops) {
           await loadSmartDrops();
@@ -8871,6 +8958,7 @@ async function init() {
     // Custom Cyberpunk Sort Dropdown
     setupCustomDropdown();
     setupMobileTabDropdown();
+    setupMoreFiltersDropdown();
     syncMobileTabSelector();
 
     // Sort select fallback

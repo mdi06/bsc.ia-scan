@@ -691,12 +691,12 @@ if (!global.localStorage) {
 }
 
 // 1. Verify DEFAULT_PILLS_SEQUENCE contents
-assert.strictEqual(DEFAULT_PILLS_SEQUENCE.length, 10, 'Default pills sequence must have 10 items');
+assert.strictEqual(DEFAULT_PILLS_SEQUENCE.length, 5, 'Default pills sequence must have 5 items in Approach 1');
 assert.strictEqual(DEFAULT_PILLS_SEQUENCE[0], 'ALL', 'First item must be ALL');
-assert.strictEqual(DEFAULT_PILLS_SEQUENCE[1], 'SNIPER_READY', 'Second item must be SNIPER_READY');
+assert.strictEqual(DEFAULT_PILLS_SEQUENCE[1], 'LAUNCHPAD', 'Second item must be LAUNCHPAD');
 assert(DEFAULT_PILLS_SEQUENCE.includes('SNIPER_READY'), 'Must include SNIPER_READY');
-assert(DEFAULT_PILLS_SEQUENCE.includes('NFT_SURGE'), 'Must include NFT_SURGE');
-assert(DEFAULT_PILLS_SEQUENCE.includes('pillSmartLeaderboard'), 'Must include pillSmartLeaderboard');
+assert(DEFAULT_PILLS_SEQUENCE.includes('ACTIVE'), 'Must include ACTIVE');
+assert(DEFAULT_PILLS_SEQUENCE.includes('FAVORITES'), 'Must include FAVORITES');
 console.log('✔ DEFAULT_PILLS_SEQUENCE integrity: PASS');
 
 // 2. Mock DOM Elements for Pills and Container
@@ -861,7 +861,8 @@ global.document.createDocumentFragment = () => new MockElement('fragment');
 
 // 3. Test getPillKey
 assert.strictEqual(getPillKey(mockPillElements['ALL']), 'ALL', 'getPillKey should return data-filter value');
-assert.strictEqual(getPillKey(mockPillElements['pillSmartLeaderboard']), 'pillSmartLeaderboard', 'getPillKey should return ID when data-filter absent');
+const mockIdOnlyElement = new MockElement('button', { id: 'customActionBtn' });
+assert.strictEqual(getPillKey(mockIdOnlyElement), 'customActionBtn', 'getPillKey should return ID when data-filter absent');
 console.log('✔ getPillKey: PASS');
 
 // 4. Test getCurrentPillSequence
@@ -870,9 +871,9 @@ assert.deepStrictEqual(seqInitial, DEFAULT_PILLS_SEQUENCE, 'Current sequence sho
 console.log('✔ getCurrentPillSequence: PASS');
 
 // 5. Test movePill (move down and move up)
-movePill('ALL', 1); // Swap ALL and SNIPER_READY -> [SNIPER_READY, ALL, ...]
+movePill('ALL', 1); // Swap ALL and LAUNCHPAD -> [LAUNCHPAD, ALL, ...]
 const seqAfterSwap = getCurrentPillSequence();
-assert.strictEqual(seqAfterSwap[0], 'SNIPER_READY', 'SNIPER_READY should now be first');
+assert.strictEqual(seqAfterSwap[0], 'LAUNCHPAD', 'LAUNCHPAD should now be first');
 assert.strictEqual(seqAfterSwap[1], 'ALL', 'ALL should now be second');
 assert.strictEqual(mockResetBtn.style.display, 'inline-flex', 'Reset button should appear when sequence is customized');
 
@@ -881,15 +882,15 @@ assert.deepStrictEqual(savedInStorage, seqAfterSwap, 'Storage must match new seq
 console.log('✔ movePill & Persistence: PASS');
 
 // 6. Test movePillToTop
-movePillToTop('pillSmartLeaderboard'); // Move leaderboard to top -> [pillSmartLeaderboard, LAUNCHPAD, ALL, ...]
+movePillToTop('FAVORITES'); // Move FAVORITES to top -> [FAVORITES, LAUNCHPAD, ALL, ...]
 const seqAfterTop = getCurrentPillSequence();
-assert.strictEqual(seqAfterTop[0], 'pillSmartLeaderboard', 'pillSmartLeaderboard should be at top index 0');
+assert.strictEqual(seqAfterTop[0], 'FAVORITES', 'FAVORITES should be at top index 0');
 console.log('✔ movePillToTop: PASS');
 
 // 7. Test renderReorderModalList
 openReorderModal();
 assert(mockReorderModal.open, 'Reorder modal should be opened');
-assert.strictEqual(mockReorderList.children.length, 10, 'Reorder list must render 10 items');
+assert.strictEqual(mockReorderList.children.length, 5, 'Reorder list must render 5 items');
 assert(mockReorderList.children[0].textContent.includes('#1'), 'First item must show #1');
 console.log('✔ openReorderModal & renderReorderModalList: PASS');
 
