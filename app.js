@@ -5845,6 +5845,10 @@ async function connectWeb3(providerType = 'auto') {
     }
     walletProviderName = provName;
 
+    if (typeof window !== 'undefined' && window.posthog && typeof window.posthog.identify === 'function') {
+      window.posthog.identify(account, { wallet_provider: provName });
+    }
+
     // Check & switch to BSC Mainnet (56 / 0x38)
     try {
       const chainId = await provider.request({ method: 'eth_chainId' });
@@ -6146,6 +6150,10 @@ function disconnectWallet() {
   if (typeof localStorage !== 'undefined') {
     localStorage.removeItem('agent_id_connected_wallet');
     localStorage.removeItem('agent_id_wallet_provider');
+  }
+
+  if (typeof window !== 'undefined' && window.posthog && typeof window.posthog.reset === 'function') {
+    window.posthog.reset();
   }
 
   // Clear balances on allDrops
