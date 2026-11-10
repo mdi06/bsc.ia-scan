@@ -691,9 +691,9 @@ if (!global.localStorage) {
 }
 
 // 1. Verify DEFAULT_PILLS_SEQUENCE contents
-assert.strictEqual(DEFAULT_PILLS_SEQUENCE.length, 12, 'Default pills sequence must have 12 items');
+assert.strictEqual(DEFAULT_PILLS_SEQUENCE.length, 10, 'Default pills sequence must have 10 items');
 assert.strictEqual(DEFAULT_PILLS_SEQUENCE[0], 'ALL', 'First item must be ALL');
-assert.strictEqual(DEFAULT_PILLS_SEQUENCE[1], 'LAUNCHPAD', 'Second item must be LAUNCHPAD');
+assert.strictEqual(DEFAULT_PILLS_SEQUENCE[1], 'SNIPER_READY', 'Second item must be SNIPER_READY');
 assert(DEFAULT_PILLS_SEQUENCE.includes('SNIPER_READY'), 'Must include SNIPER_READY');
 assert(DEFAULT_PILLS_SEQUENCE.includes('NFT_SURGE'), 'Must include NFT_SURGE');
 assert(DEFAULT_PILLS_SEQUENCE.includes('pillSmartLeaderboard'), 'Must include pillSmartLeaderboard');
@@ -870,9 +870,9 @@ assert.deepStrictEqual(seqInitial, DEFAULT_PILLS_SEQUENCE, 'Current sequence sho
 console.log('✔ getCurrentPillSequence: PASS');
 
 // 5. Test movePill (move down and move up)
-movePill('ALL', 1); // Swap ALL and LAUNCHPAD -> [LAUNCHPAD, ALL, ...]
+movePill('ALL', 1); // Swap ALL and SNIPER_READY -> [SNIPER_READY, ALL, ...]
 const seqAfterSwap = getCurrentPillSequence();
-assert.strictEqual(seqAfterSwap[0], 'LAUNCHPAD', 'LAUNCHPAD should now be first');
+assert.strictEqual(seqAfterSwap[0], 'SNIPER_READY', 'SNIPER_READY should now be first');
 assert.strictEqual(seqAfterSwap[1], 'ALL', 'ALL should now be second');
 assert.strictEqual(mockResetBtn.style.display, 'inline-flex', 'Reset button should appear when sequence is customized');
 
@@ -889,7 +889,7 @@ console.log('✔ movePillToTop: PASS');
 // 7. Test renderReorderModalList
 openReorderModal();
 assert(mockReorderModal.open, 'Reorder modal should be opened');
-assert.strictEqual(mockReorderList.children.length, 12, 'Reorder list must render 12 items');
+assert.strictEqual(mockReorderList.children.length, 10, 'Reorder list must render 10 items');
 assert(mockReorderList.children[0].textContent.includes('#1'), 'First item must show #1');
 console.log('✔ openReorderModal & renderReorderModalList: PASS');
 

@@ -4193,7 +4193,7 @@ function setSearchQuery(q, andOpenModal = false) {
   if (andOpenModal && searchQuery) {
     const target = (typeof findTokenByQuery === 'function') ? findTokenByQuery(searchQuery) : null;
     if (target) {
-      openModal(target);
+      openModal(target, 'recent_chip');
     } else if (typeof resolveTokenAndInspect === 'function') {
       resolveTokenAndInspect(searchQuery);
     }
@@ -5370,6 +5370,130 @@ function getInspectNavContext(item = currentInspectItem) {
   };
 }
 
+// ==========================================================================
+// 📊 Telemetry & Granular Interaction Analytics (PostHog & Vercel)
+// ==========================================================================
+
+function trackAnalytics(eventName, eventData = {}) {
+  try {
+    if (typeof window !== 'undefined') {
+      if (window.posthog && typeof window.posthog.capture === 'function') {
+        window.posthog.capture(eventName, eventData);
+      } else if (typeof window.va === 'function') {
+        window.va('event', { name: eventName, data: eventData });
+      }
+    }
+  } catch (err) {
+    // Non-blocking telemetry guard
+  }
+}
+
+let _modalOpenTimestamp = null;
+let _modalObservedSections = new Set();
+let _modalSectionObserver = null;
+let _activeInspectItem = null;
+
+function setupModalTelemetry(item, source = 'direct') {
+  _activeInspectItem = item;
+  _modalOpenTimestamp = Date.now();
+  _modalObservedSections = new Set();
+
+  const isFree = Boolean(item.is_free || item.mint_price_bnb === '0' || Number(item.mint_price_usd) === 0);
+  const mcapNum = Number(item.market_cap_usd || item.fdv_usd || item.mcap || 0);
+  const bondingPct = Number(item.bonding_progress || item.mint_progress || 0);
+
+  trackAnalytics('token_inspected', {
+    name: item.name || '',
+    symbol: item.symbol || '',
+    contract: item.contract || '',
+    is_free: isFree,
+    mint_progress: bondingPct,
+    risk_level: item.risk_badge || item.risk_level || 'Clean',
+    mcap_usd: mcapNum,
+    has_lp: Boolean(Number(item.lp_usd || 0) > 0),
+    nav_source: source
+  });
+
+  if (typeof window === 'undefined' || typeof IntersectionObserver === 'undefined') return;
+
+  if (_modalSectionObserver) {
+    _modalSectionObserver.disconnect();
+  }
+
+  const modalContent = document.getElementById('modalContent');
+  if (!modalContent) return;
+
+  _modalSectionObserver = new IntersectionObserver((entries) => {
+    entries.forEach(entry => {
+      if (entry.isIntersecting) {
+        const sectionName = entry.target.getAttribute('data-modal-section');
+        if (sectionName && !_modalObservedSections.has(sectionName)) {
+          _modalObservedSections.add(sectionName);
+          trackAnalytics('modal_section_viewed', {
+            section: sectionName,
+            token_symbol: item.symbol || '',
+            token_contract: item.contract || '',
+            is_free: isFree,
+            total_sections_viewed: _modalObservedSections.size
+          });
+        }
+      }
+    });
+  }, {
+    root: modalContent,
+    threshold: 0.3
+  });
+
+  setTimeout(() => {
+    const freshContent = document.getElementById('modalContent');
+    if (freshContent && _modalSectionObserver) {
+      freshContent.querySelectorAll('[data-modal-section]').forEach(el => {
+        _modalSectionObserver.observe(el);
+      });
+    }
+  }, 120);
+}
+
+function finishModalTelemetry(exitMethod = 'closed') {
+  if (!_modalOpenTimestamp || !_activeInspectItem) return;
+
+  const dwellSeconds = Math.max(1, Math.round((Date.now() - _modalOpenTimestamp) / 1000));
+  const viewedArr = Array.from(_modalObservedSections);
+
+  trackAnalytics('modal_dwell_time', {
+    token_symbol: _activeInspectItem.symbol || '',
+    token_contract: _activeInspectItem.contract || '',
+    dwell_seconds: dwellSeconds,
+    sections_count: viewedArr.length,
+    sections_viewed: viewedArr,
+    exit_method: exitMethod
+  });
+
+  if (_modalSectionObserver) {
+    _modalSectionObserver.disconnect();
+    _modalSectionObserver = null;
+  }
+  _modalOpenTimestamp = null;
+  _activeInspectItem = null;
+  _modalObservedSections.clear();
+}
+
+function trackCliCopy(type, symbol, contract) {
+  trackAnalytics('cli_copied', {
+    type: type,
+    token_symbol: symbol || '',
+    token_contract: contract || ''
+  });
+}
+
+function trackExternalClick(target, symbol, contract) {
+  trackAnalytics('external_link_clicked', {
+    target: target,
+    token_symbol: symbol || '',
+    token_contract: contract || ''
+  });
+}
+
 function navigateInspectModal(direction) {
   const modal = (typeof document !== 'undefined') ? document.getElementById('inspectModal') : null;
   if (!modal) return;
@@ -5384,7 +5508,8 @@ function navigateInspectModal(direction) {
   if (targetIndex >= 0 && targetIndex < list.length) {
     const nextTarget = list[targetIndex];
     if (nextTarget) {
-      openModal(nextTarget);
+      finishModalTelemetry(direction > 0 ? 'next_arrow' : 'prev_arrow');
+      openModal(nextTarget, direction > 0 ? 'next_arrow' : 'prev_arrow');
       const content = document.getElementById('modalContent');
       if (content) content.scrollTop = 0;
     }
@@ -5399,6 +5524,11 @@ function navigateInspectModal(direction) {
 }
 
 if (typeof window !== 'undefined') {
+  window.trackAnalytics = trackAnalytics;
+  window.trackCliCopy = trackCliCopy;
+  window.trackExternalClick = trackExternalClick;
+  window.setupModalTelemetry = setupModalTelemetry;
+  window.finishModalTelemetry = finishModalTelemetry;
   window.navigateInspectModal = navigateInspectModal;
   window.getInspectNavContext = getInspectNavContext;
 }
@@ -5537,7 +5667,7 @@ async function resolveTokenAndInspect(tokenQuery, attempts = 0) {
   }
 
   if (target) {
-    openModal(target);
+    openModal(target, 'url_hash');
   } else if (attempts < 25) {
     setTimeout(() => {
       if (typeof window !== 'undefined' && window.location) {
@@ -5588,7 +5718,7 @@ function handleTokenClick(event, contract) {
 
   const target = findTokenByQuery(contract);
   if (target) {
-    openModal(target);
+    openModal(target, 'table_click');
   }
 }
 
@@ -5604,7 +5734,7 @@ if (typeof window !== 'undefined') {
 }
 
 // Modal Inspection Dialog
-function openModal(item) {
+function openModal(item, source = 'direct') {
   const modal = document.getElementById('inspectModal');
   const content = document.getElementById('modalContent');
   if (!modal || !content) return;
@@ -5612,10 +5742,7 @@ function openModal(item) {
   currentInspectItem = item;
   setModalHash(item);
   addRecentInspected(item);
-
-  if (typeof window !== 'undefined' && window.va) {
-    window.va('event', { name: 'inspect_drop', data: { name: item.name || '', symbol: item.symbol || '' } });
-  }
+  setupModalTelemetry(item, source);
 
   const std = String(item.standard || 'ERC-721');
   const isNft = std.includes('721') || std.includes('NFT');
@@ -5787,7 +5914,7 @@ function openModal(item) {
       </div>
     </div>
 
-    <div class="modal-section">
+    <div class="modal-section" data-modal-section="architecture">
       <div class="modal-section-title">Contract & On-Chain Architecture</div>
       <div class="modal-grid">
         <div><span class="dim">Contract:</span> ${cAddrFormatted}</div>
@@ -5801,13 +5928,13 @@ function openModal(item) {
       </div>
     </div>
 
-    <div class="modal-section market-dynamics-card">
+    <div class="modal-section market-dynamics-card" data-modal-section="market_valuation">
       <div class="modal-section-title" style="display: flex; justify-content: space-between; align-items: center;">
         <span style="color: var(--color-cyan); font-weight: 700; display: inline-flex; align-items: center; gap: 6px;">
           💎 Market Valuation & Trading Dynamics
         </span>
         <div style="display: flex; gap: 6px; align-items: center;">
-          ${dexScreenerUrl ? `<a href="${dexScreenerUrl}" target="_blank" rel="noopener" class="badge badge-cyan" style="text-decoration: none; font-weight: 700; padding: 3px 8px; font-size: 11px;" title="Open live chart and trades on DexScreener">📈 DexScreener ↗</a>` : ''}
+          ${dexScreenerUrl ? `<a href="${dexScreenerUrl}" target="_blank" rel="noopener" class="badge badge-cyan" onclick="trackExternalClick('dexscreener_badge', '${escapeHtml(sym)}', '${cAddr}')" style="text-decoration: none; font-weight: 700; padding: 3px 8px; font-size: 11px;" title="Open live chart and trades on DexScreener">📈 DexScreener ↗</a>` : ''}
           ${chg24Badge}
         </div>
       </div>
@@ -5815,32 +5942,32 @@ function openModal(item) {
         <div class="market-metric-box">
           <span class="dim">Market Cap / FDV</span>
           <strong style="color: ${mcapNum > 0 ? 'var(--color-green)' : 'var(--text-primary)'}; font-size: 15px; display: block; margin-top: 2px;">
-            ${dexScreenerUrl && mcapNum > 0 ? `<a href="${dexScreenerUrl}" target="_blank" rel="noopener" style="color: var(--color-green); text-decoration: none;" title="View Valuation on DexScreener">${mcapFormatted} ↗</a>` : mcapFormatted}
+            ${dexScreenerUrl && mcapNum > 0 ? `<a href="${dexScreenerUrl}" target="_blank" rel="noopener" onclick="trackExternalClick('dexscreener_mcap', '${escapeHtml(sym)}', '${cAddr}')" style="color: var(--color-green); text-decoration: none;" title="View Valuation on DexScreener">${mcapFormatted} ↗</a>` : mcapFormatted}
           </strong>
         </div>
         <div class="market-metric-box">
           <span class="dim">24h Trading Vol</span>
           <strong style="color: ${vol24Num > 0 ? 'var(--color-cyan)' : 'var(--text-dim)'}; font-size: 15px; display: block; margin-top: 2px;">
-            ${dexScreenerUrl && vol24Num > 0 ? `<a href="${dexScreenerUrl}" target="_blank" rel="noopener" style="color: var(--color-cyan); text-decoration: none;" title="View Volume on DexScreener">${vol24Formatted} ↗</a>` : vol24Formatted}
+            ${dexScreenerUrl && vol24Num > 0 ? `<a href="${dexScreenerUrl}" target="_blank" rel="noopener" onclick="trackExternalClick('dexscreener_vol', '${escapeHtml(sym)}', '${cAddr}')" style="color: var(--color-cyan); text-decoration: none;" title="View Volume on DexScreener">${vol24Formatted} ↗</a>` : vol24Formatted}
           </strong>
         </div>
         <div class="market-metric-box">
           <span class="dim">PancakeSwap LP</span>
           <strong style="color: ${lp > 0 ? 'var(--color-yellow)' : 'var(--text-dim)'}; font-size: 15px; display: block; margin-top: 2px;">
-            ${dexScreenerUrl && lp > 0 ? `<a href="${dexScreenerUrl}" target="_blank" rel="noopener" style="color: var(--color-yellow); text-decoration: none;" title="View Liquidity Pool on DexScreener">$${formatCount(lp)} ↗</a>` : (lp > 0 ? `$${formatCount(lp)}` : '$0')}
+            ${dexScreenerUrl && lp > 0 ? `<a href="${dexScreenerUrl}" target="_blank" rel="noopener" onclick="trackExternalClick('dexscreener_lp', '${escapeHtml(sym)}', '${cAddr}')" style="color: var(--color-yellow); text-decoration: none;" title="View Liquidity Pool on DexScreener">$${formatCount(lp)} ↗</a>` : (lp > 0 ? `$${formatCount(lp)}` : '$0')}
           </strong>
         </div>
         <div class="market-metric-box">
           <span class="dim">Current Price</span>
           <strong style="font-size: 15px; display: block; margin-top: 2px;">
-            ${dexScreenerUrl && tkPriceNum > 0 ? `<a href="${dexScreenerUrl}" target="_blank" rel="noopener" style="color: var(--color-green); text-decoration: none;" title="Open live chart on DexScreener">${formatCryptoPrice(tkPriceNum)} ↗</a>` : (tkPriceNum > 0 ? formatCryptoPrice(tkPriceNum) : (Number(item.floor_price_usd || 0) > 0 ? `$${Number(item.floor_price_usd).toFixed(2)}` : '<span class="dim">—</span>'))}
+            ${dexScreenerUrl && tkPriceNum > 0 ? `<a href="${dexScreenerUrl}" target="_blank" rel="noopener" onclick="trackExternalClick('dexscreener_price', '${escapeHtml(sym)}', '${cAddr}')" style="color: var(--color-green); text-decoration: none;" title="Open live chart on DexScreener">${formatCryptoPrice(tkPriceNum)} ↗</a>` : (tkPriceNum > 0 ? formatCryptoPrice(tkPriceNum) : (Number(item.floor_price_usd || 0) > 0 ? `$${Number(item.floor_price_usd).toFixed(2)}` : '<span class="dim">—</span>'))}
           </strong>
         </div>
       </div>
     </div>
 
     ${!isNft ? `
-    <div class="modal-section bonding-gauge-card">
+    <div class="modal-section bonding-gauge-card" data-modal-section="bonding_gauge">
       <div class="bonding-gauge-header">
         <span class="bonding-gauge-title">${bondingGraduated ? '🚀 GRADUATED TO PANCAKESWAP DEX' : '📈 Secondary Market Bonding Curve & DEX Graduation Gauge'}</span>
         <span class="badge ${bondingGraduated ? 'badge-green' : (bondingPct >= 80 ? 'badge-red' : (bondingPct >= 50 ? 'badge-yellow' : 'badge-cyan'))}" style="font-weight: 700;">
@@ -5852,12 +5979,12 @@ function openModal(item) {
       </div>
       <div class="bonding-gauge-stats">
         <span>${bondingGraduated ? `Secondary Liquidity Pool: $${formatCount(lp)}` : `Primary Minting: ${formatCount(tm)} / ${formatCount(ms) || 'Target Cap'}`}</span>
-        <span>${bondingGraduated ? (dexScreenerUrl ? `<a href="${dexScreenerUrl}" target="_blank" rel="noopener" style="color: var(--color-green); font-weight: 600; text-decoration: none;" title="View pair on DexScreener">🟢 Active Trading on PancakeSwap V2 ➔ View on DexScreener ↗</a>` : '🟢 Active Trading on PancakeSwap V2') : (bondingPct >= 80 ? '🔥 Near DEX Pool Injection (≥80%)' : (bondingPct >= 50 ? '⚡ Strong Momentum (≥50%)' : '🌱 Early Fair-Mint Phase'))}</span>
+        <span>${bondingGraduated ? (dexScreenerUrl ? `<a href="${dexScreenerUrl}" target="_blank" rel="noopener" onclick="trackExternalClick('dexscreener_graduated', '${escapeHtml(sym)}', '${cAddr}')" style="color: var(--color-green); font-weight: 600; text-decoration: none;" title="View pair on DexScreener">🟢 Active Trading on PancakeSwap V2 ➔ View on DexScreener ↗</a>` : '🟢 Active Trading on PancakeSwap V2') : (bondingPct >= 80 ? '🔥 Near DEX Pool Injection (≥80%)' : (bondingPct >= 50 ? '⚡ Strong Momentum (≥50%)' : '🌱 Early Fair-Mint Phase'))}</span>
       </div>
     </div>
     ` : ''}
 
-    <div class="modal-section">
+    <div class="modal-section" data-modal-section="security_audit">
       <div class="modal-section-title">🛡️ Security & Anti-Rug Audit</div>
       <div class="modal-grid">
         <div><span class="dim">Risk Rating:</span> <strong>${item.risk_badge || item.risk_level || '🟢 Clean (SAFE)'}</strong></div>
@@ -5878,7 +6005,7 @@ function openModal(item) {
       ` : ''}
     </div>
 
-    <div class="modal-section holder-dist-card">
+    <div class="modal-section holder-dist-card" data-modal-section="holder_distribution">
       <div class="holder-dist-header">
         <span class="holder-dist-title">📊 Holder Distribution Breakdown</span>
         <div style="display: flex; gap: 6px; align-items: center; flex-wrap: wrap;">
@@ -5929,20 +6056,20 @@ function openModal(item) {
     </div>
 
     ${(item.is_proxy_clone || item.is_factory) ? `
-    <div class="modal-section" style="border-color: rgba(56, 189, 248, 0.4); background: rgba(56, 189, 248, 0.03);">
+    <div class="modal-section" data-modal-section="proxy_architecture" style="border-color: rgba(56, 189, 248, 0.4); background: rgba(56, 189, 248, 0.03);">
       <div class="modal-section-title" style="display: flex; justify-content: space-between; align-items: center;">
         <span style="color: var(--color-cyan);">🧩 Proxy & Clone Architecture (Option E)</span>
         <span class="badge badge-cyan" style="font-size: 11px;">${escapeHtml(item.proxy_type || 'Clone Contract')}</span>
       </div>
       <div class="modal-grid" style="margin-top: 6px;">
         <div><span class="dim">Proxy Pattern:</span> <strong>${escapeHtml(item.proxy_type || 'EIP-1167 / EIP-1967')}</strong></div>
-        <div><span class="dim">Implementation:</span> <strong>${item.master_implementation ? `<a href="https://bscscan.com/address/${item.master_implementation}" target="_blank" rel="noopener" style="color: var(--color-cyan); text-decoration: underline;">${item.master_implementation.slice(0, 10)}...${item.master_implementation.slice(-6)}</a>` : 'Direct Contract'}</strong></div>
+        <div><span class="dim">Implementation:</span> <strong>${item.master_implementation ? `<a href="https://bscscan.com/address/${item.master_implementation}" target="_blank" rel="noopener" onclick="trackExternalClick('bscscan_proxy_impl', '${escapeHtml(sym)}', '${cAddr}')" style="color: var(--color-cyan); text-decoration: underline;">${item.master_implementation.slice(0, 10)}...${item.master_implementation.slice(-6)}</a>` : 'Direct Contract'}</strong></div>
         ${item.is_factory ? `<div><span class="dim">Factory:</span> <strong style="color: var(--color-yellow);">${escapeHtml(item.factory_badge || 'Launchpad Factory')}</strong></div>` : ''}
       </div>
     </div>
     ` : ''}
 
-    <div class="modal-section" style="${isReady ? 'border-color: rgba(74, 222, 128, 0.4); background: rgba(74, 222, 128, 0.03);' : ''}">
+    <div class="modal-section" data-modal-section="assisted_conviction" style="${isReady ? 'border-color: rgba(74, 222, 128, 0.4); background: rgba(74, 222, 128, 0.03);' : ''}">
       <div class="modal-section-title" style="display: flex; justify-content: space-between; align-items: center;">
         <span>🎯 Assisted Conviction Audit (60% Rule & Anti-Rug)</span>
         <span class="${isReady ? 'badge badge-green' : 'badge badge-yellow'}" style="font-size: 11px;">${sEval.badge}</span>
@@ -5953,13 +6080,13 @@ function openModal(item) {
     </div>
 
     ${smList.length > 0 ? `
-    <div class="modal-section">
+    <div class="modal-section" data-modal-section="smart_money">
       <div class="modal-section-title" style="display: flex; justify-content: space-between; align-items: center;">
         <span style="display: inline-flex; align-items: center; gap: 8px;">
           🧠 Smart Money Activity (${smList.length} Tracked Wallets)
           ${smList.length >= 3 ? `<span class="badge-cluster" style="font-size: 10px;" title="3+ Smart Money Alpha Wallets Inflow Detected">🔥 SM Cluster (${smList.length})</span>` : ''}
         </span>
-        <button class="btn-sm-view-leaderboard" onclick="document.getElementById('inspectModal').close(); openSmartLeaderboardModal('ALL')">🏆 View All Smart Hunters (Win Rates) ↗</button>
+        <button class="btn-sm-view-leaderboard" onclick="trackAnalytics('leaderboard_opened_from_modal', { token_symbol: '${escapeHtml(sym)}' }); document.getElementById('inspectModal').close(); openSmartLeaderboardModal('ALL')">🏆 View All Smart Hunters (Win Rates) ↗</button>
       </div>
       <div style="color: var(--color-cyan); font-size: 12px; margin-top: 8px; display: flex; flex-wrap: wrap; gap: 6px;">
         ${smList.slice(0, 12).map(w => {
@@ -5967,10 +6094,10 @@ function openModal(item) {
           return `
             <div style="display: inline-flex; align-items: center; gap: 4px; background: rgba(0, 240, 255, 0.05); border: 1px solid rgba(0, 240, 255, 0.2); border-radius: 4px; padding: 2px 6px; margin: 2px;">
               <span style="font-weight: 700; color: ${isF ? 'var(--color-yellow)' : 'var(--color-cyan)'}; font-size: 11px;">${isF ? '⭐ ' : ''}${escapeHtml(w)}</span>
-              <button class="${isF ? 'btn-follow-wallet following' : 'btn-follow-wallet'}" style="padding: 2px 6px; font-size: 9.5px;" onclick="toggleFollowWallet('${escapeHtml(w)}'); this.classList.toggle('following'); this.textContent = this.classList.contains('following') ? '★ Following' : '⭐ Follow';">
+              <button class="${isF ? 'btn-follow-wallet following' : 'btn-follow-wallet'}" style="padding: 2px 6px; font-size: 9.5px;" onclick="trackAnalytics('wallet_follow_toggled', { wallet: '${escapeHtml(w)}', will_follow: !followedWallets.has('${escapeHtml(w)}'.toLowerCase()) }); toggleFollowWallet('${escapeHtml(w)}'); this.classList.toggle('following'); this.textContent = this.classList.contains('following') ? '★ Following' : '⭐ Follow';">
                 ${isF ? '★ Following' : '⭐ Follow'}
               </button>
-              <button class="btn-view-activity" style="padding: 2px 6px; font-size: 9.5px;" onclick="viewWalletActivity('${escapeHtml(w)}')" title="View all drops minted by ${escapeHtml(w)}">
+              <button class="btn-view-activity" style="padding: 2px 6px; font-size: 9.5px;" onclick="trackAnalytics('wallet_activity_viewed', { wallet: '${escapeHtml(w)}' }); viewWalletActivity('${escapeHtml(w)}')" title="View all drops minted by ${escapeHtml(w)}">
                 👁️ Activity
               </button>
             </div>
@@ -5982,7 +6109,7 @@ function openModal(item) {
     ` : ''}
 
     ${isNft || item.secondary_sales_count ? `
-    <div class="modal-section" style="${item.is_nft_surge ? 'border-color: rgba(217, 70, 239, 0.5); background: rgba(217, 70, 239, 0.04);' : ''}">
+    <div class="modal-section" data-modal-section="secondary_trading" style="${item.is_nft_surge ? 'border-color: rgba(217, 70, 239, 0.5); background: rgba(217, 70, 239, 0.04);' : ''}">
       <div class="modal-section-title" style="display: flex; justify-content: space-between; align-items: center;">
         <span style="color: var(--color-magenta);">🦋 Element Market Secondary Trading Activity</span>
         ${item.is_nft_surge ? `<span class="badge badge-magenta" style="font-size: 11px; font-weight:700;">🦋 SURGE (${item.secondary_sales_count} sales)</span>` : ''}
@@ -5994,13 +6121,13 @@ function openModal(item) {
         <div><span class="dim">Secondary Transfers:</span> <strong>${item.secondary_transfers || 0} transfers</strong></div>
       </div>
       <div style="margin-top: 10px; font-size: 11px; color: var(--text-dim);">
-        🔗 Marketplace: <a href="${mktUrl}" target="_blank" rel="noopener" style="color: var(--color-cyan); text-decoration: underline;">${mktUrl}</a> (Manual confirmation only — no auto-trade)
+        🔗 Marketplace: <a href="${mktUrl}" target="_blank" rel="noopener" onclick="trackExternalClick('element_market', '${escapeHtml(sym)}', '${cAddr}')" style="color: var(--color-cyan); text-decoration: underline;">${mktUrl}</a> (Manual confirmation only — no auto-trade)
       </div>
     </div>
     ` : ''}
 
     ${isNft && (item.user_balance > 0 || activeTab === 'PORTFOLIO') ? `
-    <div class="modal-section" style="border-color: rgba(217, 70, 239, 0.4); background: rgba(217, 70, 239, 0.03);">
+    <div class="modal-section" data-modal-section="nft_portfolio_exit" style="border-color: rgba(217, 70, 239, 0.4); background: rgba(217, 70, 239, 0.03);">
       <div class="modal-section-title" style="display: flex; justify-content: space-between; align-items: center;">
         <span style="color: var(--color-magenta);">🎨 Element NFT Portfolio Exit Action</span>
         <span class="badge ${exitEval.badge_class || 'badge-magenta'}" style="font-size: 11px;">${exitEval.badge}</span>
@@ -6009,34 +6136,34 @@ function openModal(item) {
         <strong style="color: var(--text-white);">Exit Strategy:</strong> ${exitEval.recommendation}
       </div>
       <div class="modal-links">
-        <a href="${mktUrl}" target="_blank" rel="noopener" class="modal-btn" style="background: rgba(217, 70, 239, 0.2); border: 1px solid var(--color-magenta); color: #ffffff; text-decoration: none;">🛒 Open Element Market to List/Sell NFT</a>
+        <a href="${mktUrl}" target="_blank" rel="noopener" onclick="trackExternalClick('element_sell_nft', '${escapeHtml(sym)}', '${cAddr}')" class="modal-btn" style="background: rgba(217, 70, 239, 0.2); border: 1px solid var(--color-magenta); color: #ffffff; text-decoration: none;">🛒 Open Element Market to List/Sell NFT</a>
       </div>
     </div>
     ` : ''}
 
-    <div class="modal-section">
+    <div class="modal-section" data-modal-section="secondary_links">
       <div class="modal-section-title">🔗 Official Secondary Links</div>
       <div class="modal-links">
-        ${!isNft && dexScreenerUrl ? `<a href="${dexScreenerUrl}" target="_blank" rel="noopener" class="modal-btn" style="background: rgba(0, 240, 255, 0.15); border: 1px solid var(--color-cyan); color: var(--color-cyan); font-weight: 700;">📈 View on DexScreener ↗</a>` : ''}
-        <a href="${isNft ? mktUrl : `https://pancakeswap.finance/swap?outputCurrency=${cAddr}`}" target="_blank" rel="noopener" class="modal-btn btn-element">🛒 ${isNft ? 'Element NFT Collection' : 'Trade on PancakeSwap DEX'}</a>
-        ${!isNft ? `<a href="https://pancakeswap.finance/swap?inputCurrency=${cAddr}&outputCurrency=BNB" target="_blank" rel="noopener" class="modal-btn" style="background: rgba(240, 185, 11, 0.15); border: 1px solid #f0b90b; color: #f0b90b;">🥞 Swap to BNB (PancakeSwap)</a>` : ''}
-        <a href="https://bscscan.com/address/${cAddr}" target="_blank" rel="noopener" class="modal-btn btn-bscscan">🔍 View on BscScan</a>
-        ${item.website ? `<a href="${item.website}" target="_blank" rel="noopener" class="modal-btn btn-bscscan">🌐 Website</a>` : ''}
-        ${item.twitter ? `<a href="${item.twitter}" target="_blank" rel="noopener" class="modal-btn btn-bscscan">🐦 Twitter / X</a>` : ''}
+        ${!isNft && dexScreenerUrl ? `<a href="${dexScreenerUrl}" target="_blank" rel="noopener" onclick="trackExternalClick('dexscreener_links', '${escapeHtml(sym)}', '${cAddr}')" class="modal-btn" style="background: rgba(0, 240, 255, 0.15); border: 1px solid var(--color-cyan); color: var(--color-cyan); font-weight: 700;">📈 View on DexScreener ↗</a>` : ''}
+        <a href="${isNft ? mktUrl : `https://pancakeswap.finance/swap?outputCurrency=${cAddr}`}" target="_blank" rel="noopener" onclick="trackExternalClick('pancakeswap_links', '${escapeHtml(sym)}', '${cAddr}')" class="modal-btn btn-element">🛒 ${isNft ? 'Element NFT Collection' : 'Trade on PancakeSwap DEX'}</a>
+        ${!isNft ? `<a href="https://pancakeswap.finance/swap?inputCurrency=${cAddr}&outputCurrency=BNB" target="_blank" rel="noopener" onclick="trackExternalClick('pancakeswap_swap_bnb', '${escapeHtml(sym)}', '${cAddr}')" class="modal-btn" style="background: rgba(240, 185, 11, 0.15); border: 1px solid #f0b90b; color: #f0b90b;">🥞 Swap to BNB (PancakeSwap)</a>` : ''}
+        <a href="https://bscscan.com/address/${cAddr}" target="_blank" rel="noopener" onclick="trackExternalClick('bscscan_address', '${escapeHtml(sym)}', '${cAddr}')" class="modal-btn btn-bscscan">🔍 View on BscScan</a>
+        ${item.website ? `<a href="${item.website}" target="_blank" rel="noopener" onclick="trackExternalClick('website', '${escapeHtml(sym)}', '${cAddr}')" class="modal-btn btn-bscscan">🌐 Website</a>` : ''}
+        ${item.twitter ? `<a href="${item.twitter}" target="_blank" rel="noopener" onclick="trackExternalClick('twitter', '${escapeHtml(sym)}', '${cAddr}')" class="modal-btn btn-bscscan">🐦 Twitter / X</a>` : ''}
       </div>
     </div>
 
     ${!isNft ? `
-    <div class="modal-section dex-chart-section">
+    <div class="modal-section dex-chart-section" data-modal-section="dex_chart">
       <div style="display: flex; justify-content: space-between; align-items: center;">
         <span style="font-size: 12px; font-weight: 700; color: var(--color-cyan);">📈 Live DEX Candlestick Price Action Chart</span>
         <div style="display: flex; gap: 8px; align-items: center;">
           ${dexScreenerUrl ? `
-            <a href="${dexScreenerUrl}" target="_blank" rel="noopener" class="dex-chart-toggle-btn" style="color: var(--color-cyan); text-decoration: none; padding: 4px 8px; border: 1px solid rgba(0, 240, 255, 0.3); border-radius: 4px; font-size: 11px; display: inline-flex; align-items: center; gap: 4px;" title="Open live pair on DexScreener in new window">
+            <a href="${dexScreenerUrl}" target="_blank" rel="noopener" onclick="trackExternalClick('dexscreener_chart_open', '${escapeHtml(sym)}', '${cAddr}')" class="dex-chart-toggle-btn" style="color: var(--color-cyan); text-decoration: none; padding: 4px 8px; border: 1px solid rgba(0, 240, 255, 0.3); border-radius: 4px; font-size: 11px; display: inline-flex; align-items: center; gap: 4px;" title="Open live pair on DexScreener in new window">
               <span>↗</span> <span>Open DexScreener</span>
             </a>
           ` : ''}
-          <button class="dex-chart-toggle-btn" id="chartToggleBtn" onclick="toggleDexChart('${cAddr}', '${dexScreenerUrl}')">
+          <button class="dex-chart-toggle-btn" id="chartToggleBtn" onclick="trackAnalytics('dex_chart_toggled', { token_symbol: '${escapeHtml(sym)}' }); toggleDexChart('${cAddr}', '${dexScreenerUrl}')">
             <span id="chartToggleIcon">📊</span> <span id="chartToggleLabel">Show Live DEX Chart</span>
           </button>
         </div>
@@ -6045,7 +6172,7 @@ function openModal(item) {
     </div>
     ` : ''}
 
-    <div class="modal-section mint-action-section" style="${isSoldOut ? 'opacity: 0.85;' : (isReady ? 'border-color: rgba(74, 222, 128, 0.5); box-shadow: 0 0 15px rgba(74, 222, 128, 0.1);' : 'border-color: rgba(0, 240, 255, 0.4);')}">
+    <div class="modal-section mint-action-section" data-modal-section="mint_action" style="${isSoldOut ? 'opacity: 0.85;' : (isReady ? 'border-color: rgba(74, 222, 128, 0.5); box-shadow: 0 0 15px rgba(74, 222, 128, 0.1);' : 'border-color: rgba(0, 240, 255, 0.4);')}">
       <div class="modal-section-title" style="display: flex; justify-content: space-between; align-items: center;">
         <span style="color: var(--color-cyan); font-weight: 700; display: inline-flex; align-items: center; gap: 6px;">
           ⚡ 1-Click Web3 Direct Mint
@@ -6071,7 +6198,7 @@ function openModal(item) {
       ${connectedWallet && !isAgenticWallet ? `
         <div class="agentic-status-warning" style="background: rgba(240, 185, 11, 0.08); border: 1px dashed rgba(240, 185, 11, 0.4); border-radius: 6px; padding: 8px 12px; margin: 8px 0; font-size: 11px; color: var(--color-yellow); display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap;">
           <span>ℹ️ <strong>Non-Agentic Wallet:</strong> If this drop is an Agent ID exclusive launch, it requires an active <code>.ai</code> Agent ID to mint.</span>
-          <a href="https://web3.binance.com/en/dev-docs/products/agentic-wallet/ai-pro#came-from-the-agent-id-campaign" target="_blank" rel="noopener" style="color: var(--color-cyan); text-decoration: underline;">Claim .ai in Binance App ↗</a>
+          <a href="https://web3.binance.com/en/dev-docs/products/agentic-wallet/ai-pro#came-from-the-agent-id-campaign" target="_blank" rel="noopener" onclick="trackExternalClick('binance_claim_ai', '${escapeHtml(sym)}', '${cAddr}')" style="color: var(--color-cyan); text-decoration: underline;">Claim .ai in Binance App ↗</a>
         </div>
       ` : (connectedWallet && isAgenticWallet ? `
         <div class="agentic-status-success" style="background: rgba(0, 240, 255, 0.08); border: 1px solid rgba(0, 240, 255, 0.3); border-radius: 6px; padding: 6px 12px; margin: 8px 0; font-size: 11px; color: var(--color-cyan); display: flex; align-items: center; gap: 8px;">
@@ -6082,13 +6209,13 @@ function openModal(item) {
 
       ${isSoldOut ? `
         <div style="display: flex; gap: 10px; margin-top: 8px;">
-          <a href="${!isNft ? (dexScreenerUrl || mktUrl) : mktUrl}" target="_blank" rel="noopener" class="web3-mint-btn sold-out" style="text-align: center; text-decoration: none; display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%;">
+          <a href="${!isNft ? (dexScreenerUrl || mktUrl) : mktUrl}" target="_blank" rel="noopener" onclick="trackExternalClick('sold_out_trade', '${escapeHtml(sym)}', '${cAddr}')" class="web3-mint-btn sold-out" style="text-align: center; text-decoration: none; display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%;">
             <span>🔒 Sold Out (100% Capped) ➔ ${!isNft ? 'View Chart & Trade on DexScreener ↗' : 'Trade on Secondary Market'}</span>
           </a>
         </div>
       ` : `
         <div class="mint-btn-container" style="margin-top: 8px;">
-          <button id="modalMintBtn" class="web3-mint-btn" onclick="executeWeb3Mint('${cAddr}', '${calldata}', '${valWei}', '${escapeHtml(name)}')">
+          <button id="modalMintBtn" class="web3-mint-btn" onclick="trackAnalytics('mint_button_clicked', { token_symbol: '${escapeHtml(sym)}', is_free: ${isFree} }); executeWeb3Mint('${cAddr}', '${calldata}', '${valWei}', '${escapeHtml(name)}')">
             <span class="mint-icon">⚡</span>
             <span id="modalMintBtnText">${connectedWallet ? `1-Click Mint (${mintCostLabel})` : `👛 Connect Wallet & Mint (${mintCostLabel})`}</span>
           </button>
@@ -6097,16 +6224,16 @@ function openModal(item) {
       `}
     </div>
 
-    <div class="modal-section">
+    <div class="modal-section" data-modal-section="sniper_cli">
       <div class="modal-section-title">⚡ 1-Click Sniper CLI Command (Binance Agentic Wallet)</div>
       <div class="cli-box">
         <code>${escapeHtml(cliSnippet)}</code>
-        <button class="copy-btn" onclick="navigator.clipboard.writeText('${cliSnippet.replace(/'/g, "\\'")}'); this.textContent='Copied!'; setTimeout(()=>this.textContent='Copy', 1500)">Copy</button>
+        <button class="copy-btn" onclick="trackCliCopy('sniper_cli', '${escapeHtml(sym)}', '${cAddr}'); navigator.clipboard.writeText('${cliSnippet.replace(/'/g, "\\'")}'); this.textContent='Copied!'; setTimeout(()=>this.textContent='Copy', 1500)">Copy</button>
       </div>
     </div>
 
     ${!isNft ? `
-    <div class="modal-section" style="border-color: rgba(240, 185, 11, 0.4); background: rgba(240, 185, 11, 0.03);">
+    <div class="modal-section" data-modal-section="pancakeswap_exit" style="border-color: rgba(240, 185, 11, 0.4); background: rgba(240, 185, 11, 0.03);">
       <div class="modal-section-title" style="display: flex; justify-content: space-between; align-items: center;">
         <span style="color: var(--color-yellow);">🥞 1-Click PancakeSwap V2 Take-Profit / Exit Command</span>
         <span class="badge ${exitEval.badge_class || 'badge-green'}" style="font-size: 11px;">${exitEval.badge}</span>
@@ -6115,12 +6242,12 @@ function openModal(item) {
         <strong style="color: var(--text-white);">Exit Strategy:</strong> ${exitEval.recommendation}
       </div>
       <div class="modal-links" style="margin-bottom: 10px;">
-        ${dexScreenerUrl ? `<a href="${dexScreenerUrl}" target="_blank" rel="noopener" class="modal-btn" style="background: rgba(0, 240, 255, 0.15); border: 1px solid var(--color-cyan); color: var(--color-cyan); font-weight: 700; text-decoration: none;">📈 DexScreener Live Chart ↗</a>` : ''}
-        <a href="https://pancakeswap.finance/swap?inputCurrency=${cAddr}&outputCurrency=BNB" target="_blank" rel="noopener" class="modal-btn" style="background: rgba(240, 185, 11, 0.2); border: 1px solid #f0b90b; color: #f0b90b; text-decoration: none;">🥞 1-Click Swap on PancakeSwap ↗</a>
+        ${dexScreenerUrl ? `<a href="${dexScreenerUrl}" target="_blank" rel="noopener" onclick="trackExternalClick('exit_dexscreener_chart', '${escapeHtml(sym)}', '${cAddr}')" class="modal-btn" style="background: rgba(0, 240, 255, 0.15); border: 1px solid var(--color-cyan); color: var(--color-cyan); font-weight: 700; text-decoration: none;">📈 DexScreener Live Chart ↗</a>` : ''}
+        <a href="https://pancakeswap.finance/swap?inputCurrency=${cAddr}&outputCurrency=BNB" target="_blank" rel="noopener" onclick="trackExternalClick('exit_pancakeswap_swap', '${escapeHtml(sym)}', '${cAddr}')" class="modal-btn" style="background: rgba(240, 185, 11, 0.2); border: 1px solid #f0b90b; color: #f0b90b; text-decoration: none;">🥞 1-Click Swap on PancakeSwap ↗</a>
       </div>
       <div class="cli-box">
         <code>${escapeHtml(sellCliSnippet)}</code>
-        <button class="copy-btn" onclick="navigator.clipboard.writeText('${sellCliSnippet.replace(/'/g, "\\'")}'); this.textContent='Copied!'; setTimeout(()=>this.textContent='Copy', 1500)">Copy Exit CLI</button>
+        <button class="copy-btn" onclick="trackCliCopy('exit_cli', '${escapeHtml(sym)}', '${cAddr}'); navigator.clipboard.writeText('${sellCliSnippet.replace(/'/g, "\\'")}'); this.textContent='Copied!'; setTimeout(()=>this.textContent='Copy', 1500)">Copy Exit CLI</button>
       </div>
     </div>
     ` : ''}
@@ -8028,14 +8155,12 @@ async function fetchDrops() {
 // ========================================================
 const DEFAULT_PILLS_SEQUENCE = [
   'ALL',
-  'LAUNCHPAD',
   'SNIPER_READY',
   'NFT_SURGE',
   'PROXY',
   'FAVORITES',
   'FOLLOWED',
   'FREE',
-  'SMART',
   'pillSmartLeaderboard',
   'LP',
   'ACTIVE'
@@ -8391,7 +8516,7 @@ function syncMobileTabSelector() {
     LAUNCHPAD: { label: '3: 🚀 Launchpads', countId: 'launchpadTabCount', badgeClass: 'badge-yellow' },
     SMART: { label: '4: 🧠 Smart Alpha', countId: 'smartCount', badgeClass: 'badge-yellow' },
     WALLETS: { label: '5: 🏆 Wallet Leaderboard', countId: 'walletsTabCount', badgeClass: 'badge-yellow' },
-    PORTFOLIO: { label: '6: 🎒 My Portfolio', countId: 'portfolioCount', badgeClass: 'badge-cyan' }
+    PORTFOLIO: { label: '5: 🎒 My Portfolio', countId: 'portfolioCount', badgeClass: 'badge-cyan' }
   };
 
   const curr = tabDefs[activeTab] || tabDefs.RADAR;
@@ -8655,9 +8780,6 @@ async function init() {
         const b = document.getElementById('tabSmart');
         if (b) b.click();
       } else if (e.key === '5') {
-        const b = document.getElementById('tabWallets');
-        if (b) b.click();
-      } else if (e.key === '6') {
         const b = document.getElementById('tabPortfolio');
         if (b) b.click();
       }
@@ -8684,6 +8806,7 @@ async function init() {
     const searchInput = document.getElementById('searchInput');
     const searchClearBtn = document.getElementById('searchClearBtn');
 
+    let searchDebounceTimer = null;
     if (searchInput) {
       searchInput.addEventListener('input', async e => {
         searchQuery = e.target.value;
@@ -8694,6 +8817,19 @@ async function init() {
           await loadSmartDrops();
         }
         renderTable();
+
+        // Track debounced search queries so we know what tokens users are looking for
+        clearTimeout(searchDebounceTimer);
+        const qClean = String(searchQuery || '').trim();
+        if (qClean.length >= 2) {
+          searchDebounceTimer = setTimeout(() => {
+            trackAnalytics('token_searched', {
+              query: qClean,
+              active_filter: activeFilter,
+              active_tab: activeTab
+            });
+          }, 650);
+        }
       });
 
       searchInput.addEventListener('keydown', e => {
@@ -8752,6 +8888,7 @@ async function init() {
         if (e.target === modal) modal.close();
       });
       modal.addEventListener('close', () => {
+        finishModalTelemetry('modal_closed');
         clearModalHash();
         currentInspectItem = null;
       });
