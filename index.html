@@ -50,11 +50,43 @@
   <!-- PostHog Analytics & Session Replay -->
   <script>
     !function(t,e){var o,n,p,r;e.__SV||(window.posthog=e,e._i=[],e.init=function(i,s,a){function g(t,e){var o=e.split(".");2==o.length&&(t=t[o[0]],e=o[1]),t[e]=function(){t.push([e].concat(Array.prototype.slice.call(arguments,0)))}}(p=t.createElement("script")).type="text/javascript",p.async=!0,p.src=s.api_host+"/static/array.js",(r=t.getElementsByTagName("script")[0]).parentNode.insertBefore(p,r);var u=e;for(void 0!==a?u=e[a]=[]:a="posthog",u.people=u.people||[],u.toString=function(t){var e="posthog";return"posthog"!==a&&(e+="."+a),t||(e+=" (stub)"),e},u.people.toString=function(){return u.toString(1)+".people (stub)"},o="capture identify alias people.set people.set_once set_config register register_once unregister opt_out_capturing has_opted_out_capturing opt_in_capturing reset isFeatureEnabled onFeatureFlags getFeatureFlag getFeatureFlagPayload reloadFeatureFlags group updateEarlyAccessFeatureEnrollment getEarlyAccessFeatures getActiveMatchingSurveys getSurveys onSessionId".split(" "),n=0;n<o.length;n++)g(u,o[n]);e._i.push([i,s,a])},e.__SV=1)}(document,window.posthog||[]);
+
+    // 🛡️ Automatic Developer & Internal Traffic Exclusion
+    var isLocalDev = Boolean(
+      window.location.hostname === 'localhost' ||
+      window.location.hostname === '127.0.0.1' ||
+      window.location.hostname.endsWith('.local')
+    );
+
+    // Support toggle via URL query: ?dev=1 (opt-out forever) or ?dev=0 (opt back in)
+    if (window.location.search) {
+      if (window.location.search.includes('dev=1') || window.location.search.includes('admin=1')) {
+        try { localStorage.setItem('posthog_opt_out_dev', 'true'); } catch (_) {}
+      } else if (window.location.search.includes('dev=0')) {
+        try { localStorage.removeItem('posthog_opt_out_dev'); } catch (_) {}
+      }
+    }
+
+    var isDevOptedOut = false;
+    try {
+      isDevOptedOut = isLocalDev || localStorage.getItem('posthog_opt_out_dev') === 'true';
+    } catch (_) {
+      isDevOptedOut = isLocalDev;
+    }
+    window.isDevOptedOut = isDevOptedOut;
+
     posthog.init('phc_BzxueVZ45SH7ZUEnNNHoyRS9NrsFhUapvGtQ2PoWGdmH', {
       api_host: 'https://eu.i.posthog.com',
       person_profiles: 'identified_only',
-      capture_pageview: true,
-      capture_pageleave: true
+      capture_pageview: !isDevOptedOut,
+      capture_pageleave: !isDevOptedOut,
+      disable_session_recording: isDevOptedOut,
+      loaded: function(ph) {
+        if (isDevOptedOut) {
+          ph.opt_out_capturing();
+          console.info('🛡️ [PostHog] Developer mode active: telemetry and session recording disabled for this device.');
+        }
+      }
     });
   </script>
 
@@ -62,7 +94,7 @@
   <script>
     window.va = window.va || function () {
       (window.vaq = window.vaq || []).push(arguments);
-      if (arguments[0] === 'event' && arguments[1] && window.posthog && typeof window.posthog.capture === 'function') {
+      if (!window.isDevOptedOut && arguments[0] === 'event' && arguments[1] && window.posthog && typeof window.posthog.capture === 'function') {
         window.posthog.capture(arguments[1].name, arguments[1].data || {});
       }
     };

@@ -5377,6 +5377,7 @@ function getInspectNavContext(item = currentInspectItem) {
 function trackAnalytics(eventName, eventData = {}) {
   try {
     if (typeof window !== 'undefined') {
+      if (window.isDevOptedOut) return;
       if (window.posthog && typeof window.posthog.capture === 'function') {
         window.posthog.capture(eventName, eventData);
       } else if (typeof window.va === 'function') {
