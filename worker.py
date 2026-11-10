@@ -1000,15 +1000,90 @@ def run_proxy_factory_watcher_loop():
         time.sleep(20)
 
 
+def run_agent_id_counter_loop():
+    """Lightweight background tracker syncing real-time Binance .ai Agent ID mints from BSC."""
+    print("[🤖 Agent ID Tracker] Starting live SPACE ID (.ai) mint counter loop...", flush=True)
+    # publicnode endpoints support up to 50k-block eth_getLogs queries in a single call
+    logs_rpc = monitor.BscRpcClient([
+        "https://bsc-rpc.publicnode.com",
+        "https://bsc.publicnode.com"
+    ])
+    transfer_topic = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
+    zero_from_topic = "0x0000000000000000000000000000000000000000000000000000000000000000"
+    registry_addr = monitor.AGENT_ID_REGISTRY
+
+    # Resolve best persisted baseline across local JSON and cloud DB (survives Render restarts)
+    local_st = monitor.load_agent_id_stats() or {}
+    cloud_st = db.get_agent_id_stats(max_age_sec=0.0) or {}
+    if int(cloud_st.get("total_created_wallets") or 0) > int(local_st.get("total_created_wallets") or 0):
+        cur_st = dict(cloud_st)
+    elif int(cloud_st.get("total_created_wallets") or 0) == int(local_st.get("total_created_wallets") or 0) and int(cloud_st.get("last_block") or 0) > int(local_st.get("last_block") or 0):
+        cur_st = dict(cloud_st)
+    else:
+        cur_st = dict(local_st)
+
+    total_wallets = int(cur_st.get("total_created_wallets") or 178001)
+    last_block = int(cur_st.get("last_block") or 0)
+    startup_synced = False
+
+    while True:
+        try:
+            curr_block = logs_rpc.get_block_number()
+            if curr_block:
+                if last_block <= 0:
+                    last_block = curr_block - 1
+
+                # Guard against stale baselines exceeding publicnode log retention (~250k blocks)
+                start_block = max(last_block + 1, curr_block - 200000)
+                if start_block <= curr_block:
+                    chunk_size = 40000
+                    f_blk = start_block
+                    total_added = 0
+                    failed_chunk = False
+                    while f_blk <= curr_block:
+                        t_blk = min(f_blk + chunk_size - 1, curr_block)
+                        res = logs_rpc.call("eth_getLogs", [{
+                            "fromBlock": hex(f_blk),
+                            "toBlock": hex(t_blk),
+                            "address": registry_addr,
+                            "topics": [transfer_topic, zero_from_topic]
+                        }])
+                        if res is None:
+                            failed_chunk = True
+                            break
+                        total_added += len(res)
+                        last_block = t_blk
+                        f_blk = t_blk + 1
+
+                    if total_added > 0 or not startup_synced or not failed_chunk:
+                        if total_added > 0:
+                            total_wallets += total_added
+                            print(f"[🤖 Agent IDs] +{total_added} new .ai wallets! Total: {total_wallets:,} (Block #{last_block})", flush=True)
+                        cur_st = {
+                            "total_created_wallets": total_wallets,
+                            "last_block": last_block,
+                            "last_updated": time.time(),
+                            "source": "SPACE ID / Binance Agent ID Registry (0x60B9262456dE011F7d15a54CdD8c48bAaa8B022F)"
+                        }
+                        monitor.save_agent_id_stats(cur_st)
+                        db.save_agent_id_stats(cur_st, force_cloud=(not startup_synced))
+                        startup_synced = True
+        except Exception as e:
+            print(f"[⚠️ Agent ID Tracker Error] {e}", flush=True)
+
+        time.sleep(12)
+
+
 def start_worker():
-    """Starts all 5 background worker threads in this isolated producer process with auto-healing supervision."""
-    print("[⚙️ Worker Process] Starting all 5 autonomous discovery & sweeper loops...", flush=True)
+    """Starts all 6 background worker threads in this isolated producer process with auto-healing supervision."""
+    print("[⚙️ Worker Process] Starting all 6 autonomous discovery & sweeper loops...", flush=True)
     task_specs = [
         (run_discovery_loop, "DiscoveryLoop"),
         (run_market_dynamics_updater_loop, "MarketUpdater"),
         (run_fast_track_progress_sweeper_loop, "FastSweeper"),
         (run_element_nft_volume_sweeper_loop, "ElementSweeper"),
         (run_proxy_factory_watcher_loop, "ProxyWatcher"),
+        (run_agent_id_counter_loop, "AgentIdCounter"),
         (run_memory_guard_loop, "MemoryGuard")
     ]
     threads = []

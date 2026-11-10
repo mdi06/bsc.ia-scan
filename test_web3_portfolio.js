@@ -1540,10 +1540,16 @@ assert(mockModalContentZero.innerHTML.includes('Unresolved') || mockModalContent
 global.document.getElementById = prevGetElemZero;
 console.log('✔ Micro-Price Formatting, Outlier Guard & Zero-Address Dev Root: PASS');
 
-// Testing Live Agentic Wallets Counter Sync (Zero-Bandwidth Piggyback)
+// Testing Live Agentic Wallets Counter Sync (Zero-Bandwidth Piggyback + On-Chain Monotonic Anchor)
 console.log('Testing Live Agentic Wallets Counter Sync...');
-const { updateDigitalAiCounter, getCurrentAgentWalletsCount } = require('./app.js');
-const mockHdrCount = { textContent: '' };
+const {
+  updateDigitalAiCounter,
+  applyAgentWalletsState,
+  getCurrentAgentWalletsCount,
+  setAgentWalletsAnchorBlock,
+  getAgentWalletsAnchorBlock
+} = require('./app.js');
+const mockHdrCount = { textContent: '', style: {} };
 const mockTicker = { textContent: '' };
 const mockScreen = { innerHTML: '', appendChild: () => {} };
 const prevGetElemCounter = global.document.getElementById;
@@ -1562,6 +1568,22 @@ assert(mockTicker.textContent.includes('175,849'), 'Ticker must display formatte
 // Calling without arguments should preserve state
 updateDigitalAiCounter();
 assert.strictEqual(getCurrentAgentWalletsCount(), 175849, 'State must be preserved without overriding');
+
+// Test monotonic protection: newer block advances, stale count/older block never regresses
+setAgentWalletsAnchorBlock(132758000);
+applyAgentWalletsState(178005, 132758020);
+assert.strictEqual(getCurrentAgentWalletsCount(), 178005, 'Newer block must advance count to 178,005');
+assert.strictEqual(getAgentWalletsAnchorBlock(), 132758020, 'Anchor block must advance to 132758020');
+
+applyAgentWalletsState(175842, 0);
+assert.strictEqual(getCurrentAgentWalletsCount(), 178005, 'Stale cached count without block must NEVER regress counter');
+
+applyAgentWalletsState(178001, 132757997);
+assert.strictEqual(getCurrentAgentWalletsCount(), 178005, 'Older block must NEVER regress counter');
+
+// Restore clean baseline for downstream test suites
+updateDigitalAiCounter(175842);
+setAgentWalletsAnchorBlock(0);
 
 global.document.getElementById = prevGetElemCounter;
 console.log('✔ Live Agentic Wallets Counter Sync: PASS');

@@ -149,24 +149,33 @@ SMART_WALLETS_CSV_URL = "https://docs.google.com/spreadsheets/d/1jcKyWK1JJ8uBchT
 
 def load_agent_id_stats() -> Dict[str, Any]:
     """Loads live statistics for registered Binance .ai Agent ID wallets."""
+    best = None
     for p in (STATS_FILE, STATS_FILE_ROOT):
         if os.path.exists(p):
             try:
                 with open(p, "r") as f:
-                    return json.load(f)
+                    d = json.load(f)
+                if isinstance(d, dict) and d.get("total_created_wallets"):
+                    if best is None or int(d.get("total_created_wallets", 0)) > int(best.get("total_created_wallets", 0)):
+                        best = d
             except Exception:
                 pass
+    if best is not None:
+        return best
     return {
-        "total_created_wallets": 175842,
+        "total_created_wallets": 178001,
+        "last_block": 132757997,
         "last_updated": time.time(),
         "source": "SPACE ID / Binance Agent ID Registry (0x60B9262456dE011F7d15a54CdD8c48bAaa8B022F)"
     }
 
 def save_agent_id_stats(stats: Dict[str, Any]):
-    """Persists updated agent ID statistics."""
+    """Persists updated agent ID statistics atomically to disk."""
     for p in (STATS_FILE, STATS_FILE_ROOT):
         try:
-            os.makedirs(os.path.dirname(p), exist_ok=True)
+            d = os.path.dirname(p)
+            if d:
+                os.makedirs(d, exist_ok=True)
             tmp = p + ".tmp"
             with open(tmp, "w") as f:
                 json.dump(stats, f, indent=2)

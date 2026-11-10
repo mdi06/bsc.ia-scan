@@ -168,4 +168,53 @@ def test_api_stats_and_overview_endpoints():
     assert json_data["total_created_wallets"] >= 175842
 
 
+def test_agent_id_stats_persistence_and_etag(tmp_path):
+    """Verifies DB persistence for .ai wallet telemetry and that delta ETag invalidates when count grows."""
+    import monitor
+    import worker
+    from db import DatabaseManager
+
+    assert hasattr(worker, "run_agent_id_counter_loop")
+
+    test_db = DatabaseManager(db_path=str(tmp_path / "stats_test.db"))
+    sample = {
+        "total_created_wallets": 178050,
+        "last_block": 132758500,
+        "last_updated": 1794306000
+    }
+    test_db.save_agent_id_stats(sample, force_cloud=True)
+    loaded = test_db.get_agent_id_stats(max_age_sec=0.0)
+    assert loaded is not None
+    assert loaded["total_created_wallets"] == 178050
+    assert loaded["last_block"] == 132758500
+
+    # Verify delta ETag changes when agent_wallets changes
+    client = TestClient(api.app)
+    orig_load = monitor.load_agent_id_stats
+    orig_db_get = api.db.get_agent_id_stats
+    try:
+        cur_val = [178010]
+        monitor.load_agent_id_stats = lambda: {"total_created_wallets": cur_val[0], "last_block": 132758000}
+        api.db.get_agent_id_stats = lambda: {"total_created_wallets": cur_val[0], "last_block": 132758000}
+
+        r1 = client.get("/api/feed?since_block=999999999")
+        assert r1.status_code == 200
+        etag1 = r1.headers.get("etag")
+        assert etag1
+
+        # Matching ETag with same count -> 304
+        r304 = client.get("/api/feed?since_block=999999999", headers={"If-None-Match": etag1})
+        assert r304.status_code == 304
+
+        # Increment wallet count without deploying any new drop -> MUST invalidate ETag (200 OK!)
+        cur_val[0] = 178011
+        r200 = client.get("/api/feed?since_block=999999999", headers={"If-None-Match": etag1})
+        assert r200.status_code == 200
+        assert r200.json()["agent_wallets"] == 178011
+    finally:
+        monitor.load_agent_id_stats = orig_load
+        api.db.get_agent_id_stats = orig_db_get
+
+
+
 

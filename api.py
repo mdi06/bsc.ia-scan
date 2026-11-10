@@ -202,8 +202,19 @@ def compute_global_overview_stats(all_projs=None) -> dict:
     nft_surge_count = sum(1 for d in all_projs if d.get("is_nft_surge"))
     secondary_count = sum(1 for d in all_projs if is_secondary_market_asset(d))
 
-    agent_id_stats = monitor.load_agent_id_stats()
-    total_agent_wallets = int(agent_id_stats.get("total_created_wallets", 175842))
+    local_stats = monitor.load_agent_id_stats() or {}
+    cloud_stats = db.get_agent_id_stats() or {}
+    local_count = int(local_stats.get("total_created_wallets") or 0)
+    cloud_count = int(cloud_stats.get("total_created_wallets") or 0)
+    if cloud_count > local_count:
+        best_agent_stats = cloud_stats
+    elif cloud_count == local_count and int(cloud_stats.get("last_block") or 0) > int(local_stats.get("last_block") or 0):
+        best_agent_stats = cloud_stats
+    else:
+        best_agent_stats = local_stats
+
+    total_agent_wallets = int(best_agent_stats.get("total_created_wallets") or 178001)
+    agent_wallets_block = int(best_agent_stats.get("last_block") or 0)
 
     return {
         "total": total,
@@ -214,7 +225,8 @@ def compute_global_overview_stats(all_projs=None) -> dict:
         "secondary": secondary_count,
         "latest_block": latest_block,
         "agent_wallets": total_agent_wallets,
-        "total_created_wallets": total_agent_wallets
+        "total_created_wallets": total_agent_wallets,
+        "agent_wallets_block": agent_wallets_block
     }
 
 
@@ -227,19 +239,20 @@ def get_overview_stats(request: Request):
     Includes ETag 304 caching and CORS headers.
     """
     stats = compute_global_overview_stats()
-    stats_etag = f'"{stats["total"]}-{stats["agent_wallets"]}-{stats.get("latest_block")}"'
+    stats_etag = f'"{stats["total"]}-{stats["agent_wallets"]}-{stats.get("agent_wallets_block")}-{stats.get("latest_block")}"'
     client_etag = request.headers.get("if-none-match")
     if _etag_matches(client_etag, stats_etag):
-        return Response(status_code=304, headers={"ETag": stats_etag, "Cache-Control": "public, max-age=15"})
+        return Response(status_code=304, headers={"ETag": stats_etag, "Cache-Control": "public, max-age=5"})
     return JSONResponse(
         status_code=200,
-        headers={"ETag": stats_etag, "Cache-Control": "public, max-age=15"},
+        headers={"ETag": stats_etag, "Cache-Control": "public, max-age=5"},
         content={
             "success": True,
             "mode": "stats",
             "stats": stats,
             "agent_wallets": stats["agent_wallets"],
             "total_created_wallets": stats["total_created_wallets"],
+            "agent_wallets_block": stats.get("agent_wallets_block", 0),
             "latest_block": stats.get("latest_block")
         }
     )
@@ -249,10 +262,12 @@ def get_overview_stats(request: Request):
 @app.get("/data/agent_id_stats.json")
 def get_agent_id_stats_json():
     """Serves agent_id_stats.json directly with CORS and caching for static fallbacks."""
-    stats = monitor.load_agent_id_stats()
+    local_st = monitor.load_agent_id_stats() or {}
+    cloud_st = db.get_agent_id_stats() or {}
+    stats = cloud_st if int(cloud_st.get("total_created_wallets") or 0) > int(local_st.get("total_created_wallets") or 0) else local_st
     return JSONResponse(
         content=stats,
-        headers={"Cache-Control": "public, max-age=60", "Access-Control-Allow-Origin": "*"}
+        headers={"Cache-Control": "public, max-age=15", "Access-Control-Allow-Origin": "*"}
     )
 
 
@@ -276,6 +291,7 @@ def get_feed(
     # Pre-calculated filter stats so frontend doesn't need all 10,000 drops just to show counts
     stats = compute_global_overview_stats(all_projs)
     total_agent_wallets = stats["agent_wallets"]
+    agent_wallets_block = stats.get("agent_wallets_block", 0)
 
     client_etag = request.headers.get("if-none-match")
 
@@ -284,14 +300,14 @@ def get_feed(
         delta = [p for p in all_projs if int(p.get("block") or 0) > since_block]
 
         if not delta:
-            delta_etag = f'"{total}-delta-{since_block}"'
+            delta_etag = f'"{total}-{total_agent_wallets}-delta-{since_block}"'
             # Bandwidth Guard 1: HTTP 304 Not Modified (0 bytes body) if client already has this state
             if _etag_matches(client_etag, delta_etag):
-                return Response(status_code=304, headers={"ETag": delta_etag, "Cache-Control": "public, max-age=15"})
-            # Bandwidth Guard 2: Minimal 0-drop payload without redundant nested stats (~80 bytes vs 20 KB)
+                return Response(status_code=304, headers={"ETag": delta_etag, "Cache-Control": "public, max-age=5"})
+            # Bandwidth Guard 2: Minimal 0-drop payload without redundant nested stats (~100 bytes vs 20 KB)
             return JSONResponse(
                 status_code=200,
-                headers={"ETag": delta_etag, "Cache-Control": "public, max-age=15"},
+                headers={"ETag": delta_etag, "Cache-Control": "public, max-age=5"},
                 content={
                     "success": True,
                     "mode": "delta",
@@ -299,11 +315,12 @@ def get_feed(
                     "count": 0,
                     "latest_block": latest_block,
                     "agent_wallets": total_agent_wallets,
+                    "agent_wallets_block": agent_wallets_block,
                     "projects": []
                 }
             )
 
-        delta_etag = f'"{latest_block}-{total}-delta-{since_block}"'
+        delta_etag = f'"{latest_block}-{total}-{total_agent_wallets}-delta-{since_block}"'
         return JSONResponse(
             status_code=200,
             headers={"ETag": delta_etag, "Cache-Control": "public, max-age=5"},
@@ -314,6 +331,7 @@ def get_feed(
                 "count": len(delta),
                 "latest_block": latest_block,
                 "agent_wallets": total_agent_wallets,
+                "agent_wallets_block": agent_wallets_block,
                 "projects": delta,
                 "stats": stats
             }
@@ -336,7 +354,7 @@ def get_feed(
     target_total = len(target_list)
     paginated = target_list[offset : offset + limit]
 
-    feed_etag = f'"{latest_block}-{total}-{offset}-{limit}-{filter or ""}"'
+    feed_etag = f'"{latest_block}-{total}-{total_agent_wallets}-{offset}-{limit}-{filter or ""}"'
     if _etag_matches(client_etag, feed_etag):
         return Response(status_code=304, headers={"ETag": feed_etag, "Cache-Control": "public, max-age=5"})
 

@@ -58,6 +58,11 @@ class DatabaseManager:
         self._client_instance = None
         self._client_pid = None
 
+        # Agent ID telemetry cache & throttling
+        self._agent_stats_cache: Optional[Dict[str, Any]] = None
+        self._agent_stats_cache_time: float = 0.0
+        self._last_stats_cloud_write: float = 0.0
+
         # Pre-seed in-memory cache from local history (0-byte egress on cold start)
         if os.path.exists(HISTORY_FILE):
             try:
@@ -721,6 +726,114 @@ class DatabaseManager:
                 conn.close()
 
         return {"wallet": w, "favorites": clean_favs, "updated_at": ts}
+
+    # -------------------------------------------------------------------------
+    # Persistent .ai Agent ID Telemetry Counter
+    # -------------------------------------------------------------------------
+    def get_agent_id_stats(self, max_age_sec: float = 15.0) -> Optional[Dict[str, Any]]:
+        """Loads persisted .ai wallet counter from Supabase or SQLite with lightweight TTL cache."""
+        now = time.time()
+        with self._cache_lock:
+            if self._agent_stats_cache and (now - self._agent_stats_cache_time < max_age_sec):
+                return dict(self._agent_stats_cache)
+
+        sentinel = "__system_agent_id_stats__"
+        record = None
+        if self.mode == "supabase":
+            try:
+                client = self.client
+                if HAS_HTTPX and client:
+                    resp = client.get(f"/rest/v1/user_favorites?wallet=eq.{sentinel}&select=favorites,updated_at")
+                    if resp.status_code == 200:
+                        rows = resp.json()
+                        if rows:
+                            favs = rows[0].get("favorites")
+                            if isinstance(favs, str):
+                                favs = json.loads(favs)
+                            if isinstance(favs, list) and favs and isinstance(favs[0], dict):
+                                record = favs[0]
+                            elif isinstance(favs, dict):
+                                record = favs
+            except Exception:
+                pass
+
+        if record is None:
+            with self._lock:
+                conn = self._get_sqlite_connection()
+                try:
+                    cur = conn.cursor()
+                    cur.execute("SELECT favorites FROM user_favorites WHERE wallet = ?", (sentinel,))
+                    row = cur.fetchone()
+                    if row and row["favorites"]:
+                        favs = json.loads(row["favorites"])
+                        if isinstance(favs, list) and favs and isinstance(favs[0], dict):
+                            record = favs[0]
+                        elif isinstance(favs, dict):
+                            record = favs
+                except Exception:
+                    pass
+                finally:
+                    conn.close()
+
+        if record and record.get("total_created_wallets"):
+            with self._cache_lock:
+                self._agent_stats_cache = dict(record)
+                self._agent_stats_cache_time = now
+            return dict(record)
+        return None
+
+    def save_agent_id_stats(self, stats: Dict[str, Any], force_cloud: bool = False) -> None:
+        """Persists .ai wallet counter to Supabase (throttled every 60s) and SQLite."""
+        if not stats or not stats.get("total_created_wallets"):
+            return
+
+        now = time.time()
+        clean_stats = {
+            "total_created_wallets": int(stats["total_created_wallets"]),
+            "last_block": int(stats.get("last_block") or 0),
+            "last_updated": int(stats.get("last_updated") or now),
+            "source": stats.get("source", "SPACE ID / Binance Agent ID Registry (0x60B9262456dE011F7d15a54CdD8c48bAaa8B022F)")
+        }
+
+        with self._cache_lock:
+            self._agent_stats_cache = clean_stats
+            self._agent_stats_cache_time = now
+
+        sentinel = "__system_agent_id_stats__"
+        payload = [clean_stats]
+
+        if self.mode == "supabase":
+            if force_cloud or (now - self._last_stats_cloud_write >= 60.0):
+                try:
+                    client = self.client
+                    if HAS_HTTPX and client:
+                        resp = client.post(
+                            "/rest/v1/user_favorites?on_conflict=wallet",
+                            json={"wallet": sentinel, "favorites": payload, "updated_at": clean_stats["last_updated"]},
+                            headers={"Prefer": "resolution=merge-duplicates"}
+                        )
+                        if resp.status_code in (200, 201):
+                            self._last_stats_cloud_write = now
+                            return
+                except Exception:
+                    pass
+
+        with self._lock:
+            conn = self._get_sqlite_connection()
+            try:
+                cur = conn.cursor()
+                cur.execute("""
+                    INSERT INTO user_favorites (wallet, favorites, updated_at)
+                    VALUES (?, ?, ?)
+                    ON CONFLICT(wallet) DO UPDATE SET
+                        favorites=excluded.favorites,
+                        updated_at=excluded.updated_at;
+                """, (sentinel, json.dumps(payload), clean_stats["last_updated"]))
+                conn.commit()
+            except Exception:
+                pass
+            finally:
+                conn.close()
 
 
 # Global Singleton Instance

@@ -1792,9 +1792,18 @@ function computeStats(drops) {
   };
 }
 
-let currentAgentWalletsCount = 175842;
+const AGENT_ID_REGISTRY_ADDR = '0x60B9262456dE011F7d15a54CdD8c48bAaa8B022F';
+const ERC721_TRANSFER_TOPIC = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef';
+const ZERO_ADDRESS_TOPIC = '0x0000000000000000000000000000000000000000000000000000000000000000';
+const PUBLICNODE_LOG_RPCS = ['https://bsc-rpc.publicnode.com', 'https://bsc.publicnode.com'];
+
+let currentAgentWalletsCount = 178001;
+let agentWalletsAnchorBlock = 132757997;
+let isSyncingWalletsOnChain = false;
+let lastWalletChainSyncAt = 0;
 
 function updateDigitalAiCounter(count = currentAgentWalletsCount) {
+  const prevCount = currentAgentWalletsCount;
   if (typeof count === 'number' && !isNaN(count) && count > 0) {
     currentAgentWalletsCount = count;
   } else {
@@ -1817,9 +1826,102 @@ function updateDigitalAiCounter(count = currentAgentWalletsCount) {
     }
   }
   const hdrCount = document.getElementById('headerAiWalletsCount');
-  if (hdrCount) hdrCount.textContent = formatted;
+  if (hdrCount) {
+    hdrCount.textContent = formatted;
+    if (count > prevCount && hdrCount.style) {
+      hdrCount.style.color = '#00ff88';
+      hdrCount.style.textShadow = '0 0 12px rgba(0, 255, 136, 0.85)';
+      setTimeout(() => {
+        hdrCount.style.color = '#ffd600';
+        hdrCount.style.textShadow = '0 0 6px rgba(255, 214, 0, 0.5)';
+      }, 900);
+    }
+  }
   const tickerEl = document.getElementById('tickerAiWallets');
   if (tickerEl) tickerEl.textContent = `🤖 ${formatted} .ai`;
+}
+
+function applyAgentWalletsState(count, blockNum = 0) {
+  const n = Number(count || 0);
+  const b = Number(blockNum || 0);
+  if (!n || isNaN(n) || n <= 0) return;
+
+  if (b > 0) {
+    if (b >= agentWalletsAnchorBlock) {
+      agentWalletsAnchorBlock = b;
+      const nextCount = (n >= currentAgentWalletsCount) ? n : currentAgentWalletsCount;
+      updateDigitalAiCounter(nextCount);
+    }
+  } else if (n > currentAgentWalletsCount) {
+    updateDigitalAiCounter(n);
+  }
+}
+
+async function syncLiveAgentWalletsOnChain(currBlk) {
+  if (typeof fetch === 'undefined' || !currBlk || currBlk <= agentWalletsAnchorBlock) return;
+  if (typeof document !== 'undefined' && document.hidden) return;
+  if (isSyncingWalletsOnChain) return;
+
+  const now = Date.now();
+  if (now - lastWalletChainSyncAt < 14000) return;
+
+  isSyncingWalletsOnChain = true;
+  lastWalletChainSyncAt = now;
+
+  try {
+    const startBlk = Math.max(agentWalletsAnchorBlock + 1, currBlk - 200000);
+    const chunkSize = 40000;
+    let totalNew = 0;
+    let fBlk = startBlk;
+    let allOk = true;
+
+    while (fBlk <= currBlk) {
+      const tBlk = Math.min(fBlk + chunkSize - 1, currBlk);
+      let chunkLogs = null;
+
+      for (const endpoint of PUBLICNODE_LOG_RPCS) {
+        try {
+          const res = await fetchWithTimeout(endpoint, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              jsonrpc: '2.0',
+              id: 1,
+              method: 'eth_getLogs',
+              params: [{
+                fromBlock: '0x' + fBlk.toString(16),
+                toBlock: '0x' + tBlk.toString(16),
+                address: AGENT_ID_REGISTRY_ADDR,
+                topics: [ERC721_TRANSFER_TOPIC, ZERO_ADDRESS_TOPIC]
+              }]
+            })
+          }, 4500);
+          if (!res || !res.ok) continue;
+          const json = await res.json();
+          if (json && Array.isArray(json.result)) {
+            chunkLogs = json.result;
+            break;
+          }
+        } catch (_) {}
+      }
+
+      if (chunkLogs === null) {
+        allOk = false;
+        break;
+      }
+      totalNew += chunkLogs.length;
+      agentWalletsAnchorBlock = tBlk;
+      fBlk = tBlk + 1;
+    }
+
+    if (allOk || totalNew > 0) {
+      if (totalNew > 0) {
+        updateDigitalAiCounter(currentAgentWalletsCount + totalNew);
+      }
+    }
+  } finally {
+    isSyncingWalletsOnChain = false;
+  }
 }
 
 // Update DOM Header with Macro Stats
@@ -1907,7 +2009,11 @@ function applyOverviewStats(data, persist = true) {
     }
 
     if (s.agent_wallets || s.total_created_wallets) {
-      updateDigitalAiCounter(Number(s.agent_wallets || s.total_created_wallets));
+      applyAgentWalletsState(
+        Number(s.agent_wallets || s.total_created_wallets),
+        Number(s.agent_wallets_block || s.last_block || data.agent_wallets_block || 0)
+      );
+      globalStats.agent_wallets = currentAgentWalletsCount;
     }
 
     if (typeof document !== 'undefined') {
@@ -7728,6 +7834,7 @@ async function pollLatestBlock() {
       if (data && data.result) {
         const blkNum = parseInt(data.result, 16);
         document.getElementById('latestBlock').textContent = `${blkNum.toLocaleString()}`;
+        syncLiveAgentWalletsOnChain(blkNum).catch(() => {});
         return;
       }
     } catch (err) {
@@ -7785,7 +7892,10 @@ async function pollDeltaFeed() {
       applyOverviewStats(data.stats);
     }
     if (data && data.agent_wallets) {
-      updateDigitalAiCounter(Number(data.agent_wallets));
+      applyAgentWalletsState(
+        Number(data.agent_wallets),
+        Number(data.agent_wallets_block || (data.stats && data.stats.agent_wallets_block) || 0)
+      );
     }
 
     if (data && data.projects && data.projects.length > 0) {
@@ -7999,7 +8109,10 @@ async function fetchDrops() {
         applyOverviewStats(payload.stats);
       }
       if (payload.agent_wallets) {
-        updateDigitalAiCounter(Number(payload.agent_wallets));
+        applyAgentWalletsState(
+          Number(payload.agent_wallets),
+          Number(payload.agent_wallets_block || (payload.stats && payload.stats.agent_wallets_block) || 0)
+        );
       }
       hasMoreDrops = Boolean(payload.has_more);
       if (payload.latest_block) latestKnownBlock = payload.latest_block;
@@ -9235,6 +9348,10 @@ if (typeof module !== 'undefined' && module.exports) {
     registerPulseItem,
     pulseItemsMap,
     updateDigitalAiCounter,
+    applyAgentWalletsState,
+    syncLiveAgentWalletsOnChain,
+    getAgentWalletsAnchorBlock: () => agentWalletsAnchorBlock,
+    setAgentWalletsAnchorBlock: (b) => { agentWalletsAnchorBlock = b; },
     getCurrentAgentWalletsCount: () => currentAgentWalletsCount,
     fetchOverviewStats,
     applyOverviewStats,
