@@ -4120,12 +4120,17 @@ function loadRecentInspected() {
   if (typeof localStorage === 'undefined') return [];
   try {
     const saved = localStorage.getItem(RECENT_INSPECTED_STORAGE_KEY);
-    if (saved) {
+    if (saved !== null) {
       const parsed = JSON.parse(saved);
       if (Array.isArray(parsed)) return parsed;
     }
   } catch (_) {}
-  return [];
+  // Default starter chips from popular alpha tokens if no prior inspections
+  return [
+    { symbol: 'Ptah', name: 'Ptah Protocol', contract: '0x360d0b00c3c3a9d70e6e7372cfbe85e68b95973c' },
+    { symbol: 'TIMIS', name: 'Timis Alpha', contract: '0x17bfa63510ec1469e7be9401824cae3cb5871216' },
+    { symbol: 'Chuffa', name: 'Chuffa Agent', contract: '0x999338b58a1f81cf0ec700e475877f10b77b7522' }
+  ];
 }
 
 function saveRecentInspected(list) {
