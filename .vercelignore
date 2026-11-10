@@ -2,7 +2,7 @@ __pycache__/
 *.py
 *.pyc
 *.db*
-data/
+data/*.db*
 video_assets/
 Dockerfile
 fly.toml

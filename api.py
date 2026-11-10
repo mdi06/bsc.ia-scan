@@ -189,6 +189,73 @@ def is_secondary_market_asset(d: dict) -> bool:
     return lp > 50.0 or mc > 500.0 or (px > 0 and vol > 0) or sec_vol > 0 or has_pair or is_grad
 
 
+def compute_global_overview_stats(all_projs=None) -> dict:
+    if all_projs is None:
+        raw_projs = db.get_all_projects()
+        all_projs = [p for p in raw_projs if (p.get("contract") or "").lower() not in BOGUS_SET]
+    total = len(all_projs)
+    latest_block = all_projs[0].get("block") if all_projs else None
+
+    smart_count = sum(1 for d in all_projs if (d.get("smart_wallets") or d.get("smart_minters")))
+    sniper_ready_count = sum(1 for d in all_projs if d.get("sniper_ready"))
+    proxy_count = sum(1 for d in all_projs if d.get("is_proxy_clone"))
+    nft_surge_count = sum(1 for d in all_projs if d.get("is_nft_surge"))
+    secondary_count = sum(1 for d in all_projs if is_secondary_market_asset(d))
+
+    agent_id_stats = monitor.load_agent_id_stats()
+    total_agent_wallets = int(agent_id_stats.get("total_created_wallets", 175842))
+
+    return {
+        "total": total,
+        "smart": smart_count,
+        "sniper_ready": sniper_ready_count,
+        "proxy": proxy_count,
+        "nft_surge": nft_surge_count,
+        "secondary": secondary_count,
+        "latest_block": latest_block,
+        "agent_wallets": total_agent_wallets,
+        "total_created_wallets": total_agent_wallets
+    }
+
+
+@app.get("/api/stats")
+@app.get("/api/overview")
+@app.get("/api/summary")
+def get_overview_stats(request: Request):
+    """
+    Dedicated lightweight summary statistics endpoint for instant overview render.
+    Includes ETag 304 caching and CORS headers.
+    """
+    stats = compute_global_overview_stats()
+    stats_etag = f'"{stats["total"]}-{stats["agent_wallets"]}-{stats.get("latest_block")}"'
+    client_etag = request.headers.get("if-none-match")
+    if _etag_matches(client_etag, stats_etag):
+        return Response(status_code=304, headers={"ETag": stats_etag, "Cache-Control": "public, max-age=15"})
+    return JSONResponse(
+        status_code=200,
+        headers={"ETag": stats_etag, "Cache-Control": "public, max-age=15"},
+        content={
+            "success": True,
+            "mode": "stats",
+            "stats": stats,
+            "agent_wallets": stats["agent_wallets"],
+            "total_created_wallets": stats["total_created_wallets"],
+            "latest_block": stats.get("latest_block")
+        }
+    )
+
+
+@app.get("/agent_id_stats.json")
+@app.get("/data/agent_id_stats.json")
+def get_agent_id_stats_json():
+    """Serves agent_id_stats.json directly with CORS and caching for static fallbacks."""
+    stats = monitor.load_agent_id_stats()
+    return JSONResponse(
+        content=stats,
+        headers={"Cache-Control": "public, max-age=60", "Access-Control-Allow-Origin": "*"}
+    )
+
+
 @app.get("/api/feed")
 def get_feed(
     request: Request,
@@ -207,25 +274,8 @@ def get_feed(
     latest_block = all_projs[0].get("block") if all_projs else None
 
     # Pre-calculated filter stats so frontend doesn't need all 10,000 drops just to show counts
-    smart_count = sum(1 for d in all_projs if (d.get("smart_wallets") or d.get("smart_minters")))
-    sniper_ready_count = sum(1 for d in all_projs if d.get("sniper_ready"))
-    proxy_count = sum(1 for d in all_projs if d.get("is_proxy_clone"))
-    nft_surge_count = sum(1 for d in all_projs if d.get("is_nft_surge"))
-    secondary_count = sum(1 for d in all_projs if is_secondary_market_asset(d))
-
-    agent_id_stats = monitor.load_agent_id_stats()
-    total_agent_wallets = int(agent_id_stats.get("total_created_wallets", 175842))
-
-    stats = {
-        "total": total,
-        "smart": smart_count,
-        "sniper_ready": sniper_ready_count,
-        "proxy": proxy_count,
-        "nft_surge": nft_surge_count,
-        "secondary": secondary_count,
-        "latest_block": latest_block,
-        "agent_wallets": total_agent_wallets
-    }
+    stats = compute_global_overview_stats(all_projs)
+    total_agent_wallets = stats["agent_wallets"]
 
     client_etag = request.headers.get("if-none-match")
 

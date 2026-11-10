@@ -146,4 +146,26 @@ def test_api_feed_endpoint():
     assert "secondary" in sec_data.get("stats", {})
 
 
+def test_api_stats_and_overview_endpoints():
+    """Verifies /api/stats, /api/overview, and /agent_id_stats.json return summary stats."""
+    client = TestClient(api.app)
+
+    for path in ("/api/stats", "/api/overview", "/api/summary"):
+        res = client.get(path)
+        assert res.status_code == 200
+        data = res.json()
+        assert data["success"] is True
+        assert "stats" in data
+        assert "agent_wallets" in data
+        assert data["agent_wallets"] >= 175842
+        assert "total" in data["stats"]
+
+    # Verify static json fallback route
+    res_json = client.get("/agent_id_stats.json")
+    assert res_json.status_code == 200
+    json_data = res_json.json()
+    assert "total_created_wallets" in json_data
+    assert json_data["total_created_wallets"] >= 175842
+
+
 

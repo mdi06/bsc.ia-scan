@@ -106,7 +106,7 @@
           </div>
         </div>
 
-        <!-- Prominent Global Cyber Search Bar -->
+        <!-- Prominent Global Cyber Search Bar & Sticky Recent Search Chips -->
         <div class="suite-search-wrap">
           <div class="search-box suite-search-box">
             <span class="search-icon">🔍</span>
@@ -115,6 +115,14 @@
             <button type="button" id="searchClearBtn" class="search-clear-btn" aria-label="Clear search"
               title="Clear search" style="display: none;">✕</button>
             <span class="search-kbd-badge" title="Press / to search">/</span>
+          </div>
+          <!-- Recently Inspected / Searched Chips -->
+          <div class="recent-search-chips-wrap" id="recentSearchChipsWrap" style="display: none;">
+            <span class="recent-chips-label">Recent:</span>
+            <div class="recent-chips-list" id="recentChipsList">
+              <!-- Injected by app.js: e.g. [Ptah], [TIMIS], [Chuffa] -->
+            </div>
+            <button type="button" class="recent-chips-clear" id="recentChipsClearBtn" onclick="clearRecentChips()" title="Clear recent history" aria-label="Clear recent history">✕</button>
           </div>
         </div>
 

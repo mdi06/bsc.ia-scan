@@ -1828,28 +1828,209 @@ function renderStats(drops) {
 
   updateDigitalAiCounter(currentAgentWalletsCount);
 
-  document.getElementById('fillRatePct').textContent = `${stats.fillRatePct.toFixed(1)}%`;
-  document.getElementById('fillRateRatio').textContent = `(${stats.soldOutCount} / ${stats.cappedTotal} Sold Out)`;
-  document.getElementById('nearCapCount').textContent = stats.nearCapCount;
-  document.getElementById('momentumCount').textContent = `${stats.warmCapCount} ACTIVE`;
+  const elFillPct = document.getElementById('fillRatePct');
+  if (elFillPct) elFillPct.textContent = `${stats.fillRatePct.toFixed(1)}%`;
+  const elFillRatio = document.getElementById('fillRateRatio');
+  if (elFillRatio) elFillRatio.textContent = `(${stats.soldOutCount} / ${stats.cappedTotal} Sold Out)`;
+  const elNearCap = document.getElementById('nearCapCount');
+  if (elNearCap) elNearCap.textContent = stats.nearCapCount;
+  const elMom = document.getElementById('momentumCount');
+  if (elMom) elMom.textContent = `${stats.warmCapCount} ACTIVE`;
 
   if (stats.topGainer) {
     const tg = stats.topGainer;
     const tgMint = tg.isFree || tg.mintUsd === 0 ? 'FREE' : formatCryptoPrice(tg.mintUsd);
     const tgAth = Math.max(tg.athPrice, tg.secUsd);
     const tgNet = Math.max(tg.athProfit, tg.profit);
-    document.getElementById('topGainerName').textContent = `${tg.name} (${tg.symbol})`;
-    document.getElementById('topGainerDetails').textContent = `Mint: ${tgMint} ➔ ATH: ${formatCryptoPrice(tgAth)}`;
-    document.getElementById('topGainerNet').textContent = `Net: ${formatCryptoPrice(tgNet, true)} / token`;
+    const elTgName = document.getElementById('topGainerName');
+    if (elTgName) elTgName.textContent = `${tg.name} (${tg.symbol})`;
+    const elTgDet = document.getElementById('topGainerDetails');
+    if (elTgDet) elTgDet.textContent = `Mint: ${tgMint} ➔ ATH: ${formatCryptoPrice(tgAth)}`;
+    const elTgNet = document.getElementById('topGainerNet');
+    if (elTgNet) elTgNet.textContent = `Net: ${formatCryptoPrice(tgNet, true)} / token`;
   }
 
   if (stats.runnerUp) {
     const ru = stats.runnerUp;
     const ruAth = Math.max(ru.athPrice, ru.secUsd);
-    document.getElementById('runnerUpDetails').textContent = `│ 🥈 Runner-Up: ${ru.name} (${ru.symbol}) [${formatCryptoPrice(ruAth)}]`;
+    const elRu = document.getElementById('runnerUpDetails');
+    if (elRu) elRu.textContent = `│ 🥈 Runner-Up: ${ru.name} (${ru.symbol}) [${formatCryptoPrice(ruAth)}]`;
   }
 
   renderSmartStreamTicker(drops);
+}
+
+// Dedicated Overview Statistics System: Cache-First multi-mirror resilience & offline fallbacks
+const OVERVIEW_STATS_CACHE_KEY = 'agent_id_overview_stats';
+let isFetchingOverviewStats = false;
+let overviewStatsRetryCount = 0;
+const MAX_STATS_RETRIES = 2;
+
+function hydrateCachedOverviewStats() {
+  if (typeof localStorage !== 'undefined') {
+    try {
+      const raw = localStorage.getItem(OVERVIEW_STATS_CACHE_KEY);
+      if (raw) {
+        const cached = JSON.parse(raw);
+        if (cached && (cached.stats || cached.total !== undefined || cached.count !== undefined || cached.agent_wallets || cached.total_created_wallets)) {
+          applyOverviewStats(cached, false);
+          return true;
+        }
+      }
+    } catch (_) {}
+  }
+  if (typeof applyOverviewStatsFallback === 'function') {
+    applyOverviewStatsFallback();
+  }
+  return false;
+}
+
+function applyOverviewStats(data, persist = true) {
+  if (!data) return;
+  const s = data.stats || data;
+  if (s && typeof s === 'object') {
+    globalStats = {
+      total: Number(s.total !== undefined ? s.total : (s.count !== undefined ? s.count : (allDrops ? allDrops.length : 0))),
+      smart: Number(s.smart !== undefined ? s.smart : 0),
+      sniper_ready: Number(s.sniper_ready !== undefined ? s.sniper_ready : 0),
+      proxy: Number(s.proxy !== undefined ? s.proxy : 0),
+      nft_surge: Number(s.nft_surge !== undefined ? s.nft_surge : 0),
+      secondary: Number(s.secondary !== undefined ? s.secondary : 0),
+      latest_block: s.latest_block || latestKnownBlock || 0,
+      agent_wallets: Number(s.agent_wallets || s.total_created_wallets || currentAgentWalletsCount)
+    };
+
+    if (persist && typeof localStorage !== 'undefined') {
+      try {
+        localStorage.setItem(OVERVIEW_STATS_CACHE_KEY, JSON.stringify(data));
+      } catch (_) {}
+    }
+
+    if (s.agent_wallets || s.total_created_wallets) {
+      updateDigitalAiCounter(Number(s.agent_wallets || s.total_created_wallets));
+    }
+
+    if (typeof document !== 'undefined') {
+      const rEl = document.getElementById('radarCount');
+      if (rEl) rEl.textContent = globalStats.total;
+      const sEl = document.getElementById('smartCount');
+      if (sEl) sEl.textContent = globalStats.smart;
+
+      updateSniperReadyCount();
+      updateNftSurgeCount();
+      updateProxyCount();
+      updateLaunchpadCount();
+      updateSecondaryTabCount();
+      if (allDrops && allDrops.length > 0) {
+        renderStats(allDrops);
+      }
+    }
+  } else if (data && data.total_created_wallets) {
+    updateDigitalAiCounter(Number(data.total_created_wallets));
+  }
+}
+
+function applyOverviewStatsFallback() {
+  if (!allDrops || allDrops.length === 0) return;
+  const localSmart = allDrops.filter(d => (d.smart_wallets && d.smart_wallets.length > 0) || (d.smart_minters && d.smart_minters.length > 0)).length;
+  const localSecondary = allDrops.filter(d => isSecondaryMarketAsset(d)).length;
+  const localSniper = allDrops.filter(d => isSniperReady(d)).length;
+  const localProxy = allDrops.filter(d => Boolean(d.is_proxy_clone)).length;
+  const localNft = allDrops.filter(d => evaluateNftSurge(d).surge).length;
+
+  globalStats = {
+    total: (globalStats && globalStats.total) ? globalStats.total : allDrops.length,
+    smart: (globalStats && globalStats.smart) ? globalStats.smart : localSmart,
+    sniper_ready: (globalStats && globalStats.sniper_ready) ? globalStats.sniper_ready : localSniper,
+    proxy: (globalStats && globalStats.proxy) ? globalStats.proxy : localProxy,
+    nft_surge: (globalStats && globalStats.nft_surge) ? globalStats.nft_surge : localNft,
+    secondary: (globalStats && globalStats.secondary) ? globalStats.secondary : localSecondary,
+    latest_block: latestKnownBlock || (allDrops[0] ? allDrops[0].block : 0),
+    agent_wallets: currentAgentWalletsCount
+  };
+
+  if (typeof document !== 'undefined') {
+    const rEl = document.getElementById('radarCount');
+    if (rEl) rEl.textContent = globalStats.total;
+    const sEl = document.getElementById('smartCount');
+    if (sEl) sEl.textContent = globalStats.smart;
+
+    updateSniperReadyCount();
+    updateNftSurgeCount();
+    updateProxyCount();
+    updateLaunchpadCount();
+    updateSecondaryTabCount();
+    renderStats(allDrops);
+  }
+}
+
+async function fetchOverviewStats(isRetry = false) {
+  // Cache-First: immediately hydrate from cached local state before attempting background network fetch
+  if (!isRetry) {
+    hydrateCachedOverviewStats();
+  }
+
+  if (isFetchingOverviewStats && !isRetry) return false;
+  isFetchingOverviewStats = true;
+
+  const candidateEndpoints = [
+    `${BACKEND_URL}/api/stats`,
+    `${BACKEND_URL}/api/overview`,
+    `https://bsc-ia-scan.onrender.com/api/stats`,
+    `https://agent-id-monitor.fly.dev/api/stats`,
+    `/api/stats`,
+    `/api/overview`,
+    `agent_id_stats.json`,
+    `data/agent_id_stats.json`
+  ];
+  const endpoints = Array.from(new Set(candidateEndpoints.filter(Boolean)));
+
+  let loadedStats = null;
+  let lastErr = null;
+
+  for (const ep of endpoints) {
+    try {
+      const res = await fetchWithTimeout(ep, { cache: 'default' }, 3500);
+      if (!res || !res.ok) {
+        lastErr = new Error(`HTTP ${res ? res.status : 'ERR'} from ${ep}`);
+        continue;
+      }
+      const data = await res.json();
+      if (data && (data.stats || data.total_created_wallets || data.agent_wallets || data.total)) {
+        loadedStats = data;
+        break;
+      }
+    } catch (err) {
+      lastErr = err;
+    }
+  }
+
+  if (loadedStats) {
+    overviewStatsRetryCount = 0;
+    applyOverviewStats(loadedStats);
+    isFetchingOverviewStats = false;
+    return true;
+  }
+
+  // Graceful background retry without alarming warnings since local cache is already active
+  if (overviewStatsRetryCount < MAX_STATS_RETRIES) {
+    overviewStatsRetryCount++;
+    setTimeout(() => {
+      fetchOverviewStats(true).catch(() => {});
+    }, overviewStatsRetryCount * 1200);
+  } else {
+    applyOverviewStatsFallback();
+  }
+
+  isFetchingOverviewStats = false;
+  return false;
+}
+
+if (typeof window !== 'undefined') {
+  window.fetchOverviewStats = fetchOverviewStats;
+  window.applyOverviewStats = applyOverviewStats;
+  window.applyOverviewStatsFallback = applyOverviewStatsFallback;
+  window.hydrateCachedOverviewStats = hydrateCachedOverviewStats;
 }
 
 // Evaluate Assisted Sniper Conviction (60% Rule & Anti-Rug)
@@ -3927,6 +4108,149 @@ function getFilteredDrops() {
   return list;
 }
 
+// ==========================================================================
+// 🔍 Sticky Search Bar & Recent Search Chips System
+// ==========================================================================
+
+const RECENT_INSPECTED_STORAGE_KEY = 'agent_id_recent_inspected';
+const MAX_RECENT_CHIPS = 8;
+let recentInspectedTokens = [];
+
+function loadRecentInspected() {
+  if (typeof localStorage === 'undefined') return [];
+  try {
+    const saved = localStorage.getItem(RECENT_INSPECTED_STORAGE_KEY);
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      if (Array.isArray(parsed)) return parsed;
+    }
+  } catch (_) {}
+  return [];
+}
+
+function saveRecentInspected(list) {
+  if (typeof localStorage === 'undefined') return;
+  try {
+    localStorage.setItem(RECENT_INSPECTED_STORAGE_KEY, JSON.stringify(list));
+  } catch (_) {}
+}
+
+function addRecentInspected(token) {
+  if (!token) return;
+  const sym = token.symbol || token.name;
+  if (!sym) return;
+  const cleanSym = String(sym).trim();
+  if (!cleanSym) return;
+
+  const cAddr = String(token.contract || '').toLowerCase().trim();
+
+  // Deduplicate: filter out if already exists by contract or symbol
+  recentInspectedTokens = recentInspectedTokens.filter(item => {
+    if (cAddr && item.contract && item.contract.toLowerCase() === cAddr) return false;
+    if (item.symbol && item.symbol.toLowerCase() === cleanSym.toLowerCase()) return false;
+    return true;
+  });
+
+  // Prepend to front
+  recentInspectedTokens.unshift({
+    symbol: cleanSym,
+    name: token.name || cleanSym,
+    contract: token.contract || '',
+    timestamp: Date.now()
+  });
+
+  if (recentInspectedTokens.length > MAX_RECENT_CHIPS) {
+    recentInspectedTokens = recentInspectedTokens.slice(0, MAX_RECENT_CHIPS);
+  }
+
+  saveRecentInspected(recentInspectedTokens);
+  renderRecentChips();
+}
+
+function clearRecentChips() {
+  recentInspectedTokens = [];
+  saveRecentInspected([]);
+  renderRecentChips();
+}
+
+function setSearchQuery(q, andOpenModal = false) {
+  searchQuery = q || '';
+  const sInput = document.getElementById('searchInput');
+  const sClear = document.getElementById('searchClearBtn');
+  if (sInput) {
+    sInput.value = searchQuery;
+  }
+  if (sClear) {
+    sClear.style.display = searchQuery ? 'inline-flex' : 'none';
+  }
+  renderTable();
+
+  if (andOpenModal && searchQuery) {
+    const target = (typeof findTokenByQuery === 'function') ? findTokenByQuery(searchQuery) : null;
+    if (target) {
+      openModal(target);
+    } else if (typeof resolveTokenAndInspect === 'function') {
+      resolveTokenAndInspect(searchQuery);
+    }
+  }
+}
+
+function handleRecentChipClick(symbol, contract, event) {
+  if (event) {
+    if (typeof event.preventDefault === 'function') event.preventDefault();
+    if (typeof event.stopPropagation === 'function') event.stopPropagation();
+  }
+  const cleanSym = String(symbol || '').trim();
+  setSearchQuery(cleanSym, true);
+}
+
+function renderRecentChips() {
+  if (typeof document === 'undefined') return;
+  const wrap = document.getElementById('recentSearchChipsWrap');
+  const listEl = document.getElementById('recentChipsList');
+  if (!wrap || !listEl) return;
+
+  if (!recentInspectedTokens || recentInspectedTokens.length === 0) {
+    wrap.style.display = 'none';
+    listEl.innerHTML = '';
+    return;
+  }
+
+  wrap.style.display = 'flex';
+  listEl.innerHTML = recentInspectedTokens.map(item => {
+    const sym = escapeHtml(item.symbol || item.name || 'Token');
+    const c = escapeHtml(item.contract || '');
+    return `
+      <button type="button" class="recent-chip" onclick="handleRecentChipClick('${sym.replace(/'/g, "\\'")}', '${c}', event)" title="Jump back to ${sym}">
+        <span class="recent-chip-icon">⚡</span>
+        <span class="recent-chip-text">${sym}</span>
+      </button>
+    `;
+  }).join('');
+}
+
+function setupStickyHeaderScroll() {
+  if (typeof window === 'undefined') return;
+  const header = document.querySelector('.suite-header');
+  if (!header) return;
+  window.addEventListener('scroll', () => {
+    if (window.scrollY > 15) {
+      header.classList.add('scrolled');
+    } else {
+      header.classList.remove('scrolled');
+    }
+  }, { passive: true });
+}
+
+if (typeof window !== 'undefined') {
+  window.addRecentInspected = addRecentInspected;
+  window.clearRecentChips = clearRecentChips;
+  window.handleRecentChipClick = handleRecentChipClick;
+  window.renderRecentChips = renderRecentChips;
+  window.setSearchQuery = setSearchQuery;
+  window.setupStickyHeaderScroll = setupStickyHeaderScroll;
+}
+
 const TABLE_RENDER_CHUNK = 60;
 let tableRenderLimit = 60;
 
@@ -4190,7 +4514,10 @@ function renderTable(keepLimit = false) {
   visible.forEach((item, index) => {
     const tr = document.createElement('tr');
     if (item._isNew) tr.classList.add('row-new');
-    tr.addEventListener('click', () => openModal(item));
+    tr.addEventListener('click', (e) => {
+      if (e && e.target && (e.target.closest('a') || e.target.closest('button'))) return;
+      openModal(item);
+    });
 
     const blk = item.block ? `#${String(item.block).slice(-6)}` : '-';
     const smWalletsList = (item.smart_wallets && item.smart_wallets.length > 0)
@@ -4409,7 +4736,11 @@ function renderTable(keepLimit = false) {
     let cellProg = progBar;
     let cellPrice = priceStr;
     let cellFloor = floorStr;
-    let actBtn = `<button class="inspect-btn"><span class="desktop-only">Inspect</span><span class="mobile-only">🔍 Deep Dive & Snipe CLI ➔</span></button>`;
+
+    const tokenSym = item.symbol || item.name || item.contract || '';
+    const tokenHash = '#token=' + encodeURIComponent(tokenSym);
+    const tokenLink = `<a href="${tokenHash}" class="token-permalink" onclick="handleTokenClick(event, '${item.contract}')" title="Inspect ${escapeHtml(item.name || tokenSym)} (Ctrl+Click to open in new tab)"><strong>${item.name || 'Unknown'}</strong><span class="sym">(${item.symbol || ''})</span></a>`;
+    let actBtn = `<a href="${tokenHash}" class="inspect-btn" onclick="handleTokenClick(event, '${item.contract}')" title="Inspect & Snipe CLI (Ctrl+Click to open in new tab)"><span class="desktop-only">Inspect</span><span class="mobile-only">🔍 Deep Dive & Snipe CLI ➔</span></a>`;
 
     if (isSec) {
       const dexScreenerUrl = getDexScreenerUrl(item);
@@ -4464,17 +4795,17 @@ function renderTable(keepLimit = false) {
       if (item.contract === '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee') {
         cellHolders = `<span style="color: var(--color-green); font-weight:700;">Gas: ${Number(item.user_balance || 0).toFixed(4)} BNB</span>`;
         cellFloor = `<span class="badge badge-cyan" style="font-size: 11px;">⛽ GAS RESERVE</span>`;
-        actBtn = `<button class="inspect-btn" style="border-color: var(--color-cyan); color: var(--color-cyan); font-weight:700;"><span class="desktop-only">⛽ Gas Reserve</span><span class="mobile-only">⛽ Gas ➔</span></button>`;
+        actBtn = `<a href="${tokenHash}" class="inspect-btn" onclick="handleTokenClick(event, '${item.contract}')" style="border-color: var(--color-cyan); color: var(--color-cyan); font-weight:700;"><span class="desktop-only">⛽ Gas Reserve</span><span class="mobile-only">⛽ Gas ➔</span></a>`;
       } else if (isNft) {
         cellHolders = `<span style="color: var(--color-green); font-weight:700;">Holdings: ${formatCount(item.user_balance || 1)} NFT</span>`;
         cellFloor = `<span class="badge ${exitSignal.badge_class}" style="font-size: 11px;">${exitSignal.badge}</span>`;
-        actBtn = `<button class="inspect-btn" style="border-color: var(--color-magenta); color: var(--color-magenta); font-weight:700;"><span class="desktop-only">🎨 Element List</span><span class="mobile-only">🎨 Element ➔</span></button>`;
+        actBtn = `<a href="${tokenHash}" class="inspect-btn" onclick="handleTokenClick(event, '${item.contract}')" style="border-color: var(--color-magenta); color: var(--color-magenta); font-weight:700;"><span class="desktop-only">🎨 Element List</span><span class="mobile-only">🎨 Element ➔</span></a>`;
       } else {
         const balNum = Number(item.user_balance || 0);
         const balStr = balNum >= 1000 ? formatCount(balNum) : (balNum < 0.01 ? balNum.toFixed(4) : balNum.toFixed(2));
         cellHolders = `<span style="color: var(--color-green); font-weight:700;">Holdings: ${balStr}</span>`;
         cellFloor = `<span class="badge ${exitSignal.badge_class}" style="font-size: 11px;">${exitSignal.badge}</span>`;
-        actBtn = `<button class="inspect-btn" style="border-color: #f0b90b; color: #f0b90b; font-weight:700;"><span class="desktop-only">🥞 1-Click Exit</span><span class="mobile-only">🥞 Exit CLI ➔</span></button>`;
+        actBtn = `<a href="${tokenHash}" class="inspect-btn" onclick="handleTokenClick(event, '${item.contract}')" style="border-color: #f0b90b; color: #f0b90b; font-weight:700;"><span class="desktop-only">🥞 1-Click Exit</span><span class="mobile-only">🥞 Exit CLI ➔</span></a>`;
       }
     }
 
@@ -4484,7 +4815,7 @@ function renderTable(keepLimit = false) {
         <td class="col-num">${index + 1}</td>
         <td class="col-block"><code>${blk}</code></td>
         <td class="col-sm">${smBadge}</td>
-        <td class="col-project"><strong>${item.name || 'Unknown'}</strong><span class="sym">(${item.symbol || ''})</span></td>
+        <td class="col-project">${tokenLink}</td>
         <td class="col-type">${stdBadge}</td>
         <td class="col-safety">${safeBadge}</td>
         <td class="col-interest">${intBadge}</td>
@@ -4501,7 +4832,7 @@ function renderTable(keepLimit = false) {
         <td class="col-num">${index + 1}</td>
         <td class="col-block"><code>${blk}</code></td>
         <td class="col-sm">${smBadge}</td>
-        <td class="col-project"><strong>${item.name || 'Unknown'}</strong><span class="sym">(${item.symbol || ''})</span></td>
+        <td class="col-project">${tokenLink}</td>
         <td class="col-type">${stdBadge}</td>
         <td class="col-safety">${safeBadge}</td>
         <td class="col-interest">${intBadge}</td>
@@ -4555,7 +4886,10 @@ function appendNextTableBatch() {
     const index = tableRenderLimit + idx;
     const tr = document.createElement('tr');
     if (item._isNew) tr.classList.add('row-new');
-    tr.addEventListener('click', () => openModal(item));
+    tr.addEventListener('click', (e) => {
+      if (e && e.target && (e.target.closest('a') || e.target.closest('button'))) return;
+      openModal(item);
+    });
 
     const blk = item.block ? `#${String(item.block).slice(-6)}` : '-';
     const smWalletsList = (item.smart_wallets && item.smart_wallets.length > 0)
@@ -4746,7 +5080,11 @@ function appendNextTableBatch() {
     let cellLp = lpStr;
     let cellProg = progBar;
     let cellPrice = priceStr;
-    let actBtn = `<button class="inspect-btn" onclick="openModal(allDrops[${index}] || allDrops.find(x => x.contract === '${item.contract}'))"><span class="desktop-only">Inspect</span><span class="mobile-only">➔</span></button>`;
+
+    const tokenSym = item.symbol || item.name || item.contract || '';
+    const tokenHash = '#token=' + encodeURIComponent(tokenSym);
+    const tokenLink = `<a href="${tokenHash}" class="token-permalink" onclick="handleTokenClick(event, '${item.contract}')" title="Inspect ${escapeHtml(item.name || tokenSym)} (Ctrl+Click to open in new tab)"><strong>${item.name || 'Unknown'}</strong><span class="sym">(${item.symbol || ''})</span></a>`;
+    let actBtn = `<a href="${tokenHash}" class="inspect-btn" onclick="handleTokenClick(event, '${item.contract}')" title="Inspect & Snipe CLI (Ctrl+Click to open in new tab)"><span class="desktop-only">Inspect</span><span class="mobile-only">➔</span></a>`;
 
     if (isSec) {
       const dexScreenerUrl = getDexScreenerUrl(item);
@@ -4801,17 +5139,17 @@ function appendNextTableBatch() {
       if (item.is_native_gas) {
         cellHolders = `<span style="color: var(--color-green); font-weight:700;">Gas: ${Number(item.user_balance || 0).toFixed(4)} BNB</span>`;
         cellFloor = `<span class="badge badge-cyan" style="font-size: 11px;">⛽ GAS RESERVE</span>`;
-        actBtn = `<button class="inspect-btn" style="border-color: var(--color-cyan); color: var(--color-cyan); font-weight:700;"><span class="desktop-only">⛽ Gas Reserve</span><span class="mobile-only">⛽ Gas ➔</span></button>`;
+        actBtn = `<a href="${tokenHash}" class="inspect-btn" onclick="handleTokenClick(event, '${item.contract}')" style="border-color: var(--color-cyan); color: var(--color-cyan); font-weight:700;"><span class="desktop-only">⛽ Gas Reserve</span><span class="mobile-only">⛽ Gas ➔</span></a>`;
       } else if (isNft) {
         cellHolders = `<span style="color: var(--color-green); font-weight:700;">Holdings: ${formatCount(item.user_balance || 1)} NFT</span>`;
         cellFloor = `<span class="badge ${exitSignal.badge_class}" style="font-size: 11px;">${exitSignal.badge}</span>`;
-        actBtn = `<button class="inspect-btn" style="border-color: var(--color-magenta); color: var(--color-magenta); font-weight:700;"><span class="desktop-only">🎨 Element List</span><span class="mobile-only">🎨 Element ➔</span></button>`;
+        actBtn = `<a href="${tokenHash}" class="inspect-btn" onclick="handleTokenClick(event, '${item.contract}')" style="border-color: var(--color-magenta); color: var(--color-magenta); font-weight:700;"><span class="desktop-only">🎨 Element List</span><span class="mobile-only">🎨 Element ➔</span></a>`;
       } else {
         const balNum = Number(item.user_balance || 0);
         const balStr = balNum >= 1000 ? formatCount(balNum) : (balNum < 0.01 ? balNum.toFixed(4) : balNum.toFixed(2));
         cellHolders = `<span style="color: var(--color-green); font-weight:700;">Holdings: ${balStr}</span>`;
         cellFloor = `<span class="badge ${exitSignal.badge_class}" style="font-size: 11px;">${exitSignal.badge}</span>`;
-        actBtn = `<button class="inspect-btn" style="border-color: #f0b90b; color: #f0b90b; font-weight:700;"><span class="desktop-only">🥞 1-Click Exit</span><span class="mobile-only">🥞 Exit CLI ➔</span></button>`;
+        actBtn = `<a href="${tokenHash}" class="inspect-btn" onclick="handleTokenClick(event, '${item.contract}')" style="border-color: #f0b90b; color: #f0b90b; font-weight:700;"><span class="desktop-only">🥞 1-Click Exit</span><span class="mobile-only">🥞 Exit CLI ➔</span></a>`;
       }
     }
 
@@ -4821,7 +5159,7 @@ function appendNextTableBatch() {
         <td class="col-num">${index + 1}</td>
         <td class="col-block"><code>${blk}</code></td>
         <td class="col-sm">${smBadge}</td>
-        <td class="col-project"><strong>${item.name || 'Unknown'}</strong><span class="sym">(${item.symbol || ''})</span></td>
+        <td class="col-project">${tokenLink}</td>
         <td class="col-type">${stdBadge}</td>
         <td class="col-safety">${safeBadge}</td>
         <td class="col-interest">${intBadge}</td>
@@ -4838,7 +5176,7 @@ function appendNextTableBatch() {
         <td class="col-num">${index + 1}</td>
         <td class="col-block"><code>${blk}</code></td>
         <td class="col-sm">${smBadge}</td>
-        <td class="col-project"><strong>${item.name || 'Unknown'}</strong><span class="sym">(${item.symbol || ''})</span></td>
+        <td class="col-project">${tokenLink}</td>
         <td class="col-type">${stdBadge}</td>
         <td class="col-safety">${safeBadge}</td>
         <td class="col-interest">${intBadge}</td>
@@ -4978,11 +5316,297 @@ function computeHolderDistribution(item) {
   return result;
 }
 
+// In-Modal Token Navigation System (Prev / Next & Arrow Keys)
+let currentInspectItem = null;
+
+function getInspectNavContext(item = currentInspectItem) {
+  if (!item) return { list: [], index: -1, total: 0, hasPrev: false, hasNext: false, prevItem: null, nextItem: null };
+  const cAddr = String(item.contract || '').toLowerCase().trim();
+
+  // Try current active filtered table list first
+  let list = [];
+  try {
+    list = (typeof getFilteredDrops === 'function') ? getFilteredDrops() : [];
+  } catch (e) {
+    list = [];
+  }
+
+  let idx = list.findIndex(d => String(d.contract || '').toLowerCase().trim() === cAddr);
+
+  // If not found in current filtered list, fallback to allDrops (local or global/window)
+  if (idx === -1) {
+    if (typeof allDrops !== 'undefined' && Array.isArray(allDrops) && allDrops.length > 0) {
+      list = allDrops;
+      idx = list.findIndex(d => String(d.contract || '').toLowerCase().trim() === cAddr);
+    }
+    if (idx === -1 && typeof global !== 'undefined' && Array.isArray(global.allDrops) && global.allDrops.length > 0) {
+      list = global.allDrops;
+      idx = list.findIndex(d => String(d.contract || '').toLowerCase().trim() === cAddr);
+    }
+    if (idx === -1 && typeof window !== 'undefined' && Array.isArray(window.allDrops) && window.allDrops.length > 0) {
+      list = window.allDrops;
+      idx = list.findIndex(d => String(d.contract || '').toLowerCase().trim() === cAddr);
+    }
+  }
+
+  const hasPrev = idx > 0;
+  const hasNext = idx !== -1 && idx < list.length - 1;
+  const prevItem = hasPrev ? list[idx - 1] : null;
+  const nextItem = hasNext ? list[idx + 1] : null;
+
+  return {
+    list,
+    index: idx,
+    total: list.length,
+    hasPrev,
+    hasNext,
+    prevItem,
+    nextItem
+  };
+}
+
+function navigateInspectModal(direction) {
+  const modal = (typeof document !== 'undefined') ? document.getElementById('inspectModal') : null;
+  if (!modal) return;
+  const isOpen = Boolean(modal.open || modal.hasAttribute('open'));
+  if (!isOpen && typeof modal.open !== 'undefined') return;
+  if (!currentInspectItem) return;
+
+  const { list, index } = getInspectNavContext(currentInspectItem);
+  if (!list || list.length === 0 || index === -1) return;
+
+  const targetIndex = index + direction;
+  if (targetIndex >= 0 && targetIndex < list.length) {
+    const nextTarget = list[targetIndex];
+    if (nextTarget) {
+      openModal(nextTarget);
+      const content = document.getElementById('modalContent');
+      if (content) content.scrollTop = 0;
+    }
+  }
+
+  // Pre-load older drops if approaching the end of loaded batch in radar feed
+  if (direction > 0 && targetIndex >= list.length - 2 && hasMoreDrops && !isLoadingMore && activeTab === 'RADAR' && activeFilter === 'ALL' && !searchQuery) {
+    if (typeof loadMoreDrops === 'function') {
+      loadMoreDrops().catch(() => {});
+    }
+  }
+}
+
+if (typeof window !== 'undefined') {
+  window.navigateInspectModal = navigateInspectModal;
+  window.getInspectNavContext = getInspectNavContext;
+}
+
+// ==========================================================================
+// 🔗 URL Hash Permalinks for Modals (e.g. /#token=PTAH or /#inspect=0x...)
+// ==========================================================================
+
+function parseTokenFromHash(hashStr) {
+  if (!hashStr || typeof hashStr !== 'string') return '';
+  const clean = hashStr.replace(/^#/, '').trim();
+  if (!clean) return '';
+  if (clean.includes('=')) {
+    try {
+      const params = new URLSearchParams(clean);
+      const val = params.get('token') || params.get('inspect') || '';
+      if (val) return val.trim();
+    } catch (_) {}
+  }
+  const match = clean.match(/^(?:token|inspect)=([^&]+)/i);
+  if (match && match[1]) {
+    try {
+      return decodeURIComponent(match[1]).trim();
+    } catch (_) {
+      return match[1].trim();
+    }
+  }
+  return '';
+}
+
+function isSameToken(item, query) {
+  if (!item || !query) return false;
+  const q = String(query).trim().toLowerCase();
+  const sym = String(item.symbol || '').trim().toLowerCase();
+  const name = String(item.name || '').trim().toLowerCase();
+  const addr = String(item.contract || '').trim().toLowerCase();
+  return (sym && sym === q) || (name && name === q) || (addr && addr === q);
+}
+
+function findTokenByQuery(query) {
+  if (!query) return null;
+  const q = String(query).trim().toLowerCase();
+  if (!q) return null;
+
+  // Search in memory allDrops (or global.allDrops in unit tests)
+  const dropsList = (typeof allDrops !== 'undefined' && Array.isArray(allDrops))
+    ? allDrops
+    : ((typeof global !== 'undefined' && Array.isArray(global.allDrops)) ? global.allDrops : []);
+
+  if (dropsList.length > 0) {
+    // 1. Exact symbol match has highest priority
+    let found = dropsList.find(d => d && d.symbol && d.symbol.toLowerCase() === q);
+    if (found) return found;
+
+    // 2. Contract address match
+    found = dropsList.find(d => d && d.contract && d.contract.toLowerCase() === q);
+    if (found) return found;
+
+    // 3. Project name match
+    found = dropsList.find(d => d && d.name && d.name.toLowerCase() === q);
+    if (found) return found;
+  }
+
+  // Search in pulseItemsMap if available
+  const pMap = (typeof pulseItemsMap !== 'undefined') ? pulseItemsMap : ((typeof global !== 'undefined') ? global.pulseItemsMap : null);
+  if (pMap && typeof pMap.values === 'function') {
+    for (const item of pMap.values()) {
+      if (!item) continue;
+      if (item.symbol && item.symbol.toLowerCase() === q) return item;
+      if (item.contract && item.contract.toLowerCase() === q) return item;
+      if (item.name && item.name.toLowerCase() === q) return item;
+    }
+  }
+
+  return null;
+}
+
+function setModalHash(item) {
+  if (typeof window === 'undefined' || !window.location || !item) return;
+  const sym = item.symbol || item.name || item.contract;
+  if (!sym) return;
+  const targetHash = '#token=' + encodeURIComponent(sym);
+  if (window.location.hash !== targetHash) {
+    try {
+      window.location.hash = targetHash;
+    } catch (e) {
+      if (window.location) window.location.hash = targetHash;
+    }
+  }
+}
+
+function clearModalHash() {
+  if (typeof window === 'undefined' || !window.location) return;
+  const hash = window.location.hash || '';
+  if (hash.startsWith('#token=') || hash.startsWith('#inspect=')) {
+    if (window.history && typeof window.history.replaceState === 'function' && window.location.pathname) {
+      try {
+        const cleanUrl = window.location.pathname + (window.location.search || '');
+        window.history.replaceState(null, '', cleanUrl);
+      } catch (e) {
+        window.location.hash = '';
+      }
+    } else {
+      window.location.hash = '';
+    }
+    if (window.location.hash && (window.location.hash.startsWith('#token=') || window.location.hash.startsWith('#inspect='))) {
+      try { window.location.hash = ''; } catch (_) {}
+    }
+  }
+}
+
+async function resolveTokenAndInspect(tokenQuery, attempts = 0) {
+  if (!tokenQuery) return;
+  const modal = (typeof document !== 'undefined') ? document.getElementById('inspectModal') : null;
+  const isAlreadyOpen = Boolean(modal && (modal.open || (typeof modal.hasAttribute === 'function' && modal.hasAttribute('open'))));
+
+  if (isAlreadyOpen && currentInspectItem && isSameToken(currentInspectItem, tokenQuery)) {
+    return;
+  }
+
+  let target = findTokenByQuery(tokenQuery);
+
+  if (!target && attempts >= 2 && typeof fetch !== 'undefined') {
+    try {
+      const apiUrl = (typeof BACKEND_URL !== 'undefined' ? BACKEND_URL : '') + `/api/projects?search=${encodeURIComponent(tokenQuery)}`;
+      const res = await fetch(apiUrl);
+      if (res.ok) {
+        const data = await res.json();
+        if (data && data.projects && data.projects.length > 0) {
+          target = data.projects[0];
+        }
+      }
+    } catch (e) {
+      // API fallback error
+    }
+  }
+
+  if (target) {
+    openModal(target);
+  } else if (attempts < 25) {
+    setTimeout(() => {
+      if (typeof window !== 'undefined' && window.location) {
+        const currentHashToken = parseTokenFromHash(window.location.hash);
+        if (currentHashToken && currentHashToken.toLowerCase() !== tokenQuery.toLowerCase()) {
+          return;
+        }
+      }
+      resolveTokenAndInspect(tokenQuery, attempts + 1);
+    }, 150);
+  }
+}
+
+function checkUrlHash() {
+  if (typeof window === 'undefined' || !window.location) return;
+  const tokenQuery = parseTokenFromHash(window.location.hash);
+  if (!tokenQuery) return;
+  resolveTokenAndInspect(tokenQuery);
+}
+
+function handleHashChange() {
+  if (typeof window === 'undefined' || !window.location) return;
+  const tokenQuery = parseTokenFromHash(window.location.hash);
+  const modal = (typeof document !== 'undefined') ? document.getElementById('inspectModal') : null;
+  const isAlreadyOpen = Boolean(modal && (modal.open || (typeof modal.hasAttribute === 'function' && modal.hasAttribute('open'))));
+
+  if (tokenQuery) {
+    resolveTokenAndInspect(tokenQuery);
+  } else if (isAlreadyOpen) {
+    if (typeof modal.close === 'function') {
+      modal.close();
+    } else {
+      modal.removeAttribute('open');
+    }
+  }
+}
+
+function handleTokenClick(event, contract) {
+  if (!event) return;
+  // If user clicked with Ctrl, Cmd (metaKey), Shift, Alt, or middle mouse button (button === 1),
+  // let browser handle default link navigation (opening in new tab or window).
+  if (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey || event.button === 1) {
+    return;
+  }
+  // Standard left click: prevent default full page jump/reload and open modal in-page
+  if (typeof event.preventDefault === 'function') event.preventDefault();
+  if (typeof event.stopPropagation === 'function') event.stopPropagation();
+
+  const target = findTokenByQuery(contract);
+  if (target) {
+    openModal(target);
+  }
+}
+
+if (typeof window !== 'undefined') {
+  window.setModalHash = setModalHash;
+  window.clearModalHash = clearModalHash;
+  window.checkUrlHash = checkUrlHash;
+  window.handleHashChange = handleHashChange;
+  window.handleTokenClick = handleTokenClick;
+  window.parseTokenFromHash = parseTokenFromHash;
+  window.findTokenByQuery = findTokenByQuery;
+  window.resolveTokenAndInspect = resolveTokenAndInspect;
+}
+
 // Modal Inspection Dialog
 function openModal(item) {
   const modal = document.getElementById('inspectModal');
   const content = document.getElementById('modalContent');
   if (!modal || !content) return;
+
+  currentInspectItem = item;
+  setModalHash(item);
+  addRecentInspected(item);
 
   if (typeof window !== 'undefined' && window.va) {
     window.va('event', { name: 'inspect_drop', data: { name: item.name || '', symbol: item.symbol || '' } });
@@ -5122,12 +5746,39 @@ function openModal(item) {
   const mintedStr = formatCount(item.total_minted);
   const supplyStr = (item.max_supply && Number(item.max_supply) > 0) ? `/ ${formatCount(item.max_supply)}` : '<span class="dim">(Uncapped)</span>';
 
+  // Navigation context for in-modal flipping (Prev / Next & Arrow Keys)
+  currentInspectItem = item;
+  const navCtx = getInspectNavContext(item);
+  const navIndex = navCtx.index;
+  const navTotal = navCtx.total;
+  const hasPrev = navCtx.hasPrev;
+  const hasNext = navCtx.hasNext;
+  const prevItem = navCtx.prevItem;
+  const nextItem = navCtx.nextItem;
+  const prevTitle = hasPrev && prevItem ? `Previous: ${escapeHtml(prevItem.name)} (${escapeHtml(prevItem.symbol || '')}) [← Left Arrow]` : 'First token in list';
+  const nextTitle = hasNext && nextItem ? `Next: ${escapeHtml(nextItem.name)} (${escapeHtml(nextItem.symbol || '')}) [→ Right Arrow]` : 'Last token in list';
+
   content.innerHTML = `
     <div class="modal-header">
-      <div class="modal-title">🔍 ${name} (${sym}) - Deep Dive Inspection</div>
-      <div style="display: flex; gap: 8px; align-items: center;">
+      <div class="modal-title-group">
+        <div class="modal-title">🔍 ${name} (${sym}) - Deep Dive Inspection</div>
+        ${navTotal > 1 && navIndex !== -1 ? `
+          <div class="modal-nav-compact" role="group" aria-label="In-Modal Token Navigation">
+            <button class="modal-nav-btn prev-btn" id="modalPrevBtn" onclick="navigateInspectModal(-1)" ${hasPrev ? '' : 'disabled'} title="${prevTitle}" aria-label="Previous Token">
+              <span class="nav-arrow">←</span> <span class="nav-label">Prev</span> <span class="nav-key">[←]</span>
+            </button>
+            <span class="modal-nav-counter" id="modalNavCounter" title="Token ${navIndex + 1} of ${navTotal} in active list">
+              ${navIndex + 1} / ${navTotal}
+            </span>
+            <button class="modal-nav-btn next-btn" id="modalNextBtn" onclick="navigateInspectModal(1)" ${hasNext ? '' : 'disabled'} title="${nextTitle}" aria-label="Next Token">
+              <span class="nav-label">Next</span> <span class="nav-arrow">→</span> <span class="nav-key">[→]</span>
+            </button>
+          </div>
+        ` : ''}
+      </div>
+      <div class="modal-header-actions" style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
         <button class="${favBtnClass}" id="modalFavBtn" onclick="toggleModalFav('${cAddr}')">${favBtnText}</button>
-        <button class="modal-close-btn" onclick="document.getElementById('inspectModal').close()">✕ Close [ESC]</button>
+        <button class="modal-close-btn" onclick="document.getElementById('inspectModal').close()" title="Close dialog [ESC]">✕ Close [ESC]</button>
       </div>
     </div>
 
@@ -5469,6 +6120,28 @@ function openModal(item) {
     </div>
     ` : ''}
 
+    ${navTotal > 1 && navIndex !== -1 ? `
+    <div class="modal-section modal-footer-nav-card" style="border-color: rgba(0, 240, 255, 0.25); background: rgba(0, 240, 255, 0.03);">
+      <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <span style="font-size: 13px; font-weight: 700; color: var(--color-cyan);">⚡ In-Modal Quick Flip</span>
+          <span style="font-size: 11px; color: var(--text-dim);">Use <kbd class="nav-kbd">←</kbd> / <kbd class="nav-kbd">→</kbd> arrow keys to browse</span>
+        </div>
+        <div class="modal-footer-nav-buttons" style="display: flex; align-items: center; gap: 8px;">
+          <button class="modal-nav-btn footer-nav-btn prev-btn" onclick="navigateInspectModal(-1)" ${hasPrev ? '' : 'disabled'} title="${prevTitle}">
+            ← Prev ${prevItem ? `(${escapeHtml(prevItem.symbol || prevItem.name)})` : ''}
+          </button>
+          <span class="modal-nav-counter" style="font-weight: 700; color: var(--color-yellow); font-size: 12px; padding: 4px 10px; background: rgba(0,0,0,0.4); border-radius: 4px; border: 1px solid var(--border-dim);">
+            ${navIndex + 1} of ${navTotal}
+          </span>
+          <button class="modal-nav-btn footer-nav-btn next-btn" onclick="navigateInspectModal(1)" ${hasNext ? '' : 'disabled'} title="${nextTitle}">
+            Next ${nextItem ? `(${escapeHtml(nextItem.symbol || nextItem.name)})` : ''} →
+          </button>
+        </div>
+      </div>
+    </div>
+    ` : ''}
+
     <div class="modal-section" style="border-top: 1px dashed var(--border-dim); margin-top: 14px; padding-top: 14px;">
       <div class="modal-section-title" style="color: var(--color-yellow);">💎 Support & Donate (BNB / BEP-20 / EVM)</div>
       <div style="font-size: 11px; color: var(--text-dim); margin-bottom: 8px;">
@@ -5481,7 +6154,9 @@ function openModal(item) {
     </div>
   `;
 
-  modal.showModal();
+  content.scrollTop = 0;
+  if (typeof modal.showModal === 'function') modal.showModal();
+  else modal.setAttribute('open', '');
 }
 
 let currentHofFilter = 'ALL';
@@ -6814,13 +7489,13 @@ function checkUrlParams() {
       }
     }, 200);
   }
-  const qInspect = urlParams.get('inspect');
+  const qInspect = urlParams.get('inspect') || urlParams.get('token') || urlParams.get('symbol');
   if (qInspect) {
     const tryInspect = async (attempts = 0) => {
-      let target = (allDrops || []).find(d => (d.contract || '').toLowerCase() === qInspect.toLowerCase());
-      if (!target && attempts >= 3) {
+      let target = findTokenByQuery(qInspect);
+      if (!target && attempts >= 2) {
         try {
-          const res = await fetch(`${BACKEND_URL}/api/projects?search=${qInspect}`);
+          const res = await fetch(`${BACKEND_URL}/api/projects?search=${encodeURIComponent(qInspect)}`);
           if (res.ok) {
             const data = await res.json();
             if (data && data.projects && data.projects.length > 0) {
@@ -6974,19 +7649,7 @@ async function pollDeltaFeed() {
     const data = await res.json();
 
     if (data && data.stats) {
-      globalStats = data.stats;
-      if (data.stats.agent_wallets) {
-        updateDigitalAiCounter(Number(data.stats.agent_wallets));
-      }
-      const rEl = document.getElementById('radarCount');
-      if (rEl) rEl.textContent = globalStats.total;
-      const sEl = document.getElementById('smartCount');
-      if (sEl) sEl.textContent = globalStats.smart;
-      updateSniperReadyCount();
-      updateNftSurgeCount();
-      updateProxyCount();
-      updateLaunchpadCount();
-      updateSecondaryTabCount();
+      applyOverviewStats(data.stats);
     }
     if (data && data.agent_wallets) {
       updateDigitalAiCounter(Number(data.agent_wallets));
@@ -7051,6 +7714,7 @@ async function pollDeltaFeed() {
         renderStats(allDrops);
         renderTable();
         checkUrlParams();
+        checkUrlHash();
 
         const timeStr = new Date().toLocaleTimeString();
         const syncEl = document.getElementById('syncTime');
@@ -7179,15 +7843,8 @@ async function fetchDrops() {
       } catch (e2) {
         source = 'Local Snapshot';
         res = await fetchWithTimeout(`feed_snapshot.json`, { cache: 'default' }, 4000);
-        try {
-          const statsRes = await fetchWithTimeout(`data/agent_id_stats.json`, { cache: 'default' }, 2000);
-          if (statsRes && statsRes.ok) {
-            const stData = await statsRes.json();
-            if (stData && stData.total_created_wallets) {
-              updateDigitalAiCounter(Number(stData.total_created_wallets));
-            }
-          }
-        } catch (eStats) {}
+        // Resilient stats hydration with multi-mirror fallback and automatic retry
+        fetchOverviewStats().catch(() => {});
       }
     }
 
@@ -7203,10 +7860,7 @@ async function fetchDrops() {
     } else if (payload && Array.isArray(payload.projects)) {
       freshDrops = payload.projects;
       if (payload.stats) {
-        globalStats = payload.stats;
-        if (payload.stats.agent_wallets) {
-          updateDigitalAiCounter(Number(payload.stats.agent_wallets));
-        }
+        applyOverviewStats(payload.stats);
       }
       if (payload.agent_wallets) {
         updateDigitalAiCounter(Number(payload.agent_wallets));
@@ -7323,6 +7977,7 @@ async function fetchDrops() {
 
     renderStats(allDrops);
     renderTable();
+    checkUrlHash();
 
     const timeStr = new Date().toLocaleTimeString();
     const syncEl = document.getElementById('syncTime');
@@ -7960,9 +8615,28 @@ async function init() {
       });
     });
 
-    // Global keyboard shortcuts (1: Radar, 2: Secondary Market, 3: Launchpads, 4: Smart Alpha, 5: Wallets, 6: Portfolio)
+    // In-modal Arrow Key Navigation (← Prev / Next →) & Global Tab Shortcuts
     document.addEventListener('keydown', (e) => {
       if (['INPUT', 'TEXTAREA'].includes(document.activeElement?.tagName)) return;
+
+      const inspectModal = document.getElementById('inspectModal');
+      const isInspectOpen = Boolean(inspectModal && (inspectModal.open || inspectModal.hasAttribute('open')));
+
+      if (isInspectOpen) {
+        if (e.key === 'ArrowLeft') {
+          e.preventDefault();
+          navigateInspectModal(-1);
+          return;
+        }
+        if (e.key === 'ArrowRight') {
+          e.preventDefault();
+          navigateInspectModal(1);
+          return;
+        }
+        // When inspection modal is open, suppress background tab switching
+        return;
+      }
+
       if (e.key === '1') {
         const b = document.getElementById('tabRadar');
         if (b) b.click();
@@ -8066,11 +8740,17 @@ async function init() {
       });
     }
 
-    // Close modal on backdrop click
+    // Close modal on backdrop click and sync URL hash
     const modal = document.getElementById('inspectModal');
-    modal.addEventListener('click', e => {
-      if (e.target === modal) modal.close();
-    });
+    if (modal) {
+      modal.addEventListener('click', e => {
+        if (e.target === modal) modal.close();
+      });
+      modal.addEventListener('close', () => {
+        clearModalHash();
+        currentInspectItem = null;
+      });
+    }
 
     // Top Gainer Banner Click -> Hall of Fame Modal
     const gainerBanner = document.getElementById('topGainerBanner');
@@ -8158,14 +8838,27 @@ async function init() {
       });
     }
 
-    // Check URL parameters (e.g. ?wallet=0x...)
+    // Check URL parameters and hash permalinks (e.g. ?wallet=0x... or #token=PTAH)
     checkUrlParams();
+    checkUrlHash();
+
+    // Listen to URL hash changes for permalinks & browser back/forward navigation
+    window.addEventListener('hashchange', handleHashChange);
 
     // Initialize 24h Daily Pulse Hero Card
     initDailyPulseHero();
 
     // Auto-reconnect previously authorized wallet
     tryAutoReconnect();
+
+    // Initialize Recent Search & Inspected Chips and Sticky Header Scroll
+    recentInspectedTokens = loadRecentInspected();
+    renderRecentChips();
+    setupStickyHeaderScroll();
+
+    // Cache-First: Eagerly hydrate overview statistics from local cache immediately, then sync fresh in background
+    hydrateCachedOverviewStats();
+    fetchOverviewStats().catch(() => {});
 
     // Start cloud feed fetch & periodic background sync (non-blocking so UI is instant)
     fetchDrops().catch(err => console.warn('Initial fetchDrops hitch:', err));
@@ -8312,7 +9005,37 @@ if (typeof module !== 'undefined' && module.exports) {
     pulseItemsMap,
     updateDigitalAiCounter,
     getCurrentAgentWalletsCount: () => currentAgentWalletsCount,
-    isMobileClient
+    fetchOverviewStats,
+    applyOverviewStats,
+    applyOverviewStatsFallback,
+    getGlobalStats: () => globalStats,
+    setGlobalStats: (s) => { globalStats = s; },
+    navigateInspectModal,
+    getInspectNavContext,
+    getCurrentInspectItem: () => currentInspectItem,
+    setCurrentInspectItem: (item) => { currentInspectItem = item; },
+    isMobileClient,
+    parseTokenFromHash,
+    findTokenByQuery,
+    setModalHash,
+    clearModalHash,
+    checkUrlHash,
+    handleHashChange,
+    handleTokenClick,
+    resolveTokenAndInspect,
+    hydrateCachedOverviewStats,
+    OVERVIEW_STATS_CACHE_KEY,
+    RECENT_INSPECTED_STORAGE_KEY,
+    loadRecentInspected,
+    saveRecentInspected,
+    addRecentInspected,
+    clearRecentChips,
+    renderRecentChips,
+    handleRecentChipClick,
+    setSearchQuery,
+    getRecentInspectedTokens: () => recentInspectedTokens,
+    setRecentInspectedTokens: (t) => { recentInspectedTokens = t; },
+    setupStickyHeaderScroll
   };
 }
 

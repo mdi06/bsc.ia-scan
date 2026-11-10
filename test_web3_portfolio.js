@@ -1591,5 +1591,427 @@ assert.strictEqual(isMobileClient(), false, 'isMobileClient must be false for 12
 global.document.getElementById = prevGetElemToast;
 console.log('✔ Mobile Notification Alert Suppression: PASS');
 
-console.log('🎉 All Web3, Multicall3, Smart Hunters, and Competitor Features verified successfully!');
-process.exit(0);
+// Testing Overview & Statistics Resilience (Failed API Call & Retry Logic)
+console.log('Testing Overview & Statistics Resilience...');
+const {
+  fetchOverviewStats,
+  applyOverviewStats,
+  applyOverviewStatsFallback,
+  getGlobalStats,
+  setGlobalStats
+} = require('./app.js');
+
+// 1. Test applyOverviewStats with server payload
+const mockRadarEl = { textContent: '' };
+const mockSmartEl = { textContent: '' };
+const prevGetElemStats = global.document.getElementById;
+global.document.getElementById = (id) => {
+  if (id === 'radarCount') return mockRadarEl;
+  if (id === 'smartCount') return mockSmartEl;
+  if (id === 'headerAiWalletsCount') return mockHdrCount;
+  if (id === 'tickerAiWallets') return mockTicker;
+  if (id === 'digitalLcdScreen') return mockScreen;
+  if (id === 'fillRatePct' || id === 'fillRateRatio' || id === 'nearCapCount' || id === 'momentumCount') return { textContent: '' };
+  if (id === 'topGainerName' || id === 'topGainerDetails' || id === 'topGainerNet' || id === 'runnerUpDetails') return { textContent: '' };
+  return null;
+};
+
+applyOverviewStats({
+  stats: {
+    total: 10420,
+    smart: 185,
+    sniper_ready: 42,
+    proxy: 12,
+    nft_surge: 8,
+    secondary: 95,
+    latest_block: 13200000,
+    agent_wallets: 175900
+  }
+});
+
+const gs = getGlobalStats();
+assert(gs !== null, 'globalStats must be populated');
+assert.strictEqual(gs.total, 10420, 'globalStats.total must equal 10420');
+assert.strictEqual(gs.smart, 185, 'globalStats.smart must equal 185');
+assert.strictEqual(mockRadarEl.textContent, 10420, 'radarCount DOM element must be updated');
+assert.strictEqual(mockSmartEl.textContent, 185, 'smartCount DOM element must be updated');
+assert.strictEqual(getCurrentAgentWalletsCount(), 175900, 'agent wallets count must be updated');
+
+// 2. Test applyOverviewStatsFallback with in-memory calculation
+setGlobalStats(null);
+applyOverviewStatsFallback();
+const fallbackStats = getGlobalStats();
+assert(fallbackStats !== null, 'fallbackStats must not be null');
+assert(fallbackStats.total >= 0, 'fallbackStats.total must be non-negative');
+
+// 3. Test fetchOverviewStats resilience against simulated network failure (404/500/CORS)
+const originalFetch = global.fetch;
+let fetchAttempts = 0;
+global.fetch = async (url) => {
+  fetchAttempts++;
+  if (url.includes('/api/stats') || url.includes('/api/overview')) {
+    // Simulate initial 500 error or 404
+    return { ok: false, status: 500, json: async () => ({ error: 'Simulated backend cold boot failure' }) };
+  }
+  if (url.includes('agent_id_stats.json')) {
+    // Successful mirror fallback
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({ total_created_wallets: 175999, source: 'Mock fallback' })
+    };
+  }
+  return { ok: false, status: 404 };
+};
+
+(async () => {
+  const result = await fetchOverviewStats(true);
+  assert.strictEqual(result, true, 'fetchOverviewStats must succeed via fallback mirror without throwing');
+  assert(fetchAttempts >= 2, 'Must have attempted primary endpoints before succeeding on fallback');
+  assert.strictEqual(getCurrentAgentWalletsCount(), 175999, 'Must update agent wallets counter from fallback');
+
+  // Restore fetch and DOM
+  global.fetch = originalFetch;
+  global.document.getElementById = prevGetElemStats;
+  console.log('✔ Overview & Statistics Resilience and Mirror Fallback: PASS');
+
+  // 4. Test In-Modal Navigation (Prev / Next & Arrow Keys)
+  console.log('Testing In-Modal Navigation (Prev / Next buttons & Arrow Keys)...');
+  const {
+    openModal,
+    navigateInspectModal,
+    getInspectNavContext,
+    getCurrentInspectItem,
+    setAllDrops
+  } = require('./app.js');
+
+  const itemA = { contract: '0x1111111111111111111111111111111111111111', name: 'Alpha Agent', symbol: 'ALPHA' };
+  const itemB = { contract: '0x2222222222222222222222222222222222222222', name: 'Beta Agent', symbol: 'BETA' };
+  const itemC = { contract: '0x3333333333333333333333333333333333333333', name: 'Gamma Agent', symbol: 'GAMMA' };
+
+  setAllDrops([itemA, itemB, itemC]);
+  global.allDrops = [itemA, itemB, itemC];
+
+  // Position & Context Verification
+  const ctxA = getInspectNavContext(itemA);
+  assert.strictEqual(ctxA.index, 0, 'Item A must be at index 0');
+  assert.strictEqual(ctxA.total, 3, 'Total items must be 3');
+  assert.strictEqual(ctxA.hasPrev, false, 'First item must not have previous');
+  assert.strictEqual(ctxA.hasNext, true, 'First item must have next');
+  assert.strictEqual(ctxA.nextItem.contract, itemB.contract, 'Next item of A must be B');
+
+  const ctxB = getInspectNavContext(itemB);
+  assert.strictEqual(ctxB.index, 1, 'Item B must be at index 1');
+  assert.strictEqual(ctxB.hasPrev, true, 'Middle item must have previous');
+  assert.strictEqual(ctxB.hasNext, true, 'Middle item must have next');
+  assert.strictEqual(ctxB.prevItem.contract, itemA.contract, 'Previous of B must be A');
+  assert.strictEqual(ctxB.nextItem.contract, itemC.contract, 'Next of B must be C');
+
+  const ctxC = getInspectNavContext(itemC);
+  assert.strictEqual(ctxC.index, 2, 'Item C must be at index 2');
+  assert.strictEqual(ctxC.hasPrev, true, 'Last item must have previous');
+  assert.strictEqual(ctxC.hasNext, false, 'Last item must not have next');
+
+  // openModal DOM Render Verification
+  const mockModalInspect = { open: true, showModal: () => { mockModalInspect.open = true; }, close: () => { mockModalInspect.open = false; } };
+  const mockContentInspect = { innerHTML: '', scrollTop: 100 };
+  global.document.getElementById = (id) => {
+    if (id === 'inspectModal') return mockModalInspect;
+    if (id === 'modalContent') return mockContentInspect;
+    return null;
+  };
+
+  openModal(itemA);
+  assert.strictEqual(getCurrentInspectItem().contract, itemA.contract, 'Current inspect item must be itemA');
+  assert(mockContentInspect.innerHTML.includes('modal-nav-compact'), 'Modal header must render in-modal nav compact group');
+  assert(mockContentInspect.innerHTML.includes('disabled'), 'Prev button must be disabled for first token');
+  assert(mockContentInspect.innerHTML.includes('1 / 3'), 'Counter must display 1 / 3');
+  assert(mockContentInspect.innerHTML.includes('modal-footer-nav-card'), 'Modal footer quick flip card must be rendered');
+  assert.strictEqual(mockContentInspect.scrollTop, 0, 'scrollTop must be reset to 0');
+
+  // navigateInspectModal Navigation
+  navigateInspectModal(1);
+  assert.strictEqual(getCurrentInspectItem().contract, itemB.contract, 'Navigating +1 must advance to itemB');
+  assert(mockContentInspect.innerHTML.includes('2 / 3'), 'Counter must now display 2 / 3');
+  assert(!mockContentInspect.innerHTML.includes('id="modalPrevBtn" onclick="navigateInspectModal(-1)" disabled'), 'Prev button must be enabled for itemB');
+  assert(!mockContentInspect.innerHTML.includes('id="modalNextBtn" onclick="navigateInspectModal(1)" disabled'), 'Next button must be enabled for itemB');
+
+  navigateInspectModal(1);
+  assert.strictEqual(getCurrentInspectItem().contract, itemC.contract, 'Navigating +1 must advance to itemC');
+  assert(mockContentInspect.innerHTML.includes('3 / 3'), 'Counter must display 3 / 3');
+  assert(mockContentInspect.innerHTML.includes('id="modalNextBtn" onclick="navigateInspectModal(1)" disabled'), 'Next button must be disabled for last token');
+
+  // Underflow & overflow protection
+  navigateInspectModal(1);
+  assert.strictEqual(getCurrentInspectItem().contract, itemC.contract, 'Navigating +1 at end must not overflow');
+
+  navigateInspectModal(-1);
+  assert.strictEqual(getCurrentInspectItem().contract, itemB.contract, 'Navigating -1 must return to itemB');
+
+  navigateInspectModal(-1);
+  assert.strictEqual(getCurrentInspectItem().contract, itemA.contract, 'Navigating -1 must return to itemA');
+
+  navigateInspectModal(-1);
+  assert.strictEqual(getCurrentInspectItem().contract, itemA.contract, 'Navigating -1 at start must not underflow');
+
+  console.log('✔ In-Modal Navigation (Prev / Next & Counter System): PASS');
+
+  // ==========================================================================
+  // Testing URL Hash Permalinks for Modals (e.g. /#token=PTAH)
+  // ==========================================================================
+  console.log('Testing URL Hash Permalinks for Modals (/#token=PTAH)...');
+  const {
+    parseTokenFromHash,
+    findTokenByQuery,
+    setModalHash,
+    clearModalHash,
+    checkUrlHash,
+    handleHashChange,
+    handleTokenClick,
+    resolveTokenAndInspect
+  } = require('./app.js');
+
+  // 1. parseTokenFromHash tests
+  assert.strictEqual(parseTokenFromHash('#token=PTAH'), 'PTAH', 'Must parse simple token symbol');
+  assert.strictEqual(parseTokenFromHash('#token=AGENT%20ID'), 'AGENT ID', 'Must decode URI component');
+  assert.strictEqual(parseTokenFromHash('#inspect=0x1234567890abcdef1234567890abcdef12345678'), '0x1234567890abcdef1234567890abcdef12345678', 'Must parse inspect contract hash');
+  assert.strictEqual(parseTokenFromHash('#token=ALPHA&chart=1'), 'ALPHA', 'Must parse query param format');
+  assert.strictEqual(parseTokenFromHash(''), '', 'Empty hash must return empty string');
+  assert.strictEqual(parseTokenFromHash('#'), '', 'Single hash must return empty string');
+
+  // 2. findTokenByQuery tests
+  const tokenPtah = { contract: '0x1111111111111111111111111111111111111111', name: 'Ptah Agent', symbol: 'PTAH' };
+  const tokenAgent = { contract: '0x2222222222222222222222222222222222222222', name: 'Agent Protocol', symbol: 'AGENT' };
+  setAllDrops([tokenPtah, tokenAgent]);
+
+  assert.strictEqual(findTokenByQuery('PTAH').contract, tokenPtah.contract, 'Must find token by exact symbol');
+  assert.strictEqual(findTokenByQuery('ptah').contract, tokenPtah.contract, 'Must find token case-insensitively');
+  assert.strictEqual(findTokenByQuery('Ptah Agent').contract, tokenPtah.contract, 'Must find token by name');
+  assert.strictEqual(findTokenByQuery('0x1111111111111111111111111111111111111111').symbol, 'PTAH', 'Must find token by contract');
+  assert.strictEqual(findTokenByQuery('NONEXISTENT'), null, 'Nonexistent token returns null');
+
+  // 3. setModalHash & clearModalHash tests
+  global.window.location = { hash: '', pathname: '/feed', search: '' };
+  setModalHash(tokenPtah);
+  assert.strictEqual(global.window.location.hash, '#token=PTAH', 'setModalHash must set window.location.hash to #token=PTAH');
+
+  clearModalHash();
+  assert.strictEqual(global.window.location.hash, '', 'clearModalHash must reset hash to empty');
+
+  // 4. Modal Open & In-Modal Navigation Hash Sync
+  global.document.getElementById = (id) => {
+    if (id === 'inspectModal') return {
+      open: true,
+      showModal: () => {},
+      close: () => { clearModalHash(); }
+    };
+    if (id === 'modalContent') return { innerHTML: '', scrollTop: 0 };
+    return null;
+  };
+
+  openModal(tokenPtah);
+  assert.strictEqual(global.window.location.hash, '#token=PTAH', 'openModal must update hash to #token=PTAH');
+
+  // In-modal navigation syncs hash
+  navigateInspectModal(1);
+  assert.strictEqual(global.window.location.hash, '#token=AGENT', 'navigateInspectModal must update hash to #token=AGENT');
+
+  // Closing clears hash
+  clearModalHash();
+  assert.strictEqual(global.window.location.hash, '', 'Closing modal must clear hash');
+
+  // 5. checkUrlHash Permalinks on Load / Navigation
+  global.window.location.hash = '#token=PTAH';
+  checkUrlHash();
+  assert.strictEqual(getCurrentInspectItem().symbol, 'PTAH', 'checkUrlHash must resolve and open PTAH modal');
+
+  // 6. Ctrl+Click & Middle Click Permalinks Support
+  let defaultPrevented = false;
+  let propagationStopped = false;
+  const standardLeftClick = {
+    ctrlKey: false,
+    metaKey: false,
+    shiftKey: false,
+    altKey: false,
+    button: 0,
+    preventDefault: () => { defaultPrevented = true; },
+    stopPropagation: () => { propagationStopped = true; }
+  };
+  handleTokenClick(standardLeftClick, tokenPtah.contract);
+  assert.strictEqual(defaultPrevented, true, 'Standard left click must preventDefault to avoid page jump');
+  assert.strictEqual(propagationStopped, true, 'Standard left click must stopPropagation');
+
+  // Modifier click (Ctrl+Click / Cmd+Click / Middle-Click) for new tab
+  let ctrlPrevented = false;
+  const ctrlClick = {
+    ctrlKey: true,
+    metaKey: false,
+    shiftKey: false,
+    altKey: false,
+    button: 0,
+    preventDefault: () => { ctrlPrevented = true; },
+    stopPropagation: () => {}
+  };
+  handleTokenClick(ctrlClick, tokenPtah.contract);
+  assert.strictEqual(ctrlPrevented, false, 'Ctrl+Click must NOT preventDefault so browser opens in new tab');
+
+  // 7. Table Permalinks DOM Rendering
+  const { setActiveTab, setActiveFilter } = require('./app.js');
+  setActiveTab('RADAR');
+  setActiveFilter('ALL');
+
+  const mockTableBody = {
+    replaceChildren: () => {},
+    appendChild: () => {},
+    innerHTML: ''
+  };
+  global.document.getElementById = (id) => {
+    if (id === 'tableBody') return mockTableBody;
+    if (id === 'inspectModal') return { showModal: () => {}, close: () => {}, hasAttribute: () => false };
+    if (id === 'modalContent') return { innerHTML: '', scrollTop: 0 };
+    return null;
+  };
+
+  let renderedRowHtml = '';
+  mockTableBody.appendChild = (frag) => {
+    if (frag && frag.children) {
+      for (const ch of frag.children) renderedRowHtml += ch.innerHTML;
+    }
+  };
+  mockTableBody.replaceChildren = (frag) => {
+    if (frag && frag.children) {
+      for (const ch of frag.children) renderedRowHtml += ch.innerHTML;
+    }
+  };
+
+  renderTable();
+  assert(renderedRowHtml.includes('class="token-permalink"'), 'Table must render token-permalink anchor tags');
+  assert(renderedRowHtml.includes('href="#token=PTAH"'), 'Table must render href="#token=PTAH" for permalink bookmarking');
+  assert(renderedRowHtml.includes('class="inspect-btn"'), 'Table must render inspect-btn anchor');
+
+  console.log('✔ URL Hash Permalinks for Modals (/#token=PTAH & Tab Links): PASS');
+
+  // ==========================================================================
+  // Testing Cache-First Overview Stats (0ms Instant Local Hydration)
+  // ==========================================================================
+  console.log('Testing Cache-First Overview Stats...');
+  const appModule = require('./app.js');
+  const {
+    hydrateCachedOverviewStats,
+    OVERVIEW_STATS_CACHE_KEY,
+    getGlobalStats
+  } = appModule;
+
+  const sampleCachedStats = {
+    stats: {
+      total: 2188,
+      smart: 842,
+      sniper_ready: 114,
+      proxy: 320,
+      nft_surge: 65,
+      secondary: 198,
+      latest_block: 43210000,
+      agent_wallets: 175842
+    }
+  };
+
+  // Ensure persistence to localStorage
+  appModule.applyOverviewStats(sampleCachedStats);
+  const storedJson = global.localStorage.getItem(OVERVIEW_STATS_CACHE_KEY);
+  assert(storedJson, 'applyOverviewStats must persist stats to localStorage');
+  const parsedStored = JSON.parse(storedJson);
+  assert.strictEqual(parsedStored.stats.total, 2188, 'Persisted total count must match 2188');
+
+  // Test synchronous cache hydration
+  const hydrated = hydrateCachedOverviewStats();
+  assert.strictEqual(hydrated, true, 'hydrateCachedOverviewStats must return true on cache hit');
+  assert.strictEqual(getGlobalStats().total, 2188, 'globalStats must be instantly populated from cache with zero delay');
+  assert.strictEqual(getGlobalStats().smart, 842, 'globalStats.smart must be populated from cache');
+
+  console.log('✔ Cache-First Overview Stats: PASS');
+
+  // ==========================================================================
+  // Testing Sticky Search Bar & Recent Search Chips ([Ptah], [TIMIS], [Chuffa])
+  // ==========================================================================
+  console.log('Testing Sticky Search Bar & Recent Search Chips...');
+  const {
+    addRecentInspected,
+    clearRecentChips,
+    renderRecentChips,
+    handleRecentChipClick,
+    setSearchQuery,
+    getRecentInspectedTokens,
+    setRecentInspectedTokens,
+    RECENT_INSPECTED_STORAGE_KEY
+  } = require('./app.js');
+
+  clearRecentChips();
+  assert.strictEqual(getRecentInspectedTokens().length, 0, 'clearRecentChips must reset list to 0');
+
+  // Add sample tokens from user session data: Ptah, TIMIS, Chuffa
+  const tPtah = { symbol: 'Ptah', name: 'Ptah Protocol', contract: '0x1111111111111111111111111111111111111111' };
+  const tTimis = { symbol: 'TIMIS', name: 'Timis Alpha', contract: '0x2222222222222222222222222222222222222222' };
+  const tChuffa = { symbol: 'Chuffa', name: 'Chuffa Agent', contract: '0x3333333333333333333333333333333333333333' };
+  setAllDrops([tPtah, tTimis, tChuffa]);
+
+  addRecentInspected(tPtah);
+  addRecentInspected(tTimis);
+  addRecentInspected(tChuffa);
+
+  let chips = getRecentInspectedTokens();
+  assert.strictEqual(chips.length, 3, 'Must have 3 recent chips');
+  assert.strictEqual(chips[0].symbol, 'Chuffa', 'Most recently inspected token must be at front');
+  assert.strictEqual(chips[1].symbol, 'TIMIS', 'Second token must be TIMIS');
+  assert.strictEqual(chips[2].symbol, 'Ptah', 'Third token must be Ptah');
+
+  // Deduplication: Re-inspecting Ptah must bump it to the front
+  addRecentInspected(tPtah);
+  chips = getRecentInspectedTokens();
+  assert.strictEqual(chips.length, 3, 'Deduplication must prevent duplicate entries');
+  assert.strictEqual(chips[0].symbol, 'Ptah', 'Re-inspected Ptah must move to front');
+
+  // Test DOM rendering of chips
+  const mockChipsWrap = { style: { display: 'none' } };
+  const mockChipsList = { innerHTML: '' };
+  const mockSearchInput = { value: '', focus: () => {} };
+  const mockSearchClear = { style: { display: 'none' } };
+
+  global.document.getElementById = (id) => {
+    if (id === 'recentSearchChipsWrap') return mockChipsWrap;
+    if (id === 'recentChipsList') return mockChipsList;
+    if (id === 'searchInput') return mockSearchInput;
+    if (id === 'searchClearBtn') return mockSearchClear;
+    if (id === 'tableBody') return mockTableBody;
+    if (id === 'inspectModal') return { showModal: () => {}, close: () => {}, hasAttribute: () => false };
+    if (id === 'modalContent') return { innerHTML: '', scrollTop: 0 };
+    return null;
+  };
+
+  renderRecentChips();
+  assert.strictEqual(mockChipsWrap.style.display, 'flex', 'recentSearchChipsWrap must be displayed flex');
+  assert(mockChipsList.innerHTML.includes('Ptah'), 'Recent chips must render Ptah');
+  assert(mockChipsList.innerHTML.includes('TIMIS'), 'Recent chips must render TIMIS');
+  assert(mockChipsList.innerHTML.includes('Chuffa'), 'Recent chips must render Chuffa');
+
+  // Test 1-click jump back: handleRecentChipClick sets search input & opens inspection
+  handleRecentChipClick('TIMIS', tTimis.contract);
+  assert.strictEqual(mockSearchInput.value, 'TIMIS', 'Clicking chip must populate searchInput with TIMIS');
+  assert.strictEqual(mockSearchClear.style.display, 'inline-flex', 'Clear search button must be displayed');
+  assert.strictEqual(getCurrentInspectItem().symbol, 'TIMIS', 'Clicking chip must jump directly into TIMIS modal inspection');
+
+  // Test modal inspection triggers automatic addition
+  const tAuto = { symbol: 'ALPHA', name: 'Alpha Agent', contract: '0x4444444444444444444444444444444444444444' };
+  openModal(tAuto);
+  chips = getRecentInspectedTokens();
+  assert.strictEqual(chips[0].symbol, 'ALPHA', 'openModal must automatically prepend inspected token to recent chips');
+
+  // Test clearing chips
+  clearRecentChips();
+  assert.strictEqual(getRecentInspectedTokens().length, 0, 'Chips must be cleared');
+  assert.strictEqual(mockChipsWrap.style.display, 'none', 'recentSearchChipsWrap must hide when empty');
+
+  console.log('✔ Sticky Search Bar & Recent Search Chips ([Ptah], [TIMIS], [Chuffa]): PASS');
+
+  console.log('🎉 All Web3, Multicall3, Smart Hunters, and Competitor Features verified successfully!');
+  process.exit(0);
+})();

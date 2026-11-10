@@ -144,16 +144,18 @@ REFUND_SELECTORS = {
 HISTORY_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "history.json")
 SMART_WALLETS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "smart_wallets.json")
 STATS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "agent_id_stats.json")
+STATS_FILE_ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "agent_id_stats.json")
 SMART_WALLETS_CSV_URL = "https://docs.google.com/spreadsheets/d/1jcKyWK1JJ8uBchTS3p1ok18DeB7yrDb2ZDxOaNYF73Q/export?format=csv&gid=395869104"
 
 def load_agent_id_stats() -> Dict[str, Any]:
     """Loads live statistics for registered Binance .ai Agent ID wallets."""
-    if os.path.exists(STATS_FILE):
-        try:
-            with open(STATS_FILE, "r") as f:
-                return json.load(f)
-        except Exception:
-            pass
+    for p in (STATS_FILE, STATS_FILE_ROOT):
+        if os.path.exists(p):
+            try:
+                with open(p, "r") as f:
+                    return json.load(f)
+            except Exception:
+                pass
     return {
         "total_created_wallets": 175842,
         "last_updated": time.time(),
@@ -162,14 +164,15 @@ def load_agent_id_stats() -> Dict[str, Any]:
 
 def save_agent_id_stats(stats: Dict[str, Any]):
     """Persists updated agent ID statistics."""
-    try:
-        os.makedirs(os.path.dirname(STATS_FILE), exist_ok=True)
-        tmp = STATS_FILE + ".tmp"
-        with open(tmp, "w") as f:
-            json.dump(stats, f, indent=2)
-        os.replace(tmp, STATS_FILE)
-    except Exception:
-        pass
+    for p in (STATS_FILE, STATS_FILE_ROOT):
+        try:
+            os.makedirs(os.path.dirname(p), exist_ok=True)
+            tmp = p + ".tmp"
+            with open(tmp, "w") as f:
+                json.dump(stats, f, indent=2)
+            os.replace(tmp, p)
+        except Exception:
+            pass
 
 DIGITS_3ROW = {
     "0": ["█▀█", "█ █", "█▄█"],
