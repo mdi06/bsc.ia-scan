@@ -8,27 +8,107 @@ Runs purely as a non-blocking web server serving clients:
 - Zero RPC polling or third-party API blocking: responds in < 5ms from cache/DB.
 """
 
+import atexit
+import logging
 import os
 import sys
 import time
 import json
 import hashlib
+from contextlib import asynccontextmanager
 from typing import Optional, List, Dict, Any
-from fastapi import FastAPI, Query, HTTPException, Request
+from fastapi import Depends, FastAPI, Query, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse, Response, RedirectResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
+from opentelemetry.exporter.otlp.proto.http._log_exporter import OTLPLogExporter
+from opentelemetry.sdk._logs import LoggerProvider, LoggingHandler
+from opentelemetry.sdk._logs.export import BatchLogRecordProcessor
+from opentelemetry.sdk.resources import Resource
+from posthog import Posthog, identify_context
+from posthog.integrations.asgi import PosthogASGIMiddleware
 import uvicorn
 
 import monitor
+from config import get_settings
 from db import db
+
+settings = get_settings()
+posthog_client: Optional[Posthog] = None
+posthog_log_provider: Optional[LoggerProvider] = None
+posthog_log = logging.getLogger("posthog.exporter")
+posthog_log.propagate = False
+
+if settings.posthog_project_token and settings.posthog_host:
+    posthog_client = Posthog(
+        settings.posthog_project_token,
+        host=settings.posthog_host,
+        enable_exception_autocapture=True,
+    )
+    atexit.register(posthog_client.shutdown)
+
+    posthog_log_provider = LoggerProvider(
+        resource=Resource.create(
+            {
+                "service.name": "agent-id-backend",
+                "deployment.environment": settings.environment,
+            }
+        )
+    )
+    posthog_log_provider.add_log_record_processor(
+        BatchLogRecordProcessor(
+            OTLPLogExporter(
+                endpoint=f"{settings.posthog_host.rstrip('/')}/i/v1/logs",
+                headers={"Authorization": f"Bearer {settings.posthog_project_token}"},
+            )
+        )
+    )
+    posthog_log.addHandler(LoggingHandler(logger_provider=posthog_log_provider))
+    posthog_log.setLevel(logging.INFO)
+elif settings.environment != "production":
+    missing_variable = (
+        "POSTHOG_PROJECT_TOKEN"
+        if not settings.posthog_project_token
+        else "POSTHOG_HOST"
+    )
+    print(
+        f"{missing_variable} variable required by PostHog is missing or un-configured, "
+        f"this causes events to be silently missed. This error stops appearing once "
+        f"{missing_variable} is configured",
+        file=sys.stderr,
+    )
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    yield
+    if posthog_client:
+        try:
+            posthog_client.flush()
+        except Exception:
+            pass
+    if posthog_log_provider:
+        try:
+            posthog_log_provider.force_flush(timeout_millis=5000)
+        except Exception:
+            pass
+        finally:
+            try:
+                posthog_log_provider.shutdown()
+            except Exception:
+                pass
+
 
 app = FastAPI(
     title="Agent ID Monitor Backend",
     version="2.0.0",
-    description="High-performance async FastAPI backend powered by Supabase / SQLite WAL"
+    description="High-performance async FastAPI backend powered by Supabase / SQLite WAL",
+    lifespan=lifespan,
 )
+
+if posthog_client:
+    app.add_middleware(PosthogASGIMiddleware, client=posthog_client)
 
 # GZip compression middleware: shrinks JSON/text responses by 80-90% to protect Render 5GB bandwidth
 app.add_middleware(GZipMiddleware, minimum_size=500)
@@ -75,12 +155,17 @@ def startup_event():
     import threading
     t = threading.Thread(target=run_api_memory_guard, daemon=True, name="ApiMemoryGuard")
     t.start()
+    purged = 0
     try:
         purged = db.delete_projects(BOGUS_SCAM_CONTRACTS)
         if purged:
             print(f"[FastAPI Startup] Automatically purged {purged} bogus scam/stock contracts from database", flush=True)
     except Exception as e:
         print(f"[FastAPI Startup Purge Error] {e}", flush=True)
+    posthog_log.info(
+        "api startup completed",
+        extra={"event": "api_started", "purged_project_count": purged},
+    )
 
 
 @app.post("/api/admin/purge-bogus")
@@ -392,19 +477,38 @@ def get_projects(
     return res
 
 
+async def get_connected_wallet(request: Request) -> str:
+    """Identify the current request by its validated connected-wallet id."""
+    if request.method == "GET":
+        wallet = request.query_params.get("wallet", "")
+    else:
+        try:
+            incoming = await request.json()
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid JSON body")
+        wallet = incoming.get("wallet", "") if isinstance(incoming, dict) else ""
+
+    wallet = str(wallet).lower().strip()
+    if not wallet or not wallet.startswith("0x") or len(wallet) != 42:
+        detail = (
+            "Valid 0x... BSC wallet address required in ?wallet= parameter"
+            if request.method == "GET"
+            else "Valid 0x... BSC wallet address required"
+        )
+        raise HTTPException(status_code=400, detail=detail)
+
+    if posthog_client:
+        identify_context(wallet)
+    return wallet
+
+
 @app.get("/api/favorites")
 @app.get("/favorites")
-def get_favorites(wallet: str = Query(..., description="0x... BSC wallet address")):
-    w = (wallet or "").lower().strip()
-    if not w or not w.startswith("0x") or len(w) != 42:
-        raise HTTPException(
-            status_code=400,
-            detail="Valid 0x... BSC wallet address required in ?wallet= parameter"
-        )
-    record = db.get_favorites(w)
+def get_favorites(wallet: str = Depends(get_connected_wallet)):
+    record = db.get_favorites(wallet)
     return {
         "success": True,
-        "wallet": w,
+        "wallet": wallet,
         "favorites": record.get("favorites", []),
         "updated_at": record.get("updated_at", 0)
     }
@@ -412,16 +516,10 @@ def get_favorites(wallet: str = Query(..., description="0x... BSC wallet address
 
 @app.post("/api/favorites")
 @app.post("/favorites")
-async def post_favorites(request: Request):
-    try:
-        incoming = await request.json()
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid JSON body")
-
-    wallet = (incoming.get("wallet") or "").lower().strip()
-    if not wallet or not wallet.startswith("0x") or len(wallet) != 42:
-        raise HTTPException(status_code=400, detail="Valid 0x... BSC wallet address required")
-
+async def post_favorites(
+    request: Request, wallet: str = Depends(get_connected_wallet)
+):
+    incoming = await request.json()
     raw_favs = incoming.get("favorites", [])
     if not isinstance(raw_favs, list):
         raw_favs = []
@@ -430,6 +528,16 @@ async def post_favorites(request: Request):
     ts = int(incoming.get("timestamp") or time.time())
 
     saved = db.save_favorites(wallet, clean_favs, ts)
+
+    if posthog_client:
+        posthog_client.capture(
+            "favorites_saved",
+            properties={"favorites_count": len(clean_favs)},
+        )
+    posthog_log.info(
+        "favorites saved",
+        extra={"event": "favorites_saved", "favorites_count": len(clean_favs)},
+    )
 
     return {
         "success": True,
@@ -462,6 +570,10 @@ async def post_sync(request: Request):
         new_history = list(merged_dict.values())
         new_history.sort(key=lambda x: x.get("block", 0) or 0, reverse=True)
         monitor.save_history(new_history)
+        posthog_log.info(
+            "history synchronized",
+            extra={"event": "history_synchronized", "project_count": len(new_history)},
+        )
         return {"success": True, "count": len(new_history)}
     raise HTTPException(status_code=400, detail="Expected JSON array of projects")
 
