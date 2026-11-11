@@ -2270,6 +2270,22 @@ function updateSniperReadyCount() {
   }
 }
 
+function isFreeMintDrop(d) {
+  if (!d) return false;
+  const pStr = String(d.mint_price_str || '').toUpperCase();
+  const vWei = Number(d.mint_value_wei || 0);
+  return Boolean(d.has_free_mint || pStr.includes('FREE') || (vWei === 0 && Number(d.mint_price_bnb || 0) === 0 && !pStr.includes('PAID') && !pStr.includes('DEX') && !pStr.includes('TBD')));
+}
+
+function updateFreeMintsCount() {
+  if (typeof document === 'undefined') return;
+  const el = document.getElementById('freeMintsCount');
+  if (el) {
+    const cnt = allDrops.filter(d => isFreeMintDrop(d)).length;
+    el.textContent = cnt;
+  }
+}
+
 // Registry of all 24H Market Pulse & Hero Card items for instant modal inspection
 const pulseItemsMap = new Map();
 
@@ -4429,6 +4445,7 @@ function renderTable(keepLimit = false) {
 
   updateFavPillCount();
   updateSniperReadyCount();
+  updateFreeMintsCount();
   updateNftSurgeCount();
   updateProxyCount();
   updateLaunchpadCount();
@@ -4625,6 +4642,7 @@ function renderTable(keepLimit = false) {
   visible.forEach((item, index) => {
     const tr = document.createElement('tr');
     if (item._isNew) tr.classList.add('row-new');
+    tr.setAttribute('title', `Click row to inspect ${escapeHtml(item.name || item.symbol || 'token')}`);
     tr.addEventListener('click', (e) => {
       if (e && e.target && (e.target.closest('a') || e.target.closest('button'))) return;
       openModal(item);
@@ -4851,7 +4869,7 @@ function renderTable(keepLimit = false) {
     const tokenSym = item.symbol || item.name || item.contract || '';
     const tokenHash = '#token=' + encodeURIComponent(tokenSym);
     const tokenLink = `<a href="${tokenHash}" class="token-permalink" onclick="handleTokenClick(event, '${item.contract}')" title="Inspect ${escapeHtml(item.name || tokenSym)} (Ctrl+Click to open in new tab)"><strong>${item.name || 'Unknown'}</strong><span class="sym">(${item.symbol || ''})</span></a>`;
-    let actBtn = `<a href="${tokenHash}" class="inspect-btn" onclick="handleTokenClick(event, '${item.contract}')" title="Inspect & Snipe CLI (Ctrl+Click to open in new tab)"><span class="desktop-only">Inspect</span><span class="mobile-only">🔍 Deep Dive & Snipe CLI ➔</span></a>`;
+    let actBtn = `<a href="${tokenHash}" class="inspect-btn" onclick="handleTokenClick(event, '${item.contract}')" title="Inspect & Snipe CLI (Ctrl+Click to open in new tab)"><span class="desktop-only">Inspect ➔</span><span class="mobile-only">🔍 Inspect ➔</span></a>`;
 
     if (isSec) {
       const dexScreenerUrl = getDexScreenerUrl(item);
@@ -4997,6 +5015,7 @@ function appendNextTableBatch() {
     const index = tableRenderLimit + idx;
     const tr = document.createElement('tr');
     if (item._isNew) tr.classList.add('row-new');
+    tr.setAttribute('title', `Click row to inspect ${escapeHtml(item.name || item.symbol || 'token')}`);
     tr.addEventListener('click', (e) => {
       if (e && e.target && (e.target.closest('a') || e.target.closest('button'))) return;
       openModal(item);
@@ -5195,7 +5214,7 @@ function appendNextTableBatch() {
     const tokenSym = item.symbol || item.name || item.contract || '';
     const tokenHash = '#token=' + encodeURIComponent(tokenSym);
     const tokenLink = `<a href="${tokenHash}" class="token-permalink" onclick="handleTokenClick(event, '${item.contract}')" title="Inspect ${escapeHtml(item.name || tokenSym)} (Ctrl+Click to open in new tab)"><strong>${item.name || 'Unknown'}</strong><span class="sym">(${item.symbol || ''})</span></a>`;
-    let actBtn = `<a href="${tokenHash}" class="inspect-btn" onclick="handleTokenClick(event, '${item.contract}')" title="Inspect & Snipe CLI (Ctrl+Click to open in new tab)"><span class="desktop-only">Inspect</span><span class="mobile-only">➔</span></a>`;
+    let actBtn = `<a href="${tokenHash}" class="inspect-btn" onclick="handleTokenClick(event, '${item.contract}')" title="Inspect & Snipe CLI (Ctrl+Click to open in new tab)"><span class="desktop-only">Inspect ➔</span><span class="mobile-only">🔍 Inspect ➔</span></a>`;
 
     if (isSec) {
       const dexScreenerUrl = getDexScreenerUrl(item);
@@ -8274,6 +8293,7 @@ const DEFAULT_PILLS_SEQUENCE = [
   'ALL',
   'LAUNCHPAD',
   'SNIPER_READY',
+  'FREE',
   'ACTIVE',
   'FAVORITES'
 ];
@@ -9009,6 +9029,13 @@ async function init() {
 
     let searchDebounceTimer = null;
     if (searchInput) {
+      // Auto-select text on click if field already contains search query for frictionless replacement
+      searchInput.addEventListener('click', () => {
+        if (searchInput.value && searchInput.selectionStart === searchInput.selectionEnd) {
+          searchInput.select();
+        }
+      });
+
       searchInput.addEventListener('input', async e => {
         searchQuery = e.target.value;
         if (searchClearBtn) {
@@ -9036,6 +9063,7 @@ async function init() {
       searchInput.addEventListener('keydown', e => {
         if (e.key === 'Escape') {
           if (searchInput.value) {
+            clearTimeout(searchDebounceTimer);
             searchInput.value = '';
             searchQuery = '';
             if (searchClearBtn) searchClearBtn.style.display = 'none';
@@ -9047,7 +9075,12 @@ async function init() {
     }
 
     if (searchClearBtn) {
-      searchClearBtn.addEventListener('click', () => {
+      searchClearBtn.addEventListener('click', (e) => {
+        if (e) {
+          e.preventDefault();
+          e.stopPropagation();
+        }
+        clearTimeout(searchDebounceTimer);
         if (searchInput) {
           searchInput.value = '';
           searchQuery = '';
