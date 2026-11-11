@@ -161,10 +161,30 @@ EXCLUDED_PEGS_CONTRACTS = {
     '0x0e09fabb73bd3ade0a17ecc321fd13a19e81ce82'
 }
 SYNTHETIC_EQUITY_SYMBOLS = {
-    'TSLAB', 'AAPLB', 'MSFTB', 'METAB', 'SPCXB', 'NVDA', 'NVDAB', 'AMZNB', 'GOOGLB', 'MRNAB', 'SOXSB', 'CRCLB', 'QQQB', 'MSTRB',
-    'BABAB', 'BNCB', 'SKHYB', 'COINB', 'PLTRB', 'AMDB',
-    'SPY', 'SPYB', 'TSMC', 'TSMB', 'PDD', 'PDDB', 'NFLX', 'NFLXB', 'INTCB', 'DISB', 'UBERB', 'BAAB'
+    'TSLA', 'TSLAB', 'AAPL', 'AAPLB', 'MSFT', 'MSFTB', 'META', 'METAB', 'SPCXB', 'NVDA', 'NVDAB', 
+    'AMZN', 'AMZNB', 'GOOGL', 'GOOGLB', 'MRNA', 'MRNAB', 'SOXS', 'SOXSB', 'SOXL', 'SOXLB', 
+    'CRCLB', 'QQQ', 'QQQB', 'TQQQ', 'TQQQB', 'MSTR', 'MSTRB', 'BABA', 'BABAB', 'BNCB', 'SKHYB', 
+    'COIN', 'COINB', 'PLTR', 'PLTRB', 'AMD', 'AMDB', 'SPY', 'SPYB', 'TSMC', 'TSMB', 'PDD', 'PDDB', 
+    'NFLX', 'NFLXB', 'INTC', 'INTCB', 'DIS', 'DISB', 'UBER', 'UBERB', 'BA', 'BAAB'
 }
+
+def is_bogus_or_synthetic_asset(d: dict) -> bool:
+    if not d or not isinstance(d, dict):
+        return True
+    c = str(d.get("contract") or "").lower().strip()
+    if c in BOGUS_SET or c in EXCLUDED_PEGS_CONTRACTS:
+        return True
+    sym = str(d.get("symbol") or "").upper().strip()
+    if sym in EXCLUDED_PEGS_SYMBOLS or sym in SYNTHETIC_EQUITY_SYMBOLS:
+        return True
+    name = str(d.get("name") or "").upper().strip()
+    if any(k in name for k in (
+        'ETF', 'PROSHARES', 'DIREXION', 'BEAR 3X', 'BULL 3X', 'INVESQO', 'INVESCO', 
+        'BSTOCKS', 'TOKENIZED STOCK', 'S&P 500', 'NASDAQ', 'ISHARES', 'VANGUARD',
+        'PANCAKESWAP', 'BINANCE-PEG', 'WRAPPED BNB', 'TETHER USD', 'USD COIN', 'ZCASH', 'DOGEZILLA'
+    )):
+        return True
+    return False
 
 def get_sanitized_mcap(d: dict) -> float:
     if not d or not isinstance(d, dict):
@@ -217,9 +237,9 @@ def compute_global_overview_stats(all_projs=None) -> dict:
     try:
         if all_projs is None:
             raw_projs = db.get_all_projects()
-            all_projs = [p for p in raw_projs if isinstance(p, dict) and (p.get("contract") or "").lower() not in BOGUS_SET]
+            all_projs = [p for p in raw_projs if isinstance(p, dict) and not is_bogus_or_synthetic_asset(p)]
         else:
-            all_projs = [p for p in all_projs if isinstance(p, dict) and (p.get("contract") or "").lower() not in BOGUS_SET]
+            all_projs = [p for p in all_projs if isinstance(p, dict) and not is_bogus_or_synthetic_asset(p)]
         total = len(all_projs)
         latest_block = all_projs[0].get("block") if all_projs else None
 
@@ -334,7 +354,7 @@ def get_feed(
     Includes Bandwidth Guard: HTTP 304 Not Modified & tiny delta payloads to preserve free hosting.
     """
     raw_projs = db.get_all_projects()
-    all_projs = [p for p in raw_projs if (p.get("contract") or "").lower() not in BOGUS_SET]
+    all_projs = [p for p in raw_projs if not is_bogus_or_synthetic_asset(p)]
     total = len(all_projs)
     latest_block = all_projs[0].get("block") if all_projs else None
 
@@ -506,7 +526,7 @@ def get_projects(
         order=order
     )
     if isinstance(res, dict) and "projects" in res:
-        res["projects"] = [p for p in res["projects"] if (p.get("contract") or "").lower() not in BOGUS_SET]
+        res["projects"] = [p for p in res["projects"] if not is_bogus_or_synthetic_asset(p)]
     return res
 
 

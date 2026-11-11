@@ -124,6 +124,9 @@ def _process_smart_money_candidate(rpc, rcv, snd, aid, tx_h, b, tx_val, inp, wal
         if monitor.is_system_infra({"contract": rcv, "classification": cls, "name": det.get("name"), "symbol": det.get("symbol"), "max_supply": det.get("max_supply"), "total_minted": det.get("total_minted")}):
             return
 
+        if monitor.is_synthetic_stock_or_peg(det.get("name"), det.get("symbol"), rcv):
+            return
+
         if len(inp) < 10 or inp in ("", "0x"):
             mint_cd = "0x"
             val_str = str(tx_val)

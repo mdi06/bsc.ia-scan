@@ -1407,6 +1407,30 @@ def update_momentum_metrics(item: Dict[str, Any]) -> Tuple[str, str]:
     return vel_str, org_str
 
 
+SYNTHETIC_STOCK_SYMBOLS = {
+    'TSLA', 'TSLAB', 'AAPL', 'AAPLB', 'MSFT', 'MSFTB', 'META', 'METAB', 'SPCXB', 'NVDA', 'NVDAB', 
+    'AMZN', 'AMZNB', 'GOOGL', 'GOOGLB', 'MRNA', 'MRNAB', 'SOXS', 'SOXSB', 'SOXL', 'SOXLB', 
+    'CRCLB', 'QQQ', 'QQQB', 'TQQQ', 'TQQQB', 'MSTR', 'MSTRB', 'BABA', 'BABAB', 'BNCB', 'SKHYB', 
+    'COIN', 'COINB', 'PLTR', 'PLTRB', 'AMD', 'AMDB', 'SPY', 'SPYB', 'TSMC', 'TSMB', 'PDD', 'PDDB', 
+    'NFLX', 'NFLXB', 'INTC', 'INTCB', 'DIS', 'DISB', 'UBER', 'UBERB', 'BA', 'BAAB'
+}
+
+
+def is_synthetic_stock_or_peg(name: str, symbol: str, contract: str = "") -> bool:
+    """Checks whether a token is a synthetic equity stock or major ETF on BSC."""
+    sym = (symbol or "").upper().strip()
+    if sym in SYNTHETIC_STOCK_SYMBOLS:
+        return True
+    nm = (name or "").upper().strip()
+    if any(k in nm for k in (
+        'ETF', 'PROSHARES', 'DIREXION', 'BEAR 3X', 'BULL 3X', 'INVESQO', 'INVESCO', 
+        'BSTOCKS', 'TOKENIZED', 'S&P 500', 'NASDAQ', 'ISHARES', 'VANGUARD',
+        'PANCAKESWAP', 'BINANCE-PEG', 'WRAPPED BNB', 'TETHER USD', 'USD COIN', 'ZCASH', 'DOGEZILLA'
+    )):
+        return True
+    return False
+
+
 def is_system_infra(item: Dict[str, Any]) -> bool:
     """
     Detects pure infrastructure / utility adapter contracts (like resolver helpers)

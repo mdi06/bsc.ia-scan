@@ -512,9 +512,11 @@ const EXCLUDED_PEGS_CONTRACTS = new Set([
 ]);
 
 const SYNTHETIC_EQUITY_SYMBOLS = new Set([
-  'TSLAB', 'AAPLB', 'MSFTB', 'METAB', 'SPCXB', 'NVDA', 'NVDAB', 'AMZNB', 'GOOGLB', 'MRNAB', 'SOXSB', 'CRCLB', 'QQQB', 'MSTRB',
-  'BABAB', 'BNCB', 'SKHYB', 'COINB', 'PLTRB', 'AMDB',
-  'SPY', 'SPYB', 'TSMC', 'TSMB', 'PDD', 'PDDB', 'NFLX', 'NFLXB', 'INTCB', 'DISB', 'UBERB', 'BAAB'
+  'TSLA', 'TSLAB', 'AAPL', 'AAPLB', 'MSFT', 'MSFTB', 'META', 'METAB', 'SPCXB', 'NVDA', 'NVDAB', 
+  'AMZN', 'AMZNB', 'GOOGL', 'GOOGLB', 'MRNA', 'MRNAB', 'SOXS', 'SOXSB', 'SOXL', 'SOXLB', 
+  'CRCLB', 'QQQ', 'QQQB', 'TQQQ', 'TQQQB', 'MSTR', 'MSTRB', 'BABA', 'BABAB', 'BNCB', 'SKHYB', 
+  'COIN', 'COINB', 'PLTR', 'PLTRB', 'AMD', 'AMDB', 'SPY', 'SPYB', 'TSMC', 'TSMB', 'PDD', 'PDDB', 
+  'NFLX', 'NFLXB', 'INTC', 'INTCB', 'DIS', 'DISB', 'UBER', 'UBERB', 'BA', 'BAAB'
 ]);
 
 // Determine if a token is a major pegged/infrastructure asset, stablecoin, synthetic stock, or DEX platform token
@@ -528,8 +530,12 @@ function isExcludedMajorAsset(d) {
   if (EXCLUDED_PEGS_CONTRACTS.has(c) || EXCLUDED_PEGS_SYMBOLS.has(sym) || SYNTHETIC_EQUITY_SYMBOLS.has(sym)) {
     return true;
   }
-  // bStocks / tokenized synthetic stocks check (e.g. SPY, TSMC, Netflix stock tokens)
-  if (name.includes('BSTOCKS') || name.includes('TOKENIZED STOCK') || name.includes('S&P 500') || (name === 'SPY' && sym.startsWith('SPY'))) {
+  // bStocks / tokenized synthetic stocks & Wall Street ETFs
+  if (name.includes('BSTOCKS') || name.includes('TOKENIZED') || name.includes('S&P 500') || 
+      name.includes('ETF') || name.includes('PROSHARES') || name.includes('DIREXION') || 
+      name.includes('BEAR 3X') || name.includes('BULL 3X') || name.includes('INVESQO') || 
+      name.includes('INVESCO') || name.includes('ISHARES') || name.includes('VANGUARD') ||
+      name.includes('NASDAQ') || (name === 'SPY' && sym.startsWith('SPY'))) {
     return true;
   }
   if (name.includes('PANCAKESWAP') || name.includes('BINANCE-PEG') || name.includes('WRAPPED BNB') || name.includes('TETHER USD') || name.includes('USD COIN') || name.includes('ZCASH') || name.includes('DOGEZILLA')) {
