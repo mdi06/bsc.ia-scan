@@ -161,7 +161,9 @@ EXCLUDED_PEGS_CONTRACTS = {
     '0x0e09fabb73bd3ade0a17ecc321fd13a19e81ce82'
 }
 SYNTHETIC_EQUITY_SYMBOLS = {
-    'TSLAB', 'AAPLB', 'MSFTB', 'METAB', 'SPCXB', 'NVDA', 'NVDAB', 'AMZNB', 'GOOGLB', 'MRNAB', 'SOXSB', 'CRCLB', 'QQQB', 'MSTRB'
+    'TSLAB', 'AAPLB', 'MSFTB', 'METAB', 'SPCXB', 'NVDA', 'NVDAB', 'AMZNB', 'GOOGLB', 'MRNAB', 'SOXSB', 'CRCLB', 'QQQB', 'MSTRB',
+    'BABAB', 'BNCB', 'SKHYB', 'COINB', 'PLTRB', 'AMDB',
+    'SPY', 'SPYB', 'TSMC', 'TSMB', 'PDD', 'PDDB', 'NFLX', 'NFLXB', 'INTCB', 'DISB', 'UBERB', 'BAAB'
 }
 
 def get_sanitized_mcap(d: dict) -> float:

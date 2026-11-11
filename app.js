@@ -513,7 +513,8 @@ const EXCLUDED_PEGS_CONTRACTS = new Set([
 
 const SYNTHETIC_EQUITY_SYMBOLS = new Set([
   'TSLAB', 'AAPLB', 'MSFTB', 'METAB', 'SPCXB', 'NVDA', 'NVDAB', 'AMZNB', 'GOOGLB', 'MRNAB', 'SOXSB', 'CRCLB', 'QQQB', 'MSTRB',
-  'BABAB', 'BNCB', 'SKHYB', 'COINB', 'PLTRB', 'AMDB'
+  'BABAB', 'BNCB', 'SKHYB', 'COINB', 'PLTRB', 'AMDB',
+  'SPY', 'SPYB', 'TSMC', 'TSMB', 'PDD', 'PDDB', 'NFLX', 'NFLXB', 'INTCB', 'DISB', 'UBERB', 'BAAB'
 ]);
 
 // Determine if a token is a major pegged/infrastructure asset, stablecoin, synthetic stock, or DEX platform token
@@ -525,6 +526,10 @@ function isExcludedMajorAsset(d) {
 
   if (c === '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee') return true;
   if (EXCLUDED_PEGS_CONTRACTS.has(c) || EXCLUDED_PEGS_SYMBOLS.has(sym) || SYNTHETIC_EQUITY_SYMBOLS.has(sym)) {
+    return true;
+  }
+  // bStocks / tokenized synthetic stocks check (e.g. SPY, TSMC, Netflix stock tokens)
+  if (name.includes('BSTOCKS') || name.includes('TOKENIZED STOCK') || name.includes('S&P 500') || (name === 'SPY' && sym.startsWith('SPY'))) {
     return true;
   }
   if (name.includes('PANCAKESWAP') || name.includes('BINANCE-PEG') || name.includes('WRAPPED BNB') || name.includes('TETHER USD') || name.includes('USD COIN') || name.includes('ZCASH') || name.includes('DOGEZILLA')) {
@@ -4078,6 +4083,19 @@ function evaluatePortfolioExit(item, bnbPriceUsd = 705.0) {
 // Filter and Sort Drops
 function getFilteredDrops() {
   let list = [...allDrops];
+
+  // If searching, also include any known Hall of Fame / Top Gainers not yet in the active feed chunk
+  if (searchQuery.trim() && Array.isArray(savedTopGainers) && savedTopGainers.length > 0) {
+    const existingContracts = new Set(list.map(d => String(d.contract || '').toLowerCase()));
+    for (const g of savedTopGainers) {
+      const item = g.item || g;
+      const c = String(item.contract || '').toLowerCase();
+      if (c && !existingContracts.has(c) && !isExcludedMajorAsset(item)) {
+        list.push(item);
+        existingContracts.add(c);
+      }
+    }
+  }
 
   // Tab filtering
   if (activeTab === 'SECONDARY') {
