@@ -494,7 +494,7 @@ function formatCryptoPrice(val, isNet = false) {
 // Known major pegged / Layer-1 tokens and synthetic equities on BSC
 const EXCLUDED_PEGS_SYMBOLS = new Set([
   'BTCB', 'WBTC', 'BTC', 'ETH', 'WETH', 'WBNB', 'BNB', 'USDT', 'USDC', 'BUSD', 
-  'DAI', 'TUSD', 'FDUSD', 'CAKE', 'U', 'OSK', 'FIST',
+  'DAI', 'TUSD', 'FDUSD', 'CAKE', 'U', 'OSK',
   'SOL', 'XRP', 'ADA', 'DOGE', 'DOT', 'AVAX', 'MATIC', 'POL', 'LINK', 'LTC', 'SHIB', 'UNI',
   'ZEC', 'BCH', 'XLM', 'EOS', 'ATOM', 'TRX', 'FIL', 'NEAR', 'XMR', 'ETC', 'APT', 'SUI', 'PEPE', 'FLOKI', 'DOGEZILLA'
 ]);
@@ -4400,6 +4400,272 @@ if (typeof window !== 'undefined') {
   window.renderRecentChips = renderRecentChips;
   window.setSearchQuery = setSearchQuery;
   window.setupStickyHeaderScroll = setupStickyHeaderScroll;
+}
+
+// Quick Search Dropdown
+let searchDropdownResults = [];
+let searchDropdownSelectedIndex = -1;
+
+function highlightSearchMatch(text, query) {
+  if (!text) return '';
+  const escapedText = escapeHtml(String(text));
+  if (!query || !query.trim()) return escapedText;
+  const q = escapeHtml(query.trim());
+  const regex = new RegExp(`(${q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
+  return escapedText.replace(regex, '<mark class="search-hl">$1</mark>');
+}
+
+function getMatchingDrops(query, maxLimit = 7) {
+  if (!query || !query.trim()) return [];
+  const q = query.toLowerCase().trim();
+
+  const candidateMap = new Map();
+
+  // Active radar feed
+  const dropsList = (Array.isArray(allDrops) && allDrops.length > 0)
+    ? allDrops
+    : ((typeof global !== 'undefined' && Array.isArray(global.allDrops)) ? global.allDrops : (allDrops || []));
+
+  if (Array.isArray(dropsList)) {
+    for (const d of dropsList) {
+      if (!d || isExcludedMajorAsset(d)) continue;
+      const c = String(d.contract || d.id || '').toLowerCase();
+      if (c && !candidateMap.has(c)) {
+        candidateMap.set(c, d);
+      }
+    }
+  }
+
+  // Top gainers / Hall of fame
+  if (Array.isArray(savedTopGainers)) {
+    for (const g of savedTopGainers) {
+      const item = g.item || g;
+      if (!item || isExcludedMajorAsset(item)) continue;
+      const c = String(item.contract || item.id || '').toLowerCase();
+      if (c && !candidateMap.has(c)) {
+        candidateMap.set(c, item);
+      }
+    }
+  }
+
+  const matches = [];
+  for (const item of candidateMap.values()) {
+    const sym = String(item.symbol || '').toLowerCase();
+    const name = String(item.name || '').toLowerCase();
+    const contract = String(item.contract || '').toLowerCase();
+    const deployer = String(item.deployer || '').toLowerCase();
+
+    const sw = Array.isArray(item.smart_wallets) && item.smart_wallets.length > 0
+      ? item.smart_wallets
+      : (Array.isArray(item.smart_minters) ? item.smart_minters : []);
+    const matchSw = sw.some(w => String(w).toLowerCase().includes(q));
+
+    let score = 0;
+    if (sym === q) score = 100;
+    else if (sym.startsWith(q)) score = 80;
+    else if (name.startsWith(q)) score = 65;
+    else if (sym.includes(q)) score = 50;
+    else if (name.includes(q)) score = 40;
+    else if (contract === q) score = 95;
+    else if (contract.startsWith(q)) score = 35;
+    else if (contract.includes(q)) score = 30;
+    else if (deployer.includes(q)) score = 20;
+    else if (matchSw) score = 15;
+
+    if (score > 0) {
+      matches.push({ item, score });
+    }
+  }
+
+  // Sort by score descending, then block / id descending
+  matches.sort((a, b) => {
+    if (b.score !== a.score) return b.score - a.score;
+    const bBlock = Number(b.item.block_number || b.item.id || 0);
+    const aBlock = Number(a.item.block_number || a.item.id || 0);
+    return bBlock - aBlock;
+  });
+
+  return matches.slice(0, maxLimit).map(m => m.item);
+}
+
+function renderSearchDropdown(query) {
+  const dropdown = document.getElementById('searchResultsDropdown');
+  if (!dropdown) return;
+
+  const q = String(query || '').trim();
+  if (!q) {
+    hideSearchDropdown();
+    return;
+  }
+
+  searchDropdownResults = getMatchingDrops(q, 7);
+  searchDropdownSelectedIndex = -1;
+
+  if (searchDropdownResults.length === 0) {
+    dropdown.innerHTML = `
+      <div class="search-dropdown-empty">
+        <div class="search-empty-icon">🔍</div>
+        <div class="search-empty-title">No agentic projects matching "<strong>${escapeHtml(q)}</strong>"</div>
+        <div class="search-empty-desc">Check the contract or token symbol, or trace directly on BscScan</div>
+        <div class="search-empty-actions">
+          <a href="https://bscscan.com/search?q=${encodeURIComponent(q)}" target="_blank" rel="noopener" class="search-empty-btn">
+            Search on BscScan ↗
+          </a>
+        </div>
+      </div>
+    `;
+    dropdown.style.display = 'block';
+    return;
+  }
+
+  const itemsHtml = searchDropdownResults.map((item, idx) => {
+    const sym = item.symbol || 'TOKEN';
+    const name = item.name || sym;
+    const cAddr = String(item.contract || '');
+    const shortAddr = cAddr.length > 12 ? `${cAddr.slice(0, 6)}...${cAddr.slice(-4)}` : cAddr;
+    const initial = (sym[0] || name[0] || '?').toUpperCase();
+
+    // Badges
+    const badges = [];
+    const pStr = String(item.mint_price_str || '').toUpperCase();
+    const isFree = item.has_free_mint || pStr.includes('FREE');
+    if (isFree) badges.push('<span class="search-drop-badge badge-free">Free</span>');
+    if (typeof isSniperReady === 'function' && isSniperReady(item)) badges.push('<span class="search-drop-badge badge-sniper">Snipe Ready</span>');
+    if (item.safety_score === 'HONEYPOT' || item.is_honeypot) badges.push('<span class="search-drop-badge badge-honeypot">Honeypot</span>');
+    const sw = Array.isArray(item.smart_wallets) && item.smart_wallets.length > 0 ? item.smart_wallets : (item.smart_minters || []);
+    if (sw.length > 0) badges.push(`<span class="search-drop-badge badge-smart">🧠 ${sw.length}</span>`);
+
+    // Price / gain
+    const price = item.token_price_usd || item.market_price_usd || item.current_price;
+    const priceDisplay = price > 0 ? formatCryptoPrice(price) : (isFree ? 'FREE' : (item.mint_price_bnb ? `${item.mint_price_bnb} BNB` : '—'));
+
+    let gainDisplay = '';
+    let gainClass = 'gain-neutral';
+    const gainPct = Number(item.gain_pct || item.price_change_24h || 0);
+    const athMult = Number(item.ath_multiplier || item.gain_multiple || 0);
+
+    if (gainPct !== 0) {
+      const isPos = gainPct > 0;
+      gainDisplay = `${isPos ? '+' : ''}${gainPct.toFixed(1)}%`;
+      gainClass = isPos ? 'gain-pos' : 'gain-neg';
+    } else if (athMult > 1) {
+      gainDisplay = `${athMult.toFixed(1)}x ATH`;
+      gainClass = 'gain-pos';
+    } else if (item.market_cap > 0) {
+      gainDisplay = `MC: $${formatCount(item.market_cap)}`;
+      gainClass = 'gain-neutral';
+    }
+
+    return `
+      <div class="search-dropdown-item" role="option" data-idx="${idx}" data-contract="${escapeHtml(cAddr)}" tabindex="-1">
+        <div class="search-drop-avatar">${initial}</div>
+        <div class="search-drop-main">
+          <div class="search-drop-title-row">
+            <span class="search-drop-name" title="${escapeHtml(name)}">${highlightSearchMatch(name, q)}</span>
+            <span class="search-drop-symbol">$${highlightSearchMatch(sym, q)}</span>
+            <div class="search-drop-badges">${badges.join('')}</div>
+          </div>
+          <div class="search-drop-sub">
+            <span class="search-drop-addr">${shortAddr}</span>
+            ${item.standard ? `<span>• ${escapeHtml(item.standard)}</span>` : ''}
+          </div>
+        </div>
+        <div class="search-drop-meta">
+          <div class="search-drop-price">${priceDisplay}</div>
+          ${gainDisplay ? `<div class="search-drop-gain ${gainClass}">${gainDisplay}</div>` : ''}
+        </div>
+        <div class="search-drop-action" aria-hidden="true">↗</div>
+      </div>
+    `;
+  }).join('');
+
+  dropdown.innerHTML = `
+    <div class="search-dropdown-inner">
+      <div class="search-dropdown-header">
+        <span class="search-dropdown-title">Matching Drops <span class="search-dropdown-count">(${searchDropdownResults.length})</span></span>
+        <span class="search-dropdown-hint desktop-only">↵ to inspect</span>
+      </div>
+      <div class="search-dropdown-list" role="listbox" id="searchDropdownList">
+        ${itemsHtml}
+      </div>
+      <div class="search-dropdown-footer">
+        <button type="button" class="search-dropdown-view-table" id="searchDropdownViewTable">
+          <span>View in table ↓</span>
+        </button>
+        <div class="search-dropdown-shortcuts desktop-only">
+          <span><kbd>↑</kbd><kbd>↓</kbd> navigate</span>
+          <span><kbd>↵</kbd> inspect</span>
+          <span><kbd>esc</kbd> close</span>
+        </div>
+      </div>
+    </div>
+  `;
+
+  // Attach event listeners to items
+  dropdown.querySelectorAll('.search-dropdown-item').forEach(el => {
+    el.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const idx = Number(el.getAttribute('data-idx'));
+      const item = searchDropdownResults[idx];
+      if (item) {
+        selectSearchDropdownItem(item);
+      }
+    });
+  });
+
+  const viewTableBtn = document.getElementById('searchDropdownViewTable');
+  if (viewTableBtn) {
+    viewTableBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      hideSearchDropdown();
+      const tableSec = document.getElementById('tableSection') || document.querySelector('.table-wrapper') || document.getElementById('tableBody');
+      if (tableSec) {
+        tableSec.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    });
+  }
+
+  dropdown.style.display = 'block';
+}
+
+function hideSearchDropdown() {
+  const dropdown = document.getElementById('searchResultsDropdown');
+  if (dropdown) {
+    dropdown.style.display = 'none';
+  }
+  searchDropdownSelectedIndex = -1;
+}
+
+function selectSearchDropdownItem(item) {
+  if (!item) return;
+  hideSearchDropdown();
+  addRecentInspected(item);
+  openModal(item, 'search_dropdown');
+}
+
+function updateSearchDropdownSelection(newIndex) {
+  const items = document.querySelectorAll('#searchResultsDropdown .search-dropdown-item');
+  if (!items || items.length === 0) return;
+
+  items.forEach(el => el.classList.remove('is-selected'));
+
+  if (newIndex >= 0 && newIndex < items.length) {
+    searchDropdownSelectedIndex = newIndex;
+    const target = items[newIndex];
+    target.classList.add('is-selected');
+    target.scrollIntoView({ block: 'nearest' });
+  } else {
+    searchDropdownSelectedIndex = -1;
+  }
+}
+
+if (typeof window !== 'undefined') {
+  window.renderSearchDropdown = renderSearchDropdown;
+  window.hideSearchDropdown = hideSearchDropdown;
+  window.getMatchingDrops = getMatchingDrops;
+  window.selectSearchDropdownItem = selectSearchDropdownItem;
 }
 
 const TABLE_RENDER_CHUNK = 60;
@@ -9060,6 +9326,12 @@ async function init() {
         }
       });
 
+      searchInput.addEventListener('focus', () => {
+        if (searchInput.value && searchInput.value.trim()) {
+          renderSearchDropdown(searchInput.value);
+        }
+      });
+
       searchInput.addEventListener('input', async e => {
         searchQuery = e.target.value;
         if (searchClearBtn) {
@@ -9069,6 +9341,7 @@ async function init() {
           await loadSmartDrops();
         }
         renderTable();
+        renderSearchDropdown(searchQuery);
 
         // Track debounced search queries so we know what tokens users are looking for
         clearTimeout(searchDebounceTimer);
@@ -9085,7 +9358,45 @@ async function init() {
       });
 
       searchInput.addEventListener('keydown', e => {
+        const dropdown = document.getElementById('searchResultsDropdown');
+        const isDropdownOpen = dropdown && dropdown.style.display !== 'none';
+
+        if (e.key === 'ArrowDown') {
+          if (!isDropdownOpen && searchInput.value.trim()) {
+            e.preventDefault();
+            renderSearchDropdown(searchInput.value);
+            return;
+          }
+          if (isDropdownOpen && searchDropdownResults && searchDropdownResults.length > 0) {
+            e.preventDefault();
+            const nextIdx = (searchDropdownSelectedIndex + 1) % searchDropdownResults.length;
+            updateSearchDropdownSelection(nextIdx);
+            return;
+          }
+        }
+
+        if (e.key === 'ArrowUp') {
+          if (isDropdownOpen && searchDropdownResults && searchDropdownResults.length > 0) {
+            e.preventDefault();
+            const prevIdx = searchDropdownSelectedIndex <= 0 ? searchDropdownResults.length - 1 : searchDropdownSelectedIndex - 1;
+            updateSearchDropdownSelection(prevIdx);
+            return;
+          }
+        }
+
+        if (e.key === 'Enter') {
+          if (isDropdownOpen && searchDropdownResults && searchDropdownResults.length > 0) {
+            e.preventDefault();
+            const chosen = searchDropdownSelectedIndex >= 0
+              ? searchDropdownResults[searchDropdownSelectedIndex]
+              : searchDropdownResults[0];
+            selectSearchDropdownItem(chosen);
+            return;
+          }
+        }
+
         if (e.key === 'Escape') {
+          hideSearchDropdown();
           if (searchInput.value) {
             clearTimeout(searchDebounceTimer);
             searchInput.value = '';
@@ -9105,6 +9416,7 @@ async function init() {
           e.stopPropagation();
         }
         clearTimeout(searchDebounceTimer);
+        hideSearchDropdown();
         if (searchInput) {
           searchInput.value = '';
           searchQuery = '';
@@ -9114,6 +9426,14 @@ async function init() {
         }
       });
     }
+
+    // Dismiss search dropdown on click outside
+    document.addEventListener('click', e => {
+      const searchWrap = document.querySelector('.suite-search-wrap');
+      if (searchWrap && !searchWrap.contains(e.target)) {
+        hideSearchDropdown();
+      }
+    });
 
     // Global '/' keyboard shortcut to focus prominent search bar
     window.addEventListener('keydown', e => {
@@ -9440,7 +9760,12 @@ if (typeof module !== 'undefined' && module.exports) {
     setSearchQuery,
     getRecentInspectedTokens: () => recentInspectedTokens,
     setRecentInspectedTokens: (t) => { recentInspectedTokens = t; },
-    setupStickyHeaderScroll
+    setupStickyHeaderScroll,
+    getMatchingDrops,
+    renderSearchDropdown,
+    hideSearchDropdown,
+    selectSearchDropdownItem,
+    highlightSearchMatch
   };
 }
 
