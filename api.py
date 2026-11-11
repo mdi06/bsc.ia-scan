@@ -43,6 +43,22 @@ app.add_middleware(
 )
 
 
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    import traceback
+    tb = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
+    print(f"[🔥 API Unhandled Error] {request.method} {request.url.path}: {exc}\n{tb}", flush=True)
+    return JSONResponse(
+        status_code=500,
+        headers={
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "*",
+            "Access-Control-Allow-Headers": "*",
+        },
+        content={"success": False, "error": str(exc), "traceback": tb}
+    )
+
+
 def run_api_memory_guard():
     """Periodically trims heap memory and runs garbage collection in the API process."""
     import gc
@@ -149,85 +165,117 @@ SYNTHETIC_EQUITY_SYMBOLS = {
 }
 
 def get_sanitized_mcap(d: dict) -> float:
-    if not d:
+    if not d or not isinstance(d, dict):
         return 0.0
-    mc = float(d.get("market_cap") or d.get("fdv") or 0.0)
-    if mc == 0.0:
-        px = float(d.get("token_price_usd") or d.get("market_price_usd") or 0.0)
-        tm = float(d.get("total_minted") or 0.0)
-        ms = float(d.get("max_supply") or 0.0)
-        if px > 0:
-            if 0 < tm < 1e14:
-                mc = tm * px
-            elif 0 < ms < 1e14:
-                mc = ms * px
-            elif tm >= 1e14:
-                mc = (tm / 1e18) * px
-            elif ms >= 1e14:
-                mc = (ms / 1e18) * px
-    if mc > 100_000_000 and float(d.get("lp_usd") or 0.0) < 50_000:
+    try:
+        mc = float(d.get("market_cap") or d.get("fdv") or 0.0)
+        if mc == 0.0:
+            px = float(d.get("token_price_usd") or d.get("market_price_usd") or 0.0)
+            tm = float(d.get("total_minted") or 0.0)
+            ms = float(d.get("max_supply") or 0.0)
+            if px > 0:
+                if 0 < tm < 1e14:
+                    mc = tm * px
+                elif 0 < ms < 1e14:
+                    mc = ms * px
+                elif tm >= 1e14:
+                    mc = (tm / 1e18) * px
+                elif ms >= 1e14:
+                    mc = (ms / 1e18) * px
+        if mc > 100_000_000 and float(d.get("lp_usd") or 0.0) < 50_000:
+            return 0.0
+        return mc
+    except Exception:
         return 0.0
-    return mc
 
 def is_secondary_market_asset(d: dict) -> bool:
-    if not d:
+    if not d or not isinstance(d, dict):
         return False
-    c = str(d.get("contract") or "").lower().strip()
-    sym = str(d.get("symbol") or "").upper().strip()
-    name = str(d.get("name") or "").upper().strip()
-    if c in EXCLUDED_PEGS_CONTRACTS or sym in EXCLUDED_PEGS_SYMBOLS or sym in SYNTHETIC_EQUITY_SYMBOLS:
+    try:
+        c = str(d.get("contract") or "").lower().strip()
+        sym = str(d.get("symbol") or "").upper().strip()
+        name = str(d.get("name") or "").upper().strip()
+        if c in EXCLUDED_PEGS_CONTRACTS or sym in EXCLUDED_PEGS_SYMBOLS or sym in SYNTHETIC_EQUITY_SYMBOLS:
+            return False
+        if "ZCASH" in name or "DOGEZILLA" in name or "BINANCE-PEG" in name or "PANCAKESWAP" in name:
+            return False
+        lp = float(d.get("lp_usd") or 0.0)
+        mc = get_sanitized_mcap(d)
+        px = float(d.get("token_price_usd") or 0.0)
+        vol = float(d.get("volume_24h") or 0.0)
+        sec_vol = float(d.get("secondary_vol_bnb") or 0.0)
+        has_pair = bool(d.get("pair_address") or d.get("pair_url"))
+        is_grad = bool(d.get("is_graduated"))
+        return lp > 50.0 or mc > 500.0 or (px > 0 and vol > 0) or sec_vol > 0 or has_pair or is_grad
+    except Exception:
         return False
-    if "ZCASH" in name or "DOGEZILLA" in name or "BINANCE-PEG" in name or "PANCAKESWAP" in name:
-        return False
-    lp = float(d.get("lp_usd") or 0.0)
-    mc = get_sanitized_mcap(d)
-    px = float(d.get("token_price_usd") or 0.0)
-    vol = float(d.get("volume_24h") or 0.0)
-    sec_vol = float(d.get("secondary_vol_bnb") or 0.0)
-    has_pair = bool(d.get("pair_address") or d.get("pair_url"))
-    is_grad = bool(d.get("is_graduated"))
-    return lp > 50.0 or mc > 500.0 or (px > 0 and vol > 0) or sec_vol > 0 or has_pair or is_grad
 
 
 def compute_global_overview_stats(all_projs=None) -> dict:
-    if all_projs is None:
-        raw_projs = db.get_all_projects()
-        all_projs = [p for p in raw_projs if (p.get("contract") or "").lower() not in BOGUS_SET]
-    total = len(all_projs)
-    latest_block = all_projs[0].get("block") if all_projs else None
+    try:
+        if all_projs is None:
+            raw_projs = db.get_all_projects()
+            all_projs = [p for p in raw_projs if isinstance(p, dict) and (p.get("contract") or "").lower() not in BOGUS_SET]
+        else:
+            all_projs = [p for p in all_projs if isinstance(p, dict) and (p.get("contract") or "").lower() not in BOGUS_SET]
+        total = len(all_projs)
+        latest_block = all_projs[0].get("block") if all_projs else None
 
-    smart_count = sum(1 for d in all_projs if (d.get("smart_wallets") or d.get("smart_minters")))
-    sniper_ready_count = sum(1 for d in all_projs if d.get("sniper_ready"))
-    proxy_count = sum(1 for d in all_projs if d.get("is_proxy_clone"))
-    nft_surge_count = sum(1 for d in all_projs if d.get("is_nft_surge"))
-    secondary_count = sum(1 for d in all_projs if is_secondary_market_asset(d))
+        smart_count = sum(1 for d in all_projs if (d.get("smart_wallets") or d.get("smart_minters")))
+        sniper_ready_count = sum(1 for d in all_projs if d.get("sniper_ready"))
+        proxy_count = sum(1 for d in all_projs if d.get("is_proxy_clone"))
+        nft_surge_count = sum(1 for d in all_projs if d.get("is_nft_surge"))
+        secondary_count = sum(1 for d in all_projs if is_secondary_market_asset(d))
 
-    local_stats = monitor.load_agent_id_stats() or {}
-    cloud_stats = db.get_agent_id_stats() or {}
-    local_count = int(local_stats.get("total_created_wallets") or 0)
-    cloud_count = int(cloud_stats.get("total_created_wallets") or 0)
-    if cloud_count > local_count:
-        best_agent_stats = cloud_stats
-    elif cloud_count == local_count and int(cloud_stats.get("last_block") or 0) > int(local_stats.get("last_block") or 0):
-        best_agent_stats = cloud_stats
-    else:
-        best_agent_stats = local_stats
+        local_stats = {}
+        try:
+            local_stats = monitor.load_agent_id_stats() or {}
+        except Exception:
+            pass
+        cloud_stats = {}
+        try:
+            cloud_stats = db.get_agent_id_stats() or {}
+        except Exception:
+            pass
 
-    total_agent_wallets = int(best_agent_stats.get("total_created_wallets") or 178001)
-    agent_wallets_block = int(best_agent_stats.get("last_block") or 0)
+        local_count = int(local_stats.get("total_created_wallets") or 0)
+        cloud_count = int(cloud_stats.get("total_created_wallets") or 0)
+        if cloud_count > local_count:
+            best_agent_stats = cloud_stats
+        elif cloud_count == local_count and int(cloud_stats.get("last_block") or 0) > int(local_stats.get("last_block") or 0):
+            best_agent_stats = cloud_stats
+        else:
+            best_agent_stats = local_stats
 
-    return {
-        "total": total,
-        "smart": smart_count,
-        "sniper_ready": sniper_ready_count,
-        "proxy": proxy_count,
-        "nft_surge": nft_surge_count,
-        "secondary": secondary_count,
-        "latest_block": latest_block,
-        "agent_wallets": total_agent_wallets,
-        "total_created_wallets": total_agent_wallets,
-        "agent_wallets_block": agent_wallets_block
-    }
+        total_agent_wallets = int(best_agent_stats.get("total_created_wallets") or 178001)
+        agent_wallets_block = int(best_agent_stats.get("last_block") or 0)
+
+        return {
+            "total": total,
+            "smart": smart_count,
+            "sniper_ready": sniper_ready_count,
+            "proxy": proxy_count,
+            "nft_surge": nft_surge_count,
+            "secondary": secondary_count,
+            "latest_block": latest_block,
+            "agent_wallets": total_agent_wallets,
+            "total_created_wallets": total_agent_wallets,
+            "agent_wallets_block": agent_wallets_block
+        }
+    except Exception as e:
+        print(f"[⚠️ Overview Stats Fallback Error] {e}", flush=True)
+        return {
+            "total": len(all_projs) if all_projs else 0,
+            "smart": 0,
+            "sniper_ready": 0,
+            "proxy": 0,
+            "nft_surge": 0,
+            "secondary": 0,
+            "latest_block": None,
+            "agent_wallets": 178001,
+            "total_created_wallets": 178001,
+            "agent_wallets_block": 0
+        }
 
 
 @app.get("/api/stats")
