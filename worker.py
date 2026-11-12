@@ -504,50 +504,54 @@ def run_fast_track_progress_sweeper_loop():
                 changed_items = []
 
                 futures = [fast_sweep_pool.submit(fast_sweep_contract, rpc, it) for it in sweep_targets]
+                sweep_results = []
                 for fut in concurrent.futures.as_completed(futures):
-                        try:
-                            c_addr, minted, supply, holders, changed = fut.result()
-                            if not c_addr or not changed:
+                    try:
+                        sweep_results.append(fut.result())
+                    except Exception as e:
+                        print(f"[⚠️ Fast-Track Sweeper Result Error] {e}", flush=True)
+
+                # Apply under the lock: other threads read and mutate the same history items.
+                with history_lock:
+                    for c_addr, minted, supply, holders, changed in sweep_results:
+                        if not c_addr or not changed:
+                            continue
+                        for it in history:
+                            if it.get("contract", "").lower() != c_addr.lower():
                                 continue
+                            old_minted = it.get("total_minted", 0) or 0
+                            old_sup = it.get("max_supply") or 0
+                            old_prog = (old_minted / old_sup * 100.0) if old_sup > 0 else 0.0
 
-                            for it in history:
-                                if it.get("contract", "").lower() == c_addr.lower():
-                                    old_minted = it.get("total_minted", 0) or 0
-                                    old_sup = it.get("max_supply") or 0
-                                    old_prog = (old_minted / old_sup * 100.0) if old_sup > 0 else 0.0
+                            if minted is not None:
+                                it["total_minted"] = minted
+                            if supply is not None:
+                                it["max_supply"] = supply
+                            if holders is not None:
+                                it["holders"] = max(it.get("holders", 0) or 0, holders)
 
-                                    if minted is not None:
-                                        it["total_minted"] = minted
-                                    if supply is not None:
-                                        it["max_supply"] = supply
-                                    if holders is not None:
-                                        it["holders"] = max(it.get("holders", 0) or 0, holders)
+                            new_sup = it.get("max_supply") or 0
+                            new_minted = it.get("total_minted", 0) or 0
+                            new_prog = (new_minted / new_sup * 100.0) if new_sup > 0 else 0.0
 
-                                    new_sup = it.get("max_supply") or 0
-                                    new_minted = it.get("total_minted", 0) or 0
-                                    new_prog = (new_minted / new_sup * 100.0) if new_sup > 0 else 0.0
+                            if old_prog < 45.0 and new_prog >= 45.0:
+                                it["signals"] = list(set((it.get("signals") or []) + ["⚡ Surging: 45%+ Minted"]))
+                            if old_prog < 60.0 and new_prog >= 60.0:
+                                it["signals"] = list(set((it.get("signals") or []) + ["🎯 SNIPER ALERT: 60%+ Sold Out!"]))
 
-                                    if old_prog < 45.0 and new_prog >= 45.0:
-                                        it["signals"] = list(set((it.get("signals") or []) + ["⚡ Surging: 45%+ Minted"]))
-                                    if old_prog < 60.0 and new_prog >= 60.0:
-                                        it["signals"] = list(set((it.get("signals") or []) + ["🎯 SNIPER ALERT: 60%+ Sold Out!"]))
+                            eva = monitor.evaluate_sniper_readiness(it)
+                            it["sniper_ready"] = eva.get("sniper_ready", False)
+                            it["sniper_status"] = eva.get("sniper_status", "TRACKING")
+                            it["sniper_badge"] = eva.get("sniper_badge", "⏳ Tracking")
+                            it["sniper_checklist"] = eva.get("sniper_checklist", [])
 
-                                    # Recalculate sniper checklist
-                                    eva = monitor.evaluate_sniper_readiness(it)
-                                    it["sniper_ready"] = eva.get("sniper_ready", False)
-                                    it["sniper_status"] = eva.get("sniper_status", "TRACKING")
-                                    it["sniper_badge"] = eva.get("sniper_badge", "⏳ Tracking")
-                                    it["sniper_checklist"] = eva.get("sniper_checklist", [])
+                            if not it.get("sniper_ready_alerted") and it["sniper_ready"]:
+                                it["sniper_ready_alerted"] = True
+                                sniper_alerts.append(it)
 
-                                    if not it.get("sniper_ready_alerted") and it["sniper_ready"]:
-                                        it["sniper_ready_alerted"] = True
-                                        sniper_alerts.append(it)
-
-                                    updates_count += 1
-                                    changed_items.append(it)
-                                    break
-                        except Exception as e:
-                            print(f"[⚠️ Fast-Track Sweeper Result Error] {e}", flush=True)
+                            updates_count += 1
+                            changed_items.append(it)
+                            break
 
                 if updates_count > 0:
                     with history_lock:
@@ -803,6 +807,7 @@ def run_element_nft_volume_sweeper_loop():
                 continue
 
             updated_count = 0
+            changed_items = []
             for item in nft_contracts:
                 c = (item.get("contract") or "").lower()
                 try:
@@ -843,6 +848,14 @@ def run_element_nft_volume_sweeper_loop():
         time.sleep(60)
 
 
+def _next_scan_range(last_block: int, curr_block: int, max_blocks: int = 10, max_lag: int = 30):
+    """Next (first, last) block numbers to scan. At most `max_blocks` per tick; if the scanner is more
+    than `max_lag` blocks behind it skips ahead to the newest `max_blocks`, like run_discovery_loop does."""
+    if curr_block - last_block > max_lag:
+        last_block = curr_block - max_blocks
+    return last_block + 1, last_block + min(curr_block - last_block, max_blocks)
+
+
 def run_proxy_factory_watcher_loop():
     """Watches new blocks for calls into proxy/factory contracts and records clone-style drops."""
     print("[🧩 Proxy Factory Watcher] Initializing Stealth Factory & Proxy Clone Watcher...", flush=True)
@@ -863,7 +876,10 @@ def run_proxy_factory_watcher_loop():
                 time.sleep(2.0)
                 continue
             if curr_block > last_block:
-                for b in range(last_block + 1, min(curr_block + 1, last_block + 6)):
+                first_block, end_block = _next_scan_range(last_block, curr_block)
+                if first_block > last_block + 1:
+                    print(f"[🧩 Proxy Factory Watcher] {curr_block - last_block} blocks behind; jumping to #{first_block}", flush=True)
+                for b in range(first_block, end_block + 1):
                     try:
                         blk = rpc.get_block(b, full_tx=True)
                     except Exception:
@@ -967,11 +983,11 @@ def run_proxy_factory_watcher_loop():
 
                                             enrichment_pool.submit(_enrich_contract_background, rpc, cand, snd, det)
 
-                last_block = curr_block
+                last_block = end_block
         except Exception as e:
             print(f"[⚠️ Proxy Factory Watcher Error] {e}", flush=True)
 
-        time.sleep(20)
+        time.sleep(1.0)
 
 
 def run_agent_id_counter_loop():
