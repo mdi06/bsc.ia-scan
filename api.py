@@ -7,7 +7,6 @@ db.py cache, plus the static frontend in local development. It does no chain sca
 worker.py's job.
 """
 
-import hashlib
 import json
 import os
 import re
@@ -160,9 +159,8 @@ def health_check():
 @app.get("/history.json")
 def get_virtual_history_json(request: Request):
     """Full project list as pre-encoded JSON bytes, with ETag/304 support."""
-    data = db.get_history_json_bytes()
-    etag = f'"{hashlib.md5(data[:128] + str(len(data)).encode()).hexdigest()}"'
-    if request.headers.get("if-none-match") == etag:
+    data, etag = db.get_history_json()
+    if _etag_matches(request.headers.get("if-none-match"), etag):
         return Response(status_code=304)
     return Response(
         content=data,
@@ -178,9 +176,12 @@ def _etag_matches(client_etag: Optional[str], target_etag: str) -> bool:
     """Matches weak (W/...) and strong ETags across Cloudflare and browsers."""
     if not client_etag or not target_etag:
         return False
-    c = client_etag.strip().lstrip("W/").strip('"')
-    t = target_etag.strip().lstrip("W/").strip('"')
-    return c == t
+    def normalize(tag: str) -> str:
+        tag = tag.strip()
+        if tag.startswith("W/"):
+            tag = tag[2:]
+        return tag.strip('"')
+    return normalize(client_etag) == normalize(target_etag)
 
 
 def is_bogus_or_synthetic_asset(d: dict) -> bool:

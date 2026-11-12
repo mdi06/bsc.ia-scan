@@ -6,11 +6,12 @@ Backends:
 """
 
 import os
+import hashlib
 import json
 import time
 import sqlite3
 import threading
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 from pathlib import Path
 
 # Supabase calls need httpx; without it everything falls back to SQLite.
@@ -56,6 +57,7 @@ class DatabaseManager:
         self._last_synced_updated_at = 0
         self._cache_ttl = 60.0  # seconds
         self._cached_json_bytes: Optional[bytes] = None
+        self._cached_json_etag: Optional[str] = None
         self._cache_dirty = True
 
         # httpx client, recreated when the PID changes (see `client`)
@@ -341,18 +343,18 @@ class DatabaseManager:
             finally:
                 conn.close()
 
-    def get_history_json_bytes(self) -> bytes:
-        """Returns pre-encoded, minified UTF-8 JSON bytes of all projects.
-        Caches the bytes in memory to avoid repetitive json.dumps allocations during HTTP requests.
-        """
+    def get_history_json(self) -> Tuple[bytes, str]:
+        """Returns (minified UTF-8 JSON of all projects, ETag of those exact bytes).
+        Both are cached until the project cache changes, so requests neither re-encode nor re-hash."""
         self.get_all_projects()
         with self._cache_lock:
             if not self._cached_json_bytes or self._cache_dirty:
                 items = list(self._projects_cache.values())
                 items.sort(key=lambda x: x.get("block", 0) or 0, reverse=True)
                 self._cached_json_bytes = json.dumps(items, separators=(',', ':')).encode("utf-8")
+                self._cached_json_etag = f'"{hashlib.md5(self._cached_json_bytes).hexdigest()}"'
                 self._cache_dirty = False
-            return self._cached_json_bytes
+            return self._cached_json_bytes, self._cached_json_etag
 
     def get_projects(
         self,
@@ -373,14 +375,14 @@ class DatabaseManager:
             s = search.lower().strip()
             filtered = [
                 p for p in filtered
-                if s in p.get("name", "").lower()
-                or s in p.get("symbol", "").lower()
-                or s in p.get("contract", "").lower()
+                if s in (p.get("name") or "").lower()
+                or s in (p.get("symbol") or "").lower()
+                or s in (p.get("contract") or "").lower()
             ]
 
         if status:
             st = status.lower().strip()
-            filtered = [p for p in filtered if p.get("status", "").lower() == st]
+            filtered = [p for p in filtered if (p.get("status") or "").lower() == st]
 
         if sniper_ready is not None:
             filtered = [p for p in filtered if bool(p.get("sniper_ready")) == sniper_ready]
@@ -622,14 +624,16 @@ class DatabaseManager:
 
         # 2. SQLite Delete
         try:
-            conn = self._get_sqlite_connection()
             with self._lock:
-                cur = conn.cursor()
-                placeholders = ",".join("?" for _ in clean)
-                cur.execute(f"DELETE FROM projects WHERE contract IN ({placeholders})", clean)
-                conn.commit()
-                deleted_count = max(deleted_count, cur.rowcount)
-            conn.close()
+                conn = self._get_sqlite_connection()
+                try:
+                    cur = conn.cursor()
+                    placeholders = ",".join("?" for _ in clean)
+                    cur.execute(f"DELETE FROM projects WHERE contract IN ({placeholders})", clean)
+                    conn.commit()
+                    deleted_count = max(deleted_count, cur.rowcount)
+                finally:
+                    conn.close()
         except Exception as e:
             print(f"[⚠️ SQLite Delete Error] {e}", flush=True)
 
