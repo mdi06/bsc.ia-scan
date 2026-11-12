@@ -330,7 +330,8 @@ def test_apply_pancake_estimate(monkeypatch):
     monkeypatch.setattr(monitor, "refresh_bnb_price", lambda rpc=None, max_age=60.0: 600.0)
     item = {"contract": token}
     assert worker._apply_pancake_estimate(None, item) is True
-    assert item["lp_wbnb"] == 4.0 and item["lp_usd"] == 2400.0 and item["pair_url"].endswith(pair)
+    # liquidity is two-sided: 2 x the WBNB reserve (4 WBNB at $600 -> $4800), like DexScreener's figure
+    assert item["lp_wbnb"] == 8.0 and item["lp_usd"] == 4800.0 and item["pair_url"].endswith(pair)
     monkeypatch.setattr(monitor, "get_pair_address", lambda rpc, f, a, b: None)
     assert worker._apply_pancake_estimate(None, {"contract": token}) is False
 

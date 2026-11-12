@@ -358,7 +358,8 @@ def get_bnb_price():
     """Live BNB/USD from the Pancake WBNB/USDT pool (cached 60s). `live` is false until a lookup has succeeded."""
     price = monitor.refresh_bnb_price()
     return JSONResponse(
-        content={"success": True, "bnb_price_usd": price, "live": monitor.bnb_price_is_live()},
+        content={"success": True, "bnb_price_usd": price, "live": monitor.bnb_price_is_live(),
+                 "as_of": monitor.bnb_price_as_of()},
         headers={"Cache-Control": "public, max-age=30"},
     )
 

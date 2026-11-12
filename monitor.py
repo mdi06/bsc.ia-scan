@@ -1186,7 +1186,9 @@ def fetch_bnb_price_usd(rpc: BscRpcClient) -> Optional[float]:
 
 BNB_PRICE_FALLBACK_USD = 705.0  # used until the first successful lookup
 BNB_PRICE_TTL_SEC = 60.0
-_bnb_price_state = {"usd": BNB_PRICE_FALLBACK_USD, "fetched_at": 0.0, "live": False}
+BNB_PRICE_STALE_AFTER_TTLS = 3  # the price stops counting as live once its last success is older than 3 TTLs
+# fetched_at = last *attempt* (throttles retries); ok_at = last *successful* lookup (0.0 = never).
+_bnb_price_state = {"usd": BNB_PRICE_FALLBACK_USD, "fetched_at": 0.0, "live": False, "ok_at": 0.0}
 _bnb_price_lock = threading.Lock()
 _bnb_price_rpc: Optional[BscRpcClient] = None
 
@@ -1209,16 +1211,23 @@ def refresh_bnb_price(rpc: Optional[BscRpcClient] = None, max_age: float = BNB_P
                 rpc = _bnb_price_rpc
             price = fetch_bnb_price_usd(rpc)
             if price and price > 0:
-                _bnb_price_state.update(usd=price, live=True)
+                _bnb_price_state.update(usd=price, live=True, ok_at=now)
             else:
                 _log.debug("BNB price lookup failed; keeping $%.2f", _bnb_price_state["usd"])
             _bnb_price_state["fetched_at"] = now  # also after a failure, so a down RPC isn't retried per call
         return _bnb_price_state["usd"]
 
 
+def bnb_price_as_of() -> Optional[float]:
+    """Unix time of the last successful BNB/USD lookup, or None if there never was one."""
+    return _bnb_price_state.get("ok_at") or None
+
+
 def bnb_price_is_live() -> bool:
-    """True once at least one on-chain lookup has succeeded (otherwise the price is the static fallback)."""
-    return _bnb_price_state["live"]
+    """True while the last *successful* on-chain lookup is recent (within BNB_PRICE_STALE_AFTER_TTLS TTLs).
+    After a longer RPC outage the cached price is reported as not live."""
+    ok_at = _bnb_price_state.get("ok_at") or 0.0
+    return bool(_bnb_price_state["live"]) and ok_at > 0 and (time.time() - ok_at) <= BNB_PRICE_STALE_AFTER_TTLS * BNB_PRICE_TTL_SEC
 
 
 def get_bnb_price_usd(rpc: BscRpcClient) -> float:
@@ -2038,6 +2047,44 @@ def compute_market_cap_stats(history: List[Dict[str, Any]], bnb_price: Optional[
     }
 
 
+# Market numbers of the token an NFT / Fair-Mint dispenser hands out. They describe the *linked* token, never the
+# dispenser record, so they live under their own keys and never feed lp_usd / market_cap / pair_url.
+_LINKED_MARKET_KEYS = {
+    "lp_usd": "linked_lp_usd",
+    "market_cap": "linked_market_cap",
+    "fdv": "linked_fdv",
+    "token_price_usd": "linked_price_usd",
+    "volume_24h": "linked_volume_24h",
+    "pair_url": "linked_pair_url",
+    "lp_pool": "linked_lp_pool",
+}
+
+
+def linked_market_fields(mkt: Dict[str, Any]) -> Dict[str, Any]:
+    """The linked_token / linked_* entries of an analyze_market_interest result, for copying onto a record."""
+    keys = set(_LINKED_MARKET_KEYS.values()) | {"linked_token"}
+    return {k: v for k, v in (mkt or {}).items() if k in keys}
+
+
+def _store_linked_market(stats: Dict[str, Any], mkt: Dict[str, Any], merge: bool = False) -> None:
+    """Copies a linked token's market numbers from `mkt` (fetch_token_market_data output, or the Pancake scratch
+    dict) into stats under linked_* keys. With merge=True existing linked values are only improved on."""
+    src_names = {"token_price_usd": ("token_price_usd", "market_price_usd")}
+    for src, dst in _LINKED_MARKET_KEYS.items():
+        val = None
+        for name in src_names.get(src, (src,)):
+            if mkt.get(name):
+                val = mkt[name]
+                break
+        if not val:
+            continue
+        if merge and src in ("lp_usd", "volume_24h") and stats.get(dst) and val <= stats[dst]:
+            continue
+        if merge and stats.get(dst) and src not in ("lp_usd",):
+            continue
+        stats[dst] = val
+
+
 def analyze_market_interest(
     rpc: BscRpcClient,
     contract_addr: str,
@@ -2217,6 +2264,16 @@ def analyze_market_interest(
             mkt_data = alt_data
             target_token = contract_addr
 
+    # An NFT / Fair-Mint dispenser is not the token it dispenses. When the market data belongs to a *linked*
+    # token (target_token != this contract), none of it may become the record's own price / liquidity / market
+    # cap / pair_url: it is kept under separate linked_* keys (see _LINKED_MARKET_KEYS).
+    is_linked = bool(target_token) and target_token != contract_addr
+    if is_linked:
+        stats["linked_token"] = target_token
+        if mkt_data:
+            _store_linked_market(stats, mkt_data)
+        mkt_data = {}
+
     if mkt_data:
         stats["holders"] = mkt_data.get("holders", 0)
         stats["buys_24h"] = mkt_data.get("buys_24h", 0)
@@ -2282,14 +2339,17 @@ def analyze_market_interest(
             stats["total_volume_bnb"] = details["total_volume_bnb"]
 
     # 4. Multi-Quote Secondary Liquidity Check on PancakeSwap V2
+    # `mk` is where the pool numbers land: the record itself, or (for a linked token) a scratch dict that is
+    # stored under linked_* keys afterwards.
+    mk = {} if is_linked else stats
     if target_token:
         try:
             bnb_price = get_bnb_price_usd(rpc)
-            best_lp_usd = stats.get("lp_usd", 0.0)
-            best_lp_wbnb = stats.get("lp_wbnb", 0.0)
+            best_lp_usd = mk.get("lp_usd", 0.0)
+            best_lp_wbnb = mk.get("lp_wbnb", 0.0)
             best_pair_addr = None
-            best_px_usd = stats.get("token_price_usd", 0.0)
-            best_px_bnb = stats.get("token_price_bnb", 0.0)
+            best_px_usd = mk.get("token_price_usd", 0.0)
+            best_px_bnb = mk.get("token_price_bnb", 0.0)
             token_dec = details.get("decimals", 18) or 18
 
             for qt in QUOTE_TOKENS:
@@ -2334,19 +2394,21 @@ def analyze_market_interest(
                 except Exception as exc:
                     _log.debug("PancakeSwap pair lookup failed: %s", exc)
 
-            if best_lp_usd > stats.get("lp_usd", 0.0):
-                stats["lp_usd"] = best_lp_usd
-                stats["lp_wbnb"] = best_lp_wbnb
+            if best_lp_usd > mk.get("lp_usd", 0.0):
+                mk["lp_usd"] = best_lp_usd
+                mk["lp_wbnb"] = best_lp_wbnb
                 if best_pair_addr:
-                    stats["lp_pool"] = best_pair_addr
-                    if not stats.get("pair_url"):
-                        stats["pair_url"] = f"https://dexscreener.com/bsc/{best_pair_addr}"
-            if best_px_usd > 0 and stats.get("token_price_usd", 0.0) == 0:
-                stats["token_price_usd"] = best_px_usd
-            if best_px_bnb > 0 and stats.get("token_price_bnb", 0.0) == 0:
-                stats["token_price_bnb"] = best_px_bnb
+                    mk["lp_pool"] = best_pair_addr
+                    if not mk.get("pair_url"):
+                        mk["pair_url"] = f"https://dexscreener.com/bsc/{best_pair_addr}"
+            if best_px_usd > 0 and mk.get("token_price_usd", 0.0) == 0:
+                mk["token_price_usd"] = best_px_usd
+            if best_px_bnb > 0 and mk.get("token_price_bnb", 0.0) == 0:
+                mk["token_price_bnb"] = best_px_bnb
         except Exception as exc:
             _log.debug("BNB price lookup failed: %s", exc)
+    if is_linked:
+        _store_linked_market(stats, mk, merge=True)
 
     # Supply metrics
     max_sup = details.get("max_supply")
@@ -4128,6 +4190,7 @@ def refresh_project_metrics(rpc: BscRpcClient, item: Dict[str, Any], wallet: str
             item["buys_1h"] = mkt.get("buys_1h", item.get("buys_1h", 0))
             item["sells_24h"] = mkt.get("sells_24h", item.get("sells_24h", 0))
             item["volume_24h"] = mkt.get("volume_24h", item.get("volume_24h", 0.0))
+            item.update(linked_market_fields(mkt))
             if mkt.get("pair_url"):
                 item["pair_url"] = mkt["pair_url"]
             if mkt.get("website"):
@@ -5348,6 +5411,7 @@ def run_live_monitor(rpc: BscRpcClient, wallet: str, plain: bool = False):
                                             "sells_24h": mkt.get("sells_24h", 0),
                                             "volume_24h": mkt.get("volume_24h", 0.0),
                                             "pair_url": mkt.get("pair_url", ""),
+                                            **linked_market_fields(mkt),
                                             "mint_calldata": mint_cd,
                                             "signals": mkt.get("signals", [f"Discovered via smart wallet {aid}"]),
                                             "detected_at": time.strftime("%Y-%m-%d %H:%M:%S"),
@@ -5437,6 +5501,7 @@ def run_live_monitor(rpc: BscRpcClient, wallet: str, plain: bool = False):
                                     "sells_24h": mkt.get("sells_24h", 0),
                                     "volume_24h": mkt.get("volume_24h", 0.0),
                                     "pair_url": mkt.get("pair_url", ""),
+                                    **linked_market_fields(mkt),
                                     "mint_calldata": det.get("mint_calldata", "0x1249c58b"),
                                     "signals": mkt.get("signals", []),
                                     "detected_at": time.strftime("%Y-%m-%d %H:%M:%S"),

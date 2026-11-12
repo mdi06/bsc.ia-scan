@@ -10,6 +10,7 @@ what it finds through db.py. Background threads:
 6. Agent ID counter: .ai wallet mint count
 """
 
+import os
 import time
 import json
 import re
@@ -65,6 +66,7 @@ def _enrich_contract_background(rpc: monitor.BscRpcClient, contract_addr: str, d
                     item["market_cap"] = mkt.get("market_cap", 0.0)
                     item["fdv"] = mkt.get("fdv", 0.0)
                     item["price_change_24h"] = mkt.get("price_change_24h", 0.0)
+                    item.update(monitor.linked_market_fields(mkt))
                     if mkt.get("pair_url"):
                         item["pair_url"] = mkt["pair_url"]
                     if mkt.get("security"):
@@ -655,20 +657,71 @@ def _collect_dex_pairs(pairs: List[Dict[str, Any]], wanted_tokens: set, dex_upda
             dex_updates[p_addr] = pair
 
 
+# ---- Market data freshness -------------------------------------------------------------------------------
+# Every record that carries market numbers also carries when they were last confirmed
+# (market_updated_at, unix seconds), where they came from (market_source: "dexscreener" | "pancake") and
+# market_stale. A record nobody has confirmed for longer than MARKET_STALE_AFTER_SEC gets its market fields
+# cleared to None ("unknown") rather than shown as if they were current.
+MARKET_STALE_AFTER_SEC = float(os.environ.get("MARKET_STALE_AFTER_SEC", 6 * 3600))
+# Cleared (set to None) when a record goes stale. Counts and prices are unknown, not zero.
+STALE_CLEARED_FIELDS = (
+    "lp_usd", "lp_wbnb", "volume_24h", "token_price_usd", "token_price_bnb", "market_cap", "fdv",
+    "price_change_24h", "buys_24h", "sells_24h", "buys_1h",
+)
+
+
+def _has_market_data(item: Dict[str, Any]) -> bool:
+    return any(item.get(f) for f in STALE_CLEARED_FIELDS)
+
+
+def _mark_market_fresh(item: Dict[str, Any], source: str, now: Optional[float] = None) -> None:
+    item["market_updated_at"] = time.time() if now is None else now
+    item["market_stale"] = False
+    item["market_source"] = source
+
+
+def _market_source(item: Dict[str, Any]) -> Optional[str]:
+    src = item.get("market_source")
+    if src:
+        return src
+    # records written before market_source existed: a Pancake info link means the Pancake estimate
+    return "pancake" if "pancakeswap.finance" in str(item.get("pair_url") or "") else None
+
+
+def _expire_stale_market(item: Dict[str, Any], now: float, max_age: Optional[float] = None) -> bool:
+    """Clears the market fields of a record whose market data nobody confirmed for longer than `max_age`
+    (default MARKET_STALE_AFTER_SEC) and flags it market_stale. A record with market data but no
+    market_updated_at (written before this existed) counts as infinitely old. True if the item changed."""
+    if not _has_market_data(item):
+        return False
+    max_age = MARKET_STALE_AFTER_SEC if max_age is None else max_age
+    ts = item.get("market_updated_at")
+    if ts and now - float(ts) <= max_age:
+        return False
+    for f in STALE_CLEARED_FIELDS:
+        item[f] = None
+    item["market_stale"] = True
+    return True
+
+
 def _needs_pancake_fallback(item: Dict[str, Any]) -> bool:
-    """The Pancake WBNB-pool estimate is only for drops DexScreener doesn't know. It counts one pool only
+    """The Pancake WBNB-pool estimate is for drops DexScreener doesn't know. It counts one pool only
     (FIST: $88K from that pool vs $7.1M real liquidity), so it must never overwrite liquidity or a DexScreener
-    pair we already have, or a single missed DexScreener answer would corrupt good data."""
+    pair we already have, or a single missed DexScreener answer would corrupt good data.
+    Records whose current numbers *are* a Pancake estimate are re-checked too (the caller rate-limits that):
+    their reserves go stale, and once DexScreener indexes the pair the dex path takes over by itself."""
     if _sweep_kind(item) not in ("token", "fair"):
         return False  # NFTs and custom contracts have no WBNB pool to find
+    if _market_source(item) == "pancake":
+        return True
     active = (item.get("total_minted") or 0) > 0 or item.get("smart_wallets") or (item.get("score") or 0) > 0
     known_pair = "dexscreener.com" in str(item.get("pair_url") or "")
     return bool(active) and not (item.get("lp_usd") or 0) > 0 and not known_pair
 
 
-def _apply_dex_pair(item: Dict[str, Any], pair: Dict[str, Any]) -> None:
-    """Copies a DexScreener pair's price, liquidity, volume, market cap and trade counts onto a drop.
-    Raises if the pair has malformed numbers."""
+def _apply_dex_pair(item: Dict[str, Any], pair: Dict[str, Any], now: Optional[float] = None) -> None:
+    """Copies a DexScreener pair's price, liquidity, volume, market cap and trade counts onto a drop and
+    stamps it fresh (market_updated_at). Raises if the pair has malformed numbers."""
     lp_info = pair.get("liquidity", {})
     item["lp_usd"] = float(lp_info.get("usd") or 0.0)
     if pair.get("priceUsd"):
@@ -697,6 +750,7 @@ def _apply_dex_pair(item: Dict[str, Any], pair: Dict[str, Any]) -> None:
     item["buys_24h"] = int((txns.get("h24", {}) or {}).get("buys") or 0)
     item["sells_24h"] = int((txns.get("h24", {}) or {}).get("sells") or 0)
     item["buys_1h"] = int((txns.get("h1", {}) or {}).get("buys") or 0)
+    _mark_market_fresh(item, "dexscreener", now)
 
 
 def _recompute_interest(item: Dict[str, Any]) -> None:
@@ -741,8 +795,26 @@ PANCAKE_RECHECK_SEC = 3600.0
 PANCAKE_FALLBACK_PER_SWEEP = 25
 
 
-def _apply_pancake_estimate(rpc, item: Dict[str, Any]) -> bool:
-    """Sets pair_url, lp_wbnb and lp_usd from the token's PancakeSwap V2 WBNB pool. True if it changed the item."""
+def _pancake_token_decimals(rpc, item: Dict[str, Any], c: str) -> int:
+    """Decimals of the token in the pool: from the stored standard string, else decimals() on the contract,
+    else 18."""
+    dec = _token_decimals(item)
+    if dec is not None:
+        return dec
+    try:
+        res = rpc.call_contract(c, "0x313ce567")
+        if res and len(res) >= 66:
+            val = int(res[:66], 16)
+            if 0 <= val <= 36:
+                return val
+    except Exception:
+        pass
+    return 18
+
+
+def _apply_pancake_estimate(rpc, item: Dict[str, Any], now: Optional[float] = None) -> bool:
+    """Sets pair_url, lp_wbnb, lp_usd and token price from the token's PancakeSwap V2 WBNB pool and stamps the
+    numbers fresh. Liquidity is two-sided (2 x the WBNB reserve), like DexScreener's. True if it changed the item."""
     c = (item.get("contract") or "").lower()
     pair_addr = monitor.get_pair_address(rpc, monitor.PANCAKE_FACTORY_V2, c, monitor.WBNB_ADDRESS)
     if not pair_addr:
@@ -753,10 +825,102 @@ def _apply_pancake_estimate(rpc, item: Dict[str, Any]) -> bool:
         return True  # the pair link alone is still new information
     r0, r1 = reserves
     # token0 is the lower address: WBNB's reserve is r1 when our token sorts below it
-    wbnb_reserve = (r1 if c < monitor.WBNB_ADDRESS.lower() else r0) / 1e18
-    item["lp_wbnb"] = wbnb_reserve
-    item["lp_usd"] = wbnb_reserve * monitor.refresh_bnb_price(rpc)
+    token_is_t0 = c < monitor.WBNB_ADDRESS.lower()
+    wbnb_reserve = (r1 if token_is_t0 else r0) / 1e18
+    token_reserve = (r0 if token_is_t0 else r1) / (10 ** _pancake_token_decimals(rpc, item, c))
+    bnb_usd = monitor.refresh_bnb_price(rpc)
+    item["lp_wbnb"] = wbnb_reserve * 2
+    item["lp_usd"] = wbnb_reserve * bnb_usd * 2
+    if token_reserve > 0 and wbnb_reserve > 0:
+        item["token_price_bnb"] = wbnb_reserve / token_reserve
+        item["token_price_usd"] = item["token_price_bnb"] * bnb_usd
+    _mark_market_fresh(item, "pancake", now)
     return True
+
+
+def _apply_market_sweep(history: List[Dict[str, Any]], dex_updates: Dict[str, Dict[str, Any]],
+                        now: float) -> tuple:
+    """Applies one DexScreener sweep to `history`. Returns (changed_items, pancake_candidates, no_pair_items,
+    updated_count). changed_items includes records whose interest score changed even when no pair was found,
+    so those get saved too."""
+    changed_items: List[Dict[str, Any]] = []
+    pancake_candidates: List[Dict[str, Any]] = []
+    no_pair_items: List[Dict[str, Any]] = []
+    updated_count = 0
+    for item in history:
+        c = (item.get("contract") or "").lower()
+        pair_addr = ""
+        m = re.search(r'dexscreener\.com/bsc/(0x[a-fA-F0-9]{40})', item.get("pair_url") or "")
+        if m:
+            pair_addr = m.group(1).lower()
+
+        # Guard: Candidate pool must have item contract as baseToken
+        pair = dex_updates.get(c)
+        if not pair and pair_addr:
+            cand_p = dex_updates.get(pair_addr)
+            if cand_p and (cand_p.get("baseToken", {}).get("address") or "").lower() == c:
+                pair = cand_p
+        item_changed = False
+
+        if pair:
+            try:
+                _apply_dex_pair(item, pair, now)
+                updated_count += 1
+                item_changed = True
+            except Exception as e:
+                print(f"[⚠️ Market Engine] bad DexScreener data for {c}: {e}", flush=True)
+        else:
+            no_pair_items.append(item)
+            if _needs_pancake_fallback(item) and now - _pancake_checked_at.get(c, 0.0) >= PANCAKE_RECHECK_SEC:
+                pancake_candidates.append(item)
+
+        before = (item.get("score"), item.get("rating"), item.get("sniper_ready"), item.get("sniper_status"))
+        try:
+            _recompute_interest(item)
+        except Exception as e:
+            print(f"[⚠️ Market Engine] score update failed for {c}: {e}", flush=True)
+        after = (item.get("score"), item.get("rating"), item.get("sniper_ready"), item.get("sniper_status"))
+        if before[0] is not None and before != after:
+            item_changed = True  # a rescored record must be saved even when DexScreener had nothing new
+
+        if item_changed:
+            changed_items.append(item)
+    return changed_items, pancake_candidates, no_pair_items, updated_count
+
+
+def find_foreign_pair_records(history: List[Dict[str, Any]], fetch_pairs=None) -> List[Dict[str, Any]]:
+    """Records whose pair_url points at a DexScreener pair whose BASE token is not the record's own contract
+    (an NFT / Fair-Mint record that picked up its dispensed token's pair, see H2). Looks the pairs up in batches
+    of 30; a pair DexScreener doesn't return is left alone (unknown is not wrong)."""
+    fetch_pairs = fetch_pairs or _fetch_dexscreener_pairs
+    by_pair: Dict[str, List[Dict[str, Any]]] = {}
+    for item in history:
+        m = re.search(r'dexscreener\.com/bsc/(0x[a-fA-F0-9]{40})', item.get("pair_url") or "")
+        if m and item.get("contract"):
+            by_pair.setdefault(m.group(1).lower(), []).append(item)
+    pair_addrs = list(by_pair)
+    bad: List[Dict[str, Any]] = []
+    for i in range(0, len(pair_addrs), 30):
+        chunk = pair_addrs[i:i + 30]
+        for pair in fetch_pairs(DEXSCREENER_PAIRS_URL + ",".join(chunk)):
+            p_addr = (pair.get("pairAddress") or "").lower()
+            base = ((pair.get("baseToken") or {}).get("address") or "").lower()
+            for item in by_pair.get(p_addr, []):
+                if base and base != item["contract"].lower():
+                    bad.append(item)
+    return bad
+
+
+def clear_foreign_pair_market(item: Dict[str, Any]) -> None:
+    """Drops the market numbers and pair link a record picked up from another token's pair. The next market
+    sweep re-fills them if the contract has a pair of its own."""
+    for f in STALE_CLEARED_FIELDS:
+        item[f] = None
+    item["pair_url"] = ""
+    item["lp_pool"] = None
+    item["market_stale"] = True
+    item.pop("market_updated_at", None)
+    item.pop("market_source", None)
 
 
 def run_market_dynamics_updater_loop():
@@ -782,13 +946,15 @@ def run_market_dynamics_updater_loop():
             ]
             active_old = [
                 x for x in history[150:]
-                if not monitor.is_system_infra(x) and (x.get("lp_usd", 0) > 0 or x.get("token_price_usd", 0) > 0)
+                if not monitor.is_system_infra(x)
+                and ((x.get("lp_usd") or 0) > 0 or (x.get("token_price_usd") or 0) > 0 or x.get("market_stale"))
             ]
             contracts_to_check = recent_drops + active_old
 
             batch_size = 30
             dex_updates = {}
             dex_failures = 0
+            failed_contracts = set()  # records whose DexScreener batch failed: "no pair" there means "unknown"
             for i in range(0, len(contracts_to_check), batch_size):
                 chunk = contracts_to_check[i:i + batch_size]
                 chunk_addrs = [x["contract"] for x in chunk if x.get("contract")]
@@ -810,46 +976,14 @@ def run_market_dynamics_updater_loop():
                 except Exception as e:
                     dex_failures += 1  # best-effort: the next sweep retries
                     last_dex_error = e
+                    failed_contracts.update(chunk_addrs_set)
                 time.sleep(0.5)
             if dex_failures:
                 print(f"[⚠️ Market Engine] DexScreener failed for {dex_failures} batch(es): {last_dex_error}", flush=True)
 
-            updated_count = 0
-            changed_items = []
-            pancake_candidates = []
             now = time.time()
-            for item in history:
-                c = (item.get("contract") or "").lower()
-                pair_addr = ""
-                m = re.search(r'dexscreener\.com/bsc/(0x[a-fA-F0-9]{40})', item.get("pair_url") or "")
-                if m:
-                    pair_addr = m.group(1).lower()
-
-                # Guard: Candidate pool must have item contract as baseToken
-                pair = dex_updates.get(c)
-                if not pair and pair_addr:
-                    cand_p = dex_updates.get(pair_addr)
-                    if cand_p and (cand_p.get("baseToken", {}).get("address") or "").lower() == c:
-                        pair = cand_p
-                item_changed = False
-
-                if pair:
-                    try:
-                        _apply_dex_pair(item, pair)
-                        updated_count += 1
-                        item_changed = True
-                    except Exception as e:
-                        print(f"[⚠️ Market Engine] bad DexScreener data for {c}: {e}", flush=True)
-                elif _needs_pancake_fallback(item) and now - _pancake_checked_at.get(c, 0.0) >= PANCAKE_RECHECK_SEC:
-                    pancake_candidates.append(item)
-
-                try:
-                    _recompute_interest(item)
-                except Exception as e:
-                    print(f"[⚠️ Market Engine] score update failed for {c}: {e}", flush=True)
-
-                if item_changed:
-                    changed_items.append(item)
+            changed_items, pancake_candidates, no_pair_items, updated_count = _apply_market_sweep(
+                history, dex_updates, now)
 
             # Save the DexScreener results before the slow RPC pass below.
             if changed_items:
@@ -860,7 +994,8 @@ def run_market_dynamics_updater_loop():
             # Pancake pool estimate for drops DexScreener doesn't list: a few per sweep, each re-checked at most
             # hourly. One RPC round trip per item, so doing every unlisted drop each sweep took minutes.
             pancake_changed = []
-            for item in pancake_candidates[:PANCAKE_FALLBACK_PER_SWEEP]:
+            this_sweep = pancake_candidates[:PANCAKE_FALLBACK_PER_SWEEP]
+            for item in this_sweep:
                 c = (item.get("contract") or "").lower()
                 _pancake_checked_at[c] = time.time()
                 try:
@@ -873,6 +1008,26 @@ def run_market_dynamics_updater_loop():
                 with history_lock:
                     monitor.save_history(history, delta=pancake_changed)
                 print(f"[📈 Market Engine] Estimated Pancake liquidity for {len(pancake_changed)} unlisted contracts.", flush=True)
+
+            # Records nobody confirmed for too long: clear their market fields (unknown, not a stale number) and
+            # rescore. Skipped for records whose DexScreener batch failed (we don't know that there is no pair)
+            # and for Pancake candidates still waiting for their turn (they haven't had their chance yet).
+            deferred = {id(x) for x in pancake_candidates[PANCAKE_FALLBACK_PER_SWEEP:]}
+            expired = []
+            for item in no_pair_items:
+                if id(item) in deferred or (item.get("contract") or "").lower() in failed_contracts:
+                    continue
+                try:
+                    if _expire_stale_market(item, time.time()):
+                        _recompute_interest(item)
+                        expired.append(item)
+                except Exception as e:
+                    print(f"[⚠️ Market Engine] stale-market expiry failed for {item.get('contract')}: {e}", flush=True)
+            if expired:
+                with history_lock:
+                    monitor.save_history(history, delta=expired)
+                print(f"[📈 Market Engine] Cleared stale market data for {len(expired)} contracts "
+                      f"(no DexScreener/Pancake update for over {MARKET_STALE_AFTER_SEC / 3600:.0f}h).", flush=True)
 
         except Exception as e:
             print(f"[⚠️ Market Engine Error] {e}", flush=True)

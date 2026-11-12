@@ -8,7 +8,7 @@ import monitor
 @pytest.fixture(autouse=True)
 def reset_price_state():
     saved = dict(monitor._bnb_price_state)
-    monitor._bnb_price_state.update(usd=monitor.BNB_PRICE_FALLBACK_USD, fetched_at=0.0, live=False)
+    monitor._bnb_price_state.update(usd=monitor.BNB_PRICE_FALLBACK_USD, fetched_at=0.0, live=False, ok_at=0.0)
     yield
     monitor._bnb_price_state.update(saved)
 
@@ -48,4 +48,6 @@ def test_bnb_price_endpoint(monkeypatch):
     monkeypatch.setattr(monitor, "fetch_bnb_price_usd", lambda rpc: 688.0)
     res = TestClient(api.app).get("/api/bnb-price")
     assert res.status_code == 200
-    assert res.json() == {"success": True, "bnb_price_usd": 688.0, "live": True}
+    body = res.json()
+    assert body["success"] is True and body["bnb_price_usd"] == 688.0 and body["live"] is True
+    assert body["as_of"] == monitor.bnb_price_as_of() and body["as_of"] > 0
