@@ -328,6 +328,7 @@ def compute_global_overview_stats(all_projs=None) -> dict:
         }
 
 
+# Main route: /api/stats. /api/overview and /api/summary are aliases kept for external clients.
 @app.get("/api/stats")
 @app.get("/api/overview")
 @app.get("/api/summary")
@@ -551,6 +552,7 @@ def get_projects(
     return res
 
 
+# Main route: /api/favorites. /favorites is an alias kept for older clients.
 @app.get("/api/favorites")
 @app.get("/favorites")
 def get_favorites(wallet: str = Query(..., description="0x... BSC wallet address")):
@@ -569,6 +571,7 @@ def get_favorites(wallet: str = Query(..., description="0x... BSC wallet address
     }
 
 
+# Main route: /api/favorites. /favorites is an alias kept for older clients.
 @app.post("/api/favorites")
 @app.post("/favorites")
 async def post_favorites(request: Request):
@@ -603,6 +606,7 @@ async def post_favorites(request: Request):
     }
 
 
+# Main route: /api/sync. /sync is an alias kept for older clients.
 @app.post("/api/sync", dependencies=[Depends(require_admin)])
 @app.post("/sync", dependencies=[Depends(require_admin)])
 async def post_sync(request: Request):
