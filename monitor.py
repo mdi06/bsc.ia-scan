@@ -3543,19 +3543,19 @@ def sync_cloud_history() -> List[Dict[str, Any]]:
                                     method="POST"
                                 )
                                 urllib.request.urlopen(sync_req, timeout=4.0)
-                            except Exception:
-                                pass
+                            except Exception as exc:
+                                _log.debug("cloud /api/sync push failed: %s", exc)
 
                     return res_list
-    except Exception:
-        pass
+    except Exception as exc:
+        _log.debug("cloud history pull failed: %s", exc)
     return []
 
 
 def load_history() -> List[Dict[str, Any]]:
     items = []
     try:
-        from db import db
+        from db import db  # imported lazily: db.py opens the database on import, which CLI start-up shouldn't pay for
         db_items = db.get_all_projects()
         if db_items:
             items = db_items
@@ -3619,7 +3619,7 @@ def save_history(history: List[Dict[str, Any]], delta: Optional[Any] = None):
 
         # 1. Primary: Save to Database (Supabase / SQLite in WAL mode)
         try:
-            from db import db
+            from db import db  # lazy, see load_history
             if delta is not None:
                 if isinstance(delta, dict):
                     db.upsert_projects([delta])
@@ -3627,16 +3627,16 @@ def save_history(history: List[Dict[str, Any]], delta: Optional[Any] = None):
                     db.upsert_projects(delta)
             else:
                 db.upsert_projects(final_list)
-        except Exception:
-            pass
+        except Exception as exc:
+            _log.debug("database upsert failed: %s", exc)
 
         # 2. Maintain history.json for backwards compatibility / local file inspection (compact minified)
         tmp_file = HISTORY_FILE + ".tmp"
         with open(tmp_file, "w", encoding="utf-8") as f:
             json.dump(final_list, f, separators=(',', ':'))
         os.replace(tmp_file, HISTORY_FILE)
-    except Exception:
-        pass
+    except Exception as exc:
+        _log.debug("could not save history: %s", exc)
 
 
 class KeyReader:
@@ -3710,8 +3710,8 @@ class KeyReader:
         if self.is_tty and self.old_settings:
             try:
                 termios.tcsetattr(sys.stdin, termios.TCSADRAIN, self.old_settings)
-            except Exception:
-                pass
+            except Exception as exc:
+                _log.debug("could not restore terminal settings: %s", exc)
 
     def __del__(self):
         self.close()
@@ -3742,8 +3742,8 @@ def get_viewport_max_rows(panel_lines: int = 7) -> int:
                 if sz.lines >= 10:
                     lines = sz.lines
                     found = True
-        except Exception:
-            pass
+        except Exception as exc:
+            _log.debug("could not read terminal size from /dev/tty: %s", exc)
 
     if not found:
         try:
@@ -3874,7 +3874,7 @@ def format_structured_safety(item: Dict[str, Any]) -> str:
 def format_structured_interest(item: Dict[str, Any]) -> str:
     """
     Standardizes interest/velocity score indicator with uniform width and badge.
-    Uses 🧊 (Ice Cube: cell_len 2) to match 🚀, 🔥, 🌱 for 100% border alignment.
+    Uses 🧊 (Ice Cube: cell_len 2) to match 🚀, 🔥, 🌱 so table borders stay aligned.
     """
     try:
         score = int(item.get("score", 0) or 0)
@@ -3894,7 +3894,7 @@ def format_structured_interest(item: Dict[str, Any]) -> str:
 def format_structured_mint_price(item: Dict[str, Any]) -> str:
     """
     Standardizes mint price cell with clean text and syntax coloring.
-    Eliminates emoji font-fallback discrepancies for 100% straight columns.
+    Avoids emoji font-fallback width differences that misalign columns.
     """
     p_str = str(item.get("mint_price_str") or "").upper()
     v_wei = int(item.get("mint_value_wei", 0) or 0)
@@ -4832,7 +4832,7 @@ def build_interactive_dashboard(
             else:
                 sm_badge = " "
 
-            # Project name without leading emojis for 100% straight margin
+            # Project name without leading emojis, so the name column stays aligned
             p_name = item.get("name", "Unknown")[:14]
             p_sym = item.get("symbol", "")[:8]
             p_display = f"{p_name} ({p_sym})"
