@@ -5022,7 +5022,7 @@ def run_live_monitor(rpc: BscRpcClient, wallet: str, plain: bool = False):
                         processed_txs.add(tx_hash)
 
                         input_data = (tx.get("input") or "").lower()
-                        # Fast in-memory check: ignores 99.999% of non-registry transactions instantly
+                        # Cheap substring check first: almost no transaction references a registry
                         if not matches_tracked_registry(input_data):
                             continue
 
@@ -5118,7 +5118,7 @@ def run_live_monitor(rpc: BscRpcClient, wallet: str, plain: bool = False):
 
         while not stop_event.is_set():
             try:
-                # Periodic 24/7 Cloud Sync every 20s
+                # Cloud sync every 20s
                 if time.time() - last_cloud_sync > 20:
                     last_cloud_sync = time.time()
                     try:
@@ -5128,8 +5128,8 @@ def run_live_monitor(rpc: BscRpcClient, wallet: str, plain: bool = False):
                             history = cloud_res
                             status_msg = f"☁️ Synced +{diff} new drops from Cloud!"
                             status_timer = time.time()
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        _log.debug("cloud history sync failed: %s", exc)
 
                 curr_b = rpc.get_block_number()
                 if curr_b <= latest_block[0]:
@@ -5167,10 +5167,10 @@ def run_live_monitor(rpc: BscRpcClient, wallet: str, plain: bool = False):
                                 save_agent_id_stats(cur_st)
                                 status_msg = f"🎉 New .ai Agent ID Claimed! Total Registered: {cur_st['total_created_wallets']:,}"
                                 status_timer = time.time()
-                            except Exception:
-                                pass
+                            except Exception as exc:
+                                _log.debug("could not update agent-id claim counter: %s", exc)
 
-                        # 1. Real-Time Smart Wallet Tracker (5,000 Tracked Wallets)
+                        # Smart-wallet activity
                         if snd in smart_wallets and rcv and rcv not in known_infra and (len(inp) >= 10 or tx_val > 0):
                             aid = smart_wallets[snd]
                             matching = [item for item in history if item.get("contract", "").lower() == rcv]
@@ -5248,10 +5248,10 @@ def run_live_monitor(rpc: BscRpcClient, wallet: str, plain: bool = False):
                                         status_msg = f"⚡ ALPHA DROP: {aid} minted {p_n}!"
                                         status_timer = time.time()
                                         notify_alert()
-                                except Exception:
-                                    pass
+                                except Exception as exc:
+                                    _log.debug("smart-wallet drop analysis failed for %s: %s", rcv, exc)
 
-                        # 2. Fast in-memory check: ignores 99.999% of non-registry transactions instantly
+                        # Cheap substring check first: almost no transaction references a registry
                         if not matches_tracked_registry(inp):
                             continue
 
@@ -5354,8 +5354,8 @@ def run_live_monitor(rpc: BscRpcClient, wallet: str, plain: bool = False):
                                     m_res = rpc.call_contract(c, keccak_selector("totalMinted()"))
                                     if m_res and len(m_res) >= 66:
                                         item["total_minted"] = int(m_res, 16)
-                            except Exception:
-                                pass
+                            except Exception as exc:
+                                _log.debug("paused/totalMinted refresh failed for %s: %s", item.get("contract"), exc)
 
                         # Auto-resolve prices for any TBD items on-chain
                         for item in history:
@@ -5374,8 +5374,8 @@ def run_live_monitor(rpc: BscRpcClient, wallet: str, plain: bool = False):
                                             if det.get("mint_calldata"):
                                                 item["mint_calldata"] = det["mint_calldata"]
                                             needs_update = True
-                                except Exception:
-                                    pass
+                                except Exception as exc:
+                                    _log.debug("TBD price resolution failed for %s: %s", item.get("contract"), exc)
                         save_history(history)
 
                 time.sleep(2)
@@ -5408,8 +5408,8 @@ def run_live_monitor(rpc: BscRpcClient, wallet: str, plain: bool = False):
                                 item["mint_calldata"] = det["mint_calldata"]
                             changed = True
                             needs_update = True
-                except Exception:
-                    pass
+                except Exception as exc:
+                    _log.debug("TBD price resolution failed for %s: %s", item.get("contract"), exc)
         if changed:
             save_history(history)
 
