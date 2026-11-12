@@ -10,9 +10,9 @@ Features:
 - Block-0 Discovery: Catches contract deployments referencing the Agent ID registry.
 - Automatic Asset Classification: Distinguishes between ERC-721 (NFT), ERC-1155, BEP-20 (Token), and Fair-Mint dispensaries.
 - Under-the-hood Token Resolution: For fair-mint contracts (like Jager), extracts the underlying token being minted.
-- Instant Security & Mint Audit: Checks for free mints, supply, and function selectors.
+- Security & Mint Audit: Checks for free mints, supply, and function selectors.
 - Terminal & Audio Alerts (macOS).
-- One-click CLI command generator for instant preview & execution with `baw`.
+- CLI command generator for previewing and executing mints with `baw`.
 """
 
 import os
@@ -20,6 +20,8 @@ import sys
 import time
 import json
 import re
+import csv
+import logging
 import urllib.request
 import subprocess
 import argparse
@@ -32,6 +34,9 @@ import shutil
 from typing import Optional, Dict, Any, List, Tuple, Iterable, Set
 
 from filters import EQUITY_SYMBOLS_CORE, EXCLUDED_PEGS_CONTRACTS, PEG_SYMBOLS_CORE
+
+# Swallowed best-effort failures are logged at DEBUG: printing would corrupt the Rich TUI.
+_log = logging.getLogger(__name__)
 
 try:
     from rich.console import Console, Group
@@ -110,9 +115,6 @@ VAULT_FACTORIES = [
     FOUR_MEME_FACTORY.lower(),                       # Four.meme Token Factory / AMAP
     FOUR_MEME_ROUTER.lower()                         # Four.meme Buy Router
 ]
-T_BEACON_UP = "0x1cf3b03a6cf19fa2baba4df148e9dcabedea7f8a5c07840e207e5c089be95d3e"   # BeaconUpgraded(address)
-T_UPGRADED = "0xbc7cd75a20ee27fd9adebab32041f755214dbc6bffa90cc0225b39da2e5c2d3b"    # Upgraded(address)
-T_VAULT_CREATED = "0x1a9fe01bcb4855c926d7757a81014e36cae596a0e3047d297d2cf88ca298a77d"
 
 FACTORY_SELECTORS = ["27cca59f", "7d38bb0d", "1737a4bd"]
 
@@ -160,8 +162,8 @@ def load_agent_id_stats() -> Dict[str, Any]:
                 if isinstance(d, dict) and d.get("total_created_wallets"):
                     if best is None or int(d.get("total_created_wallets", 0)) > int(best.get("total_created_wallets", 0)):
                         best = d
-            except Exception:
-                pass
+            except Exception as exc:
+                _log.debug("could not read agent-id stats from %s: %s", p, exc)
     if best is not None:
         return best
     return {
@@ -182,8 +184,8 @@ def save_agent_id_stats(stats: Dict[str, Any]):
             with open(tmp, "w") as f:
                 json.dump(stats, f, indent=2)
             os.replace(tmp, p)
-        except Exception:
-            pass
+        except Exception as exc:
+            _log.debug("could not write agent-id stats to %s: %s", p, exc)
 
 DIGITS_3ROW = {
     "0": ["█▀█", "█ █", "█▄█"],
@@ -222,15 +224,13 @@ def load_smart_wallets() -> Dict[str, str]:
         try:
             with open(SMART_WALLETS_FILE, "r") as f:
                 return json.load(f)
-        except Exception:
-            pass
+        except Exception as exc:
+            _log.debug("could not read %s, will re-sync: %s", SMART_WALLETS_FILE, exc)
     return sync_smart_wallets()
 
 
 def sync_smart_wallets() -> Dict[str, str]:
     """Downloads/syncs the 5,000 tracked smart agent wallets from Google Sheets."""
-    import csv
-    import urllib.request
     print(f"{C_BLUE}[*] Fetching smart agent wallets from Google Sheets ({SMART_WALLETS_CSV_URL[:45]}...)...{C_RESET}")
     wallets = {}
     try:
