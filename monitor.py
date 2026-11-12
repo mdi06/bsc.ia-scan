@@ -1806,8 +1806,8 @@ def update_post_mint_profit_metrics(item: Dict[str, Any], bnb_price: float = 705
         try:
             if float(raw_ms) >= 2**128 or float(raw_ms) >= 1e20:
                 raw_ms = None
-        except Exception:
-            pass
+        except Exception as exc:
+            _log.debug("could not normalise raw total_minted for %s: %s", c, exc)
     tm = item.get("total_minted") or 0
     is_sold = bool(raw_ms and float(raw_ms) > 0 and tm and float(tm) >= float(raw_ms))
 
