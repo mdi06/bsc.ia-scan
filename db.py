@@ -58,6 +58,7 @@ class DatabaseManager:
         self._cache_ttl = 60.0  # seconds
         self._cached_json_bytes: Optional[bytes] = None
         self._cached_json_etag: Optional[str] = None
+        self._sqlite_ready = False
         self._cache_dirty = True
 
         # httpx client, recreated when the PID changes (see `client`)
@@ -121,9 +122,11 @@ class DatabaseManager:
     # SQLite Initialization & Connection
     # -------------------------------------------------------------------------
     def _init_sqlite(self):
-        Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
+        """Creates the SQLite schema once per process (idempotent)."""
         with self._lock:
-            conn = self._get_sqlite_connection()
+            if self._sqlite_ready:
+                return
+            conn = self._open_sqlite()
             try:
                 cur = conn.cursor()
                 # Enable WAL mode for zero-lock concurrent reads and writes
@@ -165,16 +168,23 @@ class DatabaseManager:
                     );
                 """)
                 conn.commit()
+                self._sqlite_ready = True
             finally:
                 conn.close()
 
-    def _get_sqlite_connection(self) -> sqlite3.Connection:
-        # In Supabase mode _init_sqlite never runs, so the (gitignored) data/ dir may not exist
-        # on a fresh deploy; the SQLite fallback paths would then crash with "unable to open database file".
+    def _open_sqlite(self) -> sqlite3.Connection:
+        # The (gitignored) data/ dir may not exist on a fresh deploy.
         Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
         conn = sqlite3.connect(self.db_path, timeout=10.0, check_same_thread=False)
         conn.row_factory = sqlite3.Row
         return conn
+
+    def _get_sqlite_connection(self) -> sqlite3.Connection:
+        # In Supabase mode the schema is not created at start-up, but the SQLite fallback paths still
+        # run (a throttled or failed cloud write), so make sure the tables exist before every use.
+        if not self._sqlite_ready:
+            self._init_sqlite()
+        return self._open_sqlite()
 
     # -------------------------------------------------------------------------
     # Seeding & Migration
@@ -453,7 +463,8 @@ class DatabaseManager:
             f"{p.get('sniper_ready')}_{p.get('is_proxy_clone')}_{p.get('is_nft_surge')}_"
             f"{p.get('risk_level')}_{p.get('risk_badge')}_{p.get('status')}_"
             f"{px_bucket}_{p.get('token_symbol')}_{lp_k}_"
-            f"{mc_k}_{vol_k}_{p.get('mint_value_wei')}_{p.get('mint_price_str')}"
+            f"{mc_k}_{vol_k}_{p.get('mint_value_wei')}_{p.get('mint_price_str')}_"
+            f"{p.get('secondary_sales_count')}_{float(p.get('floor_price_bnb') or 0.0):.3g}"
         )
 
     def upsert_projects(self, projects: List[Dict[str, Any]]):
