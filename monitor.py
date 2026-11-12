@@ -1009,8 +1009,8 @@ def analyze_contract(rpc: BscRpcClient, contract_addr: str, wallet_addr: str) ->
                     info["mint_price_bnb"] = 0.0
                     info["mint_price_str"] = "⭐ FREE"
                     info["mint_value_wei"] = "0"
-            except Exception:
-                pass
+            except Exception as exc:
+                _log.debug("free-mint simulation (tiered mint) failed for %s: %s", contract_addr, exc)
 
     # Pattern C: Fair-Mint Token Dispenser mint(uint256,address,uint256) -> selector 0x836a1040 (e.g. BNAGENT, BIBIAI)
     elif "836a1040" in code:
@@ -1062,8 +1062,8 @@ def analyze_contract(rpc: BscRpcClient, contract_addr: str, wallet_addr: str) ->
                     info["mint_price_bnb"] = 0.0
                     info["mint_price_str"] = "⭐ FREE"
                     info["mint_value_wei"] = "0"
-            except Exception:
-                pass
+            except Exception as exc:
+                _log.debug("free-mint simulation (mint()) failed for %s: %s", contract_addr, exc)
 
         # Check general price methods if not free
         if not info["has_free_mint"]:
@@ -1087,8 +1087,8 @@ def analyze_contract(rpc: BscRpcClient, contract_addr: str, wallet_addr: str) ->
         matched_refund = [name for sel, name in REFUND_SELECTORS.items() if sel in full_code]
         info["has_refund"] = len(matched_refund) > 0
         info["refund_methods"] = matched_refund
-    except Exception:
-        pass
+    except Exception as exc:
+        _log.debug("refund selector scan failed for %s: %s", contract_addr, exc)
 
     return info
 
