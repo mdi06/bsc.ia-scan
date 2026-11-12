@@ -691,7 +691,7 @@ if (!global.localStorage) {
 }
 
 // 1. Verify DEFAULT_PILLS_SEQUENCE contents
-assert.strictEqual(DEFAULT_PILLS_SEQUENCE.length, 5, 'Default pills sequence must have 5 items in Approach 1');
+assert.strictEqual(DEFAULT_PILLS_SEQUENCE.length, 6, 'Default pills sequence must have 6 items (ALL, LAUNCHPAD, SNIPER_READY, FREE, ACTIVE, FAVORITES)');
 assert.strictEqual(DEFAULT_PILLS_SEQUENCE[0], 'ALL', 'First item must be ALL');
 assert.strictEqual(DEFAULT_PILLS_SEQUENCE[1], 'LAUNCHPAD', 'Second item must be LAUNCHPAD');
 assert(DEFAULT_PILLS_SEQUENCE.includes('SNIPER_READY'), 'Must include SNIPER_READY');
@@ -890,7 +890,7 @@ console.log('✔ movePillToTop: PASS');
 // 7. Test renderReorderModalList
 openReorderModal();
 assert(mockReorderModal.open, 'Reorder modal should be opened');
-assert.strictEqual(mockReorderList.children.length, 5, 'Reorder list must render 5 items');
+assert.strictEqual(mockReorderList.children.length, 6, 'Reorder list must render 6 items');
 assert(mockReorderList.children[0].textContent.includes('#1'), 'First item must show #1');
 console.log('✔ openReorderModal & renderReorderModalList: PASS');
 
