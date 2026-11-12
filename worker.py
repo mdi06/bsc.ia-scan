@@ -701,12 +701,15 @@ def run_market_dynamics_updater_loop():
                         pair_addr = monitor.get_pair_address(rpc, monitor.PANCAKE_FACTORY_V2, c, monitor.WBNB_ADDRESS)
                         if pair_addr:
                             item["pair_url"] = f"https://pancakeswap.finance/info/v2/pairs/{pair_addr}"
-                            r0, r1 = monitor.get_reserves(rpc, pair_addr)
-                            wbnb_reserve = (r1 if c < monitor.WBNB_ADDRESS.lower() else r0) / 1e18
-                            item["lp_wbnb"] = wbnb_reserve
-                            item["lp_usd"] = wbnb_reserve * monitor.refresh_bnb_price(rpc)
-                            updated_count += 1
-                            item_changed = True
+                            reserves = monitor.get_reserves(rpc, pair_addr)
+                            if reserves:
+                                r0, r1 = reserves
+                                # token0 is the lower address: WBNB's reserve is r1 when our token sorts below it
+                                wbnb_reserve = (r1 if c < monitor.WBNB_ADDRESS.lower() else r0) / 1e18
+                                item["lp_wbnb"] = wbnb_reserve
+                                item["lp_usd"] = wbnb_reserve * monitor.refresh_bnb_price(rpc)
+                                updated_count += 1
+                                item_changed = True
                     except Exception:
                         pass  # no Pancake pair, or the RPC call failed; try again next sweep
 
@@ -763,8 +766,55 @@ def run_market_dynamics_updater_loop():
         time.sleep(120)
 
 
+ELEMENT_SURGE_FIELDS = (
+    "secondary_sales_count", "secondary_vol_bnb", "floor_price_bnb", "high_price_bnb",
+    "secondary_transfers", "is_nft_surge", "nft_surge_badge",
+)
+
+
+def _sweep_element_nft_once(rpc, history) -> List[Dict[str, Any]]:
+    """Updates NFT drops in `history` with Element secondary-market stats (sales, volume, floor, surge flag)
+    read from on-chain Element fills. Returns the items that changed.
+
+    monitor.scan_element_nft_volume works on copies, so the network scan runs without the lock and the
+    results are applied to the shared items under history_lock."""
+    nft_contracts = [
+        x for x in history
+        if not monitor.is_system_infra(x) and (
+            "721" in str(x.get("standard", ""))
+            or "NFT" in str(x.get("standard", ""))
+            or x.get("is_nft")
+        ) and x.get("contract") and x["contract"].startswith("0x") and len(x["contract"]) == 42
+    ]
+    if not nft_contracts:
+        return []
+
+    work = [dict(x) for x in nft_contracts]
+    results = monitor.scan_element_nft_volume(rpc, work)
+
+    changed_items = []
+    with history_lock:
+        for item, scanned in zip(nft_contracts, work):
+            before = tuple(item.get(k) or 0 for k in ELEMENT_SURGE_FIELDS)  # absent, 0, "" and False all count as "nothing"
+            for k in ELEMENT_SURGE_FIELDS:
+                if k in scanned:
+                    item[k] = scanned[k]
+            if tuple(item.get(k) or 0 for k in ELEMENT_SURGE_FIELDS) == before:
+                continue
+            floor = float(item.get("floor_price_bnb") or 0.0)
+            if floor > 0:
+                item["floor_price_str"] = f"{floor:.3f} BNB"
+            signal = (results.get(item["contract"].lower()) or {}).get("badge_plain")
+            if item.get("is_nft_surge") and signal:
+                item["nft_surge_signal"] = signal
+                kept = [s for s in (item.get("signals") or []) if not s.startswith("🦋 SURGE")]
+                item["signals"] = kept + [signal]
+            changed_items.append(item)
+    return changed_items
+
+
 def run_element_nft_volume_sweeper_loop():
-    """Refreshes NFT floor price and secondary volume from Element Market, one collection per second."""
+    """Every 60s, refreshes Element Market secondary stats (sales, volume, floor, surge) for NFT drops."""
     print("[💎 Element NFT Sweeper] Initializing 24/7 Element Market Sweeper...", flush=True)
     time.sleep(7)
     rpc = monitor.BscRpcClient(monitor.RPC_ENDPOINTS)
@@ -778,54 +828,11 @@ def run_element_nft_volume_sweeper_loop():
                 time.sleep(60)
                 continue
 
-            nft_contracts = [
-                x for x in history
-                if not monitor.is_system_infra(x) and (
-                    "721" in str(x.get("standard", ""))
-                    or "NFT" in str(x.get("standard", ""))
-                    or x.get("is_nft")
-                ) and x.get("contract") and x["contract"].startswith("0x") and len(x["contract"]) == 42
-            ]
-
-            if not nft_contracts:
-                time.sleep(60)
-                continue
-
-            updated_count = 0
-            changed_items = []
-            for item in nft_contracts:
-                c = (item.get("contract") or "").lower()
-                try:
-                    data = monitor.fetch_element_market_collection(c)
-                    if data:
-                        floor = data.get("floor_price_bnb", 0.0)
-                        vol = data.get("volume_bnb", 0.0)
-                        sales = data.get("secondary_sales_count", 0)
-
-                        if floor > 0:
-                            item["floor_price_bnb"] = floor
-                            item["floor_price_str"] = f"{floor:.3f} BNB"
-                        if vol > 0:
-                            item["volume_bnb"] = vol
-                        if sales > 0:
-                            item["secondary_sales_count"] = sales
-
-                        eva = monitor.evaluate_nft_surge(item)
-                        if eva.get("is_nft_surge"):
-                            item["is_nft_surge"] = True
-                            item["nft_surge_signal"] = eva.get("signal")
-                            item["signals"] = list(set((item.get("signals") or []) + [eva["signal"]]))
-
-                        updated_count += 1
-                        changed_items.append(item)
-                except Exception as e:
-                    print(f"[⚠️ Element NFT Sweeper] {c} failed: {e}", flush=True)
-                time.sleep(1.0)
-
-            if updated_count > 0:
+            changed_items = _sweep_element_nft_once(rpc, history)
+            if changed_items:
                 with history_lock:
                     monitor.save_history(history, delta=changed_items)
-                print(f"[💎 Element NFT Sweeper] Synced secondary volume/floor for {updated_count} NFT drops.", flush=True)
+                print(f"[💎 Element NFT Sweeper] Synced secondary volume/floor for {len(changed_items)} NFT drops.", flush=True)
 
         except Exception as e:
             print(f"[⚠️ Element NFT Sweeper Error] {e}", flush=True)

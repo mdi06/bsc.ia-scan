@@ -1111,6 +1111,24 @@ def analyze_contract(rpc: BscRpcClient, contract_addr: str, wallet_addr: str) ->
     return info
 
 
+def get_pair_address(rpc: BscRpcClient, factory: str, token_a: str, token_b: str) -> Optional[str]:
+    """PancakeSwap V2 pair address for two tokens, or None if the pair doesn't exist or the call fails."""
+    call_data = "0xe6a43905" + token_a[2:].lower().zfill(64) + token_b[2:].lower().zfill(64)
+    res = rpc.call_contract(factory, call_data)
+    if not res or len(res) < 66:
+        return None
+    pair = "0x" + res[-40:]
+    return None if int(pair, 16) == 0 else pair
+
+
+def get_reserves(rpc: BscRpcClient, pair_addr: str) -> Optional[Tuple[int, int]]:
+    """(reserve0, reserve1) of a V2 pair in raw units, or None if the call fails."""
+    res = rpc.call_contract(pair_addr, "0x0902f1ac")
+    if not res or len(res) < 130:
+        return None
+    return int(res[2:66], 16), int(res[66:130], 16)
+
+
 def fetch_bnb_price_usd(rpc: BscRpcClient) -> Optional[float]:
     """BNB/USD from the PancakeSwap V2 WBNB/USDT pool reserves, or None if the lookup fails."""
     try:
