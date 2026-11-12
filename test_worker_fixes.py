@@ -296,9 +296,80 @@ def test_fetch_dexscreener_pairs_accepts_list_and_dict_bodies(monkeypatch):
 
 
 def test_pancake_fallback_never_overwrites_known_liquidity_or_dexscreener_pair():
-    base = {"total_minted": 5}
+    base = {"total_minted": 5, "standard": "BEP-20 Token (18 decimals)"}
     assert worker._needs_pancake_fallback(base) is True
     assert worker._needs_pancake_fallback({**base, "lp_usd": 7_000_000}) is False          # FIST case
     assert worker._needs_pancake_fallback({**base, "pair_url": "https://dexscreener.com/bsc/0xabc"}) is False
     assert worker._needs_pancake_fallback({**base, "pair_url": "https://pancakeswap.finance/info/v2/pairs/0x1"}) is True
-    assert worker._needs_pancake_fallback({"total_minted": 0, "score": 0}) is False         # nothing worth estimating
+    assert worker._needs_pancake_fallback({**base, "total_minted": 0, "score": 0}) is False  # nothing worth estimating
+    # NFTs and custom contracts have no WBNB pool, so they are never looked up
+    assert worker._needs_pancake_fallback({"total_minted": 5, "standard": "ERC-721 (NFT Collection)"}) is False
+    assert worker._needs_pancake_fallback({"total_minted": 5, "standard": "Custom Smart Contract"}) is False
+
+def test_apply_dex_pair_copies_metrics_and_computes_missing_market_cap():
+    item = {"total_minted": 200_000_000.0}
+    worker._apply_dex_pair(item, {
+        "liquidity": {"usd": 7_114_700.0}, "priceUsd": "0.2636", "baseToken": {"symbol": "FIST"},
+        "url": "https://dexscreener.com/bsc/0xpair", "volume": {"h24": 608_291.0}, "marketCap": 48_450_648,
+        "fdv": 48_450_648, "priceChange": {"h24": 7.58}, "txns": {"h24": {"buys": 652, "sells": 1009}, "h1": {"buys": 40}},
+    })
+    assert (item["token_price_usd"], item["lp_usd"], item["market_cap"], item["buys_24h"], item["buys_1h"]) == (0.2636, 7_114_700.0, 48_450_648, 652, 40)
+    assert item["pair_url"] == "https://dexscreener.com/bsc/0xpair"
+    # DexScreener gave no market cap: fall back to price x supply, like before
+    item2 = {"total_minted": 1000.0}
+    worker._apply_dex_pair(item2, {"liquidity": {"usd": 5}, "priceUsd": "2"})
+    assert item2["market_cap"] == 2000.0
+
+
+def test_apply_pancake_estimate(monkeypatch):
+    import monitor
+    token = "0x" + "1" * 40  # sorts below WBNB, so WBNB is token1 and its reserve is r1
+    pair = "0x" + "ab" * 20
+    monkeypatch.setattr(monitor, "get_pair_address", lambda rpc, f, a, b: pair)
+    monkeypatch.setattr(monitor, "get_reserves", lambda rpc, p: (9 * 10**18, 4 * 10**18))
+    monkeypatch.setattr(monitor, "refresh_bnb_price", lambda rpc=None, max_age=60.0: 600.0)
+    item = {"contract": token}
+    assert worker._apply_pancake_estimate(None, item) is True
+    assert item["lp_wbnb"] == 4.0 and item["lp_usd"] == 2400.0 and item["pair_url"].endswith(pair)
+    monkeypatch.setattr(monitor, "get_pair_address", lambda rpc, f, a, b: None)
+    assert worker._apply_pancake_estimate(None, {"contract": token}) is False
+
+
+def test_market_updater_saves_dexscreener_results_before_the_slow_pancake_pass(monkeypatch):
+    """Regression: the sweep used to do one RPC call per unlisted drop (minutes) before saving anything."""
+    import monitor
+    listed = {"contract": "0x" + "a" * 40, "standard": "BEP-20 Token (18 decimals)", "token_price_usd": 1.0, "lp_usd": 10.0}
+    unlisted = [{"contract": f"0x{i:040x}", "standard": "BEP-20 Token (18 decimals)", "total_minted": 5.0} for i in range(1, 61)]
+    nft = {"contract": "0x" + "e" * 40, "standard": "ERC-721 (NFT Collection)", "total_minted": 5}
+    history = [listed, nft] + unlisted
+
+    events = []
+    monkeypatch.setattr(worker, "get_shared_history", lambda force_refresh=False: history)
+    monkeypatch.setattr(worker, "_fetch_dexscreener_pairs", lambda url: [
+        {"baseToken": {"address": listed["contract"]}, "pairAddress": "0xp", "priceUsd": "2.5", "liquidity": {"usd": 99999},
+         "volume": {"h24": 1}, "url": "https://dexscreener.com/bsc/0xp"}] if "tokens/v1" in url else [])
+    monkeypatch.setattr(monitor, "save_history", lambda h, delta=None: events.append(("save", len(delta or []))))
+    monkeypatch.setattr(monitor, "BscRpcClient", lambda eps: object())
+    monkeypatch.setattr(monitor, "get_pair_address", lambda rpc, f, a, b: events.append(("rpc", a)) or None)
+    monkeypatch.setattr(monitor, "evaluate_sniper_readiness", lambda it: {})
+    worker._pancake_checked_at.clear()
+
+    class Stop(Exception):
+        pass
+
+    def fake_sleep(s):
+        if s >= 100:
+            raise Stop()
+
+    monkeypatch.setattr(worker.time, "sleep", fake_sleep)
+    try:
+        worker.run_market_dynamics_updater_loop()
+    except Stop:
+        pass
+
+    assert listed["token_price_usd"] == 2.5 and listed["lp_usd"] == 99999.0
+    assert events[0] == ("save", 1)                                   # saved first, before any RPC
+    rpc_calls = [e for e in events if e[0] == "rpc"]
+    assert len(rpc_calls) == worker.PANCAKE_FALLBACK_PER_SWEEP        # capped, not all 60
+    assert nft["contract"] not in [c for _, c in rpc_calls]           # NFTs are never looked up
+    assert len(worker._pancake_checked_at) == worker.PANCAKE_FALLBACK_PER_SWEEP  # cooldown recorded
