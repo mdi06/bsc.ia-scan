@@ -42,6 +42,26 @@ discovery_pool = concurrent.futures.ThreadPoolExecutor(max_workers=3, thread_nam
 fast_sweep_pool = concurrent.futures.ThreadPoolExecutor(max_workers=3, thread_name_prefix="FastSweeper")
 
 
+BNB_PRICE_FALLBACK_USD = 705.0  # used until the first successful lookup
+BNB_PRICE_TTL_SEC = 60.0
+_bnb_price = {"usd": BNB_PRICE_FALLBACK_USD, "fetched_at": 0.0}
+
+
+def get_bnb_price(rpc: monitor.BscRpcClient) -> float:
+    """Live BNB/USD from the Pancake WBNB/USDT pool, cached for a minute.
+    If a lookup fails, the last good price is kept (or the fallback if there never was one).
+    Only the market-updater thread calls this, so no lock is needed."""
+    now = time.time()
+    if now - _bnb_price["fetched_at"] >= BNB_PRICE_TTL_SEC:
+        price = monitor.fetch_bnb_price_usd(rpc)
+        if price and price > 0:
+            _bnb_price["usd"] = price
+        else:
+            print(f"[⚠️ Market Engine] BNB price lookup failed; using ${_bnb_price['usd']:.2f}", flush=True)
+        _bnb_price["fetched_at"] = now  # also after a failure, so a down RPC isn't hit on every item
+    return _bnb_price["usd"]
+
+
 def _known_infra() -> set:
     """Routers, factories and registries whose transactions are never treated as drop candidates."""
     return {
@@ -715,7 +735,7 @@ def run_market_dynamics_updater_loop():
                             r0, r1 = monitor.get_reserves(rpc, pair_addr)
                             wbnb_reserve = (r1 if c < monitor.WBNB_ADDRESS.lower() else r0) / 1e18
                             item["lp_wbnb"] = wbnb_reserve
-                            item["lp_usd"] = wbnb_reserve * 705.0
+                            item["lp_usd"] = wbnb_reserve * get_bnb_price(rpc)
                             updated_count += 1
                             item_changed = True
                     except Exception:

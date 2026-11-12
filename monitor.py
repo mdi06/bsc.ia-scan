@@ -1093,16 +1093,17 @@ def analyze_contract(rpc: BscRpcClient, contract_addr: str, wallet_addr: str) ->
     return info
 
 
-def get_bnb_price_usd(rpc: BscRpcClient) -> float:
+def fetch_bnb_price_usd(rpc: BscRpcClient) -> Optional[float]:
+    """BNB/USD from the PancakeSwap V2 WBNB/USDT pool reserves, or None if the lookup fails."""
     try:
         call_data = "0xe6a43905" + WBNB_ADDRESS[2:].lower().zfill(64) + USDT_ADDRESS[2:].lower().zfill(64)
         pair_res = rpc.call_contract(PANCAKE_FACTORY_V2, call_data)
         if not pair_res or len(pair_res) < 66:
-            return 750.0
+            return None
         pair_addr = "0x" + pair_res[-40:]
         res = rpc.call_contract(pair_addr, "0x0902f1ac")
         if not res or len(res) < 130:
-            return 750.0
+            return None
         r0 = int(res[2:66], 16)
         r1 = int(res[66:130], 16)
         t0 = rpc.call_contract(pair_addr, "0x0dfe1681")
@@ -1110,8 +1111,14 @@ def get_bnb_price_usd(rpc: BscRpcClient) -> float:
             return (r0 / 1e18) / (r1 / 1e18)
         else:
             return (r1 / 1e18) / (r0 / 1e18)
-    except Exception:
-        return 750.0
+    except Exception as exc:
+        _log.debug("BNB price lookup failed: %s", exc)
+        return None
+
+
+def get_bnb_price_usd(rpc: BscRpcClient) -> float:
+    price = fetch_bnb_price_usd(rpc)
+    return price if price is not None else 750.0
 
 
 def fetch_token_market_data(token_addr: str) -> Dict[str, Any]:
