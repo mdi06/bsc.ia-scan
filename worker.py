@@ -659,9 +659,104 @@ def _needs_pancake_fallback(item: Dict[str, Any]) -> bool:
     """The Pancake WBNB-pool estimate is only for drops DexScreener doesn't know. It counts one pool only
     (FIST: $88K from that pool vs $7.1M real liquidity), so it must never overwrite liquidity or a DexScreener
     pair we already have, or a single missed DexScreener answer would corrupt good data."""
+    if _sweep_kind(item) not in ("token", "fair"):
+        return False  # NFTs and custom contracts have no WBNB pool to find
     active = (item.get("total_minted") or 0) > 0 or item.get("smart_wallets") or (item.get("score") or 0) > 0
     known_pair = "dexscreener.com" in str(item.get("pair_url") or "")
     return bool(active) and not (item.get("lp_usd") or 0) > 0 and not known_pair
+
+
+def _apply_dex_pair(item: Dict[str, Any], pair: Dict[str, Any]) -> None:
+    """Copies a DexScreener pair's price, liquidity, volume, market cap and trade counts onto a drop.
+    Raises if the pair has malformed numbers."""
+    lp_info = pair.get("liquidity", {})
+    item["lp_usd"] = float(lp_info.get("usd") or 0.0)
+    if pair.get("priceUsd"):
+        item["token_price_usd"] = float(pair.get("priceUsd"))
+    if pair.get("baseToken", {}).get("symbol"):
+        item["token_symbol"] = pair["baseToken"]["symbol"]
+    if pair.get("url"):
+        item["pair_url"] = pair["url"]
+
+    item["volume_24h"] = float((pair.get("volume", {}) or {}).get("h24") or 0.0)
+
+    mcap = float(pair.get("marketCap") or 0.0)
+    fdv = float(pair.get("fdv") or 0.0)
+    if mcap == 0 and fdv == 0 and (item.get("token_price_usd") or 0.0) > 0:
+        supply_val = float(item.get("total_minted") or item.get("max_supply") or 0.0)
+        if supply_val > 0.0:
+            if supply_val > 1e14:
+                supply_val = supply_val / 1e18
+            mcap = supply_val * float(item["token_price_usd"])
+    item["market_cap"] = mcap if mcap > 0 else fdv
+    item["fdv"] = fdv
+
+    item["price_change_24h"] = float((pair.get("priceChange", {}) or {}).get("h24") or 0.0)
+
+    txns = pair.get("txns", {}) or {}
+    item["buys_24h"] = int((txns.get("h24", {}) or {}).get("buys") or 0)
+    item["sells_24h"] = int((txns.get("h24", {}) or {}).get("sells") or 0)
+    item["buys_1h"] = int((txns.get("h1", {}) or {}).get("buys") or 0)
+
+
+def _recompute_interest(item: Dict[str, Any]) -> None:
+    """Interest score, rating and sniper readiness from the drop's current metrics."""
+    score = 0
+    lp = float(item.get("lp_usd") or 0.0)
+    vol = float(item.get("volume_24h") or 0.0)
+    b24 = int(item.get("buys_24h") or 0)
+
+    if lp > 50000: score += 40
+    elif lp > 10000: score += 30
+    elif lp > 2000: score += 20
+    elif lp > 500: score += 10
+
+    if vol > 20000: score += 30
+    elif vol > 5000: score += 20
+    elif vol > 500: score += 10
+
+    if b24 > 500: score += 30
+    elif b24 > 100: score += 20
+    elif b24 > 20: score += 10
+
+    if item.get("smart_wallets"):
+        score += len(item["smart_wallets"]) * 5
+
+    item["score"] = min(100, score)
+    if score >= 80: item["rating"] = "🔥 SURGING"
+    elif score >= 50: item["rating"] = "🚀 HIGH"
+    elif score >= 25: item["rating"] = "⚡ MODERATE"
+    else: item["rating"] = "🌱 EARLY"
+
+    eva = monitor.evaluate_sniper_readiness(item)
+    item["sniper_ready"] = eva.get("sniper_ready", False)
+    item["sniper_status"] = eva.get("sniper_status", "TRACKING")
+    item["sniper_badge"] = eva.get("sniper_badge", "⏳ Tracking")
+    item["sniper_checklist"] = eva.get("sniper_checklist", [])
+
+
+# contract -> time of its last Pancake pool lookup, and how many unlisted drops to look up per sweep
+_pancake_checked_at: Dict[str, float] = {}
+PANCAKE_RECHECK_SEC = 3600.0
+PANCAKE_FALLBACK_PER_SWEEP = 25
+
+
+def _apply_pancake_estimate(rpc, item: Dict[str, Any]) -> bool:
+    """Sets pair_url, lp_wbnb and lp_usd from the token's PancakeSwap V2 WBNB pool. True if it changed the item."""
+    c = (item.get("contract") or "").lower()
+    pair_addr = monitor.get_pair_address(rpc, monitor.PANCAKE_FACTORY_V2, c, monitor.WBNB_ADDRESS)
+    if not pair_addr:
+        return False
+    item["pair_url"] = f"https://pancakeswap.finance/info/v2/pairs/{pair_addr}"
+    reserves = monitor.get_reserves(rpc, pair_addr)
+    if not reserves:
+        return True  # the pair link alone is still new information
+    r0, r1 = reserves
+    # token0 is the lower address: WBNB's reserve is r1 when our token sorts below it
+    wbnb_reserve = (r1 if c < monitor.WBNB_ADDRESS.lower() else r0) / 1e18
+    item["lp_wbnb"] = wbnb_reserve
+    item["lp_usd"] = wbnb_reserve * monitor.refresh_bnb_price(rpc)
+    return True
 
 
 def run_market_dynamics_updater_loop():
@@ -721,6 +816,8 @@ def run_market_dynamics_updater_loop():
 
             updated_count = 0
             changed_items = []
+            pancake_candidates = []
+            now = time.time()
             for item in history:
                 c = (item.get("contract") or "").lower()
                 pair_addr = ""
@@ -729,117 +826,53 @@ def run_market_dynamics_updater_loop():
                     pair_addr = m.group(1).lower()
 
                 # Guard: Candidate pool must have item contract as baseToken
-                candidate = dex_updates.get(c)
-                if not candidate and pair_addr:
+                pair = dex_updates.get(c)
+                if not pair and pair_addr:
                     cand_p = dex_updates.get(pair_addr)
                     if cand_p and (cand_p.get("baseToken", {}).get("address") or "").lower() == c:
-                        candidate = cand_p
-                pair = candidate
+                        pair = cand_p
                 item_changed = False
 
                 if pair:
                     try:
-                        lp_info = pair.get("liquidity", {})
-                        lp_usd = float(lp_info.get("usd") or 0.0)
-                        item["lp_usd"] = lp_usd
-                        if pair.get("priceUsd"):
-                            item["token_price_usd"] = float(pair.get("priceUsd"))
-                        if pair.get("baseToken", {}).get("symbol"):
-                            item["token_symbol"] = pair["baseToken"]["symbol"]
-                        if pair.get("url"):
-                            item["pair_url"] = pair["url"]
-
-                        vol = pair.get("volume", {})
-                        item["volume_24h"] = float(vol.get("h24") or 0.0)
-
-                        mcap = float(pair.get("marketCap") or 0.0)
-                        fdv = float(pair.get("fdv") or 0.0)
-                        if mcap == 0 and fdv == 0 and (item.get("token_price_usd") or 0.0) > 0:
-                            supply_val = float(item.get("total_minted") or item.get("max_supply") or 0.0)
-                            if supply_val > 0.0:
-                                if supply_val > 1e14:
-                                    supply_val = supply_val / 1e18
-                                mcap = supply_val * float(item["token_price_usd"])
-                        item["market_cap"] = mcap if mcap > 0 else fdv
-                        item["fdv"] = fdv
-
-                        p_chg = pair.get("priceChange", {})
-                        item["price_change_24h"] = float(p_chg.get("h24") or 0.0)
-
-                        txns = pair.get("txns", {})
-                        h24 = txns.get("h24", {})
-                        item["buys_24h"] = int(h24.get("buys") or 0)
-                        item["sells_24h"] = int(h24.get("sells") or 0)
-
-                        h1 = txns.get("h1", {})
-                        item["buys_1h"] = int(h1.get("buys") or 0)
-
+                        _apply_dex_pair(item, pair)
                         updated_count += 1
                         item_changed = True
                     except Exception as e:
                         print(f"[⚠️ Market Engine] bad DexScreener data for {c}: {e}", flush=True)
-                elif _needs_pancake_fallback(item):
-                    try:
-                        pair_addr = monitor.get_pair_address(rpc, monitor.PANCAKE_FACTORY_V2, c, monitor.WBNB_ADDRESS)
-                        if pair_addr:
-                            item["pair_url"] = f"https://pancakeswap.finance/info/v2/pairs/{pair_addr}"
-                            reserves = monitor.get_reserves(rpc, pair_addr)
-                            if reserves:
-                                r0, r1 = reserves
-                                # token0 is the lower address: WBNB's reserve is r1 when our token sorts below it
-                                wbnb_reserve = (r1 if c < monitor.WBNB_ADDRESS.lower() else r0) / 1e18
-                                item["lp_wbnb"] = wbnb_reserve
-                                item["lp_usd"] = wbnb_reserve * monitor.refresh_bnb_price(rpc)
-                                updated_count += 1
-                                item_changed = True
-                    except Exception:
-                        pass  # no Pancake pair, or the RPC call failed; try again next sweep
+                elif _needs_pancake_fallback(item) and now - _pancake_checked_at.get(c, 0.0) >= PANCAKE_RECHECK_SEC:
+                    pancake_candidates.append(item)
 
-                # Recompute the interest score and sniper readiness from the (possibly updated) metrics.
                 try:
-                    score = 0
-                    lp = float(item.get("lp_usd") or 0.0)
-                    vol = float(item.get("volume_24h") or 0.0)
-                    b24 = int(item.get("buys_24h") or 0)
-
-                    if lp > 50000: score += 40
-                    elif lp > 10000: score += 30
-                    elif lp > 2000: score += 20
-                    elif lp > 500: score += 10
-
-                    if vol > 20000: score += 30
-                    elif vol > 5000: score += 20
-                    elif vol > 500: score += 10
-
-                    if b24 > 500: score += 30
-                    elif b24 > 100: score += 20
-                    elif b24 > 20: score += 10
-
-                    if item.get("smart_wallets"):
-                        score += len(item["smart_wallets"]) * 5
-
-                    item["score"] = min(100, score)
-                    if score >= 80: item["rating"] = "🔥 SURGING"
-                    elif score >= 50: item["rating"] = "🚀 HIGH"
-                    elif score >= 25: item["rating"] = "⚡ MODERATE"
-                    else: item["rating"] = "🌱 EARLY"
-
-                    eva = monitor.evaluate_sniper_readiness(item)
-                    item["sniper_ready"] = eva.get("sniper_ready", False)
-                    item["sniper_status"] = eva.get("sniper_status", "TRACKING")
-                    item["sniper_badge"] = eva.get("sniper_badge", "⏳ Tracking")
-                    item["sniper_checklist"] = eva.get("sniper_checklist", [])
-
+                    _recompute_interest(item)
                 except Exception as e:
                     print(f"[⚠️ Market Engine] score update failed for {c}: {e}", flush=True)
 
                 if item_changed:
                     changed_items.append(item)
 
-            if updated_count > 0:
+            # Save the DexScreener results before the slow RPC pass below.
+            if changed_items:
                 with history_lock:
                     monitor.save_history(history, delta=changed_items)
                 print(f"[📈 Market Engine] Synced live market & mint metrics for {updated_count} contracts.", flush=True)
+
+            # Pancake pool estimate for drops DexScreener doesn't list: a few per sweep, each re-checked at most
+            # hourly. One RPC round trip per item, so doing every unlisted drop each sweep took minutes.
+            pancake_changed = []
+            for item in pancake_candidates[:PANCAKE_FALLBACK_PER_SWEEP]:
+                c = (item.get("contract") or "").lower()
+                _pancake_checked_at[c] = time.time()
+                try:
+                    if _apply_pancake_estimate(rpc, item):
+                        _recompute_interest(item)
+                        pancake_changed.append(item)
+                except Exception as e:
+                    print(f"[⚠️ Market Engine] Pancake lookup failed for {c}: {e}", flush=True)
+            if pancake_changed:
+                with history_lock:
+                    monitor.save_history(history, delta=pancake_changed)
+                print(f"[📈 Market Engine] Estimated Pancake liquidity for {len(pancake_changed)} unlisted contracts.", flush=True)
 
         except Exception as e:
             print(f"[⚠️ Market Engine Error] {e}", flush=True)
