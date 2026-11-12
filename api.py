@@ -208,6 +208,69 @@ FEED_FILTERS = {
 }
 
 
+PULSE_WINDOW_SEC = 24 * 3600
+
+
+def compute_pulse_24h(projects, now=None) -> dict:
+    """24h Pulse aggregates over the FULL dataset (not whatever page the browser has loaded).
+
+    The window is time based: records whose `detected_at` ("YYYY-MM-DD HH:MM:SS", the server's local clock, the
+    same clock that wrote it) is within the last 24 hours. `since` is that cutoff in the same format, so clients
+    can filter their own lists with a plain string comparison and no timezone guessing."""
+    now = time.time() if now is None else now
+    since = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(now - PULSE_WINDOW_SEC))
+    new_drops = graduated = smart_inflows = clusters = clean = refunds = threats = 0
+    dex_volume = 0.0
+    hunters: Dict[str, int] = {}
+    for d in projects:
+        if not isinstance(d, dict) or is_bogus_or_synthetic_asset(d):
+            continue
+        if str(d.get("detected_at") or "") < since:
+            continue
+        new_drops += 1
+        if is_secondary_market_asset(d) or d.get("is_graduated"):
+            graduated += 1
+        dex_volume += filters._num(d.get("volume_24h"))
+
+        wallets = d.get("smart_wallets") or d.get("smart_minters") or []
+        if wallets:
+            smart_inflows += len(wallets)
+            if len(wallets) >= 3:
+                clusters += 1
+            for w in wallets:
+                key = str(w).lower()
+                hunters[key] = hunters.get(key, 0) + 1
+
+        level = str(d.get("risk_level") or "SAFE").upper()
+        badge = str(d.get("risk_badge") or "").upper()
+        if any(k in badge for k in ("HONEYPOT", "SERIAL", "DRAIN")) or level in ("RUG", "HIGH"):
+            threats += 1
+        else:
+            clean += 1
+        if isinstance(d.get("security"), dict) and d["security"].get("has_refund"):
+            refunds += 1
+
+    top_hunter, top_count = None, 0
+    for w, cnt in hunters.items():
+        if cnt > top_count:
+            top_hunter, top_count = w, cnt
+    return {
+        "window_hours": 24,
+        "since": since,
+        "as_of": int(now),
+        "new_drops": new_drops,
+        "graduated": graduated,
+        "dex_volume_usd": dex_volume,
+        "smart_inflows": smart_inflows,
+        "smart_clusters": clusters,
+        "top_hunter": top_hunter,
+        "top_hunter_count": top_count,
+        "clean_mints": clean,
+        "refunds": refunds,
+        "threats_blocked": threats,
+    }
+
+
 def compute_global_overview_stats(all_projs=None) -> dict:
     try:
         if all_projs is None:
@@ -258,7 +321,8 @@ def compute_global_overview_stats(all_projs=None) -> dict:
             "latest_block": latest_block,
             "agent_wallets": total_agent_wallets,
             "total_created_wallets": total_agent_wallets,
-            "agent_wallets_block": agent_wallets_block
+            "agent_wallets_block": agent_wallets_block,
+            "pulse_24h": compute_pulse_24h(all_projs),
         }
     except Exception as e:
         print(f"[⚠️ Overview Stats Fallback Error] {e}", flush=True)
@@ -272,7 +336,8 @@ def compute_global_overview_stats(all_projs=None) -> dict:
             "latest_block": None,
             "agent_wallets": monitor.DEFAULT_AGENT_WALLET_COUNT,
             "total_created_wallets": monitor.DEFAULT_AGENT_WALLET_COUNT,
-            "agent_wallets_block": 0
+            "agent_wallets_block": 0,
+            "pulse_24h": None,
         }
 
 
@@ -283,7 +348,9 @@ def compute_global_overview_stats(all_projs=None) -> dict:
 def get_overview_stats(request: Request):
     """Summary counts for the overview header, with ETag/304 support."""
     stats = compute_global_overview_stats()
-    stats_etag = f'"{stats["total"]}-{stats["agent_wallets"]}-{stats.get("agent_wallets_block")}-{stats.get("latest_block")}"'
+    pulse = stats.get("pulse_24h") or {}
+    pulse_tag = f'{pulse.get("new_drops")}.{pulse.get("graduated")}.{round(pulse.get("dex_volume_usd") or 0)}.{pulse.get("smart_inflows")}.{pulse.get("threats_blocked")}'
+    stats_etag = f'"{stats["total"]}-{stats["agent_wallets"]}-{stats.get("agent_wallets_block")}-{stats.get("latest_block")}-{pulse_tag}"'
     client_etag = request.headers.get("if-none-match")
     if _etag_matches(client_etag, stats_etag):
         return Response(status_code=304, headers={"ETag": stats_etag, "Cache-Control": "public, max-age=5"})

@@ -9,7 +9,29 @@ let activeTab = 'RADAR';
 let activeFilter = 'ALL';
 let sortMode = 'NEWEST';
 let searchQuery = '';
-let bnbPrice = 705.0; // fallback until refreshBnbPrice() gets the live price from /api/bnb-price
+// USD per BNB from /api/bnb-price. null until the first answer: no silent fallback number is ever shown.
+let bnbPrice = null;
+let bnbPriceLive = false;   // the server says its price is fresh (a recent successful on-chain lookup)
+let bnbPriceAsOf = null;    // unix seconds of that lookup
+
+function hasUsableBnbPrice() { return typeof bnbPrice === 'number' && isFinite(bnbPrice) && bnbPrice > 0; }
+
+// BNB amount -> USD number, or null when there is no price to convert with
+function bnbToUsd(bnb) {
+  const n = Number(bnb);
+  return hasUsableBnbPrice() && isFinite(n) ? n * bnbPrice : null;
+}
+
+// "$12.34" for a BNB amount; "—" without a price; "≈$12.34" (tooltip via bnbPriceNote) when the server's price is stale
+function formatBnbAsUsd(bnb) {
+  const usd = bnbToUsd(bnb);
+  if (usd === null) return '—';
+  return (bnbPriceLive ? '' : '≈') + formatCryptoPrice(usd);
+}
+function bnbPriceNote() {
+  if (!hasUsableBnbPrice()) return 'BNB/USD price not available yet';
+  return bnbPriceLive ? '' : 'BNB/USD price is stale (the server has no fresh on-chain lookup)';
+}
 
 // Web3 State & Live Portfolio Scan
 let connectedWallet = null;
@@ -104,17 +126,26 @@ async function apiFetch(path, options) {
   throw lastErr;
 }
 
-// Live BNB/USD from the backend. Keeps the previous value if the lookup fails or isn't live yet,
-// and redraws the table when the price moves by 1% or more.
+// Live BNB/USD from the backend. Keeps the previous value if the lookup fails, and redraws the table when the
+// price moves by 1% or more or when it flips between live and stale. A price the server has never fetched
+// (live=false and no as_of: its static fallback) is not used at all.
 async function refreshBnbPrice() {
   try {
     const res = await apiFetch('/api/bnb-price');
     if (!res.ok) return;
     const data = await res.json();
     const px = Number(data && data.bnb_price_usd);
-    if (!(data && data.live && px > 0)) return;
-    const moved = Math.abs(px - bnbPrice) / bnbPrice >= 0.01;
+    if (!(data && px > 0)) return;
+    const live = Boolean(data.live);
+    if (!live && !data.as_of) {
+      bnbPriceLive = false;
+      return;
+    }
+    const prev = bnbPrice;
+    const moved = !(prev > 0) || Math.abs(px - prev) / prev >= 0.01 || live !== bnbPriceLive;
     bnbPrice = px;
+    bnbPriceLive = live;
+    bnbPriceAsOf = data.as_of || null;
     if (moved && typeof renderTable === 'function') renderTable();
   } catch (e) {
     // keep the last known price
@@ -459,29 +490,103 @@ if (typeof window !== 'undefined') {
   window.getDexScreenerUrl = getDexScreenerUrl;
 }
 
-// Format numbers nicely (e.g. 1.2K, 500)
+// Format numbers nicely (e.g. 1.2K, 500). Unknown (null / undefined / NaN / -Infinity) is "—", never "0";
+// an unlimited supply (+Infinity or >= 1e20) is "∞". Tiers K M B T Q; negatives are abbreviated too, and a value
+// that rounds up to the next tier is shown in that tier (999950 -> "1.0M", not "1000.0K").
+const COUNT_TIERS = [[1e15, 'Q'], [1e12, 'T'], [1e9, 'B'], [1e6, 'M'], [1e3, 'K']];
 function formatCount(val) {
-  const n = Number(val || 0);
-  if (!isFinite(n) || n >= 1e20) return '∞';
-  if (n >= 1e9) return (n / 1e9).toFixed(1) + 'B';
-  if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M';
-  if (n >= 1e3) return (n / 1e3).toFixed(1) + 'K';
+  if (val === null || val === undefined || val === '') return '—';
+  const n = Number(val);
+  if (Number.isNaN(n) || n === -Infinity) return '—';
+  if (n === Infinity || Math.abs(n) >= 1e20) return n < 0 ? '—' : '∞';
+  const sign = n < 0 ? '-' : '';
+  const abs = Math.abs(n);
+  for (let i = 0; i < COUNT_TIERS.length; i++) {
+    const [div, suffix] = COUNT_TIERS[i];
+    if (abs >= div) {
+      let text = (abs / div).toFixed(1);
+      if (parseFloat(text) >= 1000 && i > 0) {  // 999.96K rounds to 1000.0K: that is 1.0M
+        const [upDiv, upSuffix] = COUNT_TIERS[i - 1];
+        text = (abs / upDiv).toFixed(1);
+        return sign + text + upSuffix;
+      }
+      return sign + text + suffix;
+    }
+  }
   return n.toLocaleString();
 }
 
-// Universal Crypto Price & Net Profit Formatter (Supports Sub-Cent & Micro-Cap Tokens)
+// BNB amount without float noise or lost precision: 0.30000000000000004 -> "0.3", 0.00001 -> "0.00001"
+function formatBnb(val) {
+  if (val === null || val === undefined || val === '') return '—';
+  const n = Number(val);
+  if (!isFinite(n)) return '—';
+  if (n === 0) return '0';
+  const abs = Math.abs(n);
+  const decimals = abs >= 1 ? 4 : Math.min(18, Math.ceil(-Math.log10(abs)) + 3);
+  const text = n.toFixed(decimals);
+  return text.indexOf('.') >= 0 ? text.replace(/0+$/, '').replace(/\.$/, '') : text;
+}
+
+// "MC" when the number is a market cap, "FDV" when only a fully diluted valuation is known
+function mcapLabel(item) {
+  if (!item) return 'MC';
+  return (numOrZero(item.market_cap) > 0 || numOrZero(item.fdv) <= 0) ? 'MC' : 'FDV';
+}
+
+// Age of the record's market data, from market_updated_at (unix seconds)
+function formatMarketAge(ts, nowMs = Date.now()) {
+  const t = Number(ts);
+  if (!isFinite(t) || t <= 0) return '';
+  const sec = Math.max(0, Math.round(nowMs / 1000 - t));
+  if (sec < 90) return 'just now';
+  if (sec < 5400) return `${Math.round(sec / 60)}m ago`;
+  if (sec < 172800) return `${Math.round(sec / 3600)}h ago`;
+  return `${Math.round(sec / 86400)}d ago`;
+}
+
+// Small badge for a record whose market data was cleared as stale, or an age hint when it is old.
+function marketFreshnessHtml(item, nowMs = Date.now()) {
+  if (!item) return '';
+  if (item.market_stale) {
+    return ` <span class="badge badge-yellow" style="font-size: 9px; padding: 1px 4px;" title="No fresh DexScreener / Pancake data for this token for hours: its market numbers were cleared">⚠ stale</span>`;
+  }
+  const t = Number(item.market_updated_at);
+  if (isFinite(t) && t > 0 && nowMs / 1000 - t > 1800) {
+    return ` <span class="dim" style="font-size: 9px;" title="Market data last confirmed ${formatMarketAge(t, nowMs)}">· ${formatMarketAge(t, nowMs)}</span>`;
+  }
+  return '';
+}
+
+function withThousands(fixedStr) {
+  const dot = fixedStr.indexOf('.');
+  const intPart = dot >= 0 ? fixedStr.slice(0, dot) : fixedStr;
+  return intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ',') + (dot >= 0 ? fixedStr.slice(dot) : '');
+}
+
+// Universal Crypto Price & Net Profit Formatter (Supports Sub-Cent & Micro-Cap Tokens).
+// Unknown or non-finite values are "—"; a value that rounds up into the next band uses that band's format
+// (0.99999 -> "$1.00", not "$1.0000"); large values get thousands separators.
 function formatCryptoPrice(val, isNet = false) {
-  const n = Number(val || 0);
-  if (!isFinite(n) || n === 0) return isNet ? '+$0.00' : '$0.00';
+  if (val === null || val === undefined || val === '') return '—';
+  const n = Number(val);
+  if (!isFinite(n)) return '—';
+  if (n === 0) return isNet ? '+$0.00' : '$0.00';
   const sign = n < 0 ? '-' : (isNet ? '+' : '');
   const absN = Math.abs(n);
-  if (absN >= 1.0) return `${sign}$${absN.toFixed(2)}`;
-  if (absN >= 0.01) return `${sign}$${absN.toFixed(4)}`;
-  if (absN >= 0.0001) return `${sign}$${absN.toFixed(6)}`;
-  if (absN >= 1e-6) return `${sign}$${absN.toFixed(8)}`;
+  if (absN >= 1e21) return `${sign}$${absN.toExponential(2)}`;
+  // [lower bound, decimals]; a result that rounds up to the band above is formatted with that band instead
+  const bands = [[1.0, 2], [0.01, 4], [0.0001, 6], [1e-6, 8]];
+  for (let i = 0; i < bands.length; i++) {
+    const [lower, dec] = bands[i];
+    if (absN >= lower) {
+      let text = absN.toFixed(dec);
+      if (i > 0 && Number(text) >= bands[i - 1][0]) text = absN.toFixed(bands[i - 1][1]);
+      return `${sign}$${Number(text) >= 1 ? withThousands(text) : text}`;
+    }
+  }
   if (absN >= 1e-8) {
-    const rawStr = absN.toFixed(10);
-    const cleanStr = rawStr.replace(/0+$/, '').replace(/\.$/, '');
+    const cleanStr = absN.toFixed(10).replace(/0+$/, '').replace(/\.$/, '');
     return `${sign}$${cleanStr || '0.00'}`;
   }
   if (absN < 1e-12) {
@@ -686,171 +791,13 @@ function computeItemProfit(item, bnbPriceUsd = bnbPrice) {
 
 // Persistent Memory for Top Post-Mint Gainers & Hall of Fame Markets
 // Eliminates full 2k+ project scans; incrementally updates and saves top winners from incoming 150-drop batches.
-const SAVED_TOP_MARKETS_KEY = 'agent_id_saved_top_markets_v2';
+const SAVED_TOP_MARKETS_KEY = 'agent_id_saved_top_markets_v3';  // v2 held USD values computed with a fallback BNB price
 let savedTopGainers = [];
 
+// There is no hard-coded list of "historical winners" any more: its profits, free-mint flags and holder
+// counts were invented. Kept as a function returning [] so existing fallbacks degrade to an empty state.
 function getBaselineTopGainers() {
-  return [
-    {
-      name: "FishingAi Rod",
-      symbol: "ROD",
-      contract: "0xbdb206b823e2782dd75fff0ef89795146c29ed76",
-      standard: "ERC-721 (NFT Collection)",
-      secUsd: 6.75,
-      mintUsd: 0.0,
-      profit: 6.75,
-      athPrice: 6.75,
-      athProfit: 6.75,
-      multiplier: 0,
-      isSold: false,
-      isFree: true,
-      holders: 1524,
-      item: {
-        name: "FishingAi Rod",
-        symbol: "ROD",
-        contract: "0xbdb206b823e2782dd75fff0ef89795146c29ed76",
-        standard: "ERC-721 (NFT Collection)",
-        market_url: "https://element.market/collections/fishingai-rod",
-        token_price_usd: 6.75,
-        ath_price_usd: 6.75,
-        holders: 1524
-      }
-    },
-    {
-      name: "MLEE DAO",
-      symbol: "MDAO",
-      contract: "0xc4bf2518aa953304170753388f83277eb9588a7a",
-      standard: "BEP-20 Token (18 decimals)",
-      secUsd: 0.1070,
-      mintUsd: 0.0,
-      profit: 0.1070,
-      athPrice: 0.1070,
-      athProfit: 0.1070,
-      multiplier: 0,
-      isSold: false,
-      isFree: true,
-      holders: 8400,
-      item: {
-        name: "MLEE DAO",
-        symbol: "MDAO",
-        contract: "0xc4bf2518aa953304170753388f83277eb9588a7a",
-        standard: "BEP-20 Token (18 decimals)",
-        pair_url: "https://pancakeswap.finance/swap?outputCurrency=0xc4bf2518aa953304170753388f83277eb9588a7a",
-        token_price_usd: 0.1070,
-        ath_price_usd: 0.1070,
-        holders: 8400
-      }
-    },
-    {
-      name: "AGENT人生8",
-      symbol: "AGENT人生8",
-      contract: "0xca45f13730154fbbf2d93acf169de83f52864f80",
-      standard: "BEP-20 Token (18 decimals)",
-      secUsd: 0.04794,
-      mintUsd: 0.0,
-      profit: 0.04794,
-      athPrice: 0.04794,
-      athProfit: 0.04794,
-      multiplier: 0,
-      isSold: true,
-      isFree: true,
-      holders: 888,
-      item: {
-        name: "AGENT人生8",
-        symbol: "AGENT人生8",
-        contract: "0xca45f13730154fbbf2d93acf169de83f52864f80",
-        standard: "BEP-20 Token (18 decimals)",
-        pair_url: "https://pancakeswap.finance/swap?outputCurrency=0xca45f13730154fbbf2d93acf169de83f52864f80",
-        token_price_usd: 0.04794,
-        ath_price_usd: 0.04794,
-        max_supply: 88888888,
-        total_minted: 88888888,
-        holders: 888,
-        is_sold: true
-      }
-    },
-    {
-      name: "The Donkey",
-      symbol: "驴来",
-      contract: "0xa856c666595f556f647f94d741aae389baf97777",
-      standard: "BEP-20 Token (18 decimals)",
-      secUsd: 0.00004160,
-      mintUsd: 0.0,
-      profit: 0.00004160,
-      athPrice: 0.00004160,
-      athProfit: 0.00004160,
-      multiplier: 0,
-      isSold: true,
-      isFree: true,
-      holders: 550,
-      item: {
-        name: "The Donkey",
-        symbol: "驴来",
-        contract: "0xa856c666595f556f647f94d741aae389baf97777",
-        standard: "BEP-20 Token (18 decimals)",
-        pair_url: "https://pancakeswap.finance/swap?outputCurrency=0xa856c666595f556f647f94d741aae389baf97777",
-        token_price_usd: 0.00004160,
-        ath_price_usd: 0.00004160,
-        max_supply: 210000000000,
-        total_minted: 210000000000,
-        holders: 550,
-        is_sold: true
-      }
-    },
-    {
-      name: "4Broker Bibi",
-      symbol: "BIBI",
-      contract: "0xd6e8fd077adbd6d7a7cc24bf981c5a969bbd124e",
-      standard: "BEP-20 Token (18 decimals)",
-      secUsd: 0.00000379,
-      mintUsd: 0.0,
-      profit: 0.00000379,
-      athPrice: 0.00000379,
-      athProfit: 0.00000379,
-      multiplier: 0,
-      isSold: false,
-      isFree: true,
-      holders: 1100,
-      item: {
-        name: "4Broker Bibi",
-        symbol: "BIBI",
-        contract: "0xd6e8fd077adbd6d7a7cc24bf981c5a969bbd124e",
-        standard: "BEP-20 Token (18 decimals)",
-        pair_url: "https://pancakeswap.finance/swap?outputCurrency=0xd6e8fd077adbd6d7a7cc24bf981c5a969bbd124e",
-        token_price_usd: 0.00000379,
-        ath_price_usd: 0.00000379,
-        holders: 1100
-      }
-    },
-    {
-      name: "币安ID",
-      symbol: "币安ID",
-      contract: "0x90f6b49ebdaee09b67ffc71e2c9efca1b2be4822",
-      standard: "BEP-20 Token (18 decimals)",
-      secUsd: 0.00000353,
-      mintUsd: 0.0,
-      profit: 0.00000353,
-      athPrice: 0.000005042,
-      athProfit: 0.000005042,
-      multiplier: 0,
-      isSold: true,
-      isFree: true,
-      holders: 4820,
-      item: {
-        name: "币安ID",
-        symbol: "币安ID",
-        contract: "0x90f6b49ebdaee09b67ffc71e2c9efca1b2be4822",
-        standard: "BEP-20 Token (18 decimals)",
-        pair_url: "https://pancakeswap.finance/swap?outputCurrency=0x90f6b49ebdaee09b67ffc71e2c9efca1b2be4822",
-        token_price_usd: 0.00000353,
-        ath_price_usd: 0.000005042,
-        max_supply: 10000000000,
-        total_minted: 10000000000,
-        holders: 4820,
-        is_sold: true
-      }
-    }
-  ];
+  return [];
 }
 
 function isValidTopMarketItem(item) {
@@ -885,6 +832,7 @@ function loadSavedTopGainers() {
     if (typeof localStorage !== 'undefined') {
       // Clean up legacy poisoned cache keys
       localStorage.removeItem('agent_id_saved_top_markets');
+      localStorage.removeItem('agent_id_saved_top_markets_v2');
       localStorage.removeItem('saved_top_markets_v1');
 
       const stored = localStorage.getItem(SAVED_TOP_MARKETS_KEY);
@@ -901,12 +849,13 @@ function loadSavedTopGainers() {
     console.warn('Error reading saved top gainers from localStorage:', e);
   }
 
-  // Fallback to baseline historical winners if storage is fresh/empty
-  savedTopGainers = getBaselineTopGainers().filter(g => isValidTopMarketItem(g.item || g));
-  saveSavedTopGainers();
+  // Nothing stored yet: start empty. The leaderboard fills from the API and from live data; there is no
+  // hard-coded list of historical winners (its profits, free-mint flags and holder counts were invented).
+  savedTopGainers = [];
 }
 
 function saveSavedTopGainers() {
+  if (!bnbPriceLive) return;  // USD values computed with a stale / missing BNB price are not cached
   try {
     if (typeof localStorage !== 'undefined') {
       localStorage.setItem(SAVED_TOP_MARKETS_KEY, JSON.stringify(savedTopGainers));
@@ -914,26 +863,51 @@ function saveSavedTopGainers() {
   } catch (e) {}
 }
 
+// Where the leaderboard data came from. A seed (a frozen file) is always labelled with its date.
+let topGainersSource = { seeded: false, asOf: null };
+
+// 24h Pulse aggregates computed by the server over the FULL dataset (/api/stats -> pulse_24h). null until loaded.
+let pulse24hServer = null;
+
+function formatAsOfDate(asOf) {
+  if (asOf === null || asOf === undefined || asOf === '') return '';
+  const ms = typeof asOf === 'number' ? (asOf < 1e12 ? asOf * 1000 : asOf) : Date.parse(asOf);
+  if (!isFinite(ms)) return String(asOf);
+  return new Date(ms).toISOString().slice(0, 10);
+}
+
+// "Seed data, as of 2026-11-08" when the shown list is a frozen seed file, '' for live data
+function topGainersSeedLabel() {
+  if (!topGainersSource.seeded) return '';
+  const d = formatAsOfDate(topGainersSource.asOf);
+  return d ? `Seed data, as of ${d}` : 'Seed data (date unknown)';
+}
+
 async function syncSeededTopGainers() {
+  try {
+    const resApi = await fetchWithTimeout(`${BACKEND_URL}/api/top-gainers`, { cache: 'default' }, 4000);
+    if (resApi.ok) {
+      const dataApi = await resApi.json();
+      const list = dataApi && (Array.isArray(dataApi.gainers) ? dataApi.gainers : (Array.isArray(dataApi.items) ? dataApi.items : null));
+      if (list && list.length > 0) {
+        topGainersSource = { seeded: Boolean(dataApi.seeded), asOf: dataApi.as_of || null };
+        mergeTopGainersList(list);
+        return;
+      }
+    }
+  } catch (e) {
+    // fall through to the static seed file
+  }
   try {
     const res = await fetchWithTimeout(`seeded_top_gainers.json`, { cache: 'default' }, 4000);
     if (res.ok) {
       const data = await res.json();
       if (Array.isArray(data) && data.length > 0) {
+        topGainersSource = { seeded: true, asOf: res.headers && res.headers.get ? res.headers.get('last-modified') : null };
         mergeTopGainersList(data);
       }
     }
-  } catch (e) {
-    try {
-      const resApi = await fetchWithTimeout(`${BACKEND_URL}/api/top-gainers`, { cache: 'default' }, 4000);
-      if (resApi.ok) {
-        const dataApi = await resApi.json();
-        if (dataApi && Array.isArray(dataApi.gainers) && dataApi.gainers.length > 0) {
-          mergeTopGainersList(dataApi.gainers);
-        }
-      }
-    } catch (e2) {}
-  }
+  } catch (e2) {}
 }
 
 function mergeTopGainersList(externalList) {
@@ -964,11 +938,11 @@ function mergeTopGainersList(externalList) {
         contract: item.contract || c,
         standard: item.standard || '',
         secUsd: Number(item.secUsd || 0),
-        mintUsd: Number(item.mintUsd || 0),
+        mintUsd: (item.mintUsd === null || item.mintUsd === undefined) ? null : Number(item.mintUsd),
         profit: Number(item.profit || 0),
         athPrice: peakAth,
         athProfit: peakProfit,
-        multiplier: Number(item.multiplier || 0),
+        multiplier: Number(item.multiplier || item.ath_multiplier || (item.item && item.item.ath_multiplier) || 0),
         isSold: Boolean(item.isSold),
         isFree: Boolean(item.isFree),
         holders: Number(item.holders || 0)
@@ -987,6 +961,7 @@ function mergeTopGainersList(externalList) {
 // Incremental update: inspects incoming recent drops (e.g. 150 items) without scanning 2,000+ items
 function updateSavedTopMarkets(incomingDrops) {
   if (!Array.isArray(incomingDrops) || incomingDrops.length === 0) return savedTopGainers;
+  if (!hasUsableBnbPrice()) return savedTopGainers;  // profits need a BNB/USD price; none is invented
 
   let changed = false;
 
@@ -1013,7 +988,7 @@ function updateSavedTopMarkets(incomingDrops) {
           existing.multiplier = pInfo.multiplier || existing.multiplier;
           existing.isSold = pInfo.isSold || existing.isSold;
           existing.isFree = pInfo.isFree || existing.isFree;
-          existing.holders = Number(item.holders || item.total_minted || existing.holders || 0);
+          existing.holders = Number(item.holders || existing.holders || 0);
           existing.item = { ...existing.item, ...item };
           changed = true;
         }
@@ -1032,7 +1007,7 @@ function updateSavedTopMarkets(incomingDrops) {
           multiplier: pInfo.multiplier,
           isSold: pInfo.isSold,
           isFree: pInfo.isFree,
-          holders: Number(item.holders || item.total_minted || 0)
+          holders: Number(item.holders || 0)
         });
         changed = true;
       }
@@ -2084,6 +2059,7 @@ function applyOverviewStats(data, persist = true) {
   if (!data) return;
   const s = data.stats || data;
   if (s && typeof s === 'object') {
+    if (s.pulse_24h && typeof s.pulse_24h === 'object') pulse24hServer = s.pulse_24h;
     globalStats = {
       total: Number(s.total !== undefined ? s.total : (s.count !== undefined ? s.count : (allDrops ? allDrops.length : 0))),
       smart: Number(s.smart !== undefined ? s.smart : 0),
@@ -2883,7 +2859,7 @@ function renderPulseRunnerRow(r, idx) {
   const price = Number(r.token_price_usd || r.market_price_usd || 0);
   const priceStr = price > 0 ? formatCryptoPrice(price) : '$0.00';
   const mcap = getSanitizedMcap(r);
-  const mcapStr = mcap > 0 ? 'MC: $' + formatCount(mcap) : '';
+  const mcapStr = mcap > 0 ? mcapLabel(r) + ': $' + formatCount(mcap) : '';
   const dexUrl = getDexScreenerUrl(r) || ('https://pancakeswap.finance/swap?outputCurrency=' + r.contract);
   const cAddr = escapeHtml(r.contract || '');
   const idAttr = idx === 0 ? ' id="pulseRunnerName"' : '';
@@ -2955,32 +2931,24 @@ function renderPulseAthRow(item, idx) {
   const sym = escapeHtml(item.symbol || '');
   const cAddr = escapeHtml(item.contract || (item.item && item.item.contract) || '');
   const athPrice = Number(item.athPrice || item.ath_price_usd || item.token_price_usd || item.secUsd || 0);
-  const athStr = athPrice > 0 ? formatCryptoPrice(athPrice) : '$0.00';
-  const mintCost = Number(item.mintUsd || item.mint_cost_usd || 0);
-  const isFree = Boolean(item.isFree || mintCost === 0 || (item.mint_price_str && item.mint_price_str.includes('FREE')));
-  const mintStr = isFree ? 'Mint: Free' : ('Mint: ' + formatCryptoPrice(mintCost));
+  const athStr = athPrice > 0 ? formatCryptoPrice(athPrice) : '—';
+  // mintUsd is null / undefined when the mint cost is unknown (TBD, DEX Traded): that is "TBD", never "Free"
+  const rawMint = item.mintUsd !== undefined ? item.mintUsd : item.mint_cost_usd;
+  const mintCost = (rawMint === null || rawMint === undefined) ? null : Number(rawMint);
+  const isFree = Boolean(item.isFree || item.has_free_mint || (item.mint_price_str && String(item.mint_price_str).toUpperCase().includes('FREE')));
+  const mintStr = isFree ? 'Mint: Free' : (mintCost > 0 ? ('Mint: ' + formatCryptoPrice(mintCost)) : 'Mint: TBD');
 
-  // Compute % profit ATH gave
-  let gainPct = 0;
+  // The gain is only what the known mint cost supports; no assumed base price. A free mint shows the profit per token.
+  let gainText = '—';
+  let isUp = true;
   if (mintCost > 0 && athPrice > 0) {
-    gainPct = ((athPrice - mintCost) / mintCost) * 100;
+    const gainPct = ((athPrice - mintCost) / mintCost) * 100;
+    isUp = gainPct >= 0;
+    gainText = (isUp ? '+' : '') + (gainPct >= 1000 ? Math.round(gainPct).toLocaleString() : gainPct.toFixed(1)) + '%';
   } else if (isFree && athPrice > 0) {
-    if (item.multiplier && item.multiplier > 1) {
-      gainPct = (item.multiplier - 1) * 100;
-    } else if (item.item && Number(item.item.price_change_24h) > 0) {
-      gainPct = Number(item.item.price_change_24h);
-    } else if (item.price_change_24h && Number(item.price_change_24h) > 0) {
-      gainPct = Number(item.price_change_24h);
-    } else {
-      const basePrice = athPrice >= 0.01 ? 0.01 : 0.0001;
-      const mult = athPrice / basePrice;
-      gainPct = mult * 100;
-    }
+    gainText = '+' + formatCryptoPrice(athPrice);
   }
-
-  const isUp = gainPct >= 0;
-  const gainBadgeClass = isUp ? 'badge-green' : 'badge-red';
-  const gainText = (isUp ? '+' : '') + (gainPct >= 1000 ? Math.round(gainPct).toLocaleString() : gainPct.toFixed(1)) + '%';
+  const gainBadgeClass = gainText === '—' ? 'badge-dim' : (isUp ? 'badge-green' : 'badge-red');
   const dexUrl = getDexScreenerUrl(item) || item.pair_url || item.market_url || ('https://pancakeswap.finance/swap?outputCurrency=' + (item.contract || ''));
 
   if (cAddr) {
@@ -3015,33 +2983,25 @@ function renderPulseNftRow(nft, idx) {
   const cAddr = escapeHtml(nft.contract || (nft.item && nft.item.contract) || '');
   const flUsd = Number(nft.flUsd || nft.floor_price_usd || nft.token_price_usd || nft.secUsd || 0);
   const flBnb = Number(nft.flBnb || nft.floor_price_bnb || 0);
-  const floorStr = flUsd > 0 ? ('Floor: ' + formatCryptoPrice(flUsd)) : (flBnb > 0 ? ('Floor: ' + flBnb.toFixed(4) + ' BNB') : (nft.holders ? (formatCount(nft.holders) + ' Holders') : 'ERC-721'));
+  const floorStr = flUsd > 0 ? ('Floor: ' + formatCryptoPrice(flUsd)) : (flBnb > 0 ? ('Floor: ' + formatBnb(flBnb) + ' BNB') : (nft.holders ? (formatCount(nft.holders) + ' Holders') : 'ERC-721'));
 
-  // Calculate % from fair-mint
-  const mintCost = Number(nft.mint_cost_usd || nft.mintUsd || (nft.mint_price_bnb ? nft.mint_price_bnb * 600 : 0));
-  const isFree = Boolean(nft.isFree || nft.has_free_mint || (nft.mint_price_str && nft.mint_price_str.includes('FREE')) || mintCost === 0);
-  const mintStr = (isFree || mintCost === 0) ? 'Mint: Free' : ('Mint: ' + formatCryptoPrice(mintCost));
+  // % from the KNOWN mint cost; a free or unknown mint has none. Never an assumed base price.
+  const rawMint = nft.mint_cost_usd !== undefined ? nft.mint_cost_usd : nft.mintUsd;
+  const mintCost = (rawMint === null || rawMint === undefined) ? null : Number(rawMint);
+  const isFree = Boolean(nft.isFree || nft.has_free_mint || (nft.mint_price_str && String(nft.mint_price_str).toUpperCase().includes('FREE')));
+  const mintStr = isFree ? 'Mint: Free' : (mintCost > 0 ? ('Mint: ' + formatCryptoPrice(mintCost)) : 'Mint: TBD');
 
-  let gainPctStr = '+0.0%';
-  let gainBadgeClass = 'badge-green';
-
+  let gainPctStr = '—';
+  let gainBadgeClass = 'badge-dim';
   if (flUsd > 0) {
     if (mintCost > 0) {
       const pct = ((flUsd - mintCost) / mintCost) * 100;
       gainPctStr = (pct >= 0 ? '+' : '') + (pct > 9999 ? Math.round(pct).toLocaleString() : pct.toFixed(1)) + '%';
       gainBadgeClass = pct >= 0 ? 'badge-green' : 'badge-red';
-    } else if (isFree) {
-      const mult = flUsd / 0.01;
-      const pct = Math.round(mult * 100);
-      gainPctStr = pct >= 1000 ? `+${Math.round(mult).toLocaleString()}x` : `+${pct}%`;
-      gainBadgeClass = 'badge-green';
-    } else if (nft.price_change_24h) {
+    } else if (nft.price_change_24h !== undefined && nft.price_change_24h !== null) {
       const chg = Number(nft.price_change_24h);
-      gainPctStr = (chg >= 0 ? '+' : '') + chg.toFixed(1) + '%';
+      gainPctStr = (chg >= 0 ? '+' : '') + chg.toFixed(1) + '% 24h';
       gainBadgeClass = chg >= 0 ? 'badge-green' : 'badge-red';
-    } else {
-      gainPctStr = '+100%';
-      gainBadgeClass = 'badge-green';
     }
   }
 
@@ -3051,7 +3011,7 @@ function renderPulseNftRow(nft, idx) {
     registerPulseItem(cAddr, nft.item || nft);
   }
 
-  return `<div class="pulse-list-row pulse-nft-row" onclick="openInspectModalByContract('${cAddr}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openInspectModalByContract('${cAddr}');}" role="button" tabindex="0" title="Click to inspect ${name} (${floorStr}, ${gainPctStr} from mint)">
+  return `<div class="pulse-list-row pulse-nft-row" onclick="openInspectModalByContract('${cAddr}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openInspectModalByContract('${cAddr}');}" role="button" tabindex="0" title="Click to inspect ${name} (${floorStr}, ${gainPctStr})">
     <div class="pulse-row-left">
       <span class="pulse-rank-tag ${rankClass}">${rankLabel}</span>
       <div class="pulse-row-identity">
@@ -3070,7 +3030,11 @@ function renderPulseNftRow(nft, idx) {
   </div>`;
 }
 
-function compute24hPulseMetrics(drops = allDrops, topGainersList = savedTopGainers, currentBlock = latestKnownBlock) {
+// `currentBlock` is kept for callers but no longer used: the 24h window is a timestamp (the server's
+// pulse_24h.since, compared with each record's detected_at), not a block count (28,800 blocks is ~3.6 h at
+// BSC's current block time). Aggregates (graduated, DEX volume, smart inflows, ...) come from the server
+// (`serverPulse`); computed from a partial list they were wrong, so without them they are reported as local-only.
+function compute24hPulseMetrics(drops = allDrops, topGainersList = savedTopGainers, currentBlock = latestKnownBlock, serverPulse = pulse24hServer) {
   const list = Array.isArray(drops) ? drops : [];
   const topList = Array.isArray(topGainersList) ? topGainersList : [];
 
@@ -3128,17 +3092,10 @@ function compute24hPulseMetrics(drops = allDrops, topGainersList = savedTopGaine
 
   const topRunner = topRunners[0] || null;
 
-  // 24h Rolling Block Threshold (BSC generates ~28,800 blocks per 24 hours)
-  let maxBlock = 0;
-  if (currentBlock && currentBlock > 0) {
-    maxBlock = currentBlock;
-  } else {
-    for (const d of pool) {
-      const b = Number(d.block || 0);
-      if (b > maxBlock && b < 132000000) maxBlock = b;
-    }
-  }
-  const min24hBlock = maxBlock > 28800 ? (maxBlock - 28800) : 0;
+  // 24h window: records detected since the server's cutoff ("YYYY-MM-DD HH:MM:SS", same clock as detected_at)
+  const since = serverPulse && serverPulse.since ? String(serverPulse.since) : null;
+  const inWindow = (d) => !since || String((d && d.detected_at) || '') >= since;
+  const bnbPx = hasUsableBnbPrice() ? bnbPrice : 0;
 
   // Card 3: Top 3 Mints with the biggest amount of smart wallets involved (Past 24h Window)
   const smartMintCandidates = [];
@@ -3147,9 +3104,7 @@ function compute24hPulseMetrics(drops = allDrops, topGainersList = savedTopGaine
     if (isExcludedMajorAsset(d)) return;
     const c = String(d.contract || '').toLowerCase();
     if (c && !seenSmartContracts.has(c)) {
-      const blk = Number(d.block || 0);
-      const is24h = min24hBlock > 0 ? (blk >= min24hBlock) : true;
-      if (!is24h) return;
+      if (!inWindow(d)) return;
 
       const smList = (d.smart_wallets && d.smart_wallets.length > 0)
         ? d.smart_wallets
@@ -3187,115 +3142,52 @@ function compute24hPulseMetrics(drops = allDrops, topGainersList = savedTopGaine
     });
   }
 
-  // Card 2: Top 3 ATH Prices from Mint (Strictly Past 24h Window)
+  // Card 2: Top 3 ATH prices after mint. Only records with a KNOWN mint cost qualify (a verified free mint or a
+  // paid one): "DEX Traded" and TBD records have no mint position, so no gain is shown for them.
   const athCandidates = [];
   const seenAthContracts = new Set();
   const allAthItems = [
     ...topList,
-    ...(topList.length === 0 ? getBaselineTopGainers() : []),
-    ...uniquePool.filter(d => (Number(d.ath_price_usd || 0) > 0 || Number(d.token_price_usd || 0) > 0 || Number(d.secondary_price_usd || 0) > 0 || Number(d.multiplier || 0) > 0))
+    ...uniquePool.filter(d => (Number(d.ath_price_usd || 0) > 0 || Number(d.token_price_usd || 0) > 0 || Number(d.secondary_price_usd || 0) > 0))
   ];
-
-  // Pass 1: Strict 24h Fair-Mints (minted within the last 28,800 blocks)
-  allAthItems.forEach(entry => {
+  // persisted winners / seed entries (and their items, which also enter uniquePool): "24h" only with a known window
+  const historyEntries = new Set([...topList, ...topList.map(g => (g && g.item) ? g.item : g)]);
+  // Pass 1: strict 24h window. Pass 2 (below): fewer than 3 -> drops with active 24h trading.
+  const pushAth = (entry, strictWindow) => {
     const item = (entry && entry.item) ? entry.item : entry;
     if (!item || !isValidTopMarketItem(item) || isExcludedMajorAsset(item)) return;
     const c = String(item.contract || '').toLowerCase();
     if (!c || seenAthContracts.has(c)) return;
-
-    const blk = Number(item.block || entry.block || 0);
-    const is24hMint = min24hBlock > 0 ? (blk >= min24hBlock) : true;
-    if (!is24hMint) return;
-
-    const athPrice = Number(item.ath_price_usd || entry.athPrice || item.token_price_usd || entry.secUsd || 0);
-    const mintUsd = Number(item.mint_cost_usd || entry.mintUsd || 0);
-    if (mintUsd > 0 && athPrice <= mintUsd) return; // Only positive ATH gains from mint
-
+    // A historical winner (saved list / frozen seed) is a 24h mint only when the server window is known and it is inside it
+    if ((historyEntries.has(entry) || historyEntries.has(item)) && !(since && inWindow(item))) return;
+    if (strictWindow) {
+      if (!inWindow(item)) return;
+    } else {
+      const vol = Number(item.volume_24h || entry.volume_24h || 0);
+      const chg = item.price_change_24h || entry.price_change_24h;
+      if (vol <= 0 && (chg === undefined || chg === 0)) return;
+    }
+    const pInfo = computeItemProfit(item, bnbPrice);
+    if (pInfo.mintUsd === null || !(pInfo.athProfit > 0) || !(pInfo.athPrice > 0)) return;  // unknown cost / no gain
     seenAthContracts.add(c);
-    const profit = Number(entry.athProfit || entry.profit || (athPrice - mintUsd) || athPrice);
-    const multiplier = Number(entry.multiplier || item.multiplier || 0);
-
     athCandidates.push({
       item,
       contract: item.contract,
       name: item.name || 'Unknown',
       symbol: item.symbol || '',
-      athPrice,
-      profit,
-      multiplier,
-      block: blk,
-      mintUsd,
-      isFree: entry.isFree || item.isFree || (mintUsd === 0),
+      athPrice: pInfo.athPrice,
+      profit: pInfo.athProfit,
+      multiplier: pInfo.multiplier,          // ATH multiplier; null for a free mint
+      block: Number(item.block || entry.block || 0),
+      mintUsd: pInfo.mintUsd,
+      isFree: pInfo.isFree,
       standard: item.standard || entry.standard || '',
       pair_url: item.pair_url || entry.pair_url,
       market_url: item.market_url || entry.market_url
     });
-  });
-
-  // Pass 2: If fewer than 3 strict 24h mints, allow drops with active 24h secondary trading volume / momentum
-  if (athCandidates.length < 3) {
-    allAthItems.forEach(entry => {
-      const item = (entry && entry.item) ? entry.item : entry;
-      if (!item || !isValidTopMarketItem(item) || isExcludedMajorAsset(item)) return;
-      const c = String(item.contract || '').toLowerCase();
-      if (!c || seenAthContracts.has(c)) return;
-
-      const vol = Number(item.volume_24h || entry.volume_24h || 0);
-      const chg = item.price_change_24h || entry.price_change_24h;
-      if (vol <= 0 && (chg === undefined || chg === 0)) return;
-
-      const athPrice = Number(item.ath_price_usd || entry.athPrice || item.token_price_usd || entry.secUsd || 0);
-      const mintUsd = Number(item.mint_cost_usd || entry.mintUsd || 0);
-      if (mintUsd > 0 && athPrice <= mintUsd) return; // Only positive ATH gains
-
-      seenAthContracts.add(c);
-      const profit = Number(entry.athProfit || entry.profit || (athPrice - mintUsd) || athPrice);
-      const multiplier = Number(entry.multiplier || item.multiplier || 0);
-
-      athCandidates.push({
-        item,
-        contract: item.contract,
-        name: item.name || 'Unknown',
-        symbol: item.symbol || '',
-        athPrice,
-        profit,
-        multiplier,
-        block: Number(item.block || entry.block || 0),
-        mintUsd,
-        isFree: entry.isFree || item.isFree || (mintUsd === 0),
-        standard: item.standard || entry.standard || '',
-        pair_url: item.pair_url || entry.pair_url,
-        market_url: item.market_url || entry.market_url
-      });
-    });
-  }
-
-  // Pass 3: Fallback if test fixture has no blocks or volume
-  if (athCandidates.length < 3) {
-    const fallbackGainers = getBaselineTopGainers();
-    fallbackGainers.forEach(fb => {
-      if (athCandidates.length >= 3) return;
-      const fbItem = fb.item || fb;
-      const c = String(fbItem.contract || '').toLowerCase();
-      if (!seenAthContracts.has(c)) {
-        seenAthContracts.add(c);
-        athCandidates.push({
-          item: fbItem,
-          contract: fbItem.contract,
-          name: fbItem.name,
-          symbol: fbItem.symbol,
-          athPrice: Number(fb.athPrice || fbItem.ath_price_usd || fb.secUsd || 0),
-          profit: Number(fb.athProfit || fb.profit || fb.athPrice || 0),
-          multiplier: Number(fb.multiplier || 0),
-          mintUsd: Number(fb.mintUsd || 0),
-          isFree: true,
-          standard: fbItem.standard || fb.standard,
-          pair_url: fbItem.pair_url,
-          market_url: fbItem.market_url
-        });
-      }
-    });
-  }
+  };
+  allAthItems.forEach(entry => pushAth(entry, true));
+  if (athCandidates.length < 3) allAthItems.forEach(entry => pushAth(entry, false));
 
   athCandidates.sort((a, b) => {
     if (b.athPrice !== a.athPrice) return b.athPrice - a.athPrice;
@@ -3316,8 +3208,7 @@ function compute24hPulseMetrics(drops = allDrops, topGainersList = savedTopGaine
     const normName = String(d.name || '').trim().toLowerCase();
     if (!normName) return;
 
-    const blk = Number(d.block || 0);
-    const is24hMint = min24hBlock > 0 ? (blk >= min24hBlock) : true;
+    const is24hMint = inWindow(d);
     const vol = Number(d.volume_24h || 0);
     const has24hTrade = vol > 0 || (d.price_change_24h !== undefined && d.price_change_24h !== 0);
 
@@ -3326,28 +3217,26 @@ function compute24hPulseMetrics(drops = allDrops, topGainersList = savedTopGaine
 
     const flBnb = Number(d.floor_price_bnb || 0);
     const flUsd = Number(d.floor_price_usd || d.token_price_usd || d.market_price_usd || d.secUsd || 0);
-    const effectiveUsd = flUsd > 0 ? flUsd : (flBnb > 0 ? flBnb * 600 : 0);
+    const effectiveUsd = flUsd > 0 ? flUsd : (flBnb > 0 && bnbPx > 0 ? flBnb * bnbPx : 0);
     if (effectiveUsd <= 0) return;
 
-    const mintCost = Number(d.mint_cost_usd || d.mintUsd || (d.mint_price_bnb ? d.mint_price_bnb * 600 : 0));
-    const isFree = Boolean(d.isFree || d.has_free_mint || (d.mint_price_str && d.mint_price_str.includes('FREE')) || mintCost === 0);
-
-    let gainPct = 0;
-    let multiplier = 1;
-    if (mintCost > 0) {
+    // Gain from the KNOWN mint cost only (computeItemProfit: null cost = unknown). A free mint has no cost to
+    // divide by, so its gain is the 24h price change when there is one; otherwise there is no gain to show.
+    const nftProfit = computeItemProfit(d, bnbPrice);
+    const mintCost = nftProfit.mintUsd;       // number, or null when unknown
+    const isFree = nftProfit.isFree;
+    let gainPct = null;
+    let multiplier = null;
+    if (mintCost !== null && mintCost > 0) {
       gainPct = ((effectiveUsd - mintCost) / mintCost) * 100;
       multiplier = effectiveUsd / mintCost;
-    } else if (isFree) {
-      multiplier = effectiveUsd / 0.01;
-      gainPct = multiplier * 100;
     } else if (d.price_change_24h !== undefined && d.price_change_24h !== null) {
       gainPct = Number(d.price_change_24h);
       multiplier = (100 + gainPct) / 100;
     }
 
-    // Strict positive surge requirement: Card 4 is for positive surges only!
-    // Disqualify any collections trading below mint cost or in drawdown (e.g. -83.1%)
-    if (gainPct <= 0 || multiplier < 1.0) return;
+    // Card 4 is for positive surges only: unknown gains and collections below mint cost / in drawdown are out
+    if (gainPct === null || gainPct <= 0 || multiplier < 1.0) return;
 
     const sm = Number(d.smart_wallets_count || (d.smart_wallets ? d.smart_wallets.length : 0) || 0);
     const holders = Number(d.holders || 0);
@@ -3364,6 +3253,7 @@ function compute24hPulseMetrics(drops = allDrops, topGainersList = savedTopGaine
       mint_cost_usd: mintCost,
       has_free_mint: isFree,
       isFree,
+      gainBasis: (mintCost !== null && mintCost > 0) ? 'mint' : '24h',
       price_change_24h: d.price_change_24h,
       flUsd: effectiveUsd,
       flBnb,
@@ -3382,70 +3272,7 @@ function compute24hPulseMetrics(drops = allDrops, topGainersList = savedTopGaine
     }
   });
 
-  // Ensure default high-reputation Element collections are present if pool is small
-  const defaultNfts = [
-    {
-      contract: '0xbdb206b823e2782dd75fff0ef89795146c29ed76',
-      name: 'FishingAi Rod',
-      symbol: 'ROD',
-      standard: 'ERC-721 (NFT Collection)',
-      flUsd: 6.75,
-      flBnb: 0,
-      vol: 17193.87,
-      mint_cost_usd: 0,
-      has_free_mint: true,
-      isFree: true,
-      sm: 22,
-      holders: 1524,
-      gainPct: 67500,
-      multiplier: 675,
-      score: 675000,
-      market_url: 'https://element.market/collections/fishingai-rod'
-    },
-    {
-      contract: '0x3333333333333333333333333333333333333333',
-      name: 'Agent Cards',
-      symbol: 'ACARD',
-      standard: 'ERC-721 NFT',
-      flUsd: 0.12,
-      flBnb: 0,
-      vol: 1200,
-      mint_cost_usd: 0.02,
-      isFree: false,
-      sm: 267,
-      holders: 3500,
-      gainPct: 500,
-      multiplier: 6,
-      score: 25000,
-      market_url: 'https://element.market/collections/agent-cards'
-    },
-    {
-      contract: '0xb777c52296f0d7d3c5cab7ae0c1aaac6b014b256',
-      name: 'Oathbots',
-      symbol: 'OATH',
-      standard: 'ERC-721 (NFT Collection)',
-      flUsd: 0.11,
-      flBnb: 0.00016,
-      vol: 850,
-      mint_cost_usd: 0,
-      has_free_mint: true,
-      isFree: true,
-      sm: 0,
-      holders: 10000,
-      gainPct: 1100,
-      multiplier: 11,
-      score: 15000,
-      market_url: 'https://element.market/collections/0xb777c52296f0d7d3c5cab7ae0c1aaac6b014b256'
-    }
-  ];
-
-  defaultNfts.forEach(def => {
-    const norm = def.name.trim().toLowerCase();
-    if (!nftMap.has(norm)) {
-      nftMap.set(norm, def);
-    }
-  });
-
+  // Fewer than 3 real candidates is shown as fewer cards (or the empty state): nothing is invented to fill the row.
   const topNftSurges = Array.from(nftMap.values()).sort((a, b) => b.score - a.score).slice(0, 3);
 
   // Graduations & Volume
@@ -3550,6 +3377,19 @@ function compute24hPulseMetrics(drops = allDrops, topGainersList = savedTopGaine
     macroHeadline = headlineParts.join(' • ') + '.';
   }
 
+  const fromServer = Boolean(serverPulse && typeof serverPulse === 'object');
+  const agg = fromServer ? {
+    gradCount: Number(serverPulse.graduated || 0),
+    totalDexVol: Number(serverPulse.dex_volume_usd || 0),
+    totalSmartInflows: Number(serverPulse.smart_inflows || 0),
+    topHunter: serverPulse.top_hunter || 'Alpha Hunter',
+    topHunterCount: Number(serverPulse.top_hunter_count || 0),
+    clustersCount: Number(serverPulse.smart_clusters || 0),
+    cleanMintsCount: Number(serverPulse.clean_mints || 0),
+    refundsCount: Number(serverPulse.refunds || 0),
+    threatsBlockedCount: Number(serverPulse.threats_blocked || 0)
+  } : { gradCount, totalDexVol, totalSmartInflows, topHunter, topHunterCount, clustersCount, cleanMintsCount, refundsCount, threatsBlockedCount };
+
   return {
     topRunner,
     topRunners,
@@ -3557,16 +3397,9 @@ function compute24hPulseMetrics(drops = allDrops, topGainersList = savedTopGaine
     topSmartMints,
     topNftSurges,
     anchorAsset,
-    gradCount,
-    totalDexVol,
     launchpadCount,
-    totalSmartInflows,
-    topHunter,
-    topHunterCount,
-    clustersCount,
-    cleanMintsCount,
-    refundsCount,
-    threatsBlockedCount,
+    ...agg,
+    aggregatesSource: fromServer ? 'server' : 'local',   // 'local' = from the loaded page only: not a 24h number
     macroHeadline
   };
 }
@@ -3613,12 +3446,12 @@ function updateDailyPulseUI() {
 
     const tkPrice = Number(runner.token_price_usd || runner.market_price_usd || 0);
     if (rPriceEl) {
-      rPriceEl.textContent = tkPrice > 0 ? formatCryptoPrice(tkPrice) : '$0.00';
+      rPriceEl.textContent = tkPrice > 0 ? formatCryptoPrice(tkPrice) : '—';
     }
 
     const mcap = getSanitizedMcap(runner);
     if (rMcapEl) {
-      rMcapEl.textContent = mcap > 0 ? `$${formatCount(mcap)}` : '$0';
+      rMcapEl.textContent = mcap > 0 ? `$${formatCount(mcap)}` : '—';
     }
 
     const dexUrl = getDexScreenerUrl(runner);
@@ -3646,8 +3479,10 @@ function updateDailyPulseUI() {
   const gradCountEl = document.getElementById('pulseGradCount');
   const volEl = document.getElementById('pulse24hVol');
   const launchEl = document.getElementById('pulseLaunchpadCount');
-  if (gradCountEl) gradCountEl.textContent = metrics.gradCount;
-  if (volEl) volEl.textContent = `$${formatCount(metrics.totalDexVol)}`;
+  const serverAgg = metrics.aggregatesSource === 'server';
+  const aggText = (v) => (serverAgg ? v : '—');
+  if (gradCountEl) gradCountEl.textContent = aggText(metrics.gradCount);
+  if (volEl) volEl.textContent = serverAgg ? `$${formatCount(metrics.totalDexVol)}` : '—';
   if (launchEl) launchEl.textContent = metrics.launchpadCount;
 
   // 3. Top Smart Wallet Mints (Top 3)
@@ -3663,13 +3498,13 @@ function updateDailyPulseUI() {
   const smartInflowsEl = document.getElementById('pulseSmartInflows');
   const topHunterEl = document.getElementById('pulseTopHunter');
   const clustersEl = document.getElementById('pulseClustersCount');
-  if (smartInflowsEl) smartInflowsEl.textContent = metrics.totalSmartInflows;
+  if (smartInflowsEl) smartInflowsEl.textContent = aggText(metrics.totalSmartInflows);
   if (topHunterEl) {
     const hunterDisplay = metrics.topHunter.length > 14 ? `${metrics.topHunter.slice(0, 6)}...${metrics.topHunter.slice(-4)}` : metrics.topHunter;
     topHunterEl.textContent = hunterDisplay;
     topHunterEl.title = metrics.topHunter;
   }
-  if (clustersEl) clustersEl.textContent = metrics.clustersCount;
+  if (clustersEl) clustersEl.textContent = aggText(metrics.clustersCount);
 
   // 4. Top NFT Agent ID Surges (Element Market Floor Leaders)
   const nftListEl = document.getElementById('pulseNftSurgesList');
@@ -3685,9 +3520,9 @@ function updateDailyPulseUI() {
   const cleanMintsEl = document.getElementById('pulseCleanMints');
   const refundEl = document.getElementById('pulseRefundCount');
   const threatsEl = document.getElementById('pulseThreatsBlocked');
-  if (cleanMintsEl) cleanMintsEl.textContent = metrics.cleanMintsCount;
-  if (refundEl) refundEl.textContent = metrics.refundsCount;
-  if (threatsEl) threatsEl.textContent = metrics.threatsBlockedCount;
+  if (cleanMintsEl) cleanMintsEl.textContent = aggText(metrics.cleanMintsCount);
+  if (refundEl) refundEl.textContent = aggText(metrics.refundsCount);
+  if (threatsEl) threatsEl.textContent = aggText(metrics.threatsBlockedCount);
 
   // 5. Headline Synthesis
   const headlineEl = document.getElementById('pulseMacroHeadline');
@@ -3704,14 +3539,14 @@ function updateDailyPulseUI() {
     const chg = Number(r1.price_change_24h || 0);
     tickerRunner.textContent = `🏆 Top: ${r1.name || r1.symbol} (${chg >= 0 ? '+' : ''}${chg.toFixed(1)}%)`;
   }
-  if (tickerVolume) tickerVolume.textContent = `🌊 DEX Vol: $${formatCount(metrics.totalDexVol)}`;
-  if (tickerGrad) tickerGrad.textContent = `🚀 ${metrics.gradCount} Graduated`;
+  if (tickerVolume) tickerVolume.textContent = `🌊 DEX Vol: ${serverAgg ? '$' + formatCount(metrics.totalDexVol) : '—'}`;
+  if (tickerGrad) tickerGrad.textContent = `🚀 ${serverAgg ? metrics.gradCount : '—'} Graduated`;
   if (tickerInflow) {
     if (metrics.topSmartMints && metrics.topSmartMints.length > 0) {
       const sm1 = metrics.topSmartMints[0];
       tickerInflow.textContent = `🧠 Top Mint: ${sm1.drop.name || sm1.drop.symbol} (${sm1.count} Wallets)`;
     } else {
-      tickerInflow.textContent = `🧠 ${metrics.totalSmartInflows} Smart Inflows`;
+      tickerInflow.textContent = `🧠 ${aggText(metrics.totalSmartInflows)} Smart Inflows`;
     }
   }
 }
@@ -4019,7 +3854,7 @@ function evaluatePortfolioExit(item, bnbPriceUsd = bnbPrice) {
         multiple: 1.0,
         pnl_usd: 0.0,
         pnl_pct: 0.0,
-        recommendation: `Element volume spike! ${salesCnt} secondary sales (Floor: ${flr.toFixed(4)} BNB). List or sell manually on Element.`,
+        recommendation: `Element volume spike! ${salesCnt} secondary sales (Floor: ${formatBnb(flr)} BNB). List or sell manually on Element.`,
         can_swap: false
       };
     }
@@ -4044,6 +3879,21 @@ function evaluatePortfolioExit(item, bnbPriceUsd = bnbPrice) {
   if (curVal <= 0 && curPrice > 0) curVal = bal * curPrice;
 
   const mintBnb = Number(item.mint_price_bnb || 0.0);
+  if (mintBnb > 0 && !(Number(bnbPriceUsd) > 0)) {
+    // the cost basis is in BNB and there is no BNB/USD price: a made-up one would fake the profit signal
+    return {
+      signal: '—',
+      badge: '—',
+      badge_class: 'badge-dim',
+      action: 'HOLD',
+      action_label: 'Holding',
+      multiple: 1.0,
+      pnl_usd: 0.0,
+      pnl_pct: 0.0,
+      recommendation: 'BNB/USD price unavailable: profit and exit signals are not computed.',
+      can_swap: true
+    };
+  }
   const costUsd = mintBnb * bnbPriceUsd;
 
   let peakPrice = Number(item.peak_price_usd || 0.0);
@@ -4079,7 +3929,7 @@ function evaluatePortfolioExit(item, bnbPriceUsd = bnbPrice) {
       multiple: costUsd > 0 ? (curVal / costUsd) : 1.0,
       pnl_usd: curVal - costUsd,
       pnl_pct: -drawdownPct * 100,
-      recommendation: `Trailing Crash Stop: Dropped ${(drawdownPct * 100).toFixed(1)}% from peak ($${peakVal.toFixed(2)}). Exit to preserve capital!`,
+      recommendation: `Trailing Crash Stop: Dropped ${(drawdownPct * 100).toFixed(1)}% from peak (${formatCryptoPrice(peakVal)}). Exit to preserve capital!`,
       can_swap: true
     };
   }
@@ -4626,8 +4476,8 @@ function renderSearchDropdown(query) {
     } else if (athMult > 1) {
       gainDisplay = `${athMult.toFixed(1)}x ATH`;
       gainClass = 'gain-pos';
-    } else if (item.market_cap > 0) {
-      gainDisplay = `MC: $${formatCount(item.market_cap)}`;
+    } else if (getSanitizedMcap(item) > 0) {
+      gainDisplay = `${mcapLabel(item)}: $${formatCount(getSanitizedMcap(item))}`;
       gainClass = 'gain-neutral';
     }
 
@@ -5073,15 +4923,12 @@ function renderTable(keepLimit = false) {
     const intBadge = interestBadgeHtml(item.score);
 
     // Holders / Buys
-    const hld = Number(item.holders || item.total_minted || 0);
-    const buys = Number(item.buys_24h || item.total_minted || 0);
-    const hbStr = (hld > 0 || buys > 0)
-      ? `<span class="hld">${formatCount(hld)}</span> <span class="dim">/</span> <span class="buy">${formatCount(buys)}</span>`
-      : `<span class="dim">0 / 0</span>`;
+    // Unknown counts are "—" and real zeros are "0"; the total supply is never shown as a holder / buy count
+    const hbStr = `<span class="hld">${formatCount(item.holders)}</span> <span class="dim">/</span> <span class="buy">${formatCount(item.buys_24h)}</span>`;
 
     // LP / Vol & Market Cap
     const lpUsd = Number(item.lp_usd || 0);
-    const mcapUsd = Number(item.market_cap || item.fdv || 0);
+    const mcapUsd = getSanitizedMcap(item) || 0;
     const volBnb = item.volume_bnb || item.nft_volume_bnb;
     const secVol = Number(item.secondary_vol_bnb || 0);
     let lpStr = `<span class="dim">—</span>`;
@@ -5089,16 +4936,16 @@ function renderTable(keepLimit = false) {
       const dexScreenerUrl = getDexScreenerUrl(item);
       lpStr = `<a href="${dexScreenerUrl}" target="_blank" rel="noopener" onclick="event.stopPropagation();" style="color: var(--color-green); font-weight:600; text-decoration: none;" title="View Liquidity on DexScreener">$${lpUsd.toLocaleString(undefined, { maximumFractionDigits: 0 })} ↗</a>`;
       if (mcapUsd > 0) {
-        lpStr += `<div class="sub-mcap" style="font-size: 10px; color: var(--color-cyan); font-weight:600;" title="Market Cap / FDV: $${formatCount(mcapUsd)}"><a href="${dexScreenerUrl}" target="_blank" rel="noopener" onclick="event.stopPropagation();" style="color: var(--color-cyan); text-decoration: none;">MC: $${formatCount(mcapUsd)}</a></div>`;
+        lpStr += `<div class="sub-mcap" style="font-size: 10px; color: var(--color-cyan); font-weight:600;" title="Market Cap / FDV: $${formatCount(mcapUsd)}"><a href="${dexScreenerUrl}" target="_blank" rel="noopener" onclick="event.stopPropagation();" style="color: var(--color-cyan); text-decoration: none;">${mcapLabel(item)}: $${formatCount(mcapUsd)}</a></div>`;
       }
     } else if (item.is_nft_surge && secVol > 0) {
-      lpStr = `<span style="color: var(--color-magenta); font-weight:700;" title="${item.secondary_sales_count || 0} Element sales">${secVol.toFixed(3)} BNB 🦋</span>`;
+      lpStr = `<span style="color: var(--color-magenta); font-weight:700;" title="${item.secondary_sales_count || 0} Element sales">${formatBnb(secVol)} BNB 🦋</span>`;
     } else if (secVol > 0) {
-      lpStr = `<span style="color: var(--color-cyan); font-weight:600;" title="${item.secondary_sales_count || 0} Element sales">${secVol.toFixed(3)} BNB</span>`;
+      lpStr = `<span style="color: var(--color-cyan); font-weight:600;" title="${item.secondary_sales_count || 0} Element sales">${formatBnb(secVol)} BNB</span>`;
     } else if (volBnb && Number(volBnb) > 0) {
-      lpStr = `<span style="color: var(--color-cyan); font-weight:600;">${Number(volBnb).toFixed(2)} BNB</span>`;
+      lpStr = `<span style="color: var(--color-cyan); font-weight:600;">${formatBnb(volBnb)} BNB</span>`;
     } else if (mcapUsd > 0) {
-      lpStr = `<span style="color: var(--color-cyan); font-weight:600;" title="Market Cap / FDV: $${formatCount(mcapUsd)}">MC: $${formatCount(mcapUsd)}</span>`;
+      lpStr = `<span style="color: var(--color-cyan); font-weight:600;" title="Market Cap / FDV: $${formatCount(mcapUsd)}">${mcapLabel(item)}: $${formatCount(mcapUsd)}</span>`;
     }
 
     // Progress Bar
@@ -5167,7 +5014,7 @@ function renderTable(keepLimit = false) {
     } else if (isFree) {
       priceStr = `<span style="color: var(--color-green); font-weight:700;">⭐ FREE</span>`;
     } else if (vWei > 0) {
-      priceStr = `<span style="color: var(--color-yellow); font-weight:600;">💎 ${(vWei / 1e18).toFixed(4)} BNB</span>`;
+      priceStr = `<span style="color: var(--color-yellow); font-weight:600;">💎 ${formatBnb(vWei / 1e18)} BNB</span>`;
     }
 
     // Floor / Trade
@@ -5176,16 +5023,16 @@ function renderTable(keepLimit = false) {
     const tkUsd = Number(item.token_price_usd || item.market_price_usd || 0);
     let floorStr = '';
     if (flUsd > 0) {
-      floorStr = `<span style="color: var(--color-cyan); font-weight:600;">$${flUsd.toFixed(2)}</span>`;
+      floorStr = `<span style="color: var(--color-cyan); font-weight:600;">${formatCryptoPrice(flUsd)}</span>`;
     } else if (flBnb > 0) {
       if (item.is_nft_surge) {
-        floorStr = `<span style="color: var(--color-magenta); font-weight:700;">${flBnb.toFixed(4)} BNB</span>`;
+        floorStr = `<span style="color: var(--color-magenta); font-weight:700;">${formatBnb(flBnb)} BNB</span>`;
       } else {
         floorStr = `<span style="color: var(--color-cyan); font-weight:600;">${flBnb} BNB</span>`;
       }
     } else if (tkUsd > 0) {
       const dexScreenerUrl = getDexScreenerUrl(item);
-      floorStr = `<a href="${dexScreenerUrl}" target="_blank" rel="noopener" onclick="event.stopPropagation();" style="color: var(--color-green); font-weight:600; text-decoration: none;" title="View Live Chart on DexScreener">$${tkUsd < 0.001 ? tkUsd.toFixed(6) : tkUsd.toFixed(4)} ↗</a>`;
+      floorStr = `<a href="${dexScreenerUrl}" target="_blank" rel="noopener" onclick="event.stopPropagation();" style="color: var(--color-green); font-weight:600; text-decoration: none;" title="View Live Chart on DexScreener">${formatCryptoPrice(tkUsd)} ↗</a>`;
       const chg24 = Number(item.price_change_24h || 0);
       if (chg24 !== 0) {
         const isUp = chg24 > 0;
@@ -5237,7 +5084,7 @@ function renderTable(keepLimit = false) {
       if (lpUsd > 0) {
         cellLp = `<a href="${dexScreenerUrl}" target="_blank" rel="noopener" onclick="event.stopPropagation();" style="color: var(--color-green); font-weight:700; text-decoration: none;" title="View Liquidity Pool on DexScreener">$${formatCount(lpUsd)} ↗</a>`;
       } else if (secVol > 0) {
-        cellLp = `<span style="color: var(--color-magenta); font-weight:600;">${secVol.toFixed(2)} BNB</span>`;
+        cellLp = `<span style="color: var(--color-magenta); font-weight:600;">${formatBnb(secVol)} BNB</span>`;
       } else {
         cellLp = `<span class="dim">—</span>`;
       }
@@ -5271,7 +5118,7 @@ function renderTable(keepLimit = false) {
           : '';
         cellFloor = `
           <div style="display: flex; align-items: center; gap: 2px;">
-            <a href="${dexScreenerUrl}" target="_blank" rel="noopener" onclick="event.stopPropagation();" style="color: var(--color-green); font-weight: 700; text-decoration: none;" title="Open live chart on DexScreener">$${tkUsd < 0.001 ? tkUsd.toFixed(6) : tkUsd.toFixed(4)} ↗</a>
+            <a href="${dexScreenerUrl}" target="_blank" rel="noopener" onclick="event.stopPropagation();" style="color: var(--color-green); font-weight: 700; text-decoration: none;" title="Open live chart on DexScreener">${formatCryptoPrice(tkUsd)} ↗</a>
             ${chgBadge}
           </div>
         `;
@@ -5443,7 +5290,8 @@ function appendNextTableBatch() {
 
     // Progress Bar
     const isNft = std.includes('721') || std.includes('NFT');
-    const ms = Number(item.max_supply || 0);
+    const msRaw = Number(item.max_supply || 0);
+    const ms = (isFinite(msRaw) && msRaw < 1e20) ? msRaw : 0;   // 1e20+ is the "uncapped" sentinel, not a real cap
     const tm = Number(item.total_minted || 0);
     let progPct = 0;
     let progLabel = 'TOKEN 0%';
@@ -5479,7 +5327,7 @@ function appendNextTableBatch() {
     } else if (isFree) {
       priceStr = `<span style="color: var(--color-green); font-weight:700;">⭐ FREE</span>`;
     } else if (vWei > 0) {
-      priceStr = `<span style="color: var(--color-yellow); font-weight:600;">💎 ${(vWei / 1e18).toFixed(4)} BNB</span>`;
+      priceStr = `<span style="color: var(--color-yellow); font-weight:600;">💎 ${formatBnb(vWei / 1e18)} BNB</span>`;
     }
 
     // Floor / Trade
@@ -5488,16 +5336,16 @@ function appendNextTableBatch() {
     const tkUsd = Number(item.token_price_usd || item.market_price_usd || 0);
     let floorStr = '';
     if (flUsd > 0) {
-      floorStr = `<span style="color: var(--color-cyan); font-weight:600;">$${flUsd.toFixed(2)}</span>`;
+      floorStr = `<span style="color: var(--color-cyan); font-weight:600;">${formatCryptoPrice(flUsd)}</span>`;
     } else if (flBnb > 0) {
       if (item.is_nft_surge) {
-        floorStr = `<span style="color: var(--color-magenta); font-weight:700;">${flBnb.toFixed(4)} BNB</span>`;
+        floorStr = `<span style="color: var(--color-magenta); font-weight:700;">${formatBnb(flBnb)} BNB</span>`;
       } else {
         floorStr = `<span style="color: var(--color-cyan); font-weight:600;">${flBnb} BNB</span>`;
       }
     } else if (tkUsd > 0) {
       const dexScreenerUrl = getDexScreenerUrl(item);
-      floorStr = `<a href="${dexScreenerUrl}" target="_blank" rel="noopener" onclick="event.stopPropagation();" style="color: var(--color-green); font-weight:600; text-decoration: none;" title="View Live Chart on DexScreener">$${tkUsd < 0.001 ? tkUsd.toFixed(6) : tkUsd.toFixed(4)} ↗</a>`;
+      floorStr = `<a href="${dexScreenerUrl}" target="_blank" rel="noopener" onclick="event.stopPropagation();" style="color: var(--color-green); font-weight:600; text-decoration: none;" title="View Live Chart on DexScreener">${formatCryptoPrice(tkUsd)} ↗</a>`;
       const chg24 = Number(item.price_change_24h || 0);
       if (chg24 !== 0) {
         const isUp = chg24 > 0;
@@ -5522,10 +5370,10 @@ function appendNextTableBatch() {
 
     const exitSignal = evaluatePortfolioExit(item, bnbPrice);
     const isPort = (activeTab === 'PORTFOLIO');
-    let cellHolders = `${formatCount(item.holders || 1)} / ${formatCount(item.buys_24h || 1)}`;
+    let cellHolders = `${formatCount(item.holders)} / ${formatCount(item.buys_24h)}`;
     if (isPort && item.user_balance > 0) {
       const balVal = isNft ? `${item.user_balance} NFT` : formatCount(item.user_balance);
-      const usdVal = exitSignal.holding_usd > 0 ? ` (~$${exitSignal.holding_usd.toFixed(2)})` : '';
+      const usdVal = exitSignal.holding_usd > 0 ? ` (~${formatCryptoPrice(exitSignal.holding_usd)})` : '';
       cellHolders = `<strong style="color: var(--color-green);">${balVal}</strong>${usdVal}`;
     }
 
@@ -5545,18 +5393,18 @@ function appendNextTableBatch() {
     const starClass = isFav ? 'btn-star starred' : 'btn-star';
     const starIcon = isFav ? '★' : '☆';
 
-    const mcapUsdBatch = Number(item.market_cap || item.fdv || 0);
+    const mcapUsdBatch = getSanitizedMcap(item) || 0;
     let lpStr = '—';
     if (Number(item.lp_usd || 0) > 0) {
       const dexScreenerUrl = getDexScreenerUrl(item);
       lpStr = `<a href="${dexScreenerUrl}" target="_blank" rel="noopener" onclick="event.stopPropagation();" style="color: var(--color-green); font-weight:600; text-decoration: none;" title="View Liquidity on DexScreener">$${formatCount(item.lp_usd)} ↗</a>`;
       if (mcapUsdBatch > 0) {
-        lpStr += `<div class="sub-mcap" style="font-size: 10px; color: var(--color-cyan); font-weight:600;" title="Market Cap / FDV: $${formatCount(mcapUsdBatch)}"><a href="${dexScreenerUrl}" target="_blank" rel="noopener" onclick="event.stopPropagation();" style="color: var(--color-cyan); text-decoration: none;">MC: $${formatCount(mcapUsdBatch)}</a></div>`;
+        lpStr += `<div class="sub-mcap" style="font-size: 10px; color: var(--color-cyan); font-weight:600;" title="Market Cap / FDV: $${formatCount(mcapUsdBatch)}"><a href="${dexScreenerUrl}" target="_blank" rel="noopener" onclick="event.stopPropagation();" style="color: var(--color-cyan); text-decoration: none;">${mcapLabel(item)}: $${formatCount(mcapUsdBatch)}</a></div>`;
       }
     } else if (item.is_nft_surge && Number(item.secondary_vol_bnb || 0) > 0) {
-      lpStr = `<span style="color: var(--color-magenta); font-weight:600;">${Number(item.secondary_vol_bnb).toFixed(2)} BNB</span>`;
+      lpStr = `<span style="color: var(--color-magenta); font-weight:600;">${formatBnb(item.secondary_vol_bnb)} BNB</span>`;
     } else if (mcapUsdBatch > 0) {
-      lpStr = `<span style="color: var(--color-cyan); font-weight:600;" title="Market Cap / FDV: $${formatCount(mcapUsdBatch)}">MC: $${formatCount(mcapUsdBatch)}</span>`;
+      lpStr = `<span style="color: var(--color-cyan); font-weight:600;" title="Market Cap / FDV: $${formatCount(mcapUsdBatch)}">${mcapLabel(item)}: $${formatCount(mcapUsdBatch)}</span>`;
     }
 
     const isSec = (activeTab === 'SECONDARY');
@@ -5574,7 +5422,7 @@ function appendNextTableBatch() {
       if (Number(item.lp_usd || 0) > 0) {
         cellLp = `<a href="${dexScreenerUrl}" target="_blank" rel="noopener" onclick="event.stopPropagation();" style="color: var(--color-green); font-weight:700; text-decoration: none;" title="View Liquidity Pool on DexScreener">$${formatCount(item.lp_usd)} ↗</a>`;
       } else if (Number(item.secondary_vol_bnb || 0) > 0) {
-        cellLp = `<span style="color: var(--color-magenta); font-weight:600;">${Number(item.secondary_vol_bnb).toFixed(2)} BNB</span>`;
+        cellLp = `<span style="color: var(--color-magenta); font-weight:600;">${formatBnb(item.secondary_vol_bnb)} BNB</span>`;
       } else {
         cellLp = `<span class="dim">—</span>`;
       }
@@ -5608,7 +5456,7 @@ function appendNextTableBatch() {
           : '';
         cellFloor = `
           <div style="display: flex; align-items: center; gap: 2px;">
-            <a href="${dexScreenerUrl}" target="_blank" rel="noopener" onclick="event.stopPropagation();" style="color: var(--color-green); font-weight: 700; text-decoration: none;" title="Open live chart on DexScreener">$${tkUsd < 0.001 ? tkUsd.toFixed(6) : tkUsd.toFixed(4)} ↗</a>
+            <a href="${dexScreenerUrl}" target="_blank" rel="noopener" onclick="event.stopPropagation();" style="color: var(--color-green); font-weight: 700; text-decoration: none;" title="Open live chart on DexScreener">${formatCryptoPrice(tkUsd)} ↗</a>
             ${chgBadge}
           </div>
         `;
@@ -6257,13 +6105,22 @@ function openModal(item, source = 'direct') {
   const sellCalldata = !isNft ? buildPancakeSwapSellCalldata(cAddr, rawHeldWei, userWallet) : '';
   const sellCliSnippet = !isNft ? `baw contract-call preview --binanceChainId 56 --from ${userWallet} --to ${PANCAKE_ROUTER_V2} --value 0 --inputData ${sellCalldata} --json` : '';
 
+  // Same rule as computeItemProfit / the table: free = has_free_mint or a "FREE" price string. A zero price alone
+  // is NOT "free": DEX-traded records have no mint, and TBD records have an unknown cost.
   const mintBnbNum = Number(item.mint_price_bnb || 0);
-  const isFree = item.has_free_mint || mintBnbNum === 0 || valWei === '0';
-  const mintCostLabel = isFree ? 'FREE MINT' : `${mintBnbNum.toFixed(4)} BNB (~$${(mintBnbNum * bnbPrice).toFixed(2)})`;
+  const mintPriceUpper = String(item.mint_price_str || '').toUpperCase();
+  const isDexTraded = mintPriceUpper.includes('DEX');
+  const isFree = !isDexTraded && (Boolean(item.has_free_mint) || mintPriceUpper.includes('FREE'));
+  const hasPaidMint = !isDexTraded && !isFree && (mintBnbNum > 0 || Number(valWei) > 0);
+  const paidBnb = mintBnbNum > 0 ? mintBnbNum : Number(valWei) / 1e18;
+  const mintCostLabel = isDexTraded ? 'DEX TRADED'
+    : (isFree ? 'FREE MINT'
+      : (hasPaidMint ? `${formatBnb(paidBnb)} BNB (~${formatBnbAsUsd(paidBnb)})` : 'TBD'));
   const isSoldOut = Boolean(item.max_supply && item.total_minted && Number(item.total_minted) >= Number(item.max_supply));
   const isRiskContract = Boolean((item.risk_badge && (item.risk_badge.includes('🚨') || item.risk_badge.includes('Fund Drain') || item.risk_badge.includes('Honeypot'))) || item.risk_level === 'RUG' || (item.security && item.security.is_fund_drain));
 
-  const ms = Number(item.max_supply || 0);
+  const msRaw = Number(item.max_supply || 0);
+  const ms = (isFinite(msRaw) && msRaw < 1e20) ? msRaw : 0;   // 1e20+ is the "uncapped" sentinel
   const tm = Number(item.total_minted || 0);
   const lp = Number(item.lp_usd || 0);
   const bondingGraduated = (lp >= 500) || Boolean(item.sniper_badge && item.sniper_badge.includes('DEX'));
@@ -6312,7 +6169,9 @@ function openModal(item, source = 'direct') {
   const chg24Num = Number(item.price_change_24h || 0);
   const tkPriceNum = Number(item.token_price_usd || item.market_price_usd || 0);
 
-  let mcapFormatted = mcapNum > 0 ? `$${formatCount(mcapNum)}` : '<span class="dim">Fair Mint Phase</span>';
+  // A token that already trades but has no trustworthy market cap shows "—"; only a pre-market drop is in its fair-mint phase
+  const isTradingNow = isSecondaryMarketAsset(item);
+  let mcapFormatted = mcapNum > 0 ? `$${formatCount(mcapNum)}` : (isTradingNow ? '<span class="dim">—</span>' : '<span class="dim">Fair Mint Phase</span>');
   let vol24Formatted = vol24Num > 0 ? `$${formatCount(vol24Num)}` : '<span class="dim">—</span>';
   let chg24Badge = '';
   if (chg24Num !== 0) {
@@ -6419,7 +6278,7 @@ function openModal(item, source = 'direct') {
       </div>
       <div class="modal-grid" style="grid-template-columns: repeat(4, 1fr); gap: 10px; margin-top: 6px;">
         <div class="market-metric-box">
-          <span class="dim">Market Cap / FDV</span>
+          <span class="dim">${mcapLabel(item) === 'FDV' ? 'FDV' : 'Market Cap'}</span>
           <strong style="color: ${mcapNum > 0 ? 'var(--color-green)' : 'var(--text-primary)'}; font-size: 15px; display: block; margin-top: 2px;">
             ${dexScreenerUrl && mcapNum > 0 ? `<a href="${dexScreenerUrl}" target="_blank" rel="noopener" onclick="trackExternalClick('dexscreener_mcap', '${escapeHtml(sym)}', '${cAddr}')" style="color: var(--color-green); text-decoration: none;" title="View Valuation on DexScreener">${mcapFormatted} ↗</a>` : mcapFormatted}
           </strong>
@@ -6431,15 +6290,15 @@ function openModal(item, source = 'direct') {
           </strong>
         </div>
         <div class="market-metric-box">
-          <span class="dim">PancakeSwap LP</span>
+          <span class="dim">PancakeSwap LP${marketFreshnessHtml(item)}</span>
           <strong style="color: ${lp > 0 ? 'var(--color-yellow)' : 'var(--text-dim)'}; font-size: 15px; display: block; margin-top: 2px;">
             ${dexScreenerUrl && lp > 0 ? `<a href="${dexScreenerUrl}" target="_blank" rel="noopener" onclick="trackExternalClick('dexscreener_lp', '${escapeHtml(sym)}', '${cAddr}')" style="color: var(--color-yellow); text-decoration: none;" title="View Liquidity Pool on DexScreener">$${formatCount(lp)} ↗</a>` : (lp > 0 ? `$${formatCount(lp)}` : '$0')}
           </strong>
         </div>
         <div class="market-metric-box">
-          <span class="dim">Current Price</span>
+          <span class="dim">Current Price${marketFreshnessHtml(item)}</span>
           <strong style="font-size: 15px; display: block; margin-top: 2px;">
-            ${dexScreenerUrl && tkPriceNum > 0 ? `<a href="${dexScreenerUrl}" target="_blank" rel="noopener" onclick="trackExternalClick('dexscreener_price', '${escapeHtml(sym)}', '${cAddr}')" style="color: var(--color-green); text-decoration: none;" title="Open live chart on DexScreener">${formatCryptoPrice(tkPriceNum)} ↗</a>` : (tkPriceNum > 0 ? formatCryptoPrice(tkPriceNum) : (Number(item.floor_price_usd || 0) > 0 ? `$${Number(item.floor_price_usd).toFixed(2)}` : '<span class="dim">—</span>'))}
+            ${dexScreenerUrl && tkPriceNum > 0 ? `<a href="${dexScreenerUrl}" target="_blank" rel="noopener" onclick="trackExternalClick('dexscreener_price', '${escapeHtml(sym)}', '${cAddr}')" style="color: var(--color-green); text-decoration: none;" title="Open live chart on DexScreener">${formatCryptoPrice(tkPriceNum)} ↗</a>` : (tkPriceNum > 0 ? formatCryptoPrice(tkPriceNum) : (Number(item.floor_price_usd || 0) > 0 ? formatCryptoPrice(item.floor_price_usd) : '<span class="dim">—</span>'))}
           </strong>
         </div>
       </div>
@@ -6457,7 +6316,7 @@ function openModal(item, source = 'direct') {
         <div class="bonding-gauge-fill" style="width: ${bondingGraduated ? 100 : bondingPct}%;"></div>
       </div>
       <div class="bonding-gauge-stats">
-        <span>${bondingGraduated ? `Secondary Liquidity Pool: $${formatCount(lp)}` : `Primary Minting: ${formatCount(tm)} / ${formatCount(ms) || 'Target Cap'}`}</span>
+        <span>${bondingGraduated ? `Secondary Liquidity Pool: $${formatCount(lp)}` : `Primary Minting: ${formatCount(tm)} / ${ms > 0 ? formatCount(ms) : 'Target Cap'}`}</span>
         <span>${bondingGraduated ? (dexScreenerUrl ? `<a href="${dexScreenerUrl}" target="_blank" rel="noopener" onclick="trackExternalClick('dexscreener_graduated', '${escapeHtml(sym)}', '${cAddr}')" style="color: var(--color-green); font-weight: 600; text-decoration: none;" title="View pair on DexScreener">🟢 Active Trading on PancakeSwap V2 ➔ View on DexScreener ↗</a>` : '🟢 Active Trading on PancakeSwap V2') : (bondingPct >= 80 ? '🔥 Near DEX Pool Injection (≥80%)' : (bondingPct >= 50 ? '⚡ Strong Momentum (≥50%)' : '🌱 Early Fair-Mint Phase'))}</span>
       </div>
     </div>
@@ -6595,8 +6454,8 @@ function openModal(item, source = 'direct') {
       </div>
       <div class="modal-grid" style="margin-top: 6px;">
         <div><span class="dim">Secondary Sales:</span> <strong style="color: ${item.secondary_sales_count >= 3 ? 'var(--color-magenta)' : 'inherit'};">${item.secondary_sales_count || 0} sales</strong></div>
-        <div><span class="dim">Element Volume:</span> <strong>${item.secondary_vol_bnb ? Number(item.secondary_vol_bnb).toFixed(4) + ' BNB' : '0.0000 BNB'}</strong></div>
-        <div><span class="dim">Floor Price:</span> <strong>${item.floor_price_bnb ? Number(item.floor_price_bnb).toFixed(4) + ' BNB' : '—'}</strong></div>
+        <div><span class="dim">Element Volume:</span> <strong>${item.secondary_vol_bnb ? formatBnb(item.secondary_vol_bnb) + ' BNB' : '0 BNB'}</strong></div>
+        <div><span class="dim">Floor Price:</span> <strong>${item.floor_price_bnb ? formatBnb(item.floor_price_bnb) + ' BNB' : '—'}</strong></div>
         <div><span class="dim">Secondary Transfers:</span> <strong>${item.secondary_transfers || 0} transfers</strong></div>
       </div>
       <div style="margin-top: 10px; font-size: 11px; color: var(--text-dim);">
@@ -6663,7 +6522,7 @@ function openModal(item, source = 'direct') {
 
       <div class="mint-summary-row" style="display: flex; justify-content: space-between; align-items: center; margin: 8px 0; font-size: 12px; flex-wrap: wrap; gap: 8px;">
         <div><span class="dim">Mint Cost:</span> <strong style="color: ${isFree ? 'var(--color-green)' : 'var(--color-yellow)'};">${mintCostLabel}</strong></div>
-        <div><span class="dim">Progress:</span> <strong>${formatCount(item.total_minted)}</strong> / ${formatCount(item.max_supply) || '∞'}</div>
+        <div><span class="dim">Progress:</span> <strong>${formatCount(item.total_minted)}</strong> / ${ms > 0 ? formatCount(ms) : '∞'}</div>
         <div><span class="dim">Calldata:</span> <code>${calldata.slice(0, 10)}${calldata.length > 10 ? '...' : ''}</code></div>
       </div>
 
@@ -6693,13 +6552,19 @@ function openModal(item, source = 'direct') {
           </a>
         </div>
       ` : `
+        ${isDexTraded ? `
         <div class="mint-btn-container" style="margin-top: 8px;">
+          <a href="${dexScreenerUrl || mktUrl}" target="_blank" rel="noopener" class="web3-mint-btn sold-out" style="text-align: center; text-decoration: none; display: flex; align-items: center; justify-content: center; gap: 8px;" onclick="trackExternalClick('dex_traded_trade', '${escapeHtml(sym)}', '${cAddr}')">
+            <span>📈 Already trading on a DEX: no mint (open the live chart ↗)</span>
+          </a>
+        </div>
+        ` : `<div class="mint-btn-container" style="margin-top: 8px;">
           <button id="modalMintBtn" class="web3-mint-btn" onclick="trackAnalytics('mint_button_clicked', { token_symbol: '${escapeHtml(sym)}', is_free: ${isFree} }); executeWeb3Mint('${cAddr}', '${calldata}', '${valWei}', '${escapeHtml(name)}')">
             <span class="mint-icon">⚡</span>
             <span id="modalMintBtnText">${connectedWallet ? `1-Click Mint (${mintCostLabel})` : `👛 Connect Wallet & Mint (${mintCostLabel})`}</span>
           </button>
         </div>
-        <div id="modalMintStatus" class="mint-status-box" style="display: none; margin-top: 10px;"></div>
+        <div id="modalMintStatus" class="mint-status-box" style="display: none; margin-top: 10px;"></div>`}
       `}
     </div>
 
@@ -6806,36 +6671,25 @@ function openHallOfFameModal(filterMode = 'ALL') {
       else if (rankNum === 3) rankBadge = `<span class="hof-rank hof-rank-3">🥉 #3</span>`;
       else rankBadge = `<span class="hof-rank" style="color: var(--text-dim);">#${rankNum}</span>`;
 
-      const mintCostStr = g.isFree || g.mintUsd === 0 ? '<span style="color: var(--color-green); font-weight:700;">FREE</span>' : formatCryptoPrice(g.mintUsd);
+      const mintCostStr = g.isFree
+        ? '<span style="color: var(--color-green); font-weight:700;">FREE</span>'
+        : (g.mintUsd > 0 ? formatCryptoPrice(g.mintUsd) : '<span class="dim" title="Mint cost not known">TBD</span>');
       const athPriceStr = formatCryptoPrice(g.athPrice);
       const athProfitStr = formatCryptoPrice(g.athProfit, true);
-      const multStr = g.multiplier ? `<span class="badge badge-yellow" style="font-size: 10px;">${g.multiplier}x</span>` : (g.isFree ? `<span class="badge badge-green" style="font-size: 10px;">FREE ALPHA</span>` : '');
+      const athMultiplier = g.multiplier || (g.item && g.item.ath_multiplier) || null;   // the API sends ath_multiplier, not "multiplier"
+      const multStr = athMultiplier ? `<span class="badge badge-yellow" style="font-size: 10px;">${athMultiplier}x</span>` : (g.isFree ? `<span class="badge badge-green" style="font-size: 10px;">FREE ALPHA</span>` : '');
 
-      // Compute profit % from mint
-      let gainPct = 0;
-      const mintCost = Number(g.mintUsd || 0);
+      // Profit % needs a KNOWN mint cost. A free or unknown mint has no base to divide by: no % is shown
+      // (the net profit and multiplier next to it are real); there is no assumed base price.
+      const mintCost = (g.mintUsd === null || g.mintUsd === undefined) ? null : Number(g.mintUsd);
       const athPrice = Math.max(Number(g.athPrice || 0), Number(g.secUsd || 0));
-      const isFree = Boolean(g.isFree || mintCost === 0);
-
+      let gainPct = null;
       if (mintCost > 0 && athPrice > 0) {
         gainPct = ((athPrice - mintCost) / mintCost) * 100;
-      } else if (isFree && athPrice > 0) {
-        if (g.multiplier && g.multiplier > 1) {
-          gainPct = (g.multiplier - 1) * 100;
-        } else if (g.item && Number(g.item.price_change_24h) > 0) {
-          gainPct = Number(g.item.price_change_24h);
-        } else if (g.price_change_24h && Number(g.price_change_24h) > 0) {
-          gainPct = Number(g.price_change_24h);
-        } else {
-          const basePrice = athPrice >= 0.01 ? 0.01 : 0.0001;
-          const mult = athPrice / basePrice;
-          gainPct = mult * 100;
-        }
       }
-
-      const isUp = gainPct >= 0;
-      const gainPctStr = (isUp ? '+' : '') + (gainPct >= 1000 ? Math.round(gainPct).toLocaleString('en-US') : gainPct.toFixed(1)) + '%';
-      const profitPctBadge = athPrice > 0 ? `<span class="badge ${isUp ? 'badge-green' : 'badge-red'}" style="font-size: 10px; font-weight: 800; padding: 2px 5px; letter-spacing: 0.2px;">${gainPctStr}</span>` : '';
+      const isUp = gainPct === null || gainPct >= 0;
+      const gainPctStr = gainPct === null ? '' : (isUp ? '+' : '') + (gainPct >= 1000 ? Math.round(gainPct).toLocaleString('en-US') : gainPct.toFixed(1)) + '%';
+      const profitPctBadge = gainPct !== null && athPrice > 0 ? `<span class="badge ${isUp ? 'badge-green' : 'badge-red'}" style="font-size: 10px; font-weight: 800; padding: 2px 5px; letter-spacing: 0.2px;">${gainPctStr}</span>` : '';
 
       const curPriceStr = g.secUsd > 0 ? formatCryptoPrice(g.secUsd) : '<span class="dim">—</span>';
       const curNetStr = g.profit > 0 ? `<span style="color: var(--color-green); font-weight:600;">${formatCryptoPrice(g.profit, true)}</span>` : '<span class="dim">—</span>';
@@ -6903,7 +6757,7 @@ function openHallOfFameModal(filterMode = 'ALL') {
     <div class="hof-header">
       <div class="hof-title-group">
         <h2>🏆 ALL-TIME POST-MINT PROFIT LEADERBOARD</h2>
-        <p class="hof-subtitle">Persistent Hall of Fame tracking peak All-Time High (ATH) net gains, secondary floor/DEX prices, and multipliers across all indexed Agent ID drops.</p>
+        <p class="hof-subtitle">Persistent Hall of Fame tracking peak All-Time High (ATH) net gains, secondary floor/DEX prices, and multipliers across all indexed Agent ID drops.${topGainersSeedLabel() ? ` <span class="badge badge-yellow" style="font-size: 10px;" title="Part of this list comes from a frozen seed file">${topGainersSeedLabel()}</span>` : ''}</p>
       </div>
       <button class="modal-close-btn" id="closeHofBtn" aria-label="Close modal">✕ CLOSE</button>
     </div>
@@ -7488,6 +7342,24 @@ function updateWalletButtonUI() {
 }
 
 // 100% Dynamic On-Chain Portfolio Scanner (Native BNB + 348+ drops via Multicall3)
+// Decimals of a token: the stored token_decimals, else the "(N decimals)" in its standard string, else 18.
+// (The portfolio scan used to special-case only "8 decimals": a 9-decimal token was off by 1e9, a 0-decimal one by 1e18.)
+function tokenDecimalsOf(drop) {
+  const stored = drop && drop.token_decimals;
+  if (typeof stored === 'number' && Number.isInteger(stored) && stored >= 0 && stored <= 36) return stored;
+  const m = /\((\d+) decimals\)/.exec(String((drop && drop.standard) || ''));
+  if (m) {
+    const d = Number(m[1]);
+    if (d >= 0 && d <= 36) return d;
+  }
+  return 18;
+}
+
+// Whole-token balance from a raw on-chain balance (BigInt or number)
+function balanceFromRaw(drop, raw) {
+  return Number(raw) / (10 ** tokenDecimalsOf(drop));
+}
+
 async function scanUserPortfolio(walletAddr, force = false) {
   if (!walletAddr || isScanningPortfolio) return;
   isScanningPortfolio = true;
@@ -7649,9 +7521,7 @@ async function scanUserPortfolio(walletAddr, force = false) {
       if (raw && raw > 0n) {
         const std = String(drop.standard || '');
         const isNft = std.includes('721') || std.includes('NFT') || Boolean(drop.is_nft);
-        let dec = 18;
-        if (std.includes('8 decimals')) dec = 8;
-        drop.user_balance = isNft ? Number(raw) : (Number(raw) / (10 ** dec));
+        drop.user_balance = isNft ? Number(raw) : balanceFromRaw(drop, raw);
         drop.user_balance_wei = raw;
       } else {
         drop.user_balance = 0;
@@ -7677,7 +7547,8 @@ function updatePortfolioBannerUI() {
   const banner = document.getElementById('portfolioBanner');
   if (!banner) return;
 
-  let totalUsd = userNativeBnbBalance * bnbPrice;
+  const bnbPx = hasUsableBnbPrice() ? bnbPrice : 0;
+  let totalUsd = userNativeBnbBalance * bnbPx;
   let ownedTokens = 0;
   let ownedNfts = 0;
   let profitSignals = 0;
@@ -7689,7 +7560,7 @@ function updatePortfolioBannerUI() {
       if (isNft) {
         ownedNfts++;
         const fl = Number(drop.floor_price_bnb || 0);
-        totalUsd += drop.user_balance * (fl * bnbPrice);
+        totalUsd += drop.user_balance * (fl * bnbPx);
       } else {
         ownedTokens++;
         const p = Number(drop.token_price_usd || drop.market_price_usd || 0);
@@ -7705,10 +7576,10 @@ function updatePortfolioBannerUI() {
   const totalAssets = ownedTokens + ownedNfts + (userNativeBnbBalance > 0 ? 1 : 0);
 
   const valEl = document.getElementById('portTotalValue');
-  if (valEl) valEl.textContent = `$${totalUsd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  if (valEl) valEl.textContent = hasUsableBnbPrice() ? `${bnbPriceLive ? '' : '≈'}$${totalUsd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—';
 
   const gasEl = document.getElementById('portGasReserve');
-  if (gasEl) gasEl.textContent = `${userNativeBnbBalance.toFixed(4)} BNB ($${(userNativeBnbBalance * bnbPrice).toFixed(2)})`;
+  if (gasEl) gasEl.textContent = `${userNativeBnbBalance.toFixed(4)} BNB (${formatBnbAsUsd(userNativeBnbBalance)})`;
 
   const assetsEl = document.getElementById('portAssetsCount');
   if (assetsEl) assetsEl.textContent = `${totalAssets} Asset${totalAssets === 1 ? '' : 's'}`;
@@ -7863,7 +7734,7 @@ function openWalletModal() {
               <span class="tile-label">GAS RESERVE</span>
             </div>
             <div class="tile-value gold">${userNativeBnbBalance.toFixed(6)} BNB</div>
-            <div class="tile-sub">≈ $${(userNativeBnbBalance * bnbPrice).toFixed(2)} USD</div>
+            <div class="tile-sub">≈ ${formatBnbAsUsd(userNativeBnbBalance).replace(/^≈/, '')} USD</div>
           </div>
 
           <div class="wallet-stat-tile">
@@ -8317,9 +8188,7 @@ async function pollDeltaFeed() {
             if (raw && raw > 0n) {
               const std = String(drop.standard || '');
               const isNft = std.includes('721') || std.includes('NFT') || Boolean(drop.is_nft);
-              let dec = 18;
-              if (std.includes('8 decimals')) dec = 8;
-              drop.user_balance = isNft ? Number(raw) : (Number(raw) / (10 ** dec));
+              drop.user_balance = isNft ? Number(raw) : balanceFromRaw(drop, raw);
               drop.user_balance_wei = raw;
             }
           });
@@ -8580,9 +8449,7 @@ async function fetchDrops() {
         if (raw && raw > 0n) {
           const std = String(drop.standard || '');
           const isNft = std.includes('721') || std.includes('NFT') || Boolean(drop.is_nft);
-          let dec = 18;
-          if (std.includes('8 decimals')) dec = 8;
-          drop.user_balance = isNft ? Number(raw) : (Number(raw) / (10 ** dec));
+          drop.user_balance = isNft ? Number(raw) : balanceFromRaw(drop, raw);
           drop.user_balance_wei = raw;
         } else {
           drop.user_balance = 0;
@@ -9665,6 +9532,27 @@ if (typeof document !== 'undefined') {
 
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
+    mergeTopGainersList,
+    syncSeededTopGainers,
+    topGainersSeedLabel,
+    getTopGainersSource: () => topGainersSource,
+    getPulse24hServer: () => pulse24hServer,
+    setPulse24hServer: (p) => { pulse24hServer = p; },
+    mcapLabel,
+    marketFreshnessHtml,
+    formatMarketAge,
+    saveSavedTopGainers,
+    tokenDecimalsOf,
+    balanceFromRaw,
+    formatCount,
+    formatBnb,
+    formatBnbAsUsd,
+    bnbToUsd,
+    hasUsableBnbPrice,
+    bnbPriceNote,
+    setBnbPriceState: (price, live, asOf = null) => { bnbPrice = price; bnbPriceLive = live; bnbPriceAsOf = asOf; },
+    getBnbPriceState: () => ({ price: bnbPrice, live: bnbPriceLive, asOf: bnbPriceAsOf }),
+    refreshBnbPrice,
     EXCLUDED_PEGS_SYMBOLS,
     EXCLUDED_PEGS_CONTRACTS,
     BOGUS_SCAM_CONTRACTS,

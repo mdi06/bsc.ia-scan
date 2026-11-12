@@ -187,6 +187,7 @@ class TestTopProfits(unittest.TestCase):
         const pPaid = app.computeItemProfit(paidItem, 705.0);
         const pBtcb = app.computeItemProfit(btcbItem, 705.0);
 
+        app.setBnbPriceState(705.0, true);  // there is no built-in fallback BNB price any more
         const stats = app.computeStats([btcbItem, freeItem, paidItem]);
 
         console.log(JSON.stringify({
