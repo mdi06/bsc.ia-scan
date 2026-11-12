@@ -617,8 +617,8 @@ def resolve_full_bytecode(rpc: BscRpcClient, contract_addr: str, code: str) -> T
                 target_code = rpc.get_code(target_addr)
                 if target_code and len(target_code) > 10:
                     return target_code.lower(), "EIP-1167 Clone", target_addr
-            except Exception:
-                pass
+            except Exception as exc:
+                _log.debug("could not fetch EIP-1167 target code %s: %s", target_addr, exc)
             return c_clean, "EIP-1167 Clone", target_addr
 
     # 2. EIP-1967 Implementation Slot (UUPS / Transparent Proxy)
@@ -633,8 +633,8 @@ def resolve_full_bytecode(rpc: BscRpcClient, contract_addr: str, code: str) -> T
                 if target_code and len(target_code) > 10:
                     return target_code.lower(), "EIP-1967 Proxy", target_addr
                 return c_clean, "EIP-1967 Proxy", target_addr
-    except Exception:
-        pass
+    except Exception as exc:
+        _log.debug("EIP-1967 implementation lookup failed for %s: %s", contract_addr, exc)
 
     # 3. EIP-1967 Beacon Proxy Slot (reads beacon address -> implementation())
     try:
@@ -654,8 +654,8 @@ def resolve_full_bytecode(rpc: BscRpcClient, contract_addr: str, code: str) -> T
                         if target_code and len(target_code) > 10:
                             return target_code.lower(), "Beacon Proxy", target_addr
                         return c_clean, "Beacon Proxy", target_addr
-    except Exception:
-        pass
+    except Exception as exc:
+        _log.debug("EIP-1967 beacon lookup failed for %s: %s", contract_addr, exc)
 
     return c_clean, None, None
 
@@ -783,8 +783,8 @@ def analyze_contract(rpc: BscRpcClient, contract_addr: str, wallet_addr: str) ->
                         else:
                             info["max_supply"] = raw_s
                         break
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        _log.debug("could not parse max supply %r for %s: %s", s_res, contract_addr, exc)
 
         if info["total_minted"] is None or info["total_minted"] == 0:
             for sel_name in ["totalMinted()", "_totalMinted()", "totalSupply()", "currentSupply()", "tokenCount()", "nextTokenId()", "_nextTokenId()", "currentTokenId()", "lifetimeCommitted()", "miningCommitted()"]:
@@ -802,8 +802,8 @@ def analyze_contract(rpc: BscRpcClient, contract_addr: str, wallet_addr: str) ->
                         else:
                             info["total_minted"] = raw_m
                         break
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        _log.debug("could not parse total minted %r for %s: %s", m_res, contract_addr, exc)
 
     # Inspect bytecode constants if max_supply still not found (e.g. PUSH2 24444 -> 0x615f7c)
     if info["max_supply"] is None:
@@ -811,8 +811,8 @@ def analyze_contract(rpc: BscRpcClient, contract_addr: str, wallet_addr: str) ->
             t_codes = "".join(rpc.get_code(a) for a in target_addrs).lower()
             if "615f7c" in t_codes:
                 info["max_supply"] = 24444
-        except Exception:
-            pass
+        except Exception as exc:
+            _log.debug("bytecode max-supply scan failed for %s: %s", contract_addr, exc)
 
     # If it's an NFT and no total_minted was returned, default to 0 if newly deployed
     if classification.get("category") == "NFT" and info.get("total_minted") is None:
@@ -849,10 +849,10 @@ def analyze_contract(rpc: BscRpcClient, contract_addr: str, wallet_addr: str) ->
                         meta = json.loads(r.read().decode("utf-8"))
                         info["website"] = meta.get("external_link") or meta.get("external_url") or meta.get("website") or ""
                         info["twitter"] = meta.get("twitter") or meta.get("twitter_username") or ""
-                except Exception:
-                    pass
-    except Exception:
-        pass
+                except Exception as exc:
+                    _log.debug("contractURI metadata fetch failed for %s: %s", contract_addr, exc)
+    except Exception as exc:
+        _log.debug("contractURI lookup failed for %s: %s", contract_addr, exc)
 
     if not info.get("website"):
         for tid in [1, 0]:
@@ -865,8 +865,8 @@ def analyze_contract(rpc: BscRpcClient, contract_addr: str, wallet_addr: str) ->
                         if m and "ipfs" not in m.group(1):
                             info["website"] = m.group(1)
                         break
-            except Exception:
-                pass
+            except Exception as exc:
+                _log.debug("tokenURI lookup failed for %s: %s", contract_addr, exc)
 
     # If pure BEP-20 token with no public minting functions, price is DEX-driven
     if classification.get("category") == "TOKEN" and not any(m in code for m in ["1249c58b", "a0712d68", "836a1040", "6ecd2306"]):
@@ -955,8 +955,8 @@ def analyze_contract(rpc: BscRpcClient, contract_addr: str, wallet_addr: str) ->
                     info["mint_price_bnb"] = 0.0
                     info["mint_price_str"] = "⭐ FREE"
                     info["mint_value_wei"] = "0"
-            except Exception:
-                pass
+            except Exception as exc:
+                _log.debug("free-mint simulation (mint(uint256)) failed for %s: %s", contract_addr, exc)
 
         # Check secondary USD price if free, or primary USD price if paid
         usd_res = rpc.call_contract(contract_addr, "0x2bca65c3")
