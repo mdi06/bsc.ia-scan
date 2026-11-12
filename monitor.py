@@ -1998,8 +1998,8 @@ def analyze_market_interest(
         try:
             stats["deployer_balance_bnb"] = rpc.get_balance(deployer_addr) / 1e18
             stats["deployer_nonce"] = rpc.get_tx_count(deployer_addr)
-        except Exception:
-            pass
+        except Exception as exc:
+            _log.debug("deployer balance lookup failed for %s: %s", deployer_addr, exc)
 
         # Check for Fresh Dev Wallet (nonce <= 2 and balance < 0.05 BNB)
         if stats["deployer_nonce"] <= 2 and stats["deployer_balance_bnb"] < 0.05:
@@ -2155,8 +2155,8 @@ def analyze_market_interest(
                     if vol_wei > 0:
                         stats["volume_bnb"] = round(vol_wei / 1e18, 2)
                         stats["volume_24h"] = (vol_wei / 1e18) * 705.0
-            except Exception:
-                pass
+            except Exception as exc:
+                _log.debug("oathbots market.json fetch failed: %s", exc)
         if not stats.get("volume_bnb") and details.get("volume_bnb"):
             stats["volume_bnb"] = details["volume_bnb"]
         if not stats.get("total_volume_bnb") and details.get("total_volume_bnb"):
@@ -2212,8 +2212,8 @@ def analyze_market_interest(
                                     best_pair_addr = lp_addr
                                     best_px_usd = p_px_usd
                                     best_px_bnb = p_px_bnb
-                except Exception:
-                    pass
+                except Exception as exc:
+                    _log.debug("PancakeSwap pair lookup failed: %s", exc)
 
             if best_lp_usd > stats.get("lp_usd", 0.0):
                 stats["lp_usd"] = best_lp_usd
@@ -2226,8 +2226,8 @@ def analyze_market_interest(
                 stats["token_price_usd"] = best_px_usd
             if best_px_bnb > 0 and stats.get("token_price_bnb", 0.0) == 0:
                 stats["token_price_bnb"] = best_px_bnb
-        except Exception:
-            pass
+        except Exception as exc:
+            _log.debug("BNB price lookup failed: %s", exc)
 
     # Supply metrics
     max_sup = details.get("max_supply")
@@ -2279,8 +2279,8 @@ def analyze_market_interest(
     contract_bnb = 0.0
     try:
         contract_bnb = rpc.get_balance(contract_addr) / 1e18
-    except Exception:
-        pass
+    except Exception as exc:
+        _log.debug("contract balance lookup failed for %s: %s", contract_addr, exc)
     tot_minted = details.get("total_minted", 0) or 0
     if tot_minted > 20 and is_paid_mint and contract_bnb < 0.01 and stats.get("lp_usd", 0) < 100:
         sec["is_fund_drain"] = True
@@ -2322,8 +2322,8 @@ def analyze_market_interest(
                         tot_sup = int(sup_res[2:66], 16)
                         if tot_sup > 0:
                             dev_pct = round((dev_bal / tot_sup) * 100.0, 1)
-            except Exception:
-                pass
+            except Exception as exc:
+                _log.debug("deployer token balance lookup failed for %s: %s", deployer_addr, exc)
 
         sm_wallets = details.get("smart_wallets") or details.get("smart_minters") or []
         holders_cnt = stats.get("holders", 0) or 1
