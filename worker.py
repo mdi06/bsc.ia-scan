@@ -42,21 +42,6 @@ discovery_pool = concurrent.futures.ThreadPoolExecutor(max_workers=3, thread_nam
 fast_sweep_pool = concurrent.futures.ThreadPoolExecutor(max_workers=3, thread_name_prefix="FastSweeper")
 
 
-def _known_infra() -> set:
-    """Routers, factories and registries whose transactions are never treated as drop candidates."""
-    return {
-        monitor.PANCAKE_FACTORY_V2.lower(),
-        monitor.WBNB_ADDRESS.lower(),
-        monitor.USDT_ADDRESS.lower(),
-        monitor.AGENT_ID_REGISTRY.lower(),
-        monitor.SPACE_ID_MASTER_REGISTRY.lower(),
-        monitor.FOUR_MEME_FACTORY.lower(),
-        monitor.FOUR_MEME_ROUTER.lower(),
-        "0x10ed43c718714eb63d5aa57b78b54704e256024e",  # PancakeSwap V2 router
-        "0x13f4ea83d0bd40e75c8222255bc855a974568dd4",
-    }
-
-
 def _enrich_contract_background(rpc: monitor.BscRpcClient, contract_addr: str, deployer_addr: Optional[str], det: dict):
     """Adds GoPlus security and DexScreener market data to a newly discovered drop."""
     try:
@@ -299,7 +284,7 @@ def run_discovery_loop():
     history = get_shared_history()
     smart_wallets = monitor.load_smart_wallets()
 
-    known_infra = _known_infra()
+    known_infra = monitor.known_infra_addresses()
 
     cur = rpc.get_block_number()
     while cur is None:
@@ -867,7 +852,7 @@ def run_proxy_factory_watcher_loop():
         curr_b = rpc.get_block_number()
     last_block = curr_b - 1
 
-    known_infra = _known_infra()
+    known_infra = monitor.known_infra_addresses()
 
     while True:
         try:
@@ -1017,7 +1002,7 @@ def run_agent_id_counter_loop():
     else:
         cur_st = dict(local_st)
 
-    total_wallets = int(cur_st.get("total_created_wallets") or 178001)
+    total_wallets = int(cur_st.get("total_created_wallets") or monitor.DEFAULT_AGENT_WALLET_COUNT)
     last_block = int(cur_st.get("last_block") or 0)
     startup_synced = False
 

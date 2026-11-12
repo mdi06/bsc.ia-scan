@@ -116,6 +116,21 @@ VAULT_FACTORIES = [
     FOUR_MEME_ROUTER.lower()                         # Four.meme Buy Router
 ]
 
+def known_infra_addresses() -> set:
+    """Routers, factories and registries whose transactions are never treated as drop candidates."""
+    return {
+        PANCAKE_FACTORY_V2.lower(),
+        WBNB_ADDRESS.lower(),
+        USDT_ADDRESS.lower(),
+        AGENT_ID_REGISTRY.lower(),
+        SPACE_ID_MASTER_REGISTRY.lower(),
+        FOUR_MEME_FACTORY.lower(),
+        FOUR_MEME_ROUTER.lower(),
+        PANCAKE_ROUTER_V2.lower(),
+        "0x13f4ea83d0bd40e75c8222255bc855a974568dd4",
+    }
+
+
 FACTORY_SELECTORS = ["27cca59f", "7d38bb0d", "1737a4bd"]
 
 # Top BSC quote pairs for PancakeSwap V2 secondary liquidity resolution
@@ -151,6 +166,9 @@ STATS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "a
 STATS_FILE_ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "agent_id_stats.json")
 SMART_WALLETS_CSV_URL = "https://docs.google.com/spreadsheets/d/1jcKyWK1JJ8uBchTS3p1ok18DeB7yrDb2ZDxOaNYF73Q/export?format=csv&gid=395869104"
 
+# Registered .ai wallets, used until a real count has been read from the chain.
+DEFAULT_AGENT_WALLET_COUNT = 178001
+
 def load_agent_id_stats() -> Dict[str, Any]:
     """Loads live statistics for registered Binance .ai Agent ID wallets."""
     best = None
@@ -167,7 +185,7 @@ def load_agent_id_stats() -> Dict[str, Any]:
     if best is not None:
         return best
     return {
-        "total_created_wallets": 178001,
+        "total_created_wallets": DEFAULT_AGENT_WALLET_COUNT,
         "last_block": 132757997,
         "last_updated": time.time(),
         "source": "SPACE ID / Binance Agent ID Registry (0x60B9262456dE011F7d15a54CdD8c48bAaa8B022F)"
@@ -2605,7 +2623,7 @@ def print_interest_report(stats: Dict[str, Any]):
 
 def print_banner():
     stats = load_agent_id_stats()
-    ai_wallets_cnt = stats.get("total_created_wallets", 175842)
+    ai_wallets_cnt = stats.get("total_created_wallets", DEFAULT_AGENT_WALLET_COUNT)
     s_cnt = f"{ai_wallets_cnt:,}"
     l1, l2, l3 = "", "", ""
     for ch in s_cnt:
@@ -4537,7 +4555,7 @@ def build_interactive_dashboard(
     port_pill = f" [ 3: 🎒 My Portfolio ({port_cnt} Assets) ] "
 
     stats = load_agent_id_stats()
-    ai_wallets_cnt = stats.get("total_created_wallets", 175842)
+    ai_wallets_cnt = stats.get("total_created_wallets", DEFAULT_AGENT_WALLET_COUNT)
     c_panel = render_digital_counter_panel(f"{ai_wallets_cnt:,}")
 
     h_text = Text()
@@ -5147,17 +5165,7 @@ def run_live_monitor(rpc: BscRpcClient, wallet: str, plain: bool = False):
     stop_event = threading.Event()
 
     smart_wallets = load_smart_wallets()
-    known_infra = {
-        PANCAKE_FACTORY_V2.lower(),
-        WBNB_ADDRESS.lower(),
-        USDT_ADDRESS.lower(),
-        AGENT_ID_REGISTRY.lower(),
-        SPACE_ID_MASTER_REGISTRY.lower(),
-        FOUR_MEME_FACTORY.lower(),
-        FOUR_MEME_ROUTER.lower(),
-        "0x10ed43c718714eb63d5aa57b78b54704e256024e",
-        "0x13f4ea83d0bd40e75c8222255bc855a974568dd4"
-    }
+    known_infra = known_infra_addresses()
 
     latest_block = [rpc.get_block_number() - 1]
     latest_tx_count = [0]
@@ -5216,7 +5224,7 @@ def run_live_monitor(rpc: BscRpcClient, wallet: str, plain: bool = False):
                         if rcv == AGENT_ID_REGISTRY.lower() and len(inp) >= 10:
                             try:
                                 cur_st = load_agent_id_stats()
-                                cur_st["total_created_wallets"] = cur_st.get("total_created_wallets", 175842) + 1
+                                cur_st["total_created_wallets"] = cur_st.get("total_created_wallets", DEFAULT_AGENT_WALLET_COUNT) + 1
                                 cur_st["last_updated"] = time.time()
                                 save_agent_id_stats(cur_st)
                                 status_msg = f"🎉 New .ai Agent ID Claimed! Total Registered: {cur_st['total_created_wallets']:,}"
@@ -6616,17 +6624,7 @@ def scan_smart_wallets(rpc: BscRpcClient, wallet: str, blocks: int = 200):
         print(f"{C_YELLOW}[!] No smart wallet contract interactions detected in the last {blocks} blocks.{C_RESET}")
         return
 
-    known_infra = {
-        PANCAKE_FACTORY_V2.lower(),
-        WBNB_ADDRESS.lower(),
-        USDT_ADDRESS.lower(),
-        AGENT_ID_REGISTRY.lower(),
-        SPACE_ID_MASTER_REGISTRY.lower(),
-        FOUR_MEME_FACTORY.lower(),
-        FOUR_MEME_ROUTER.lower(),
-        "0x10ed43c718714eb63d5aa57b78b54704e256024e",
-        "0x13f4ea83d0bd40e75c8222255bc855a974568dd4"
-    }
+    known_infra = known_infra_addresses()
 
     contracts = {}
     for h in all_hits:

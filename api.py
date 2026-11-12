@@ -296,7 +296,7 @@ def compute_global_overview_stats(all_projs=None) -> dict:
         else:
             best_agent_stats = local_stats
 
-        total_agent_wallets = int(best_agent_stats.get("total_created_wallets") or 178001)
+        total_agent_wallets = int(best_agent_stats.get("total_created_wallets") or monitor.DEFAULT_AGENT_WALLET_COUNT)
         agent_wallets_block = int(best_agent_stats.get("last_block") or 0)
 
         return {
@@ -321,8 +321,8 @@ def compute_global_overview_stats(all_projs=None) -> dict:
             "nft_surge": 0,
             "secondary": 0,
             "latest_block": None,
-            "agent_wallets": 178001,
-            "total_created_wallets": 178001,
+            "agent_wallets": monitor.DEFAULT_AGENT_WALLET_COUNT,
+            "total_created_wallets": monitor.DEFAULT_AGENT_WALLET_COUNT,
             "agent_wallets_block": 0
         }
 
