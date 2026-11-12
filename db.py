@@ -1,8 +1,8 @@
 """
-Storage & Database Modernization Layer for Agent ID Monitor.
-Supports:
-1. Supabase (Remote PostgreSQL via PostgREST REST API) - Perfect for Render Free (no data loss on reboot)
-2. SQLite (WAL Mode, Thread-Safe) - Native fallback for local development and offline environments
+Storage layer for Agent ID Monitor.
+Backends:
+1. Supabase (PostgreSQL via the PostgREST API): used when SUPABASE_URL and a key are set, so data survives Render restarts.
+2. SQLite (WAL mode): fallback for local development, and when a Supabase write fails.
 """
 
 import os
@@ -13,13 +13,11 @@ import threading
 from typing import List, Dict, Any, Optional
 from pathlib import Path
 
-# Try importing httpx for Supabase REST calls; fallback to urllib if needed
+# Supabase calls need httpx; without it everything falls back to SQLite.
 try:
     import httpx
     HAS_HTTPX = True
 except ImportError:
-    import urllib.request
-    import urllib.parse
     HAS_HTTPX = False
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -46,23 +44,21 @@ class DatabaseManager:
         self.mode = "supabase" if (self.supabase_url and self.supabase_key) else "sqlite"
         self.db_path = db_path or os.getenv("DB_PATH", DEFAULT_DB_PATH)
         
-        # Thread locks for in-memory and local SQLite operations
         self._lock = threading.RLock()
         self._cache_lock = threading.RLock()
         
-        # In-memory fast cache: {contract_lower: project_dict}
-        # 60s TTL: Supabase egress only triggers once per minute max instead of every 3s.
-        # New drops upserted in-memory immediately so the UI stays fresh without polling.
+        # In-memory cache: {contract_lower: project_dict}. The 60s TTL caps Supabase reads at one per minute;
+        # upserts update the cache immediately so new drops show up without waiting for a refresh.
         self._projects_cache: Dict[str, Dict[str, Any]] = {}
         self._p_fingerprints: Dict[str, str] = {}
         self._cache_initialized = False
         self._last_cache_time = 0.0
         self._last_synced_updated_at = 0
-        self._cache_ttl = 60.0  # seconds — was 3s, caused ~1,200 Supabase hits/hr
+        self._cache_ttl = 60.0  # seconds
         self._cached_json_bytes: Optional[bytes] = None
         self._cache_dirty = True
 
-        # Process-safe HTTP client state for Supabase
+        # httpx client, recreated when the PID changes (see `client`)
         self._client_instance = None
         self._client_pid = None
 
@@ -71,7 +67,7 @@ class DatabaseManager:
         self._agent_stats_cache_time: float = 0.0
         self._last_stats_cloud_write: float = 0.0
 
-        # Pre-seed in-memory cache from local history (0-byte egress on cold start)
+        # Pre-seed the cache from history.json so a cold start needs no Supabase read.
         if os.path.exists(HISTORY_FILE):
             try:
                 with open(HISTORY_FILE, "r", encoding="utf-8") as f:
@@ -83,31 +79,28 @@ class DatabaseManager:
                             self._projects_cache[c] = d
                     if self._projects_cache:
                         self._cache_initialized = True
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"[⚠️ DB Warning] Could not pre-seed cache from {HISTORY_FILE}: {e}", flush=True)
 
         if self.mode == "sqlite":
             self._init_sqlite()
         
-        # Auto-seed on startup if needed
         self.seed_from_local_json()
 
     @property
     def client(self) -> Optional["httpx.Client"]:
-        """Process-safe and thread-safe httpx.Client provider.
-        Automatically recreates a fresh client if invoked in a newly forked child process.
-        """
+        """Shared httpx.Client, recreated in a forked child process (a client must not be shared across PIDs)."""
         if self.mode != "supabase" or not HAS_HTTPX:
             return None
         cur_pid = os.getpid()
         with self._lock:
-            if getattr(self, "_client_pid", None) != cur_pid or getattr(self, "_client_instance", None) is None:
-                old = getattr(self, "_client_instance", None)
+            if self._client_pid != cur_pid or self._client_instance is None:
+                old = self._client_instance
                 if old is not None:
                     try:
                         old.close()
                     except Exception:
-                        pass
+                        pass  # the old client may belong to the parent process; closing is best-effort
                 self._client_instance = httpx.Client(
                     base_url=self.supabase_url,
                     headers={
@@ -121,11 +114,6 @@ class DatabaseManager:
                 )
                 self._client_pid = cur_pid
             return self._client_instance
-
-    @property
-    def _client(self):
-        """Backward compatibility for any references to self._client."""
-        return self.client
 
     # -------------------------------------------------------------------------
     # SQLite Initialization & Connection
@@ -610,9 +598,6 @@ class DatabaseManager:
             finally:
                 conn.close()
 
-    def upsert_project(self, project: Dict[str, Any]):
-        self.upsert_projects([project])
-
     def delete_projects(self, contracts: List[str]) -> int:
         """Deletes projects by contract from Supabase and SQLite, invalidating cache."""
         clean = [c.lower().strip() for c in contracts if c and isinstance(c, str)]
@@ -668,8 +653,9 @@ class DatabaseManager:
 
         if self.mode == "supabase":
             try:
-                if HAS_HTTPX and self._client:
-                    resp = self._client.get(f"/rest/v1/user_favorites?wallet=eq.{w}&select=*")
+                client = self.client
+                if HAS_HTTPX and client:
+                    resp = client.get(f"/rest/v1/user_favorites?wallet=eq.{w}&select=*")
                     if resp.status_code == 200:
                         records = resp.json()
                         if records:
@@ -710,8 +696,9 @@ class DatabaseManager:
 
         if self.mode == "supabase":
             try:
-                if HAS_HTTPX and self._client:
-                    resp = self._client.post(
+                client = self.client
+                if HAS_HTTPX and client:
+                    resp = client.post(
                         "/rest/v1/user_favorites?on_conflict=wallet",
                         json={"wallet": w, "favorites": clean_favs, "updated_at": ts},
                         headers={"Prefer": "resolution=merge-duplicates"}
@@ -765,8 +752,8 @@ class DatabaseManager:
                                 record = favs[0]
                             elif isinstance(favs, dict):
                                 record = favs
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"[⚠️ Supabase Agent ID Stats Error] {e}", flush=True)
 
         if record is None:
             with self._lock:
@@ -781,8 +768,8 @@ class DatabaseManager:
                             record = favs[0]
                         elif isinstance(favs, dict):
                             record = favs
-                except Exception:
-                    pass
+                except Exception as e:
+                    print(f"[⚠️ SQLite Agent ID Stats Error] {e}", flush=True)
                 finally:
                     conn.close()
 
@@ -826,8 +813,8 @@ class DatabaseManager:
                         if resp.status_code in (200, 201):
                             self._last_stats_cloud_write = now
                             return
-                except Exception:
-                    pass
+                except Exception as e:
+                    print(f"[⚠️ Supabase Save Agent ID Stats Error] {e}", flush=True)
 
         with self._lock:
             conn = self._get_sqlite_connection()
@@ -841,12 +828,12 @@ class DatabaseManager:
                         updated_at=excluded.updated_at;
                 """, (sentinel, json.dumps(payload), clean_stats["last_updated"]))
                 conn.commit()
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"[⚠️ SQLite Save Agent ID Stats Error] {e}", flush=True)
             finally:
                 conn.close()
 
 
-# Global Singleton Instance
+# Module-level singleton shared by api.py, worker.py and monitor.py.
 db = DatabaseManager()
 

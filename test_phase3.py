@@ -65,7 +65,6 @@ def test_process_safe_db_client():
     # In sqlite mode, client is None
     assert manager.mode in ("sqlite", "supabase")
     assert hasattr(manager, "client")
-    assert hasattr(manager, "_client")
 
 
 def test_async_enrichment_pool_non_blocking():
