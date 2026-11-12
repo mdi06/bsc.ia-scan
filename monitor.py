@@ -3546,16 +3546,22 @@ def sync_cloud_history() -> List[Dict[str, Any]]:
 
                     # Push local discoveries and owned tokens to Cloud Engine
                     if len(res_list) > len(cloud_data) or any(x.get("user_balance", 0) > 0 for x in res_list):
-                        try:
-                            sync_req = urllib.request.Request(
-                                "https://agent-id-monitor.fly.dev/api/sync",
-                                data=json.dumps(res_list).encode("utf-8"),
-                                headers={"Content-Type": "application/json", "User-Agent": "Mozilla/5.0"},
-                                method="POST"
-                            )
-                            urllib.request.urlopen(sync_req, timeout=4.0)
-                        except Exception:
-                            pass
+                        admin_token = os.environ.get("ADMIN_TOKEN", "").strip()
+                        if admin_token:
+                            try:
+                                sync_req = urllib.request.Request(
+                                    "https://agent-id-monitor.fly.dev/api/sync",
+                                    data=json.dumps(res_list).encode("utf-8"),
+                                    headers={
+                                        "Content-Type": "application/json",
+                                        "User-Agent": "Mozilla/5.0",
+                                        "Authorization": f"Bearer {admin_token}",
+                                    },
+                                    method="POST"
+                                )
+                                urllib.request.urlopen(sync_req, timeout=4.0)
+                            except Exception:
+                                pass
 
                     return res_list
     except Exception:

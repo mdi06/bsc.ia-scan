@@ -13,8 +13,9 @@ import sys
 import time
 import json
 import hashlib
+import secrets
 from typing import Optional, List, Dict, Any
-from fastapi import FastAPI, Query, HTTPException, Request
+from fastapi import FastAPI, Query, HTTPException, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse, Response, RedirectResponse, FileResponse
@@ -41,6 +42,22 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+def require_admin(request: Request) -> None:
+    """Gate for write/delete endpoints. Requires `Authorization: Bearer <ADMIN_TOKEN>`.
+
+    If ADMIN_TOKEN is unset/empty the endpoints are disabled (503), never open.
+    """
+    expected = os.environ.get("ADMIN_TOKEN", "")
+    if not expected:
+        raise HTTPException(status_code=503, detail="admin disabled")
+    header = request.headers.get("authorization", "")
+    scheme, _, token = header.partition(" ")
+    if scheme.lower() != "bearer" or not token:
+        raise HTTPException(status_code=401, detail="unauthorized")
+    if not secrets.compare_digest(token.strip().encode("utf-8"), expected.encode("utf-8")):
+        raise HTTPException(status_code=401, detail="unauthorized")
 
 
 @app.exception_handler(Exception)
@@ -99,8 +116,8 @@ def startup_event():
         print(f"[FastAPI Startup Purge Error] {e}", flush=True)
 
 
-@app.post("/api/admin/purge-bogus")
-@app.delete("/api/projects/{contract}")
+@app.post("/api/admin/purge-bogus", dependencies=[Depends(require_admin)])
+@app.delete("/api/projects/{contract}", dependencies=[Depends(require_admin)])
 def purge_bogus_endpoint(contract: Optional[str] = None):
     targets = [contract.lower()] if contract else BOGUS_SCAM_CONTRACTS
     cnt = db.delete_projects(targets)
@@ -577,8 +594,8 @@ async def post_favorites(request: Request):
     }
 
 
-@app.post("/api/sync")
-@app.post("/sync")
+@app.post("/api/sync", dependencies=[Depends(require_admin)])
+@app.post("/sync", dependencies=[Depends(require_admin)])
 async def post_sync(request: Request):
     try:
         incoming = await request.json()
