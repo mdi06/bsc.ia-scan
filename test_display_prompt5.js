@@ -283,6 +283,35 @@ console.log('✔ BNB price: null until known, "—" without it, "≈" when stale
   assert.deepStrictEqual(app.compute24hPulseMetrics([], [seedEntry], 0, win).topAthMints.map(a => a.name), ['Old Winner'], 'inside the window: counted');
   console.log('✔ Pulse ATH card: historical winners only count inside the server window: PASS');
 
+  // ---------------------------------------------------------------------------------------- table: stale / DEX-traded record (preview run)
+  // SPACEDOG after the market data was cleared as stale showed "Fair Mint" in the price column and no stale marker
+  const staleDex = { standard: 'BEP-20 Token (18 decimals)', contract: '0x99487232829ac745b5be20c1d215f255335812ef', name: 'Space Dog', symbol: 'SPACEDOG',
+    mint_price_str: 'DEX Traded', total_minted: 2.4e9, max_supply: null, holders: 235, buys_24h: null, market_stale: true,
+    token_price_usd: null, lp_usd: null, market_cap: null };
+  const staleRow = tableHtml([staleDex]);
+  assert(!staleRow.includes('Fair Mint'), 'a cleared DEX-traded token is not in its "Fair Mint" phase');
+  assert(staleRow.includes('stale'), 'the table row carries the stale marker');
+  const dexOnly = tableHtml([{ ...staleDex, contract: '0x' + '6'.repeat(40), market_stale: false }]);
+  assert(!dexOnly.includes('Fair Mint'), 'a DEX-traded token with no price is "—", not "Fair Mint"');
+  const preMarket = tableHtml([{ standard: 'ERC-721 (NFT Collection)', contract: '0x' + '4'.repeat(40), name: 'Fresh Drop', symbol: 'FD',
+    mint_price_str: '0.0100 BNB', mint_price_bnb: 0.01, total_minted: 5, max_supply: 1000 }]);
+  assert(preMarket.includes('Fair Mint'), 'a genuine pre-market drop keeps its "Fair Mint" label');
+  const oldData = tableHtml([{ ...xgirl, contract: '0x' + '3'.repeat(40), market_updated_at: Date.now() / 1000 - 3 * 3600 }]);
+  assert(oldData.includes('3h ago'), 'market data that has not been confirmed for hours shows its age next to the price');
+  console.log('✔ Table: stale marker, no "Fair Mint" for a cleared / DEX-traded token, age of old data: PASS');
+
+  // ---------------------------------------------------------------------------------------- Pulse runners are live movers only
+  const seedMars = { name: 'Mars Nexus Identity', symbol: 'MARSID', contract: '0xcbac4fac33afb361e836e6a0120f5a5aac9122b3', standard: 'ERC-721 (NFT Collection)',
+    secUsd: 0.0486, athPrice: 0.0486, athProfit: 0.05, profit: 0.05,
+    item: { name: 'Mars Nexus Identity', symbol: 'MARSID', contract: '0xcbac4fac33afb361e836e6a0120f5a5aac9122b3', standard: 'ERC-721 (NFT Collection)',
+            mint_price_str: 'FREE', has_free_mint: true, token_price_usd: 0.0486, market_cap: 4300000, lp_usd: 900000, volume_24h: 5000 } };
+  const liveRunner = { name: 'Live Mover', symbol: 'LIVE', contract: '0x' + '2'.repeat(40), standard: 'BEP-20 Token (18 decimals)', token_price_usd: 0.002,
+    market_cap: 90000, lp_usd: 9000, volume_24h: 4000, price_change_24h: 12.0 };
+  const runners = app.compute24hPulseMetrics([liveRunner], [seedMars], 0, null).topRunners.map(r => r.name);
+  assert.deepStrictEqual(runners, ['Live Mover'], 'a saved / seed entry never stands in for a live 24h runner');
+  assert.strictEqual(app.compute24hPulseMetrics([], [seedMars], 0, null).topRunners.length, 0, 'no live drops: no runners (not seed entries)');
+  console.log('✔ Pulse runners: live drops only, seeds excluded: PASS');
+
   console.log('🎉 Prompt 5 display tests passed.');
   process.exit(0);
 })().catch((e) => { console.error(e); process.exit(1); });

@@ -3056,8 +3056,12 @@ function compute24hPulseMetrics(drops = allDrops, topGainersList = savedTopGaine
 
   // Top 3 Runners: prioritize positive 24h momentum with volume, or leading secondary market assets
   const runnerCandidates = [];
+  // Runners are LIVE 24h movers: a saved leaderboard / frozen seed entry carries no 24h data and must not stand in
+  // for one (a seed's old price and market cap showed up as "#3 runner +0.0%")
+  const liveContracts = new Set(list.map(d => String((d && d.contract) || '').toLowerCase()));
+  const isLive = (d) => liveContracts.has(String((d && d.contract) || '').toLowerCase());
   uniquePool.forEach(d => {
-    if (isExcludedMajorAsset(d)) return;
+    if (isExcludedMajorAsset(d) || !isLive(d)) return;
     const chg = Number(d.price_change_24h || 0);
     const mcap = getSanitizedMcap(d);
     const vol = Number(d.volume_24h || 0);
@@ -3085,7 +3089,7 @@ function compute24hPulseMetrics(drops = allDrops, topGainersList = savedTopGaine
 
   // If fewer than 3 candidates, fill with secondary market assets by market cap
   if (topRunners.length < 3) {
-    const fallbackAssets = uniquePool.filter(d => !isExcludedMajorAsset(d) && !topRunners.some(r => r.contract === d.contract));
+    const fallbackAssets = uniquePool.filter(d => !isExcludedMajorAsset(d) && isLive(d) && !topRunners.some(r => r.contract === d.contract));
     fallbackAssets.sort((a, b) => (getSanitizedMcap(b) || Number(b.lp_usd || 0)) - (getSanitizedMcap(a) || Number(a.lp_usd || 0)));
     for (const fb of fallbackAssets) {
       if (topRunners.length >= 3) break;
@@ -5044,10 +5048,14 @@ function renderTable(keepLimit = false) {
     } else {
       if (ms > 0 && tm >= ms) {
         floorStr = `<span style="color: var(--color-yellow); font-weight:600;">100% Sold</span>`;
+      } else if (item.market_stale || String(item.mint_price_str || '').toUpperCase().includes('DEX')) {
+        // a token that already trades (or whose market data was cleared as stale) is not in its fair-mint phase
+        floorStr = `<span class="dim">—</span>`;
       } else {
         floorStr = `<span style="color: var(--color-cyan); font-weight:600;">Fair Mint</span>`;
       }
     }
+    floorStr += marketFreshnessHtml(item);   // "⚠ stale", or the age of data that has not been confirmed for a while
 
     const athProf = Number(item.ath_profit_usd || 0);
     const curProf = Number(item.current_profit_usd || 0);
@@ -5357,10 +5365,14 @@ function appendNextTableBatch() {
     } else {
       if (ms > 0 && tm >= ms) {
         floorStr = `<span style="color: var(--color-yellow); font-weight:600;">100% Sold</span>`;
+      } else if (item.market_stale || String(item.mint_price_str || '').toUpperCase().includes('DEX')) {
+        // a token that already trades (or whose market data was cleared as stale) is not in its fair-mint phase
+        floorStr = `<span class="dim">—</span>`;
       } else {
         floorStr = `<span style="color: var(--color-cyan); font-weight:600;">Fair Mint</span>`;
       }
     }
+    floorStr += marketFreshnessHtml(item);   // "⚠ stale", or the age of data that has not been confirmed for a while
 
     const athProf = Number(item.ath_profit_usd || 0);
     const curProf = Number(item.current_profit_usd || 0);

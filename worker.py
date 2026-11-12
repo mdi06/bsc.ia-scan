@@ -845,6 +845,11 @@ def _recompute_interest(item: Dict[str, Any]) -> None:
 _pancake_checked_at: Dict[str, float] = {}
 PANCAKE_RECHECK_SEC = 3600.0
 PANCAKE_FALLBACK_PER_SWEEP = 25
+# A record waiting for its Pancake lookup is not expired for this long at most. Thousands of legacy records
+# queue for those 25 lookups per sweep, so without a bound a record whose pair is long gone kept showing its
+# old liquidity for hours (seen in a preview run: AVESAKE).
+PANCAKE_DEFER_MAX_SEC = 1800.0
+_pancake_defer_since: Dict[str, float] = {}
 
 
 def _pancake_token_decimals(rpc, item: Dict[str, Any], c: str) -> int:
@@ -982,6 +987,9 @@ def clean_count_junk(item: Dict[str, Any]) -> List[str]:
     - buys_24h above 1e6 that equals total_minted, or ANY buys_24h equal to total_minted on a record without a
       DexScreener pair (a real buy count never mirrors the mint count there);
     - holders equal to total_minted (above 1) on a record without a DexScreener pair;
+    - on ANY record, holders above 1e6 that equal total_minted, and buys_24h above 1e6 within 10% of total_minted
+      (the supply kept growing after the fallback copied it, so "equal" drifts): no BSC token has a million
+      holders or a million buys a day that happen to match its mint count;
     - a non-integer holders value (e.g. 74574586.24)."""
     changed: List[str] = []
     tm = item.get("total_minted")
@@ -993,8 +1001,14 @@ def clean_count_junk(item: Dict[str, Any]) -> List[str]:
         except (TypeError, ValueError):
             return False
 
+    def near(a, b, tol=0.10) -> bool:
+        try:
+            return a is not None and b is not None and float(b) > 0 and abs(float(a) - float(b)) <= tol * float(b)
+        except (TypeError, ValueError):
+            return False
+
     b24 = item.get("buys_24h")
-    if b24 is not None and same(b24, tm) and (float(b24) > 1e6 or not has_dex):
+    if b24 is not None and ((same(b24, tm) and (float(b24) > 1e6 or not has_dex)) or (near(b24, tm) and float(b24) > 1e6)):
         item["buys_24h"] = None
         changed.append("buys_24h")
     h = item.get("holders")
@@ -1003,7 +1017,7 @@ def clean_count_junk(item: Dict[str, Any]) -> List[str]:
             frac = float(h) != int(float(h))
         except (TypeError, ValueError, OverflowError):
             frac = True
-        if frac or (same(h, tm) and float(h) > 1 and not has_dex):
+        if frac or (same(h, tm) and float(h) > 1 and (not has_dex or float(h) > 1e6)):
             item["holders"] = None
             changed.append("holders")
     return changed
@@ -1102,6 +1116,7 @@ def run_market_dynamics_updater_loop():
             for item in this_sweep:
                 c = (item.get("contract") or "").lower()
                 _pancake_checked_at[c] = time.time()
+                _pancake_defer_since.pop(c, None)
                 try:
                     if _apply_pancake_estimate(rpc, item):
                         _recompute_interest(item)
@@ -1116,7 +1131,13 @@ def run_market_dynamics_updater_loop():
             # Records nobody confirmed for too long: clear their market fields (unknown, not a stale number) and
             # rescore. Skipped for records whose DexScreener batch failed (we don't know that there is no pair)
             # and for Pancake candidates still waiting for their turn (they haven't had their chance yet).
-            deferred = {id(x) for x in pancake_candidates[PANCAKE_FALLBACK_PER_SWEEP:]}
+            now_def = time.time()
+            deferred = set()
+            for x in pancake_candidates[PANCAKE_FALLBACK_PER_SWEEP:]:
+                cx = (x.get("contract") or "").lower()
+                first_seen = _pancake_defer_since.setdefault(cx, now_def)
+                if now_def - first_seen < PANCAKE_DEFER_MAX_SEC:
+                    deferred.add(id(x))      # still inside its chance window; past it the record may expire
             expired = []
             for item in no_pair_items:
                 if id(item) in deferred or (item.get("contract") or "").lower() in failed_contracts:
