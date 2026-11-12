@@ -373,3 +373,59 @@ def test_market_updater_saves_dexscreener_results_before_the_slow_pancake_pass(m
     assert len(rpc_calls) == worker.PANCAKE_FALLBACK_PER_SWEEP        # capped, not all 60
     assert nft["contract"] not in [c for _, c in rpc_calls]           # NFTs are never looked up
     assert len(worker._pancake_checked_at) == worker.PANCAKE_FALLBACK_PER_SWEEP  # cooldown recorded
+
+
+def _http_429(retry_after=None):
+    import urllib.error
+    from email.message import Message
+    hdrs = Message()
+    if retry_after is not None:
+        hdrs["Retry-After"] = str(retry_after)
+    return urllib.error.HTTPError("https://x", 429, "Too Many Requests", hdrs, None)
+
+
+def test_dexscreener_fetch_retries_429_then_succeeds(monkeypatch):
+    import io, json, urllib.request
+    waits, calls = [], []
+
+    def fake_urlopen(req, timeout=0):
+        calls.append(1)
+        if len(calls) < 3:
+            raise _http_429(retry_after=2 if len(calls) == 1 else None)
+        return io.BytesIO(json.dumps([{"pairAddress": "0x1"}]).encode())
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(worker.time, "sleep", lambda s: waits.append(s))
+    assert worker._fetch_dexscreener_pairs("https://x/a") == [{"pairAddress": "0x1"}]
+    assert len(calls) == 3 and waits == [2.0, 5.0 * 2]  # Retry-After honoured, else 5s * attempt
+
+
+def test_dexscreener_fetch_gives_up_after_repeated_429_and_does_not_retry_other_errors(monkeypatch):
+    import urllib.error, urllib.request
+    calls = []
+    monkeypatch.setattr(worker.time, "sleep", lambda s: None)
+
+    def always_429(req, timeout=0):
+        calls.append(1)
+        raise _http_429()
+
+    monkeypatch.setattr(urllib.request, "urlopen", always_429)
+    try:
+        worker._fetch_dexscreener_pairs("https://x/a")
+        assert False, "should raise"
+    except urllib.error.HTTPError as e:
+        assert e.code == 429
+    assert len(calls) == 3
+
+    calls.clear()
+
+    def server_error(req, timeout=0):
+        calls.append(1)
+        raise urllib.error.HTTPError("https://x", 500, "boom", None, None)
+
+    monkeypatch.setattr(urllib.request, "urlopen", server_error)
+    try:
+        worker._fetch_dexscreener_pairs("https://x/a")
+    except urllib.error.HTTPError:
+        pass
+    assert len(calls) == 1
