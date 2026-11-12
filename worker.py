@@ -1017,7 +1017,12 @@ def run_agent_id_counter_loop():
 
     # Resolve best persisted baseline across local JSON and cloud DB (survives Render restarts)
     local_st = monitor.load_agent_id_stats() or {}
-    cloud_st = db.get_agent_id_stats(max_age_sec=0.0) or {}
+    try:
+        cloud_st = db.get_agent_id_stats(max_age_sec=0.0) or {}
+    except Exception as e:
+        # A failed baseline lookup must not kill the counter thread (the supervisor would restart it forever).
+        print(f"[🤖 Agent ID Tracker] Could not load cloud baseline, using local only: {e}", flush=True)
+        cloud_st = {}
     if int(cloud_st.get("total_created_wallets") or 0) > int(local_st.get("total_created_wallets") or 0):
         cur_st = dict(cloud_st)
     elif int(cloud_st.get("total_created_wallets") or 0) == int(local_st.get("total_created_wallets") or 0) and int(cloud_st.get("last_block") or 0) > int(local_st.get("last_block") or 0):
