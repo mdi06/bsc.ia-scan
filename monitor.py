@@ -3082,8 +3082,8 @@ def scan_element_nft_volume(
                         fills[c] = []
                     fills[c].append(parsed["price_bnb"])
                     trade_logs.append(parsed)
-        except Exception:
-            pass
+        except Exception as exc:
+            _log.debug("Element fill logs failed for blocks %s-%s: %s", b, to_b, exc)
 
     results: Dict[str, Dict[str, Any]] = {}
 
@@ -3105,8 +3105,8 @@ def scan_element_nft_volume(
                     if res and len(res) >= 66:
                         user_held = int(res[:66], 16)
                         it["user_balance"] = user_held
-                except Exception:
-                    pass
+                except Exception as exc:
+                    _log.debug("balanceOf lookup failed for %s: %s", c, exc)
 
             moves = int(it.get("secondary_transfers", 0) or 0)
             try:
@@ -3124,8 +3124,8 @@ def scan_element_nft_volume(
                     if len(topics) == 4 and int(topics[1], 16) != 0:
                         sec_count += 1
                 moves = sec_count
-            except Exception:
-                pass
+            except Exception as exc:
+                _log.debug("transfer log scan failed for %s: %s", c, exc)
         else:
             moves = int(it.get("secondary_transfers", 0) or 0)
 
@@ -3475,8 +3475,6 @@ def refresh_portfolio(rpc: BscRpcClient, history: List[Dict[str, Any]], wallet: 
     """
     Scans tracked projects on-chain in parallel to refresh token/NFT balances.
     """
-    from concurrent.futures import ThreadPoolExecutor
-
     def _check(item):
         c = item.get("contract")
         if not c or is_system_infra(item):
