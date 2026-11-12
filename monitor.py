@@ -5763,7 +5763,7 @@ def run_live_monitor(rpc: BscRpcClient, wallet: str, plain: bool = False):
                         status_msg = f"🔄 Refreshing on-chain metrics for {sel_name}..."
                         live.update(build_interactive_dashboard(history, selected_idx, latest_block[0], latest_tx_count[0], wallet, status_msg, show_modal, active_filter=active_filter, sort_mode=sort_mode, snipe_confirm=snipe_confirm, active_tab=active_tab, portfolio_data=portfolio_data, port_selected_idx=port_selected_idx, smart_selected_idx=smart_selected_idx))
                         
-                        # Refresh selected project first for instant feedback (<1s)
+                        # Refresh the selected project first so its row updates before the rest
                         if target_proj:
                             refresh_project_metrics(rpc, target_proj, wallet)
                             save_history(history)
@@ -6552,7 +6552,6 @@ def scan_smart_wallets(rpc: BscRpcClient, wallet: str, blocks: int = 200):
         except Exception:
             return []
 
-    from concurrent.futures import ThreadPoolExecutor
     with ThreadPoolExecutor(max_workers=15) as executor:
         all_hits_nested = list(executor.map(fetch_block_txs, block_range))
 
