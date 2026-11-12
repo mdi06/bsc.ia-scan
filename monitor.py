@@ -10,9 +10,9 @@ Features:
 - Block-0 Discovery: Catches contract deployments referencing the Agent ID registry.
 - Automatic Asset Classification: Distinguishes between ERC-721 (NFT), ERC-1155, BEP-20 (Token), and Fair-Mint dispensaries.
 - Under-the-hood Token Resolution: For fair-mint contracts (like Jager), extracts the underlying token being minted.
-- Instant Security & Mint Audit: Checks for free mints, supply, and function selectors.
+- Security & Mint Audit: Checks for free mints, supply, and function selectors.
 - Terminal & Audio Alerts (macOS).
-- One-click CLI command generator for instant preview & execution with `baw`.
+- CLI command generator for previewing and executing mints with `baw`.
 """
 
 import os
@@ -20,6 +20,8 @@ import sys
 import time
 import json
 import re
+import csv
+import logging
 import urllib.request
 import subprocess
 import argparse
@@ -27,9 +29,14 @@ import select
 import tty
 import termios
 import threading
-import webbrowser
 import shutil
-from typing import Optional, Dict, Any, List, Tuple, Iterable, Set
+from concurrent.futures import ThreadPoolExecutor
+from typing import Optional, Dict, Any, List, Tuple, Iterable
+
+from filters import EQUITY_SYMBOLS_CORE, EXCLUDED_PEGS_CONTRACTS, PEG_SYMBOLS_CORE
+
+# Swallowed best-effort failures are logged at DEBUG: printing would corrupt the Rich TUI.
+_log = logging.getLogger(__name__)
 
 try:
     from rich.console import Console, Group
@@ -108,9 +115,21 @@ VAULT_FACTORIES = [
     FOUR_MEME_FACTORY.lower(),                       # Four.meme Token Factory / AMAP
     FOUR_MEME_ROUTER.lower()                         # Four.meme Buy Router
 ]
-T_BEACON_UP = "0x1cf3b03a6cf19fa2baba4df148e9dcabedea7f8a5c07840e207e5c089be95d3e"   # BeaconUpgraded(address)
-T_UPGRADED = "0xbc7cd75a20ee27fd9adebab32041f755214dbc6bffa90cc0225b39da2e5c2d3b"    # Upgraded(address)
-T_VAULT_CREATED = "0x1a9fe01bcb4855c926d7757a81014e36cae596a0e3047d297d2cf88ca298a77d"
+
+def known_infra_addresses() -> set:
+    """Routers, factories and registries whose transactions are never treated as drop candidates."""
+    return {
+        PANCAKE_FACTORY_V2.lower(),
+        WBNB_ADDRESS.lower(),
+        USDT_ADDRESS.lower(),
+        AGENT_ID_REGISTRY.lower(),
+        SPACE_ID_MASTER_REGISTRY.lower(),
+        FOUR_MEME_FACTORY.lower(),
+        FOUR_MEME_ROUTER.lower(),
+        PANCAKE_ROUTER_V2.lower(),
+        "0x13f4ea83d0bd40e75c8222255bc855a974568dd4",
+    }
+
 
 FACTORY_SELECTORS = ["27cca59f", "7d38bb0d", "1737a4bd"]
 
@@ -147,6 +166,9 @@ STATS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "a
 STATS_FILE_ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "agent_id_stats.json")
 SMART_WALLETS_CSV_URL = "https://docs.google.com/spreadsheets/d/1jcKyWK1JJ8uBchTS3p1ok18DeB7yrDb2ZDxOaNYF73Q/export?format=csv&gid=395869104"
 
+# Registered .ai wallets, used until a real count has been read from the chain.
+DEFAULT_AGENT_WALLET_COUNT = 178001
+
 def load_agent_id_stats() -> Dict[str, Any]:
     """Loads live statistics for registered Binance .ai Agent ID wallets."""
     best = None
@@ -158,12 +180,12 @@ def load_agent_id_stats() -> Dict[str, Any]:
                 if isinstance(d, dict) and d.get("total_created_wallets"):
                     if best is None or int(d.get("total_created_wallets", 0)) > int(best.get("total_created_wallets", 0)):
                         best = d
-            except Exception:
-                pass
+            except Exception as exc:
+                _log.debug("could not read agent-id stats from %s: %s", p, exc)
     if best is not None:
         return best
     return {
-        "total_created_wallets": 178001,
+        "total_created_wallets": DEFAULT_AGENT_WALLET_COUNT,
         "last_block": 132757997,
         "last_updated": time.time(),
         "source": "SPACE ID / Binance Agent ID Registry (0x60B9262456dE011F7d15a54CdD8c48bAaa8B022F)"
@@ -180,8 +202,8 @@ def save_agent_id_stats(stats: Dict[str, Any]):
             with open(tmp, "w") as f:
                 json.dump(stats, f, indent=2)
             os.replace(tmp, p)
-        except Exception:
-            pass
+        except Exception as exc:
+            _log.debug("could not write agent-id stats to %s: %s", p, exc)
 
 DIGITS_3ROW = {
     "0": ["█▀█", "█ █", "█▄█"],
@@ -220,15 +242,13 @@ def load_smart_wallets() -> Dict[str, str]:
         try:
             with open(SMART_WALLETS_FILE, "r") as f:
                 return json.load(f)
-        except Exception:
-            pass
+        except Exception as exc:
+            _log.debug("could not read %s, will re-sync: %s", SMART_WALLETS_FILE, exc)
     return sync_smart_wallets()
 
 
 def sync_smart_wallets() -> Dict[str, str]:
     """Downloads/syncs the 5,000 tracked smart agent wallets from Google Sheets."""
-    import csv
-    import urllib.request
     print(f"{C_BLUE}[*] Fetching smart agent wallets from Google Sheets ({SMART_WALLETS_CSV_URL[:45]}...)...{C_RESET}")
     wallets = {}
     try:
@@ -615,8 +635,8 @@ def resolve_full_bytecode(rpc: BscRpcClient, contract_addr: str, code: str) -> T
                 target_code = rpc.get_code(target_addr)
                 if target_code and len(target_code) > 10:
                     return target_code.lower(), "EIP-1167 Clone", target_addr
-            except Exception:
-                pass
+            except Exception as exc:
+                _log.debug("could not fetch EIP-1167 target code %s: %s", target_addr, exc)
             return c_clean, "EIP-1167 Clone", target_addr
 
     # 2. EIP-1967 Implementation Slot (UUPS / Transparent Proxy)
@@ -631,8 +651,8 @@ def resolve_full_bytecode(rpc: BscRpcClient, contract_addr: str, code: str) -> T
                 if target_code and len(target_code) > 10:
                     return target_code.lower(), "EIP-1967 Proxy", target_addr
                 return c_clean, "EIP-1967 Proxy", target_addr
-    except Exception:
-        pass
+    except Exception as exc:
+        _log.debug("EIP-1967 implementation lookup failed for %s: %s", contract_addr, exc)
 
     # 3. EIP-1967 Beacon Proxy Slot (reads beacon address -> implementation())
     try:
@@ -652,8 +672,8 @@ def resolve_full_bytecode(rpc: BscRpcClient, contract_addr: str, code: str) -> T
                         if target_code and len(target_code) > 10:
                             return target_code.lower(), "Beacon Proxy", target_addr
                         return c_clean, "Beacon Proxy", target_addr
-    except Exception:
-        pass
+    except Exception as exc:
+        _log.debug("EIP-1967 beacon lookup failed for %s: %s", contract_addr, exc)
 
     return c_clean, None, None
 
@@ -781,8 +801,8 @@ def analyze_contract(rpc: BscRpcClient, contract_addr: str, wallet_addr: str) ->
                         else:
                             info["max_supply"] = raw_s
                         break
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        _log.debug("could not parse max supply %r for %s: %s", s_res, contract_addr, exc)
 
         if info["total_minted"] is None or info["total_minted"] == 0:
             for sel_name in ["totalMinted()", "_totalMinted()", "totalSupply()", "currentSupply()", "tokenCount()", "nextTokenId()", "_nextTokenId()", "currentTokenId()", "lifetimeCommitted()", "miningCommitted()"]:
@@ -800,8 +820,8 @@ def analyze_contract(rpc: BscRpcClient, contract_addr: str, wallet_addr: str) ->
                         else:
                             info["total_minted"] = raw_m
                         break
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        _log.debug("could not parse total minted %r for %s: %s", m_res, contract_addr, exc)
 
     # Inspect bytecode constants if max_supply still not found (e.g. PUSH2 24444 -> 0x615f7c)
     if info["max_supply"] is None:
@@ -809,8 +829,8 @@ def analyze_contract(rpc: BscRpcClient, contract_addr: str, wallet_addr: str) ->
             t_codes = "".join(rpc.get_code(a) for a in target_addrs).lower()
             if "615f7c" in t_codes:
                 info["max_supply"] = 24444
-        except Exception:
-            pass
+        except Exception as exc:
+            _log.debug("bytecode max-supply scan failed for %s: %s", contract_addr, exc)
 
     # If it's an NFT and no total_minted was returned, default to 0 if newly deployed
     if classification.get("category") == "NFT" and info.get("total_minted") is None:
@@ -847,10 +867,10 @@ def analyze_contract(rpc: BscRpcClient, contract_addr: str, wallet_addr: str) ->
                         meta = json.loads(r.read().decode("utf-8"))
                         info["website"] = meta.get("external_link") or meta.get("external_url") or meta.get("website") or ""
                         info["twitter"] = meta.get("twitter") or meta.get("twitter_username") or ""
-                except Exception:
-                    pass
-    except Exception:
-        pass
+                except Exception as exc:
+                    _log.debug("contractURI metadata fetch failed for %s: %s", contract_addr, exc)
+    except Exception as exc:
+        _log.debug("contractURI lookup failed for %s: %s", contract_addr, exc)
 
     if not info.get("website"):
         for tid in [1, 0]:
@@ -863,8 +883,8 @@ def analyze_contract(rpc: BscRpcClient, contract_addr: str, wallet_addr: str) ->
                         if m and "ipfs" not in m.group(1):
                             info["website"] = m.group(1)
                         break
-            except Exception:
-                pass
+            except Exception as exc:
+                _log.debug("tokenURI lookup failed for %s: %s", contract_addr, exc)
 
     # If pure BEP-20 token with no public minting functions, price is DEX-driven
     if classification.get("category") == "TOKEN" and not any(m in code for m in ["1249c58b", "a0712d68", "836a1040", "6ecd2306"]):
@@ -953,8 +973,8 @@ def analyze_contract(rpc: BscRpcClient, contract_addr: str, wallet_addr: str) ->
                     info["mint_price_bnb"] = 0.0
                     info["mint_price_str"] = "⭐ FREE"
                     info["mint_value_wei"] = "0"
-            except Exception:
-                pass
+            except Exception as exc:
+                _log.debug("free-mint simulation (mint(uint256)) failed for %s: %s", contract_addr, exc)
 
         # Check secondary USD price if free, or primary USD price if paid
         usd_res = rpc.call_contract(contract_addr, "0x2bca65c3")
@@ -1007,8 +1027,8 @@ def analyze_contract(rpc: BscRpcClient, contract_addr: str, wallet_addr: str) ->
                     info["mint_price_bnb"] = 0.0
                     info["mint_price_str"] = "⭐ FREE"
                     info["mint_value_wei"] = "0"
-            except Exception:
-                pass
+            except Exception as exc:
+                _log.debug("free-mint simulation (tiered mint) failed for %s: %s", contract_addr, exc)
 
     # Pattern C: Fair-Mint Token Dispenser mint(uint256,address,uint256) -> selector 0x836a1040 (e.g. BNAGENT, BIBIAI)
     elif "836a1040" in code:
@@ -1060,8 +1080,8 @@ def analyze_contract(rpc: BscRpcClient, contract_addr: str, wallet_addr: str) ->
                     info["mint_price_bnb"] = 0.0
                     info["mint_price_str"] = "⭐ FREE"
                     info["mint_value_wei"] = "0"
-            except Exception:
-                pass
+            except Exception as exc:
+                _log.debug("free-mint simulation (mint()) failed for %s: %s", contract_addr, exc)
 
         # Check general price methods if not free
         if not info["has_free_mint"]:
@@ -1085,22 +1105,23 @@ def analyze_contract(rpc: BscRpcClient, contract_addr: str, wallet_addr: str) ->
         matched_refund = [name for sel, name in REFUND_SELECTORS.items() if sel in full_code]
         info["has_refund"] = len(matched_refund) > 0
         info["refund_methods"] = matched_refund
-    except Exception:
-        pass
+    except Exception as exc:
+        _log.debug("refund selector scan failed for %s: %s", contract_addr, exc)
 
     return info
 
 
-def get_bnb_price_usd(rpc: BscRpcClient) -> float:
+def fetch_bnb_price_usd(rpc: BscRpcClient) -> Optional[float]:
+    """BNB/USD from the PancakeSwap V2 WBNB/USDT pool reserves, or None if the lookup fails."""
     try:
         call_data = "0xe6a43905" + WBNB_ADDRESS[2:].lower().zfill(64) + USDT_ADDRESS[2:].lower().zfill(64)
         pair_res = rpc.call_contract(PANCAKE_FACTORY_V2, call_data)
         if not pair_res or len(pair_res) < 66:
-            return 750.0
+            return None
         pair_addr = "0x" + pair_res[-40:]
         res = rpc.call_contract(pair_addr, "0x0902f1ac")
         if not res or len(res) < 130:
-            return 750.0
+            return None
         r0 = int(res[2:66], 16)
         r1 = int(res[66:130], 16)
         t0 = rpc.call_contract(pair_addr, "0x0dfe1681")
@@ -1108,8 +1129,50 @@ def get_bnb_price_usd(rpc: BscRpcClient) -> float:
             return (r0 / 1e18) / (r1 / 1e18)
         else:
             return (r1 / 1e18) / (r0 / 1e18)
-    except Exception:
-        return 750.0
+    except Exception as exc:
+        _log.debug("BNB price lookup failed: %s", exc)
+        return None
+
+
+BNB_PRICE_FALLBACK_USD = 705.0  # used until the first successful lookup
+BNB_PRICE_TTL_SEC = 60.0
+_bnb_price_state = {"usd": BNB_PRICE_FALLBACK_USD, "fetched_at": 0.0, "live": False}
+_bnb_price_lock = threading.Lock()
+_bnb_price_rpc: Optional[BscRpcClient] = None
+
+
+def cached_bnb_price() -> float:
+    """Last known BNB/USD. Never touches the network, so it is safe in render paths."""
+    return _bnb_price_state["usd"]
+
+
+def refresh_bnb_price(rpc: Optional[BscRpcClient] = None, max_age: float = BNB_PRICE_TTL_SEC) -> float:
+    """Returns BNB/USD, re-reading the Pancake WBNB/USDT pool when the cached value is older than `max_age`.
+    A failed lookup keeps the last good price (or BNB_PRICE_FALLBACK_USD if there never was one)."""
+    global _bnb_price_rpc
+    with _bnb_price_lock:
+        now = time.time()
+        if now - _bnb_price_state["fetched_at"] >= max_age:
+            if rpc is None:
+                if _bnb_price_rpc is None:
+                    _bnb_price_rpc = BscRpcClient(RPC_ENDPOINTS)
+                rpc = _bnb_price_rpc
+            price = fetch_bnb_price_usd(rpc)
+            if price and price > 0:
+                _bnb_price_state.update(usd=price, live=True)
+            else:
+                _log.debug("BNB price lookup failed; keeping $%.2f", _bnb_price_state["usd"])
+            _bnb_price_state["fetched_at"] = now  # also after a failure, so a down RPC isn't retried per call
+        return _bnb_price_state["usd"]
+
+
+def bnb_price_is_live() -> bool:
+    """True once at least one on-chain lookup has succeeded (otherwise the price is the static fallback)."""
+    return _bnb_price_state["live"]
+
+
+def get_bnb_price_usd(rpc: BscRpcClient) -> float:
+    return refresh_bnb_price(rpc)
 
 
 def fetch_token_market_data(token_addr: str) -> Dict[str, Any]:
@@ -1177,12 +1240,12 @@ def fetch_token_market_data(token_addr: str) -> Dict[str, Any]:
                 sell_tax = 0.0
                 try:
                     buy_tax = float(data.get("buy_tax") or 0.0) * 100.0
-                except Exception:
-                    pass
+                except Exception as exc:
+                    _log.debug("bad buy_tax value from GoPlus: %s", exc)
                 try:
                     sell_tax = float(data.get("sell_tax") or 0.0) * 100.0
-                except Exception:
-                    pass
+                except Exception as exc:
+                    _log.debug("bad sell_tax value from GoPlus: %s", exc)
                 is_open = (data.get("is_open_source") == "1")
 
                 # LP Locked / Burned Calculation
@@ -1194,8 +1257,8 @@ def fetch_token_market_data(token_addr: str) -> Dict[str, Any]:
                     if lph.get("is_locked") == 1 or is_dead:
                         try:
                             total_lp_locked += float(lph.get("percent") or 0.0) * 100.0
-                        except Exception:
-                            pass
+                        except Exception as exc:
+                            _log.debug("bad LP lock entry from GoPlus: %s", exc)
                 lp_locked_pct = min(100.0, total_lp_locked)
 
                 # Top 10 Holders Percentage
@@ -1204,8 +1267,8 @@ def fetch_token_market_data(token_addr: str) -> Dict[str, Any]:
                 for h in h_list[:10]:
                     try:
                         top10_sum += float(h.get("percent") or 0.0) * 100.0
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        _log.debug("bad holder percent from GoPlus: %s", exc)
                 top10_pct = min(100.0, top10_sum)
 
                 flags = []
@@ -1250,8 +1313,8 @@ def fetch_token_market_data(token_addr: str) -> Dict[str, Any]:
                 res["risk_level"] = risk_lvl
                 res["risk_badge"] = risk_badge
                 res["risk_flags"] = flags
-    except Exception:
-        pass
+    except Exception as exc:
+        _log.debug("GoPlus lookup failed for %s: %s", token_addr, exc)
 
     # 2. Purchases (buys) & 24h volume via DexScreener
     try:
@@ -1300,8 +1363,8 @@ def fetch_token_market_data(token_addr: str) -> Dict[str, Any]:
                 tw = [s.get("url") for s in soc if s.get("type") in ("twitter", "x")]
                 if tw:
                     res["twitter"] = tw[0]
-    except Exception:
-        pass
+    except Exception as exc:
+        _log.debug("DexScreener lookup failed for %s: %s", token_addr, exc)
 
     return res
 
@@ -1449,13 +1512,15 @@ def is_system_infra(item: Dict[str, Any]) -> bool:
     return False
 
 
-def format_floor_trade_price(item: Dict[str, Any], bnb_price: float = 705.0) -> str:
+def format_floor_trade_price(item: Dict[str, Any], bnb_price: Optional[float] = None) -> str:
     """
     Formats the secondary market trading price or NFT floor price:
     - For NFTs: Floor price in BNB and USD valuation (e.g. '0.00016 BNB ($0.11)')
     - For Tokens: DEX trading price from PancakeSwap/DexScreener (e.g. '$0.000071', '$0.0517')
     - For Pre-market / unlisted: '—'
     """
+    if bnb_price is None:
+        bnb_price = cached_bnb_price()
     floor_bnb = item.get("floor_price_bnb")
     floor_usd = item.get("floor_price_usd")
     token_usd = item.get("token_price_usd") or 0.0
@@ -1502,13 +1567,15 @@ def format_floor_trade_price(item: Dict[str, Any], bnb_price: float = 705.0) -> 
     return "[dim]—[/dim]"
 
 
-def format_lp_or_volume(item: Dict[str, Any], bnb_price: float = 705.0) -> str:
+def format_lp_or_volume(item: Dict[str, Any], bnb_price: Optional[float] = None) -> str:
     """
     Formats the LP / Vol cell:
     - If project has a DEX Liquidity Pool: displays LP depth in USD (e.g. '$14,105', '$4,591')
     - If NFT collection without DEX pool: displays collection trading volume (e.g. '0.74 BNB', or '—' if 0)
     - If Token without DEX pool: displays 'None'
     """
+    if bnb_price is None:
+        bnb_price = cached_bnb_price()
     lp_usd = float(item.get("lp_usd", 0) or 0)
     if lp_usd > 0:
         return f"[green]${lp_usd:,.0f}[/green]"
@@ -1732,39 +1799,20 @@ def filter_and_sort_projects(history: List[Dict[str, Any]], active_filter: str, 
     return filtered
 
 
-EXCLUDED_PEGS_SYMBOLS = {
-    "BTCB", "WBTC", "BTC", "ETH", "WETH", "WBNB", "BNB", "USDT", "USDC", "BUSD",
-    "DAI", "TUSD", "FDUSD", "CAKE", "U", "OSK", "FIST"
-}
-
-EXCLUDED_PEGS_CONTRACTS = {
-    "0x7130d2a12b9bcbfae4f2634d864a1ee1ce3ead9c",  # BTCB
-    "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c",  # WBNB
-    "0x55d398326f99059ff775485246999027b3197955",  # USDT
-    "0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d",  # USDC
-    "0xe9e7cea3dedca5984780bafc599bd69add087d56",  # BUSD
-    "0x2170ed0880ac9a755fd29b2688956bd959f933f8",  # ETH (Binance-Peg)
-    "0x14016e85a25a55f2e084741d69d9d82361f38e2b",  # DAI
-    "0x0e09fabb73bd3ade0a17ecc321fd13a19e81ce82"   # CAKE
-}
-
-SYNTHETIC_EQUITY_SYMBOLS = {
-    "TSLAB", "AAPLB", "MSFTB", "METAB", "SPCXB", "NVDA", "NVDAB", "AMZNB", "GOOGLB", "MRNAB", "SOXSB", "CRCLB", "QQQB", "MSTRB"
-}
-
-
-def update_post_mint_profit_metrics(item: Dict[str, Any], bnb_price: float = 705.0) -> Dict[str, Any]:
+def update_post_mint_profit_metrics(item: Dict[str, Any], bnb_price: Optional[float] = None) -> Dict[str, Any]:
     """
     Computes and updates post-mint profit and ATH metrics on an item.
     Tracks persistent high-water mark (ATH price, ATH net profit, and ATH multiple).
     Filters out pegged crypto assets (BTCB, WBNB, USDT, USDC, BUSD), synthetic stocks, and system infra.
     """
+    if bnb_price is None:
+        bnb_price = cached_bnb_price()
     c = (item.get("contract") or "").lower()
     sym = (item.get("symbol") or "").upper()
     is_pegged = (
         c in EXCLUDED_PEGS_CONTRACTS
-        or sym in EXCLUDED_PEGS_SYMBOLS
-        or sym in SYNTHETIC_EQUITY_SYMBOLS
+        or sym in PEG_SYMBOLS_CORE
+        or sym in EQUITY_SYMBOLS_CORE
     )
     if is_pegged or is_system_infra(item):
         return {
@@ -1825,8 +1873,8 @@ def update_post_mint_profit_metrics(item: Dict[str, Any], bnb_price: float = 705
         try:
             if float(raw_ms) >= 2**128 or float(raw_ms) >= 1e20:
                 raw_ms = None
-        except Exception:
-            pass
+        except Exception as exc:
+            _log.debug("could not normalise raw total_minted for %s: %s", c, exc)
     tm = item.get("total_minted") or 0
     is_sold = bool(raw_ms and float(raw_ms) > 0 and tm and float(tm) >= float(raw_ms))
 
@@ -1868,7 +1916,7 @@ def update_post_mint_profit_metrics(item: Dict[str, Any], bnb_price: float = 705
     }
 
 
-def compute_market_cap_stats(history: List[Dict[str, Any]], bnb_price: float = 705.0) -> Dict[str, Any]:
+def compute_market_cap_stats(history: List[Dict[str, Any]], bnb_price: Optional[float] = None) -> Dict[str, Any]:
     """
     Computes overall mint statistics:
     - Percentage of collections that filled their mint cap (Sold Out)
@@ -1877,6 +1925,8 @@ def compute_market_cap_stats(history: List[Dict[str, Any]], bnb_price: float = 7
     - Top post-mint gainer (highest profit / ROI after mint is over)
     - All-time top gainers leaderboard list
     """
+    if bnb_price is None:
+        bnb_price = cached_bnb_price()
     capped_total = 0
     sold_out_cnt = 0
     near_cap_cnt = 0
@@ -2017,8 +2067,8 @@ def analyze_market_interest(
         try:
             stats["deployer_balance_bnb"] = rpc.get_balance(deployer_addr) / 1e18
             stats["deployer_nonce"] = rpc.get_tx_count(deployer_addr)
-        except Exception:
-            pass
+        except Exception as exc:
+            _log.debug("deployer balance lookup failed for %s: %s", deployer_addr, exc)
 
         # Check for Fresh Dev Wallet (nonce <= 2 and balance < 0.05 BNB)
         if stats["deployer_nonce"] <= 2 and stats["deployer_balance_bnb"] < 0.05:
@@ -2173,9 +2223,9 @@ def analyze_market_interest(
                     vol_wei = int(m_data.get("vol24") or m_data.get("volAll") or 0)
                     if vol_wei > 0:
                         stats["volume_bnb"] = round(vol_wei / 1e18, 2)
-                        stats["volume_24h"] = (vol_wei / 1e18) * 705.0
-            except Exception:
-                pass
+                        stats["volume_24h"] = (vol_wei / 1e18) * cached_bnb_price()
+            except Exception as exc:
+                _log.debug("oathbots market.json fetch failed: %s", exc)
         if not stats.get("volume_bnb") and details.get("volume_bnb"):
             stats["volume_bnb"] = details["volume_bnb"]
         if not stats.get("total_volume_bnb") and details.get("total_volume_bnb"):
@@ -2231,8 +2281,8 @@ def analyze_market_interest(
                                     best_pair_addr = lp_addr
                                     best_px_usd = p_px_usd
                                     best_px_bnb = p_px_bnb
-                except Exception:
-                    pass
+                except Exception as exc:
+                    _log.debug("PancakeSwap pair lookup failed: %s", exc)
 
             if best_lp_usd > stats.get("lp_usd", 0.0):
                 stats["lp_usd"] = best_lp_usd
@@ -2245,8 +2295,8 @@ def analyze_market_interest(
                 stats["token_price_usd"] = best_px_usd
             if best_px_bnb > 0 and stats.get("token_price_bnb", 0.0) == 0:
                 stats["token_price_bnb"] = best_px_bnb
-        except Exception:
-            pass
+        except Exception as exc:
+            _log.debug("BNB price lookup failed: %s", exc)
 
     # Supply metrics
     max_sup = details.get("max_supply")
@@ -2298,8 +2348,8 @@ def analyze_market_interest(
     contract_bnb = 0.0
     try:
         contract_bnb = rpc.get_balance(contract_addr) / 1e18
-    except Exception:
-        pass
+    except Exception as exc:
+        _log.debug("contract balance lookup failed for %s: %s", contract_addr, exc)
     tot_minted = details.get("total_minted", 0) or 0
     if tot_minted > 20 and is_paid_mint and contract_bnb < 0.01 and stats.get("lp_usd", 0) < 100:
         sec["is_fund_drain"] = True
@@ -2341,8 +2391,8 @@ def analyze_market_interest(
                         tot_sup = int(sup_res[2:66], 16)
                         if tot_sup > 0:
                             dev_pct = round((dev_bal / tot_sup) * 100.0, 1)
-            except Exception:
-                pass
+            except Exception as exc:
+                _log.debug("deployer token balance lookup failed for %s: %s", deployer_addr, exc)
 
         sm_wallets = details.get("smart_wallets") or details.get("smart_minters") or []
         holders_cnt = stats.get("holders", 0) or 1
@@ -2573,7 +2623,7 @@ def print_interest_report(stats: Dict[str, Any]):
 
 def print_banner():
     stats = load_agent_id_stats()
-    ai_wallets_cnt = stats.get("total_created_wallets", 175842)
+    ai_wallets_cnt = stats.get("total_created_wallets", DEFAULT_AGENT_WALLET_COUNT)
     s_cnt = f"{ai_wallets_cnt:,}"
     l1, l2, l3 = "", "", ""
     for ch in s_cnt:
@@ -2605,8 +2655,8 @@ def notify_alert():
     sys.stdout.flush()
     try:
         subprocess.Popen(["afplay", "/System/Library/Sounds/Glass.aiff"], stderr=subprocess.DEVNULL)
-    except Exception:
-        pass
+    except Exception as exc:
+        _log.debug("could not play alert sound: %s", exc)
 
 
 KNOWN_PROJECTS = [
@@ -2805,8 +2855,8 @@ def preview_snipe_call(wallet: str, to: str, value_wei: str, calldata: str) -> D
                     if sim_code and sim_code != "000000000":
                         return {"success": False, "error": {"message": err_detail or f"Simulation reverted (code {sim_code})"}}
                 return res
-            except Exception:
-                pass
+            except Exception as exc:
+                _log.debug("baw contract-call preview returned non-JSON output: %s", exc)
         return {"success": False, "error": {"message": proc.stderr or "CLI error"}}
     except Exception as e:
         return {"success": False, "error": {"message": str(e)}}
@@ -2826,8 +2876,8 @@ def execute_snipe_call(request_id: str) -> Dict[str, Any]:
         if proc.stdout:
             try:
                 return json.loads(proc.stdout)
-            except Exception:
-                pass
+            except Exception as exc:
+                _log.debug("baw contract-call execute returned non-JSON output: %s", exc)
         return {"success": False, "error": {"message": proc.stderr or "CLI error"}}
     except Exception as e:
         return {"success": False, "error": {"message": str(e)}}
@@ -2844,8 +2894,8 @@ def get_wallet_balance(rpc: BscRpcClient, contract_addr: str, wallet: str) -> in
         res = rpc.call("eth_call", [{"to": contract_addr, "data": data}, "latest"])
         if res and isinstance(res, str) and res.startswith("0x"):
             return int(res, 16)
-    except Exception:
-        pass
+    except Exception as exc:
+        _log.debug("balanceOf lookup failed for %s on %s: %s", wallet, contract_addr, exc)
     return 0
 
 
@@ -2856,7 +2906,6 @@ def check_holdings(rpc: BscRpcClient, wallet: str):
     history = load_history()
     print(f"\n{C_BOLD}🔍 Checking On-Chain Holdings for wallet {wallet}...{C_RESET}\n")
     found = []
-    from concurrent.futures import ThreadPoolExecutor
 
     def _check(item):
         c = item.get("contract")
@@ -3101,8 +3150,8 @@ def scan_element_nft_volume(
                         fills[c] = []
                     fills[c].append(parsed["price_bnb"])
                     trade_logs.append(parsed)
-        except Exception:
-            pass
+        except Exception as exc:
+            _log.debug("Element fill logs failed for blocks %s-%s: %s", b, to_b, exc)
 
     results: Dict[str, Dict[str, Any]] = {}
 
@@ -3124,8 +3173,8 @@ def scan_element_nft_volume(
                     if res and len(res) >= 66:
                         user_held = int(res[:66], 16)
                         it["user_balance"] = user_held
-                except Exception:
-                    pass
+                except Exception as exc:
+                    _log.debug("balanceOf lookup failed for %s: %s", c, exc)
 
             moves = int(it.get("secondary_transfers", 0) or 0)
             try:
@@ -3143,8 +3192,8 @@ def scan_element_nft_volume(
                     if len(topics) == 4 and int(topics[1], 16) != 0:
                         sec_count += 1
                 moves = sec_count
-            except Exception:
-                pass
+            except Exception as exc:
+                _log.debug("transfer log scan failed for %s: %s", c, exc)
         else:
             moves = int(it.get("secondary_transfers", 0) or 0)
 
@@ -3162,7 +3211,7 @@ def scan_element_nft_volume(
     return results
 
 
-def evaluate_portfolio_exit(item: Dict[str, Any], bnb_price: float = 705.0) -> Dict[str, Any]:
+def evaluate_portfolio_exit(item: Dict[str, Any], bnb_price: Optional[float] = None) -> Dict[str, Any]:
     """
     Evaluates take-profit and stop-loss conviction signals for an asset held in portfolio:
     - Native Gas (BNB): Operational Gas reserve.
@@ -3175,6 +3224,8 @@ def evaluate_portfolio_exit(item: Dict[str, Any], bnb_price: float = 705.0) -> D
       * 🔻 STOP LOSS: Position dropped >= 30% below entry cost
       * ⏳ HODL: Within normal volatility bounds
     """
+    if bnb_price is None:
+        bnb_price = cached_bnb_price()
     contract = (item.get("contract") or "").lower()
     is_nft = bool(item.get("is_nft"))
     std = str(item.get("standard") or "")
@@ -3381,7 +3432,7 @@ def build_portfolio_data(rpc: BscRpcClient, wallet: str, history: List[Dict[str,
     try:
         bnb_price = get_bnb_price_usd(rpc)
     except Exception:
-        bnb_price = 705.0
+        bnb_price = cached_bnb_price()
 
     native_usd = bnb_bal * bnb_price
 
@@ -3494,8 +3545,6 @@ def refresh_portfolio(rpc: BscRpcClient, history: List[Dict[str, Any]], wallet: 
     """
     Scans tracked projects on-chain in parallel to refresh token/NFT balances.
     """
-    from concurrent.futures import ThreadPoolExecutor
-
     def _check(item):
         c = item.get("contract")
         if not c or is_system_infra(item):
@@ -3564,19 +3613,19 @@ def sync_cloud_history() -> List[Dict[str, Any]]:
                                     method="POST"
                                 )
                                 urllib.request.urlopen(sync_req, timeout=4.0)
-                            except Exception:
-                                pass
+                            except Exception as exc:
+                                _log.debug("cloud /api/sync push failed: %s", exc)
 
                     return res_list
-    except Exception:
-        pass
+    except Exception as exc:
+        _log.debug("cloud history pull failed: %s", exc)
     return []
 
 
 def load_history() -> List[Dict[str, Any]]:
     items = []
     try:
-        from db import db
+        from db import db  # imported lazily: db.py opens the database on import, which CLI start-up shouldn't pay for
         db_items = db.get_all_projects()
         if db_items:
             items = db_items
@@ -3640,7 +3689,7 @@ def save_history(history: List[Dict[str, Any]], delta: Optional[Any] = None):
 
         # 1. Primary: Save to Database (Supabase / SQLite in WAL mode)
         try:
-            from db import db
+            from db import db  # lazy, see load_history
             if delta is not None:
                 if isinstance(delta, dict):
                     db.upsert_projects([delta])
@@ -3648,16 +3697,16 @@ def save_history(history: List[Dict[str, Any]], delta: Optional[Any] = None):
                     db.upsert_projects(delta)
             else:
                 db.upsert_projects(final_list)
-        except Exception:
-            pass
+        except Exception as exc:
+            _log.debug("database upsert failed: %s", exc)
 
         # 2. Maintain history.json for backwards compatibility / local file inspection (compact minified)
         tmp_file = HISTORY_FILE + ".tmp"
         with open(tmp_file, "w", encoding="utf-8") as f:
             json.dump(final_list, f, separators=(',', ':'))
         os.replace(tmp_file, HISTORY_FILE)
-    except Exception:
-        pass
+    except Exception as exc:
+        _log.debug("could not save history: %s", exc)
 
 
 class KeyReader:
@@ -3731,8 +3780,8 @@ class KeyReader:
         if self.is_tty and self.old_settings:
             try:
                 termios.tcsetattr(sys.stdin, termios.TCSADRAIN, self.old_settings)
-            except Exception:
-                pass
+            except Exception as exc:
+                _log.debug("could not restore terminal settings: %s", exc)
 
     def __del__(self):
         self.close()
@@ -3763,8 +3812,8 @@ def get_viewport_max_rows(panel_lines: int = 7) -> int:
                 if sz.lines >= 10:
                     lines = sz.lines
                     found = True
-        except Exception:
-            pass
+        except Exception as exc:
+            _log.debug("could not read terminal size from /dev/tty: %s", exc)
 
     if not found:
         try:
@@ -3895,7 +3944,7 @@ def format_structured_safety(item: Dict[str, Any]) -> str:
 def format_structured_interest(item: Dict[str, Any]) -> str:
     """
     Standardizes interest/velocity score indicator with uniform width and badge.
-    Uses 🧊 (Ice Cube: cell_len 2) to match 🚀, 🔥, 🌱 for 100% border alignment.
+    Uses 🧊 (Ice Cube: cell_len 2) to match 🚀, 🔥, 🌱 so table borders stay aligned.
     """
     try:
         score = int(item.get("score", 0) or 0)
@@ -3915,7 +3964,7 @@ def format_structured_interest(item: Dict[str, Any]) -> str:
 def format_structured_mint_price(item: Dict[str, Any]) -> str:
     """
     Standardizes mint price cell with clean text and syntax coloring.
-    Eliminates emoji font-fallback discrepancies for 100% straight columns.
+    Avoids emoji font-fallback width differences that misalign columns.
     """
     p_str = str(item.get("mint_price_str") or "").upper()
     v_wei = int(item.get("mint_value_wei", 0) or 0)
@@ -4069,8 +4118,8 @@ def refresh_project_metrics(rpc: BscRpcClient, item: Dict[str, Any], wallet: str
 
         # Update momentum & velocity metrics
         update_momentum_metrics(item)
-    except Exception:
-        pass
+    except Exception as exc:
+        _log.debug("metrics refresh failed for %s: %s", item.get("contract"), exc)
 
 
 def refresh_all_metrics(rpc: BscRpcClient, history: List[Dict[str, Any]], wallet: str, fast: bool = False):
@@ -4410,7 +4459,7 @@ def build_interactive_dashboard(
             m_text.append("\n")
         elif item.get("floor_price_bnb") and float(item["floor_price_bnb"]) > 0:
             f_b = float(item["floor_price_bnb"])
-            f_u = float(item.get("floor_price_usd") or (f_b * 705.0))
+            f_u = float(item.get("floor_price_usd") or (f_b * cached_bnb_price()))
             m_text.append(f"\n• Secondary Floor Price:  {f_b:g} BNB (${f_u:.2f} USD)  |  Element Marketplace\n", style="bold cyan")
 
         m_text.append(f"• Interest Score:   {score}/100 ({rating})\n", style="bold yellow")
@@ -4506,7 +4555,7 @@ def build_interactive_dashboard(
     port_pill = f" [ 3: 🎒 My Portfolio ({port_cnt} Assets) ] "
 
     stats = load_agent_id_stats()
-    ai_wallets_cnt = stats.get("total_created_wallets", 175842)
+    ai_wallets_cnt = stats.get("total_created_wallets", DEFAULT_AGENT_WALLET_COUNT)
     c_panel = render_digital_counter_panel(f"{ai_wallets_cnt:,}")
 
     h_text = Text()
@@ -4773,7 +4822,7 @@ def build_interactive_dashboard(
             fl_b = sel_s.get("floor_price_bnb")
             t_p = sel_s.get("token_price_usd", 0)
             if fl_b and float(fl_b) > 0:
-                sd_text.append(f"• Secondary Floor: {float(fl_b):g} BNB (${float(fl_b)*705:.2f} USD)  |  Element Marketplace\n", style="bold cyan")
+                sd_text.append(f"• Secondary Floor: {float(fl_b):g} BNB (${float(fl_b)*cached_bnb_price():.2f} USD)  |  Element Marketplace\n", style="bold cyan")
             elif t_p > 0:
                 sd_text.append(f"• Secondary DEX Price: ${t_p:.6f} USD  |  PancakeSwap\n", style="bold green")
 
@@ -4853,7 +4902,7 @@ def build_interactive_dashboard(
             else:
                 sm_badge = " "
 
-            # Project name without leading emojis for 100% straight margin
+            # Project name without leading emojis, so the name column stays aligned
             p_name = item.get("name", "Unknown")[:14]
             p_sym = item.get("symbol", "")[:8]
             p_display = f"{p_name} ({p_sym})"
@@ -4969,7 +5018,7 @@ def build_interactive_dashboard(
             m_parts.append(f"DEX Price: ${t_price:.4f} USD  |  Pool: ${lp_usd:,.0f}")
         elif floor_bnb and float(floor_bnb) > 0:
             vol_str = f" ({float(vol_b):g} BNB vol)" if (vol_b and float(vol_b) > 0) else ""
-            m_parts.append(f"Floor: {float(floor_bnb):g} BNB (${float(sel_item.get('floor_price_usd') or float(floor_bnb)*705):.2f}){vol_str}")
+            m_parts.append(f"Floor: {float(floor_bnb):g} BNB (${float(sel_item.get('floor_price_usd') or float(floor_bnb)*cached_bnb_price()):.2f}){vol_str}")
         elif lp_usd > 0:
             m_parts.append(f"DEX Pool: ${lp_usd:,.0f}")
         elif vol_b and float(vol_b) > 0:
@@ -5043,7 +5092,7 @@ def run_live_monitor(rpc: BscRpcClient, wallet: str, plain: bool = False):
                         processed_txs.add(tx_hash)
 
                         input_data = (tx.get("input") or "").lower()
-                        # Fast in-memory check: ignores 99.999% of non-registry transactions instantly
+                        # Cheap substring check first: almost no transaction references a registry
                         if not matches_tracked_registry(input_data):
                             continue
 
@@ -5116,17 +5165,7 @@ def run_live_monitor(rpc: BscRpcClient, wallet: str, plain: bool = False):
     stop_event = threading.Event()
 
     smart_wallets = load_smart_wallets()
-    known_infra = {
-        PANCAKE_FACTORY_V2.lower(),
-        WBNB_ADDRESS.lower(),
-        USDT_ADDRESS.lower(),
-        AGENT_ID_REGISTRY.lower(),
-        SPACE_ID_MASTER_REGISTRY.lower(),
-        FOUR_MEME_FACTORY.lower(),
-        FOUR_MEME_ROUTER.lower(),
-        "0x10ed43c718714eb63d5aa57b78b54704e256024e",
-        "0x13f4ea83d0bd40e75c8222255bc855a974568dd4"
-    }
+    known_infra = known_infra_addresses()
 
     latest_block = [rpc.get_block_number() - 1]
     latest_tx_count = [0]
@@ -5139,7 +5178,7 @@ def run_live_monitor(rpc: BscRpcClient, wallet: str, plain: bool = False):
 
         while not stop_event.is_set():
             try:
-                # Periodic 24/7 Cloud Sync every 20s
+                # Cloud sync every 20s
                 if time.time() - last_cloud_sync > 20:
                     last_cloud_sync = time.time()
                     try:
@@ -5149,8 +5188,10 @@ def run_live_monitor(rpc: BscRpcClient, wallet: str, plain: bool = False):
                             history = cloud_res
                             status_msg = f"☁️ Synced +{diff} new drops from Cloud!"
                             status_timer = time.time()
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        _log.debug("cloud history sync failed: %s", exc)
+
+                refresh_bnb_price(rpc)  # re-reads the price only when the cached one is over a minute old
 
                 curr_b = rpc.get_block_number()
                 if curr_b <= latest_block[0]:
@@ -5183,15 +5224,15 @@ def run_live_monitor(rpc: BscRpcClient, wallet: str, plain: bool = False):
                         if rcv == AGENT_ID_REGISTRY.lower() and len(inp) >= 10:
                             try:
                                 cur_st = load_agent_id_stats()
-                                cur_st["total_created_wallets"] = cur_st.get("total_created_wallets", 175842) + 1
+                                cur_st["total_created_wallets"] = cur_st.get("total_created_wallets", DEFAULT_AGENT_WALLET_COUNT) + 1
                                 cur_st["last_updated"] = time.time()
                                 save_agent_id_stats(cur_st)
                                 status_msg = f"🎉 New .ai Agent ID Claimed! Total Registered: {cur_st['total_created_wallets']:,}"
                                 status_timer = time.time()
-                            except Exception:
-                                pass
+                            except Exception as exc:
+                                _log.debug("could not update agent-id claim counter: %s", exc)
 
-                        # 1. Real-Time Smart Wallet Tracker (5,000 Tracked Wallets)
+                        # Smart-wallet activity
                         if snd in smart_wallets and rcv and rcv not in known_infra and (len(inp) >= 10 or tx_val > 0):
                             aid = smart_wallets[snd]
                             matching = [item for item in history if item.get("contract", "").lower() == rcv]
@@ -5269,10 +5310,10 @@ def run_live_monitor(rpc: BscRpcClient, wallet: str, plain: bool = False):
                                         status_msg = f"⚡ ALPHA DROP: {aid} minted {p_n}!"
                                         status_timer = time.time()
                                         notify_alert()
-                                except Exception:
-                                    pass
+                                except Exception as exc:
+                                    _log.debug("smart-wallet drop analysis failed for %s: %s", rcv, exc)
 
-                        # 2. Fast in-memory check: ignores 99.999% of non-registry transactions instantly
+                        # Cheap substring check first: almost no transaction references a registry
                         if not matches_tracked_registry(inp):
                             continue
 
@@ -5375,8 +5416,8 @@ def run_live_monitor(rpc: BscRpcClient, wallet: str, plain: bool = False):
                                     m_res = rpc.call_contract(c, keccak_selector("totalMinted()"))
                                     if m_res and len(m_res) >= 66:
                                         item["total_minted"] = int(m_res, 16)
-                            except Exception:
-                                pass
+                            except Exception as exc:
+                                _log.debug("paused/totalMinted refresh failed for %s: %s", item.get("contract"), exc)
 
                         # Auto-resolve prices for any TBD items on-chain
                         for item in history:
@@ -5395,8 +5436,8 @@ def run_live_monitor(rpc: BscRpcClient, wallet: str, plain: bool = False):
                                             if det.get("mint_calldata"):
                                                 item["mint_calldata"] = det["mint_calldata"]
                                             needs_update = True
-                                except Exception:
-                                    pass
+                                except Exception as exc:
+                                    _log.debug("TBD price resolution failed for %s: %s", item.get("contract"), exc)
                         save_history(history)
 
                 time.sleep(2)
@@ -5429,8 +5470,8 @@ def run_live_monitor(rpc: BscRpcClient, wallet: str, plain: bool = False):
                                 item["mint_calldata"] = det["mint_calldata"]
                             changed = True
                             needs_update = True
-                except Exception:
-                    pass
+                except Exception as exc:
+                    _log.debug("TBD price resolution failed for %s: %s", item.get("contract"), exc)
         if changed:
             save_history(history)
 
@@ -5784,7 +5825,7 @@ def run_live_monitor(rpc: BscRpcClient, wallet: str, plain: bool = False):
                         status_msg = f"🔄 Refreshing on-chain metrics for {sel_name}..."
                         live.update(build_interactive_dashboard(history, selected_idx, latest_block[0], latest_tx_count[0], wallet, status_msg, show_modal, active_filter=active_filter, sort_mode=sort_mode, snipe_confirm=snipe_confirm, active_tab=active_tab, portfolio_data=portfolio_data, port_selected_idx=port_selected_idx, smart_selected_idx=smart_selected_idx))
                         
-                        # Refresh selected project first for instant feedback (<1s)
+                        # Refresh the selected project first so its row updates before the rest
                         if target_proj:
                             refresh_project_metrics(rpc, target_proj, wallet)
                             save_history(history)
@@ -6573,7 +6614,6 @@ def scan_smart_wallets(rpc: BscRpcClient, wallet: str, blocks: int = 200):
         except Exception:
             return []
 
-    from concurrent.futures import ThreadPoolExecutor
     with ThreadPoolExecutor(max_workers=15) as executor:
         all_hits_nested = list(executor.map(fetch_block_txs, block_range))
 
@@ -6584,17 +6624,7 @@ def scan_smart_wallets(rpc: BscRpcClient, wallet: str, blocks: int = 200):
         print(f"{C_YELLOW}[!] No smart wallet contract interactions detected in the last {blocks} blocks.{C_RESET}")
         return
 
-    known_infra = {
-        PANCAKE_FACTORY_V2.lower(),
-        WBNB_ADDRESS.lower(),
-        USDT_ADDRESS.lower(),
-        AGENT_ID_REGISTRY.lower(),
-        SPACE_ID_MASTER_REGISTRY.lower(),
-        FOUR_MEME_FACTORY.lower(),
-        FOUR_MEME_ROUTER.lower(),
-        "0x10ed43c718714eb63d5aa57b78b54704e256024e",
-        "0x13f4ea83d0bd40e75c8222255bc855a974568dd4"
-    }
+    known_infra = known_infra_addresses()
 
     contracts = {}
     for h in all_hits:
@@ -6898,6 +6928,8 @@ def main():
 
     args = parser.parse_args()
     rpc = BscRpcClient(RPC_ENDPOINTS)
+    # Warm the BNB/USD price in the background so USD values don't start from the fallback.
+    threading.Thread(target=refresh_bnb_price, args=(rpc,), daemon=True).start()
 
     if args.command == "live":
         run_live_monitor(rpc, args.wallet, plain=args.plain)

@@ -1,36 +1,30 @@
 #!/usr/bin/env python3
 """
-Dedicated Ingestion & Background Enrichment Worker (Producer)
-==============================================================
-Runs 24/7 as an isolated operating system process:
-1. Real-Time Smart Wallet Tracker (5,000 Tracked Wallets)
-2. Block-0 Agent ID Registry Deployment Scanner
-3. 15-second High-Frequency Tiered Progress Sweeper
-4. 24/7 Market Dynamics Updater (DexScreener & Pancake Reserves)
-5. Element Market NFT Volume Sweeper
-6. Stealth Proxy Clone & Factory Watcher
-
-Decoupled from the web server: never blocked by incoming HTTP traffic.
-Persists discoveries directly to Supabase / SQLite via db.py.
+Ingestion worker (write side). Runs as its own process, separate from api.py, and persists
+what it finds through db.py. Background threads:
+1. Discovery: scans new BSC blocks for smart-wallet calls and Agent ID registry deployments
+2. Fast-track progress sweeper (every 15s): on-chain minted/supply for active drops
+3. Market dynamics updater (every 120s): DexScreener / Pancake liquidity, price, volume
+4. Element Market sweeper: NFT floor price and secondary volume
+5. Proxy / factory watcher: clone-style drops
+6. Agent ID counter: .ai wallet mint count
 """
 
-import os
-import sys
 import time
 import json
 import re
 import threading
 import concurrent.futures
 import urllib.request
-import urllib.parse
 
 import monitor
+from common.runtime import run_memory_guard_loop
 from db import db
-from typing import Optional, List, Dict, Any, Tuple
+from typing import Optional, List, Dict, Any
 
 history_lock = threading.RLock()
 
-# Shared in-memory drop cache inside worker process (eliminates redundant DB reads)
+# In-process copy of the drop list, refreshed from the DB at most every 15s.
 SHARED_HISTORY = None
 _last_shared_history_time = 0.0
 
@@ -43,27 +37,13 @@ def get_shared_history(force_refresh: bool = False) -> List[Dict[str, Any]]:
             _last_shared_history_time = now
         return SHARED_HISTORY
 
-# Reusable thread pools for worker tasks
 enrichment_pool = concurrent.futures.ThreadPoolExecutor(max_workers=3, thread_name_prefix="AlphaEnricher")
 discovery_pool = concurrent.futures.ThreadPoolExecutor(max_workers=3, thread_name_prefix="CandidateAnalyzer")
 fast_sweep_pool = concurrent.futures.ThreadPoolExecutor(max_workers=3, thread_name_prefix="FastSweeper")
 
 
-def run_memory_guard_loop():
-    """Periodically trims heap memory and calls gc.collect() every 5m to prevent RSS fragmentation."""
-    import gc
-    while True:
-        time.sleep(300)
-        gc.collect()
-        try:
-            import ctypes
-            ctypes.CDLL("libc.so.6").malloc_trim(0)
-        except Exception:
-            pass
-
-
 def _enrich_contract_background(rpc: monitor.BscRpcClient, contract_addr: str, deployer_addr: Optional[str], det: dict):
-    """Enriches newly discovered drop with GoPlus security & DexScreener metrics asynchronously."""
+    """Adds GoPlus security and DexScreener market data to a newly discovered drop."""
     try:
         mkt = monitor.analyze_market_interest(rpc, contract_addr, deployer_addr, det)
         with history_lock:
@@ -113,7 +93,7 @@ def _enrich_contract_background(rpc: monitor.BscRpcClient, contract_addr: str, d
 
 
 def _process_smart_money_candidate(rpc, rcv, snd, aid, tx_h, b, tx_val, inp, wallet):
-    """Asynchronously analyzes a candidate contract discovered via smart wallet call."""
+    """Analyzes a contract that a tracked smart wallet called, and records it as a new drop."""
     with history_lock:
         history = get_shared_history()
         if any(item.get("contract", "").lower() == rcv.lower() for item in history):
@@ -198,7 +178,7 @@ def _process_smart_money_candidate(rpc, rcv, snd, aid, tx_h, b, tx_val, inp, wal
 
 
 def _process_registry_candidate(rpc, tx_h, b, snd, tx_val, inp, wallet, known_infra):
-    """Asynchronously analyzes a candidate Block-0 contract referencing Agent ID registry."""
+    """Analyzes a transaction that references the Agent ID registry and records the contract it deployed."""
     try:
         rcpt = rpc.get_receipt(tx_h)
         if not rcpt or int(rcpt.get("status", "0"), 16) != 1:
@@ -295,7 +275,7 @@ def _process_registry_candidate(rpc, tx_h, b, snd, tx_val, inp, wallet, known_in
 
 
 def run_discovery_loop():
-    """Continuous 24/7 headless discovery scanning BSC blocks for smart money & registry drops."""
+    """Scans each new BSC block for smart-wallet calls and Agent ID registry references."""
     print("[🚀 Worker Engine] Initializing 24/7 Autonomous Scanner...", flush=True)
     time.sleep(2)
 
@@ -304,17 +284,7 @@ def run_discovery_loop():
     history = get_shared_history()
     smart_wallets = monitor.load_smart_wallets()
 
-    known_infra = {
-        monitor.PANCAKE_FACTORY_V2.lower(),
-        monitor.WBNB_ADDRESS.lower(),
-        monitor.USDT_ADDRESS.lower(),
-        monitor.AGENT_ID_REGISTRY.lower(),
-        monitor.SPACE_ID_MASTER_REGISTRY.lower(),
-        monitor.FOUR_MEME_FACTORY.lower(),
-        monitor.FOUR_MEME_ROUTER.lower(),
-        "0x10ed43c718714eb63d5aa57b78b54704e256024e",
-        "0x13f4ea83d0bd40e75c8222255bc855a974568dd4"
-    }
+    known_infra = monitor.known_infra_addresses()
 
     cur = rpc.get_block_number()
     while cur is None:
@@ -344,7 +314,7 @@ def run_discovery_loop():
                 print(f"[📡 Fast Catch-Up] Scanner was {curr_block - last_block} blocks behind. Jumping to #{curr_block - 10}...", flush=True)
                 last_block = curr_block - 10
 
-            # Process up to 10 blocks per tick to prevent starvation without skipping
+            # At most 10 blocks per tick, so one slow tick can't starve the rest of the loop.
             blocks_to_process = min(curr_block - last_block, 10)
             end_block = last_block + blocks_to_process
 
@@ -361,8 +331,8 @@ def run_discovery_loop():
                     time.sleep(0.3)
                     try:
                         block = rpc.get_block(b, full_tx=True)
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        print(f"[⚠️ Block Retry Notice #{b}] {e}", flush=True)
                     if not block or "transactions" not in block:
                         last_block = b
                         continue
@@ -381,7 +351,7 @@ def run_discovery_loop():
                     inp = (tx.get("input") or "").lower()
                     tx_val = int(tx.get("value") or "0", 16)
 
-                    # 1. Smart Money Activity Tracker (5k Tracked Wallets)
+                    # Smart-wallet call into a contract we don't track yet, or a new smart wallet on a tracked one
                     if snd in smart_wallets and rcv and rcv not in known_infra and (len(inp) >= 10 or tx_val > 0):
                         aid = smart_wallets[snd]
                         with history_lock:
@@ -400,19 +370,17 @@ def run_discovery_loop():
                                     print(f"[🧠 Smart Money Inflow] {aid} called {item.get('name')} ({rcv})", flush=True)
                         if not matching and rcv not in queued_candidates:
                             queued_candidates.add(rcv)
-                            # Offload analysis to worker pool: never block the block loop
+                            # Analysis runs in the pool so the block loop never waits on it.
                             discovery_pool.submit(_process_smart_money_candidate, rpc, rcv, snd, aid, tx_h, b, tx_val, inp, wallet)
 
-                    # 2. Block-0 Agent ID / Registry Reference Scanner
+                    # Transaction data references the Agent ID registry
                     if monitor.matches_tracked_registry(inp) and tx_h not in queued_candidates:
                         queued_candidates.add(tx_h)
-                        # Offload registry deployment analysis to worker pool
                         discovery_pool.submit(_process_registry_candidate, rpc, tx_h, b, snd, tx_val, inp, wallet, known_infra)
 
-                # Update last_block after each successfully inspected block
                 last_block = b
 
-                # Periodic cleanup of processed sets
+                # Keep the dedupe sets bounded.
                 if len(processed_txs) > 10000:
                     processed_txs.clear()
                 if len(queued_candidates) > 5000:
@@ -425,7 +393,7 @@ def run_discovery_loop():
 
 
 def fast_sweep_contract(rpc: monitor.BscRpcClient, item: dict) -> tuple:
-    """Fast-check supply & holders for a single contract without slow third-party API calls."""
+    """Reads minted/supply for one contract straight from the chain (no third-party APIs)."""
     c = item.get("contract")
     if not c or not c.startswith("0x") or len(c) != 42:
         return c, None, None, None, False
@@ -434,7 +402,6 @@ def fast_sweep_contract(rpc: monitor.BscRpcClient, item: dict) -> tuple:
         cur_minted = item.get("total_minted", 0)
         cur_supply = item.get("max_supply")
 
-        # 1. Direct on-chain totalMinted / totalSupply query
         minted = monitor.get_token_count(rpc, c)
         if minted is None or minted == 0:
             minted = monitor.get_total_supply(rpc, c)
@@ -450,12 +417,11 @@ def fast_sweep_contract(rpc: monitor.BscRpcClient, item: dict) -> tuple:
         if supply is not None and supply != cur_supply:
             changed = True
 
-        # Quick estimate of progress
         prog = 0.0
         if supply and supply > 0 and minted is not None:
             prog = min(100.0, (minted / supply) * 100.0)
 
-        # 2. Estimate on-chain holders
+        # Holder count is estimated from minted supply; it is not read from the chain.
         holders = item.get("holders", 1)
         if minted is not None and minted > 0:
             holders = max(holders, min(minted, int(minted * 0.85) + 1))
@@ -466,7 +432,8 @@ def fast_sweep_contract(rpc: monitor.BscRpcClient, item: dict) -> tuple:
 
 
 def run_fast_track_progress_sweeper_loop():
-    """15-second Tiered Progress Sweeper."""
+    """Every 15s, refreshes on-chain minted/supply for active drops. Drops past 45% minted or with
+    50+ holders are swept every cycle; the rest in batches of 50 every 4th cycle."""
     print("[⚡ Fast-Track Sweeper] Initializing 15-second Tiered Progress Sweeper...", flush=True)
     time.sleep(3)
     rpc = monitor.BscRpcClient(monitor.RPC_ENDPOINTS)
@@ -512,7 +479,7 @@ def run_fast_track_progress_sweeper_loop():
             lane2_counter += 1
             sweep_targets = list(lane1_items)
             if lane2_counter >= 4 or not lane1_items:
-                # Rotate a bounded batch of 50 cold contracts per cycle to prevent RPC pool exhaustion
+                # Bounded batch of cold contracts, to avoid exhausting the RPC pool.
                 sweep_targets.extend(lane2_items[:50])
                 lane2_counter = 0
 
@@ -522,50 +489,54 @@ def run_fast_track_progress_sweeper_loop():
                 changed_items = []
 
                 futures = [fast_sweep_pool.submit(fast_sweep_contract, rpc, it) for it in sweep_targets]
+                sweep_results = []
                 for fut in concurrent.futures.as_completed(futures):
-                        try:
-                            c_addr, minted, supply, holders, changed = fut.result()
-                            if not c_addr or not changed:
+                    try:
+                        sweep_results.append(fut.result())
+                    except Exception as e:
+                        print(f"[⚠️ Fast-Track Sweeper Result Error] {e}", flush=True)
+
+                # Apply under the lock: other threads read and mutate the same history items.
+                with history_lock:
+                    for c_addr, minted, supply, holders, changed in sweep_results:
+                        if not c_addr or not changed:
+                            continue
+                        for it in history:
+                            if it.get("contract", "").lower() != c_addr.lower():
                                 continue
+                            old_minted = it.get("total_minted", 0) or 0
+                            old_sup = it.get("max_supply") or 0
+                            old_prog = (old_minted / old_sup * 100.0) if old_sup > 0 else 0.0
 
-                            for it in history:
-                                if it.get("contract", "").lower() == c_addr.lower():
-                                    old_minted = it.get("total_minted", 0) or 0
-                                    old_sup = it.get("max_supply") or 0
-                                    old_prog = (old_minted / old_sup * 100.0) if old_sup > 0 else 0.0
+                            if minted is not None:
+                                it["total_minted"] = minted
+                            if supply is not None:
+                                it["max_supply"] = supply
+                            if holders is not None:
+                                it["holders"] = max(it.get("holders", 0) or 0, holders)
 
-                                    if minted is not None:
-                                        it["total_minted"] = minted
-                                    if supply is not None:
-                                        it["max_supply"] = supply
-                                    if holders is not None:
-                                        it["holders"] = max(it.get("holders", 0) or 0, holders)
+                            new_sup = it.get("max_supply") or 0
+                            new_minted = it.get("total_minted", 0) or 0
+                            new_prog = (new_minted / new_sup * 100.0) if new_sup > 0 else 0.0
 
-                                    new_sup = it.get("max_supply") or 0
-                                    new_minted = it.get("total_minted", 0) or 0
-                                    new_prog = (new_minted / new_sup * 100.0) if new_sup > 0 else 0.0
+                            if old_prog < 45.0 and new_prog >= 45.0:
+                                it["signals"] = list(set((it.get("signals") or []) + ["⚡ Surging: 45%+ Minted"]))
+                            if old_prog < 60.0 and new_prog >= 60.0:
+                                it["signals"] = list(set((it.get("signals") or []) + ["🎯 SNIPER ALERT: 60%+ Sold Out!"]))
 
-                                    if old_prog < 45.0 and new_prog >= 45.0:
-                                        it["signals"] = list(set((it.get("signals") or []) + ["⚡ Surging: 45%+ Minted"]))
-                                    if old_prog < 60.0 and new_prog >= 60.0:
-                                        it["signals"] = list(set((it.get("signals") or []) + ["🎯 SNIPER ALERT: 60%+ Sold Out!"]))
+                            eva = monitor.evaluate_sniper_readiness(it)
+                            it["sniper_ready"] = eva.get("sniper_ready", False)
+                            it["sniper_status"] = eva.get("sniper_status", "TRACKING")
+                            it["sniper_badge"] = eva.get("sniper_badge", "⏳ Tracking")
+                            it["sniper_checklist"] = eva.get("sniper_checklist", [])
 
-                                    # Recalculate sniper checklist
-                                    eva = monitor.evaluate_sniper_readiness(it)
-                                    it["sniper_ready"] = eva.get("sniper_ready", False)
-                                    it["sniper_status"] = eva.get("sniper_status", "TRACKING")
-                                    it["sniper_badge"] = eva.get("sniper_badge", "⏳ Tracking")
-                                    it["sniper_checklist"] = eva.get("sniper_checklist", [])
+                            if not it.get("sniper_ready_alerted") and it["sniper_ready"]:
+                                it["sniper_ready_alerted"] = True
+                                sniper_alerts.append(it)
 
-                                    if not it.get("sniper_ready_alerted") and it["sniper_ready"]:
-                                        it["sniper_ready_alerted"] = True
-                                        sniper_alerts.append(it)
-
-                                    updates_count += 1
-                                    changed_items.append(it)
-                                    break
-                        except Exception:
-                            pass
+                            updates_count += 1
+                            changed_items.append(it)
+                            break
 
                 if updates_count > 0:
                     with history_lock:
@@ -587,7 +558,7 @@ def run_fast_track_progress_sweeper_loop():
 
 
 def run_market_dynamics_updater_loop():
-    """Continuous 24/7 background market & mint dynamics updater."""
+    """Every 120s, refreshes liquidity, price and volume for recent drops from DexScreener (Pancake reserves as fallback)."""
     print("[📈 Market Engine] Initializing 24/7 Market Dynamics Updater...", flush=True)
     time.sleep(5)
     rpc = monitor.BscRpcClient(monitor.RPC_ENDPOINTS)
@@ -601,8 +572,8 @@ def run_market_dynamics_updater_loop():
                 time.sleep(20)
                 continue
 
-            # Bandwidth Guard: Only query DexScreener for the newest 150 drops and contracts with active LP.
-            # Avoid querying thousands of old inactive/dead contracts every 30 seconds!
+            # Only the newest 150 drops plus older ones that already have liquidity or a price:
+            # polling every dead contract would waste DexScreener calls.
             recent_drops = [
                 x for x in history[:150]
                 if not monitor.is_system_infra(x) and x.get("contract") and x["contract"].startswith("0x") and len(x["contract"]) == 42
@@ -663,7 +634,7 @@ def run_market_dynamics_updater_loop():
                                 if p_addr:
                                     dex_updates[p_addr] = pair
                 except Exception:
-                    pass
+                    pass  # DexScreener is best-effort; the next sweep retries
                 time.sleep(0.5)
 
             updated_count = 0
@@ -723,8 +694,8 @@ def run_market_dynamics_updater_loop():
 
                         updated_count += 1
                         item_changed = True
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        print(f"[⚠️ Market Engine] bad DexScreener data for {c}: {e}", flush=True)
                 elif (item.get("total_minted") or 0) > 0 or item.get("smart_wallets") or (item.get("score") or 0) > 0:
                     try:
                         pair_addr = monitor.get_pair_address(rpc, monitor.PANCAKE_FACTORY_V2, c, monitor.WBNB_ADDRESS)
@@ -733,13 +704,13 @@ def run_market_dynamics_updater_loop():
                             r0, r1 = monitor.get_reserves(rpc, pair_addr)
                             wbnb_reserve = (r1 if c < monitor.WBNB_ADDRESS.lower() else r0) / 1e18
                             item["lp_wbnb"] = wbnb_reserve
-                            item["lp_usd"] = wbnb_reserve * 705.0
+                            item["lp_usd"] = wbnb_reserve * monitor.refresh_bnb_price(rpc)
                             updated_count += 1
                             item_changed = True
                     except Exception:
-                        pass
+                        pass  # no Pancake pair, or the RPC call failed; try again next sweep
 
-                # Dynamic interest score recalculation
+                # Recompute the interest score and sniper readiness from the (possibly updated) metrics.
                 try:
                     score = 0
                     lp = float(item.get("lp_usd") or 0.0)
@@ -774,8 +745,8 @@ def run_market_dynamics_updater_loop():
                     item["sniper_badge"] = eva.get("sniper_badge", "⏳ Tracking")
                     item["sniper_checklist"] = eva.get("sniper_checklist", [])
 
-                except Exception:
-                    pass
+                except Exception as e:
+                    print(f"[⚠️ Market Engine] score update failed for {c}: {e}", flush=True)
 
                 if item_changed:
                     changed_items.append(item)
@@ -788,12 +759,12 @@ def run_market_dynamics_updater_loop():
         except Exception as e:
             print(f"[⚠️ Market Engine Error] {e}", flush=True)
 
-        # Sleep 120s between DexScreener sweeps to stay strictly within Render's free egress limits
+        # 120s between sweeps keeps egress within Render's free tier.
         time.sleep(120)
 
 
 def run_element_nft_volume_sweeper_loop():
-    """Continuous 24/7 background Element Market secondary volume and floor price sweeper."""
+    """Refreshes NFT floor price and secondary volume from Element Market, one collection per second."""
     print("[💎 Element NFT Sweeper] Initializing 24/7 Element Market Sweeper...", flush=True)
     time.sleep(7)
     rpc = monitor.BscRpcClient(monitor.RPC_ENDPOINTS)
@@ -821,6 +792,7 @@ def run_element_nft_volume_sweeper_loop():
                 continue
 
             updated_count = 0
+            changed_items = []
             for item in nft_contracts:
                 c = (item.get("contract") or "").lower()
                 try:
@@ -846,8 +818,8 @@ def run_element_nft_volume_sweeper_loop():
 
                         updated_count += 1
                         changed_items.append(item)
-                except Exception:
-                    pass
+                except Exception as e:
+                    print(f"[⚠️ Element NFT Sweeper] {c} failed: {e}", flush=True)
                 time.sleep(1.0)
 
             if updated_count > 0:
@@ -861,8 +833,16 @@ def run_element_nft_volume_sweeper_loop():
         time.sleep(60)
 
 
+def _next_scan_range(last_block: int, curr_block: int, max_blocks: int = 10, max_lag: int = 30):
+    """Next (first, last) block numbers to scan. At most `max_blocks` per tick; if the scanner is more
+    than `max_lag` blocks behind it skips ahead to the newest `max_blocks`, like run_discovery_loop does."""
+    if curr_block - last_block > max_lag:
+        last_block = curr_block - max_blocks
+    return last_block + 1, last_block + min(curr_block - last_block, max_blocks)
+
+
 def run_proxy_factory_watcher_loop():
-    """Continuous 24/7 background listener detecting stealth factory & proxy clone drops."""
+    """Watches new blocks for calls into proxy/factory contracts and records clone-style drops."""
     print("[🧩 Proxy Factory Watcher] Initializing Stealth Factory & Proxy Clone Watcher...", flush=True)
     time.sleep(4)
     rpc = monitor.BscRpcClient(monitor.RPC_ENDPOINTS)
@@ -872,17 +852,7 @@ def run_proxy_factory_watcher_loop():
         curr_b = rpc.get_block_number()
     last_block = curr_b - 1
 
-    known_infra = {
-        monitor.PANCAKE_FACTORY_V2.lower(),
-        monitor.WBNB_ADDRESS.lower(),
-        monitor.USDT_ADDRESS.lower(),
-        monitor.AGENT_ID_REGISTRY.lower(),
-        monitor.SPACE_ID_MASTER_REGISTRY.lower(),
-        monitor.FOUR_MEME_FACTORY.lower(),
-        monitor.FOUR_MEME_ROUTER.lower(),
-        "0x10ed43c718714eb63d5aa57b78b54704e256024e",
-        "0x13f4ea83d0bd40e75c8222255bc855a974568dd4"
-    }
+    known_infra = monitor.known_infra_addresses()
 
     while True:
         try:
@@ -891,7 +861,10 @@ def run_proxy_factory_watcher_loop():
                 time.sleep(2.0)
                 continue
             if curr_block > last_block:
-                for b in range(last_block + 1, min(curr_block + 1, last_block + 6)):
+                first_block, end_block = _next_scan_range(last_block, curr_block)
+                if first_block > last_block + 1:
+                    print(f"[🧩 Proxy Factory Watcher] {curr_block - last_block} blocks behind; jumping to #{first_block}", flush=True)
+                for b in range(first_block, end_block + 1):
                     try:
                         blk = rpc.get_block(b, full_tx=True)
                     except Exception:
@@ -906,7 +879,7 @@ def run_proxy_factory_watcher_loop():
                         if rcv in known_infra:
                             continue
 
-                        # Check for proxy deploy / clone patterns
+                        # Selectors/registry references that suggest a proxy deploy or clone
                         is_proxy_call = any(sig in inp for sig in ["0x5c19a95c", "0x3644e515", "0x5824c65a", "0x485cc955"])
                         is_proxy_ref = monitor.matches_tracked_registry(inp)
 
@@ -993,20 +966,19 @@ def run_proxy_factory_watcher_loop():
                                             monitor.save_history(history, delta=new_entry)
                                             print(f"[🧩 NEW PROXY CLONE DETECTED] {new_entry['name']} ({cand}) [{proxy_type}] Master: {impl_addr}", flush=True)
 
-                                            # Offload market interest enrichment to background pool
                                             enrichment_pool.submit(_enrich_contract_background, rpc, cand, snd, det)
 
-                last_block = curr_block
+                last_block = end_block
         except Exception as e:
             print(f"[⚠️ Proxy Factory Watcher Error] {e}", flush=True)
 
-        time.sleep(20)
+        time.sleep(1.0)
 
 
 def run_agent_id_counter_loop():
-    """Lightweight background tracker syncing real-time Binance .ai Agent ID mints from BSC."""
+    """Counts new Binance .ai Agent ID mints (registry Transfer-from-zero logs) and persists the total."""
     print("[🤖 Agent ID Tracker] Starting live SPACE ID (.ai) mint counter loop...", flush=True)
-    # publicnode endpoints support up to 50k-block eth_getLogs queries in a single call
+    # publicnode allows eth_getLogs over up to 50k blocks per call.
     logs_rpc = monitor.BscRpcClient([
         "https://bsc-rpc.publicnode.com",
         "https://bsc.publicnode.com"
@@ -1015,7 +987,7 @@ def run_agent_id_counter_loop():
     zero_from_topic = "0x0000000000000000000000000000000000000000000000000000000000000000"
     registry_addr = monitor.AGENT_ID_REGISTRY
 
-    # Resolve best persisted baseline across local JSON and cloud DB (survives Render restarts)
+    # Start from whichever baseline is further along: local JSON or cloud DB (the local file is lost on Render restarts).
     local_st = monitor.load_agent_id_stats() or {}
     try:
         cloud_st = db.get_agent_id_stats(max_age_sec=0.0) or {}
@@ -1030,7 +1002,7 @@ def run_agent_id_counter_loop():
     else:
         cur_st = dict(local_st)
 
-    total_wallets = int(cur_st.get("total_created_wallets") or 178001)
+    total_wallets = int(cur_st.get("total_created_wallets") or monitor.DEFAULT_AGENT_WALLET_COUNT)
     last_block = int(cur_st.get("last_block") or 0)
     startup_synced = False
 
@@ -1083,7 +1055,7 @@ def run_agent_id_counter_loop():
 
 
 def start_worker():
-    """Starts all 6 background worker threads in this isolated producer process with auto-healing supervision."""
+    """Starts every worker loop in its own thread and restarts any thread that dies."""
     print("[⚙️ Worker Process] Starting all 6 autonomous discovery & sweeper loops...", flush=True)
     task_specs = [
         (run_discovery_loop, "DiscoveryLoop"),
@@ -1100,7 +1072,6 @@ def start_worker():
         t.start()
         threads.append(t)
 
-    # Supervise worker threads and restart any that crash
     try:
         while True:
             time.sleep(5.0)

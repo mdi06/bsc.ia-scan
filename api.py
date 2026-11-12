@@ -1,21 +1,20 @@
 #!/usr/bin/env python3
 """
-Dedicated High-Performance FastAPI Web Server (Consumer)
-=========================================================
-Runs purely as a non-blocking web server serving clients:
-- Serves /healthz, /history.json, /api/projects, /api/favorites, /api/sync
-- Serves static assets (index.html, app.js, style.css)
-- Zero RPC polling or third-party API blocking: responds in < 5ms from cache/DB.
+FastAPI web server (read side).
+
+Serves /healthz, /history.json, /api/feed, /api/projects, /api/favorites and /api/sync from the
+db.py cache, plus the static frontend in local development. It does no chain scanning; that is
+worker.py's job.
 """
 
-import os
-import sys
-import time
 import json
-import hashlib
+import os
 import re
 import secrets
-from typing import Optional, List, Dict, Any
+import threading
+import time
+import traceback
+from typing import Dict, Optional
 from fastapi import FastAPI, Query, HTTPException, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
@@ -24,7 +23,15 @@ from fastapi.staticfiles import StaticFiles
 import uvicorn
 
 import monitor
+from common.runtime import run_memory_guard_loop
 from db import db
+from filters import (
+    BOGUS_SCAM_CONTRACTS,
+    BOGUS_SET,
+    EXCLUDED_PEGS_CONTRACTS,
+    EXCLUDED_PEGS_SYMBOLS,
+    SYNTHETIC_EQUITY_SYMBOLS,
+)
 
 app = FastAPI(
     title="Agent ID Monitor Backend",
@@ -32,10 +39,10 @@ app = FastAPI(
     description="High-performance async FastAPI backend powered by Supabase / SQLite WAL"
 )
 
-# GZip compression middleware: shrinks JSON/text responses by 80-90% to protect Render 5GB bandwidth
+# Compress responses to stay under Render's 5 GB monthly bandwidth cap.
 app.add_middleware(GZipMiddleware, minimum_size=500)
 
-# --- Basic in-memory rate limiting (fixed 60s window per client IP) ---
+# In-memory rate limiting: fixed 60s window per client IP.
 RATE_LIMIT_WINDOW = 60
 RATE_LIMIT_MAX = 120
 RATE_LIMIT_MAX_TRACKED_IPS = 50000
@@ -84,7 +91,7 @@ async def rate_limit_middleware(request: Request, call_next):
     return await call_next(request)
 
 
-# CORS Middleware for Vercel, Render & cross-origin frontend
+# The Vercel-hosted frontend calls this API cross-origin.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -112,7 +119,6 @@ def require_admin(request: Request) -> None:
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
-    import traceback
     tb = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
     print(f"[🔥 API Unhandled Error] {request.method} {request.url.path}: {exc}\n{tb}", flush=True)
     return JSONResponse(
@@ -121,39 +127,13 @@ async def global_exception_handler(request: Request, exc: Exception):
     )
 
 
-def run_api_memory_guard():
-    """Periodically trims heap memory and runs garbage collection in the API process."""
-    import gc
-    while True:
-        time.sleep(300)
-        gc.collect()
-        try:
-            import ctypes
-            ctypes.CDLL("libc.so.6").malloc_trim(0)
-        except Exception:
-            pass
-
-
-BOGUS_SCAM_CONTRACTS = [
-    "0xd0523ce816e2b404db5633d181572cded33d7fa9",  # PrinterAi ($100T fake price on $0.0002 LP)
-    "0xc5a5f6337bd9d1ee1a7367a804fce07094956922",  # The Bank ($99.7K fake price on $0.00 LP)
-    "0x2170ed0880ac9a755fd29b2688956bd959f933f8",  # Binance-Peg ETH (Layer 1 crypto)
-    "0x7425889fe94f9d693e8daefe88bcced6acfef4c0",  # Meta Platforms (METAB)
-    "0xbe9d156892e55e7154bcd3cb0fea677f9d3103e1",  # SpaceX (SPCXB)
-    "0x80106cb3ead06659a5ad19df39d9b4733863b9b0",  # Microsoft (MSFTB)
-    "0x5b1910eaad6450e50f816082aa078c41f10c292f",  # Tesla, Inc. (TSLAB)
-    "0x431a6136ee1b2f76378c8a14b53ef11ba9099b7a",  # Apple (AAPLB)
-    "0x360d0b00c3c3a9d70e6e7372cfbe85e68b95973c",  # DogeZilla (Legacy meme clone with $0 mcap / sub-decimal display bug)
-]
 ADDRESS_RE = re.compile(r"^0x[0-9a-fA-F]{40}$")
 MAX_FAVORITES = 500
-BOGUS_SET = set(c.lower() for c in BOGUS_SCAM_CONTRACTS)
 
 
 @app.on_event("startup")
 def startup_event():
-    import threading
-    t = threading.Thread(target=run_api_memory_guard, daemon=True, name="ApiMemoryGuard")
+    t = threading.Thread(target=run_memory_guard_loop, daemon=True, name="ApiMemoryGuard")
     t.start()
 
 
@@ -178,10 +158,9 @@ def health_check():
 
 @app.get("/history.json")
 def get_virtual_history_json(request: Request):
-    """Virtual high-speed endpoint serving full pre-encoded JSON bytes with 304 ETag caching."""
-    data = db.get_history_json_bytes()
-    etag = f'"{hashlib.md5(data[:128] + str(len(data)).encode()).hexdigest()}"'
-    if request.headers.get("if-none-match") == etag:
+    """Full project list as pre-encoded JSON bytes, with ETag/304 support."""
+    data, etag = db.get_history_json()
+    if _etag_matches(request.headers.get("if-none-match"), etag):
         return Response(status_code=304)
     return Response(
         content=data,
@@ -197,34 +176,13 @@ def _etag_matches(client_etag: Optional[str], target_etag: str) -> bool:
     """Matches weak (W/...) and strong ETags across Cloudflare and browsers."""
     if not client_etag or not target_etag:
         return False
-    c = client_etag.strip().lstrip("W/").strip('"')
-    t = target_etag.strip().lstrip("W/").strip('"')
-    return c == t
+    def normalize(tag: str) -> str:
+        tag = tag.strip()
+        if tag.startswith("W/"):
+            tag = tag[2:]
+        return tag.strip('"')
+    return normalize(client_etag) == normalize(target_etag)
 
-
-EXCLUDED_PEGS_SYMBOLS = {
-    'BTCB', 'WBTC', 'BTC', 'ETH', 'WETH', 'WBNB', 'BNB', 'USDT', 'USDC', 'BUSD', 
-    'DAI', 'TUSD', 'FDUSD', 'CAKE', 'U', 'OSK', 'FIST',
-    'SOL', 'XRP', 'ADA', 'DOGE', 'DOT', 'AVAX', 'MATIC', 'POL', 'LINK', 'LTC', 'SHIB', 'UNI',
-    'ZEC', 'BCH', 'XLM', 'EOS', 'ATOM', 'TRX', 'FIL', 'NEAR', 'XMR', 'ETC', 'APT', 'SUI', 'PEPE', 'FLOKI', 'DOGEZILLA'
-}
-EXCLUDED_PEGS_CONTRACTS = {
-    '0x7130d2a12b9bcbfae4f2634d864a1ee1ce3ead9c',
-    '0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c',
-    '0x55d398326f99059ff775485246999027b3197955',
-    '0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d',
-    '0xe9e7cea3dedca5984780bafc599bd69add087d56',
-    '0x2170ed0880ac9a755fd29b2688956bd959f933f8',
-    '0x14016e85a25a55f2e084741d69d9d82361f38e2b',
-    '0x0e09fabb73bd3ade0a17ecc321fd13a19e81ce82'
-}
-SYNTHETIC_EQUITY_SYMBOLS = {
-    'TSLA', 'TSLAB', 'AAPL', 'AAPLB', 'MSFT', 'MSFTB', 'META', 'METAB', 'SPCXB', 'NVDA', 'NVDAB', 
-    'AMZN', 'AMZNB', 'GOOGL', 'GOOGLB', 'MRNA', 'MRNAB', 'SOXS', 'SOXSB', 'SOXL', 'SOXLB', 
-    'CRCLB', 'QQQ', 'QQQB', 'TQQQ', 'TQQQB', 'MSTR', 'MSTRB', 'BABA', 'BABAB', 'BNCB', 'SKHYB', 
-    'COIN', 'COINB', 'PLTR', 'PLTRB', 'AMD', 'AMDB', 'SPY', 'SPYB', 'TSMC', 'TSMB', 'PDD', 'PDDB', 
-    'NFLX', 'NFLXB', 'INTC', 'INTCB', 'DIS', 'DISB', 'UBER', 'UBERB', 'BA', 'BAAB'
-}
 
 def is_bogus_or_synthetic_asset(d: dict) -> bool:
     if not d or not isinstance(d, dict):
@@ -291,6 +249,16 @@ def is_secondary_market_asset(d: dict) -> bool:
         return False
 
 
+# Predicates behind /api/feed?filter=<name>; also used for the per-filter counts in the overview stats.
+FEED_FILTERS = {
+    "secondary": is_secondary_market_asset,
+    "smart": lambda d: d.get("smart_wallets") or d.get("smart_minters"),
+    "sniper_ready": lambda d: d.get("sniper_ready"),
+    "proxy": lambda d: d.get("is_proxy_clone"),
+    "nft_surge": lambda d: d.get("is_nft_surge"),
+}
+
+
 def compute_global_overview_stats(all_projs=None) -> dict:
     try:
         if all_projs is None:
@@ -301,22 +269,23 @@ def compute_global_overview_stats(all_projs=None) -> dict:
         total = len(all_projs)
         latest_block = all_projs[0].get("block") if all_projs else None
 
-        smart_count = sum(1 for d in all_projs if (d.get("smart_wallets") or d.get("smart_minters")))
-        sniper_ready_count = sum(1 for d in all_projs if d.get("sniper_ready"))
-        proxy_count = sum(1 for d in all_projs if d.get("is_proxy_clone"))
-        nft_surge_count = sum(1 for d in all_projs if d.get("is_nft_surge"))
-        secondary_count = sum(1 for d in all_projs if is_secondary_market_asset(d))
+        counts = {name: sum(1 for d in all_projs if pred(d)) for name, pred in FEED_FILTERS.items()}
+        smart_count = counts["smart"]
+        sniper_ready_count = counts["sniper_ready"]
+        proxy_count = counts["proxy"]
+        nft_surge_count = counts["nft_surge"]
+        secondary_count = counts["secondary"]
 
         local_stats = {}
         try:
             local_stats = monitor.load_agent_id_stats() or {}
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[⚠️ Overview Stats] local agent-id stats unavailable: {e}", flush=True)
         cloud_stats = {}
         try:
             cloud_stats = db.get_agent_id_stats() or {}
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[⚠️ Overview Stats] cloud agent-id stats unavailable: {e}", flush=True)
 
         local_count = int(local_stats.get("total_created_wallets") or 0)
         cloud_count = int(cloud_stats.get("total_created_wallets") or 0)
@@ -327,7 +296,7 @@ def compute_global_overview_stats(all_projs=None) -> dict:
         else:
             best_agent_stats = local_stats
 
-        total_agent_wallets = int(best_agent_stats.get("total_created_wallets") or 178001)
+        total_agent_wallets = int(best_agent_stats.get("total_created_wallets") or monitor.DEFAULT_AGENT_WALLET_COUNT)
         agent_wallets_block = int(best_agent_stats.get("last_block") or 0)
 
         return {
@@ -352,20 +321,18 @@ def compute_global_overview_stats(all_projs=None) -> dict:
             "nft_surge": 0,
             "secondary": 0,
             "latest_block": None,
-            "agent_wallets": 178001,
-            "total_created_wallets": 178001,
+            "agent_wallets": monitor.DEFAULT_AGENT_WALLET_COUNT,
+            "total_created_wallets": monitor.DEFAULT_AGENT_WALLET_COUNT,
             "agent_wallets_block": 0
         }
 
 
+# Main route: /api/stats. /api/overview and /api/summary are aliases kept for external clients.
 @app.get("/api/stats")
 @app.get("/api/overview")
 @app.get("/api/summary")
 def get_overview_stats(request: Request):
-    """
-    Dedicated lightweight summary statistics endpoint for instant overview render.
-    Includes ETag 304 caching and CORS headers.
-    """
+    """Summary counts for the overview header, with ETag/304 support."""
     stats = compute_global_overview_stats()
     stats_etag = f'"{stats["total"]}-{stats["agent_wallets"]}-{stats.get("agent_wallets_block")}-{stats.get("latest_block")}"'
     client_etag = request.headers.get("if-none-match")
@@ -386,10 +353,20 @@ def get_overview_stats(request: Request):
     )
 
 
+@app.get("/api/bnb-price")
+def get_bnb_price():
+    """Live BNB/USD from the Pancake WBNB/USDT pool (cached 60s). `live` is false until a lookup has succeeded."""
+    price = monitor.refresh_bnb_price()
+    return JSONResponse(
+        content={"success": True, "bnb_price_usd": price, "live": monitor.bnb_price_is_live()},
+        headers={"Cache-Control": "public, max-age=30"},
+    )
+
+
 @app.get("/agent_id_stats.json")
 @app.get("/data/agent_id_stats.json")
 def get_agent_id_stats_json():
-    """Serves agent_id_stats.json directly with CORS and caching for static fallbacks."""
+    """Agent ID counter, served at the paths the static frontend falls back to."""
     local_st = monitor.load_agent_id_stats() or {}
     cloud_st = db.get_agent_id_stats() or {}
     stats = cloud_st if int(cloud_st.get("total_created_wallets") or 0) > int(local_st.get("total_created_wallets") or 0) else local_st
@@ -407,16 +384,16 @@ def get_feed(
     since_block: Optional[int] = Query(None),
     filter: Optional[str] = Query(None)
 ):
-    """
-    Lightweight, high-speed feed endpoint for initial UI render (< 50ms) and delta updates.
-    Includes Bandwidth Guard: HTTP 304 Not Modified & tiny delta payloads to preserve free hosting.
+    """Paged feed for the UI, or only the drops newer than `since_block` (delta mode).
+
+    Returns 304 / empty payloads when the client is up to date, to save bandwidth.
     """
     raw_projs = db.get_all_projects()
     all_projs = [p for p in raw_projs if not is_bogus_or_synthetic_asset(p)]
     total = len(all_projs)
     latest_block = all_projs[0].get("block") if all_projs else None
 
-    # Pre-calculated filter stats so frontend doesn't need all 10,000 drops just to show counts
+    # Filter counts are computed here so the frontend doesn't need every drop just to show them.
     stats = compute_global_overview_stats(all_projs)
     total_agent_wallets = stats["agent_wallets"]
     agent_wallets_block = stats.get("agent_wallets_block", 0)
@@ -424,15 +401,13 @@ def get_feed(
     client_etag = request.headers.get("if-none-match")
 
     if since_block is not None:
-        # Delta mode: only return drops created after this block!
         delta = [p for p in all_projs if int(p.get("block") or 0) > since_block]
 
         if not delta:
             delta_etag = f'"{total}-{total_agent_wallets}-delta-{since_block}"'
-            # Bandwidth Guard 1: HTTP 304 Not Modified (0 bytes body) if client already has this state
             if _etag_matches(client_etag, delta_etag):
                 return Response(status_code=304, headers={"ETag": delta_etag, "Cache-Control": "public, max-age=5"})
-            # Bandwidth Guard 2: Minimal 0-drop payload without redundant nested stats (~100 bytes vs 20 KB)
+            # No new drops: send a minimal payload without the nested stats.
             return JSONResponse(
                 status_code=200,
                 headers={"ETag": delta_etag, "Cache-Control": "public, max-age=5"},
@@ -465,19 +440,12 @@ def get_feed(
             }
         )
 
-    # Filter target list if requested
     target_list = all_projs
-    if filter == "secondary":
-        target_list = [d for d in all_projs if is_secondary_market_asset(d)]
-        target_list.sort(key=lambda x: get_sanitized_mcap(x), reverse=True)
-    elif filter == "smart":
-        target_list = [d for d in all_projs if (d.get("smart_wallets") or d.get("smart_minters"))]
-    elif filter == "sniper_ready":
-        target_list = [d for d in all_projs if d.get("sniper_ready")]
-    elif filter == "proxy":
-        target_list = [d for d in all_projs if d.get("is_proxy_clone")]
-    elif filter == "nft_surge":
-        target_list = [d for d in all_projs if d.get("is_nft_surge")]
+    predicate = FEED_FILTERS.get(filter)
+    if predicate:
+        target_list = [d for d in all_projs if predicate(d)]
+        if filter == "secondary":
+            target_list.sort(key=lambda x: get_sanitized_mcap(x), reverse=True)
 
     target_total = len(target_list)
     paginated = target_list[offset : offset + limit]
@@ -507,10 +475,7 @@ def get_feed(
 
 @app.get("/api/top-gainers")
 def get_top_gainers():
-    """
-    Dedicated endpoint returning saved persistent top post-mint gainers / Hall of Fame markets.
-    Zero-overhead: reads from cached persistent memory without scanning 2k+ projects.
-    """
+    """Top post-mint gainers (Hall of Fame), read from seeded_top_gainers.json."""
     base_dir = os.path.dirname(os.path.abspath(__file__))
     seed_file = os.path.join(base_dir, "seeded_top_gainers.json")
     if os.path.exists(seed_file):
@@ -525,9 +490,7 @@ def get_top_gainers():
 
 @app.get("/api/smart-hunters")
 def get_smart_hunters():
-    """
-    Dedicated endpoint returning top smart wallet hunters and win rates from cached persistent memory.
-    """
+    """Top smart-wallet hunters and win rates, read from seeded_smart_hunters.json."""
     base_dir = os.path.dirname(os.path.abspath(__file__))
     seed_file = os.path.join(base_dir, "seeded_smart_hunters.json")
     if os.path.exists(seed_file):
@@ -542,9 +505,7 @@ def get_smart_hunters():
 
 @app.get("/api/smart-drops")
 def get_smart_drops():
-    """
-    Dedicated endpoint returning historical smart money drops for instantaneous hunter activity tracking.
-    """
+    """Historical smart-money drops, read from seeded_smart_drops.json."""
     base_dir = os.path.dirname(os.path.abspath(__file__))
     seed_file = os.path.join(base_dir, "seeded_smart_drops.json")
     if os.path.exists(seed_file):
@@ -572,7 +533,7 @@ def get_projects(
     sort_by: str = Query("block"),
     order: str = Query("desc")
 ):
-    """Modernized REST endpoint with query filtering, pagination, and sorting."""
+    """Project list with search, status/sniper/progress filters, sorting and pagination."""
     res = db.get_projects(
         limit=limit,
         offset=offset,
@@ -588,6 +549,7 @@ def get_projects(
     return res
 
 
+# Main route: /api/favorites. /favorites is an alias kept for older clients.
 @app.get("/api/favorites")
 @app.get("/favorites")
 def get_favorites(wallet: str = Query(..., description="0x... BSC wallet address")):
@@ -606,6 +568,7 @@ def get_favorites(wallet: str = Query(..., description="0x... BSC wallet address
     }
 
 
+# Main route: /api/favorites. /favorites is an alias kept for older clients.
 @app.post("/api/favorites")
 @app.post("/favorites")
 async def post_favorites(request: Request):
@@ -630,7 +593,7 @@ async def post_favorites(request: Request):
     clean_favs = list(dict.fromkeys(clean_favs))
     ts = int(incoming.get("timestamp") or time.time())
 
-    saved = db.save_favorites(wallet, clean_favs, ts)
+    db.save_favorites(wallet, clean_favs, ts)
 
     return {
         "success": True,
@@ -640,6 +603,7 @@ async def post_favorites(request: Request):
     }
 
 
+# Main route: /api/sync. /sync is an alias kept for older clients.
 @app.post("/api/sync", dependencies=[Depends(require_admin)])
 @app.post("/sync", dependencies=[Depends(require_admin)])
 async def post_sync(request: Request):
@@ -669,10 +633,7 @@ async def post_sync(request: Request):
 
 @app.get("/")
 def root_handler(request: Request):
-    """
-    On Render cloud production, redirect human visitors and search crawlers to Vercel (https://agent-id-monitor.vercel.app).
-    Vercel has 100 GB global edge CDN caching, saving Render's limited 5 GB monthly bandwidth.
-    """
+    """On Render, send browsers and crawlers to the Vercel frontend so page loads don't use Render's bandwidth."""
     accept = request.headers.get("accept", "")
     host = request.headers.get("host", "")
     if os.environ.get("RENDER") or "onrender.com" in host:
@@ -690,18 +651,18 @@ def root_handler(request: Request):
 @app.get("/bnb_agent_id_screen_studio.mp4")
 @app.get("/bnb_agent_id_screen_studio_silent.mp4")
 def redirect_heavy_videos():
-    """Redirect 7.5 MB video assets to Vercel CDN instead of streaming through Render's 5 GB quota."""
+    """Redirect the 7.5 MB videos to Vercel so they don't count against Render's bandwidth."""
     return RedirectResponse(url="https://agent-id-monitor.vercel.app/bnb_agent_id_screen_studio.mp4", status_code=302)
 
 
-# Mount static files at root if in local development mode
+# Local development only: serve the frontend files from this directory.
 workspace_dir = os.path.dirname(os.path.abspath(__file__))
 if not os.environ.get("RENDER") and os.path.exists(os.path.join(workspace_dir, "index.html")):
     app.mount("/static", StaticFiles(directory=workspace_dir, html=False), name="static")
 
 
 def start_api(port=8080):
-    """Starts the FastAPI / Uvicorn server."""
+    """Runs the API under uvicorn."""
     print(f"[🌐 FastAPI & Uvicorn API Server] Serving on http://0.0.0.0:{port}...", flush=True)
     uvicorn.run(app, host="0.0.0.0", port=port, log_level="info")
 

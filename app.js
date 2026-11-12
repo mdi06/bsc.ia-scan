@@ -9,7 +9,7 @@ let activeTab = 'RADAR';
 let activeFilter = 'ALL';
 let sortMode = 'NEWEST';
 let searchQuery = '';
-let bnbPrice = 705.0;
+let bnbPrice = 705.0; // fallback until refreshBnbPrice() gets the live price from /api/bnb-price
 
 // Web3 State & Live Portfolio Scan
 let connectedWallet = null;
@@ -85,16 +85,46 @@ const BACKEND_URL = (typeof window !== 'undefined' && (window.location.hostname 
   ? ''
   : 'https://bsc-ia-scan.onrender.com';
 
+// Tries the configured backend first, then the same origin. Returns the first ok response, else the
+// last response received; throws only if every attempt failed at the network level.
+async function apiFetch(path, options) {
+  const bases = BACKEND_URL ? [BACKEND_URL, ''] : [''];
+  let lastRes = null;
+  let lastErr = null;
+  for (const base of bases) {
+    try {
+      const res = await fetch(base + path, options);
+      if (res.ok) return res;
+      lastRes = res;
+    } catch (e) {
+      lastErr = e;
+    }
+  }
+  if (lastRes) return lastRes;
+  throw lastErr;
+}
+
+// Live BNB/USD from the backend. Keeps the previous value if the lookup fails or isn't live yet,
+// and redraws the table when the price moves by 1% or more.
+async function refreshBnbPrice() {
+  try {
+    const res = await apiFetch('/api/bnb-price');
+    if (!res.ok) return;
+    const data = await res.json();
+    const px = Number(data && data.bnb_price_usd);
+    if (!(data && data.live && px > 0)) return;
+    const moved = Math.abs(px - bnbPrice) / bnbPrice >= 0.01;
+    bnbPrice = px;
+    if (moved && typeof renderTable === 'function') renderTable();
+  } catch (e) {
+    // keep the last known price
+  }
+}
+
 async function syncFavoritesFromCloud(wallet) {
   if (!wallet) return;
   try {
-    let res = null;
-    try {
-      res = await fetch(`${BACKEND_URL}/api/favorites?wallet=${wallet.toLowerCase()}&_t=${Date.now()}`);
-      if (!res.ok) throw new Error('Render fetch failed');
-    } catch (e) {
-      res = await fetch(`/api/favorites?wallet=${wallet.toLowerCase()}&_t=${Date.now()}`);
-    }
+    const res = await apiFetch(`/api/favorites?wallet=${wallet.toLowerCase()}&_t=${Date.now()}`);
     if (res && res.ok) {
       const data = await res.json();
       if (data && Array.isArray(data.favorites)) {
@@ -131,25 +161,12 @@ async function pushFavoritesToCloud(wallet) {
       favorites: [...favorites],
       timestamp: Math.floor(Date.now() / 1000)
     };
-    let ok = false;
-    try {
-      const res = await fetch(`${BACKEND_URL}/api/favorites`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-      if (res.ok) ok = true;
-    } catch (e) {}
-
-    if (!ok) {
-      const resLocal = await fetch('/api/favorites', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-      if (resLocal.ok) ok = true;
-    }
-    if (ok) cloudSyncStatus = 'synced';
+    const res = await apiFetch('/api/favorites', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    if (res.ok) cloudSyncStatus = 'synced';
   } catch (err) {
     // Graceful offline fallback
   }
@@ -3912,7 +3929,7 @@ function decodeMulticall3Aggregate3(hexStr) {
 }
 
 // Evaluate Take-Profit / Stop-Loss Exit Conviction for Portfolio Holdings
-function evaluatePortfolioExit(item, bnbPriceUsd = 705.0) {
+function evaluatePortfolioExit(item, bnbPriceUsd = bnbPrice) {
   const contract = (item.contract || '').toLowerCase();
   const std = String(item.standard || '');
   const isNft = std.includes('721') || std.includes('NFT') || Boolean(item.is_nft);
@@ -9590,6 +9607,9 @@ async function init() {
     // Poll latest block
     pollLatestBlock();
     setInterval(pollLatestBlock, 10000);
+
+    refreshBnbPrice();
+    setInterval(refreshBnbPrice, 60000);
 
   } catch (err) {
     console.error('Failed to load history.json:', err);

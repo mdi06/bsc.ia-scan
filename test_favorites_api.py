@@ -1,157 +1,118 @@
-import os
-import json
-import urllib.request
-import urllib.error
-import tempfile
 import threading
+
 import pytest
-from server import load_user_favorites, save_user_favorites, FAVORITES_FILE, favorites_lock
+from fastapi.testclient import TestClient
+
+import api
+import db as db_module
+
+WALLET = "0xa15bb4aedc1b3426159c3cacf8548cf09506a20a"
+FAV_A = "0x105d904d64520d9bcefb66af936c2cce59037777"
+FAV_B = "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c"
+FAV_C = "0x55d398326f99059ff775485246999027b3197955"
 
 
-def test_load_save_favorites(tmp_path, monkeypatch):
-    test_file = str(tmp_path / "user_favorites.json")
-    monkeypatch.setattr("server.FAVORITES_FILE", test_file)
-
-    assert load_user_favorites() == {}
-
-    data = {
-        "0xa15bb4aedc1b3426159c3cacf8548cf09506a20a": {
-            "favorites": ["0x105d904d64520d9bcefb66af936c2cce59037777"],
-            "updated_at": 1730000000
-        }
-    }
-    save_user_favorites(data)
-    loaded = load_user_favorites()
-    assert loaded == data
-    assert "0xa15bb4aedc1b3426159c3cacf8548cf09506a20a" in loaded
+@pytest.fixture
+def fav_db(tmp_path, monkeypatch):
+    """A throwaway SQLite-backed DatabaseManager, installed as api.db for the test."""
+    for var in ("SUPABASE_URL", "SUPABASE_KEY", "SUPABASE_SERVICE_ROLE_KEY", "SUPABASE_ANON_KEY"):
+        monkeypatch.delenv(var, raising=False)
+    # Don't seed from the repo's real history.json / user_favorites.json.
+    monkeypatch.setattr(db_module, "HISTORY_FILE", str(tmp_path / "no_history.json"))
+    monkeypatch.setattr(db_module, "FAVORITES_FILE", str(tmp_path / "no_favorites.json"))
+    manager = db_module.DatabaseManager(db_path=str(tmp_path / "fav.db"))
+    monkeypatch.setattr(api, "db", manager)
+    return manager
 
 
-def test_concurrent_favorites_write(tmp_path, monkeypatch):
-    test_file = str(tmp_path / "user_favorites_conc.json")
-    monkeypatch.setattr("server.FAVORITES_FILE", test_file)
+@pytest.fixture
+def client(fav_db):
+    return TestClient(api.app)
 
-    def worker(idx):
-        wallet = f"0x{idx:040x}"
-        with favorites_lock:
-            cur = load_user_favorites()
-            cur[wallet] = {"favorites": [f"0x{idx+1:040x}"], "updated_at": idx}
-            save_user_favorites(cur)
 
-    threads = [threading.Thread(target=worker, args=(i,)) for i in range(10)]
+def test_db_save_and_load_favorites(fav_db):
+    assert fav_db.get_favorites(WALLET)["favorites"] == []
+
+    fav_db.save_favorites(WALLET, [FAV_A], 1730000000)
+    record = fav_db.get_favorites(WALLET)
+    assert record["favorites"] == [FAV_A]
+    assert record["updated_at"] == 1730000000
+
+
+def test_concurrent_favorites_write(fav_db):
+    def writer(idx):
+        fav_db.save_favorites(f"0x{idx:040x}", [f"0x{idx + 1:040x}"], idx + 1)
+
+    threads = [threading.Thread(target=writer, args=(i,)) for i in range(10)]
     for t in threads:
         t.start()
     for t in threads:
         t.join()
 
-    res = load_user_favorites()
-    assert len(res) == 10
+    for i in range(10):
+        assert fav_db.get_favorites(f"0x{i:040x}")["favorites"] == [f"0x{i + 1:040x}"]
 
-def test_http_favorites_endpoints(tmp_path, monkeypatch):
-    import socket
-    from server import AgentIdServerHandler, ThreadingHTTPServer
 
-    test_file = str(tmp_path / "user_favorites_http.json")
-    monkeypatch.setattr("server.FAVORITES_FILE", test_file)
+def test_http_favorites_endpoints(client):
+    # Missing wallet parameter -> FastAPI validation error
+    assert client.get("/api/favorites").status_code == 422
+    # Malformed wallet
+    assert client.get("/api/favorites", params={"wallet": "0x123"}).status_code == 400
 
-    # Find free port
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    sock.bind(("", 0))
-    port = sock.getsockname()[1]
-    sock.close()
+    # Empty favorites for a new wallet
+    res = client.get("/api/favorites", params={"wallet": WALLET})
+    assert res.status_code == 200
+    assert res.json()["success"] is True
+    assert res.json()["favorites"] == []
 
-    server = ThreadingHTTPServer(("127.0.0.1", port), AgentIdServerHandler)
-    server_thread = threading.Thread(target=server.serve_forever, daemon=True)
-    server_thread.start()
-
-    base_url = f"http://127.0.0.1:{port}"
-    wallet = "0xa15bb4aedc1b3426159c3cacf8548cf09506a20a"
-
-    # 1. GET with missing wallet
-    with pytest.raises(urllib.error.HTTPError) as exc_info:
-        urllib.request.urlopen(f"{base_url}/api/favorites")
-    assert exc_info.value.code == 400
-
-    # 2. GET empty favorites
-    res = urllib.request.urlopen(f"{base_url}/api/favorites?wallet={wallet}")
-    assert res.status == 200
-    data = json.loads(res.read().decode())
-    assert data["success"] is True
-    assert data["favorites"] == []
-
-    # 3. POST save favorites
-    fav_payload = {
-        "wallet": wallet,
-        "favorites": ["0x105d904d64520d9bcefb66af936c2cce59037777", "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c"],
-        "timestamp": 1730500000
-    }
-    req = urllib.request.Request(
-        f"{base_url}/api/favorites",
-        data=json.dumps(fav_payload).encode(),
-        headers={"Content-Type": "application/json"}
+    # Save
+    post = client.post(
+        "/api/favorites",
+        json={"wallet": WALLET, "favorites": [FAV_A, FAV_B], "timestamp": 1730500000},
     )
-    post_res = urllib.request.urlopen(req)
-    assert post_res.status == 200
-    post_data = json.loads(post_res.read().decode())
-    assert post_data["success"] is True
-    assert len(post_data["favorites"]) == 2
+    assert post.status_code == 200
+    assert post.json()["success"] is True
+    assert len(post.json()["favorites"]) == 2
 
-    # 4. GET updated favorites
-    get_res = urllib.request.urlopen(f"{base_url}/api/favorites?wallet={wallet}")
-    get_data = json.loads(get_res.read().decode())
-    assert get_data["favorites"] == ["0x105d904d64520d9bcefb66af936c2cce59037777", "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c"]
-    assert get_data["updated_at"] == 1730500000
-
-    server.shutdown()
+    # Read back
+    got = client.get("/api/favorites", params={"wallet": WALLET}).json()
+    assert got["favorites"] == [FAV_A, FAV_B]
+    assert got["updated_at"] == 1730500000
 
 
-def test_cross_device_sync_scenario(tmp_path, monkeypatch):
-    import socket
-    from server import AgentIdServerHandler, ThreadingHTTPServer
+def test_http_favorites_rejects_bad_input(client):
+    assert client.post("/api/favorites", content=b"not json").status_code == 400
+    assert client.post("/api/favorites", json=["a"]).status_code == 400
+    assert client.post("/api/favorites", json={"wallet": "nope", "favorites": []}).status_code == 400
 
-    test_file = str(tmp_path / "user_favorites_cross_device.json")
-    monkeypatch.setattr("server.FAVORITES_FILE", test_file)
+    too_many = [f"0x{i:040x}" for i in range(api.MAX_FAVORITES + 1)]
+    assert client.post("/api/favorites", json={"wallet": WALLET, "favorites": too_many}).status_code == 413
 
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    sock.bind(("", 0))
-    port = sock.getsockname()[1]
-    sock.close()
 
-    server = ThreadingHTTPServer(("127.0.0.1", port), AgentIdServerHandler)
-    server_thread = threading.Thread(target=server.serve_forever, daemon=True)
-    server_thread.start()
+def test_http_favorites_legacy_alias(client):
+    """/favorites is kept as an alias of /api/favorites for older clients."""
+    client.post("/favorites", json={"wallet": WALLET, "favorites": [FAV_A], "timestamp": 5})
+    assert client.get("/favorites", params={"wallet": WALLET}).json()["favorites"] == [FAV_A]
 
-    base_url = f"http://127.0.0.1:{port}"
+
+def test_cross_device_sync_scenario(client):
     wallet = "0x6827d403df6b07ba405a6cfe0305dbd0fc727f55"
 
-    # Step 1: Desktop user stars 2 tokens
-    desktop_favs = ["0x105d904d64520d9bcefb66af936c2cce59037777", "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c"]
-    req1 = urllib.request.Request(
-        f"{base_url}/api/favorites",
-        data=json.dumps({"wallet": wallet, "favorites": desktop_favs, "timestamp": 1000}).encode(),
-        headers={"Content-Type": "application/json"}
-    )
-    res1 = urllib.request.urlopen(req1)
-    assert res1.status == 200
+    # Desktop stars two tokens
+    desktop_favs = [FAV_A, FAV_B]
+    res1 = client.post("/api/favorites", json={"wallet": wallet, "favorites": desktop_favs, "timestamp": 1000})
+    assert res1.status_code == 200
 
-    # Step 2: Mobile user opens app with same wallet, fetches favorites
-    res_mobile = urllib.request.urlopen(f"{base_url}/api/favorites?wallet={wallet}")
-    mobile_data = json.loads(res_mobile.read().decode())
+    # Mobile opens the app with the same wallet and fetches favorites
+    mobile_data = client.get("/api/favorites", params={"wallet": wallet}).json()
     assert set(mobile_data["favorites"]) == set(desktop_favs)
 
-    # Step 3: Mobile user stars 1 new token and pushes merged list
-    mobile_favs = list(set(mobile_data["favorites"]) | {"0x55d398326f99059ff775485246999027b3197955"})
-    req2 = urllib.request.Request(
-        f"{base_url}/api/favorites",
-        data=json.dumps({"wallet": wallet, "favorites": mobile_favs, "timestamp": 2000}).encode(),
-        headers={"Content-Type": "application/json"}
-    )
-    res2 = urllib.request.urlopen(req2)
-    assert res2.status == 200
+    # Mobile stars one more token and pushes the merged list
+    mobile_favs = list(set(mobile_data["favorites"]) | {FAV_C})
+    res2 = client.post("/api/favorites", json={"wallet": wallet, "favorites": mobile_favs, "timestamp": 2000})
+    assert res2.status_code == 200
 
-    # Step 4: Desktop user refreshes or auto-polls, sees all 3 tokens
-    res_desktop_sync = urllib.request.urlopen(f"{base_url}/api/favorites?wallet={wallet}")
-    final_data = json.loads(res_desktop_sync.read().decode())
-    assert len(final_data["favorites"]) == 3
-    assert "0x55d398326f99059ff775485246999027b3197955" in final_data["favorites"]
-
-    server.shutdown()
+    # Desktop re-syncs and sees all three
+    final = client.get("/api/favorites", params={"wallet": wallet}).json()
+    assert len(final["favorites"]) == 3
+    assert FAV_C in final["favorites"]
