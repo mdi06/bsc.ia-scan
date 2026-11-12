@@ -1179,12 +1179,12 @@ def fetch_token_market_data(token_addr: str) -> Dict[str, Any]:
                 sell_tax = 0.0
                 try:
                     buy_tax = float(data.get("buy_tax") or 0.0) * 100.0
-                except Exception:
-                    pass
+                except Exception as exc:
+                    _log.debug("bad buy_tax value from GoPlus: %s", exc)
                 try:
                     sell_tax = float(data.get("sell_tax") or 0.0) * 100.0
-                except Exception:
-                    pass
+                except Exception as exc:
+                    _log.debug("bad sell_tax value from GoPlus: %s", exc)
                 is_open = (data.get("is_open_source") == "1")
 
                 # LP Locked / Burned Calculation
@@ -1196,8 +1196,8 @@ def fetch_token_market_data(token_addr: str) -> Dict[str, Any]:
                     if lph.get("is_locked") == 1 or is_dead:
                         try:
                             total_lp_locked += float(lph.get("percent") or 0.0) * 100.0
-                        except Exception:
-                            pass
+                        except Exception as exc:
+                            _log.debug("bad LP lock entry from GoPlus: %s", exc)
                 lp_locked_pct = min(100.0, total_lp_locked)
 
                 # Top 10 Holders Percentage
@@ -1206,8 +1206,8 @@ def fetch_token_market_data(token_addr: str) -> Dict[str, Any]:
                 for h in h_list[:10]:
                     try:
                         top10_sum += float(h.get("percent") or 0.0) * 100.0
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        _log.debug("bad holder percent from GoPlus: %s", exc)
                 top10_pct = min(100.0, top10_sum)
 
                 flags = []
@@ -1252,8 +1252,8 @@ def fetch_token_market_data(token_addr: str) -> Dict[str, Any]:
                 res["risk_level"] = risk_lvl
                 res["risk_badge"] = risk_badge
                 res["risk_flags"] = flags
-    except Exception:
-        pass
+    except Exception as exc:
+        _log.debug("GoPlus lookup failed for %s: %s", token_addr, exc)
 
     # 2. Purchases (buys) & 24h volume via DexScreener
     try:
@@ -1302,8 +1302,8 @@ def fetch_token_market_data(token_addr: str) -> Dict[str, Any]:
                 tw = [s.get("url") for s in soc if s.get("type") in ("twitter", "x")]
                 if tw:
                     res["twitter"] = tw[0]
-    except Exception:
-        pass
+    except Exception as exc:
+        _log.debug("DexScreener lookup failed for %s: %s", token_addr, exc)
 
     return res
 
