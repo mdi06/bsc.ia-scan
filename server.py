@@ -1,14 +1,11 @@
 #!/usr/bin/env python3
 """
-Agent ID Monitor - Unified Master Process Orchestrator
-======================================================
-Coordinates decoupled Ingestion Worker (worker.py) & Web API Server (api.py).
+Entry point: runs the ingestion worker (worker.py) and the web API (api.py) as separate processes.
 
-Architecture (Phase 3 Decoupling):
-- Producer (worker.py): 24/7 autonomous block scanner, GoPlus auditor, and DexScreener updater.
-- Consumer (api.py): High-performance FastAPI server responding to web/mobile clients in < 5ms.
-- Orchestrator (server.py): Spawns worker and api as separate operating system processes with
-  isolated memory spaces and separate Python GILs, with graceful signal handling.
+- worker.py scans the chain, enriches drops and writes them through db.py.
+- api.py serves reads from the db.py cache.
+- This module starts the worker as a child process, restarts it if it exits, and runs the API in the main process.
+  Use --worker-only or --api-only to run just one of them.
 """
 
 import os
@@ -18,15 +15,13 @@ import signal
 import multiprocessing
 import threading
 
-import monitor
-from db import db
 import worker
 import api
 
 # Re-export app for ASGI / Uvicorn (e.g. uvicorn server:app)
 app = api.app
 
-# Backward-compatible exports for existing unit tests
+# Names the tests import from this module.
 run_discovery_loop = worker.run_discovery_loop
 run_proxy_factory_watcher_loop = worker.run_proxy_factory_watcher_loop
 run_market_dynamics_updater_loop = worker.run_market_dynamics_updater_loop
@@ -38,26 +33,20 @@ history_lock = worker.history_lock
 
 
 def run_decoupled_system(port=8080):
-    """
-    Decoupled 2-Process Architecture:
-    - Worker Process (Producer): Autonomous ingestion, GoPlus audit, DexScreener & multicall sweepers.
-    - Main Process (Consumer): FastAPI Web API server serving requests in < 5ms.
-    Eliminates redundant parent process, saving ~70 MB of RAM to stay strictly within 512MB limits.
-    """
+    """Runs the worker in a child process and the API in this one (no separate parent process, to stay under 512 MB)."""
     print("=" * 70, flush=True)
-    print("🚀 Starting Agent ID Monitor (Phase 3 Decoupled 2-Process Architecture)", flush=True)
-    print(f"   [Worker Process]: Autonomous Ingestion, GoPlus Audit & Sweepers")
+    print("🚀 Starting Agent ID Monitor (worker process + API server)", flush=True)
+    print("   [Worker Process]: ingestion, GoPlus audit & sweepers")
     print(f"   [API Server]: FastAPI on http://0.0.0.0:{port}")
     print("=" * 70, flush=True)
 
-    # 1. Spawn Worker Process (Producer)
     worker_proc = multiprocessing.Process(
         target=worker.start_worker,
         name="IngestionWorkerProcess"
     )
     worker_proc.start()
 
-    # 2. Worker supervisor thread (in background of main process)
+    # Restart the worker if it exits.
     def supervise_worker():
         nonlocal worker_proc
         while True:
@@ -70,7 +59,6 @@ def run_decoupled_system(port=8080):
     sup_thread = threading.Thread(target=supervise_worker, daemon=True, name="WorkerSupervisor")
     sup_thread.start()
 
-    # 3. Clean signal handling
     def shutdown_processes(signum=None, frame=None):
         print("\n🛑 Shutdown signal received. Gracefully terminating worker process...", flush=True)
         if worker_proc.is_alive():
@@ -81,7 +69,6 @@ def run_decoupled_system(port=8080):
     signal.signal(signal.SIGINT, shutdown_processes)
     signal.signal(signal.SIGTERM, shutdown_processes)
 
-    # 4. Run API Server (Consumer) in current process
     try:
         api.start_api(port=port)
     finally:
