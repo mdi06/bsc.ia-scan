@@ -4,8 +4,6 @@ __pycache__/
 *.db*
 data/*.db*
 video_assets/
-Dockerfile
-fly.toml
 render.yaml
 requirements.txt
 scratch/

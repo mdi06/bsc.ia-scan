@@ -93,12 +93,7 @@ async function syncFavoritesFromCloud(wallet) {
       res = await fetch(`${BACKEND_URL}/api/favorites?wallet=${wallet.toLowerCase()}&_t=${Date.now()}`);
       if (!res.ok) throw new Error('Render fetch failed');
     } catch (e) {
-      try {
-        res = await fetch(`https://agent-id-monitor.fly.dev/api/favorites?wallet=${wallet.toLowerCase()}&_t=${Date.now()}`);
-        if (!res.ok) throw new Error('Fly fetch failed');
-      } catch (e2) {
-        res = await fetch(`/api/favorites?wallet=${wallet.toLowerCase()}&_t=${Date.now()}`);
-      }
+      res = await fetch(`/api/favorites?wallet=${wallet.toLowerCase()}&_t=${Date.now()}`);
     }
     if (res && res.ok) {
       const data = await res.json();
@@ -145,17 +140,6 @@ async function pushFavoritesToCloud(wallet) {
       });
       if (res.ok) ok = true;
     } catch (e) {}
-
-    if (!ok) {
-      try {
-        const resFly = await fetch('https://agent-id-monitor.fly.dev/api/favorites', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
-        });
-        if (resFly.ok) ok = true;
-      } catch (e) {}
-    }
 
     if (!ok) {
       const resLocal = await fetch('/api/favorites', {
@@ -2094,7 +2078,6 @@ async function fetchOverviewStats(isRetry = false) {
     `${BACKEND_URL}/api/stats`,
     `${BACKEND_URL}/api/overview`,
     `https://bsc-ia-scan.onrender.com/api/stats`,
-    `https://agent-id-monitor.fly.dev/api/stats`,
     `/api/stats`,
     `/api/overview`,
     `agent_id_stats.json`,

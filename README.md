@@ -131,7 +131,7 @@ The web client (`index.html` + `app.js`) features multi-wallet Web3 connectivity
     - **🦋 ELEMENT SURGE**: Element Market NFT volume spike exit.
 - **📱 Cross-Device Favorites Sync**:
   - Starred watchlists are bound to the connected wallet address (`agent_id_favorites_0x...`).
-  - Automatically synchronizes between desktop and mobile browsers via the 24/7 Fly.io cloud API (`GET /api/favorites` & `POST /api/favorites`).
+  - Automatically synchronizes between desktop and mobile browsers via the 24/7 cloud API (`GET /api/favorites` & `POST /api/favorites`).
   - Includes a **Mobile QR Code & Shareable Watchlist URL** for instant scanning and sync on phones.
 
 ---

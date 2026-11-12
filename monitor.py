@@ -3508,11 +3508,15 @@ def refresh_portfolio(rpc: BscRpcClient, history: List[Dict[str, Any]], wallet: 
     save_history(history)
 
 
+# Cloud backend the CLI pulls from / pushes to. Override with CLOUD_API_URL (e.g. a staging service).
+CLOUD_API_URL = os.environ.get("CLOUD_API_URL", "https://bsc-ia-scan.onrender.com").strip().rstrip("/")
+
+
 def sync_cloud_history() -> List[Dict[str, Any]]:
-    """Pulls latest discoveries from 24/7 Fly.io cloud scanner and merges into local cache."""
+    """Pulls latest discoveries from the 24/7 cloud scanner and merges into local cache."""
     try:
         req = urllib.request.Request(
-            f"https://agent-id-monitor.fly.dev/history.json?_t={int(time.time())}",
+            f"{CLOUD_API_URL}/history.json?_t={int(time.time())}",
             headers={"User-Agent": "Mozilla/5.0"}
         )
         with urllib.request.urlopen(req, timeout=3.0) as resp:
@@ -3550,7 +3554,7 @@ def sync_cloud_history() -> List[Dict[str, Any]]:
                         if admin_token:
                             try:
                                 sync_req = urllib.request.Request(
-                                    "https://agent-id-monitor.fly.dev/api/sync",
+                                    f"{CLOUD_API_URL}/api/sync",
                                     data=json.dumps(res_list).encode("utf-8"),
                                     headers={
                                         "Content-Type": "application/json",
@@ -5135,7 +5139,7 @@ def run_live_monitor(rpc: BscRpcClient, wallet: str, plain: bool = False):
 
         while not stop_event.is_set():
             try:
-                # Periodic 24/7 Cloud Sync from Fly.io every 20s
+                # Periodic 24/7 Cloud Sync every 20s
                 if time.time() - last_cloud_sync > 20:
                     last_cloud_sync = time.time()
                     try:
@@ -5143,7 +5147,7 @@ def run_live_monitor(rpc: BscRpcClient, wallet: str, plain: bool = False):
                         if cloud_res and len(cloud_res) > len(history):
                             diff = len(cloud_res) - len(history)
                             history = cloud_res
-                            status_msg = f"☁️ Synced +{diff} new drops from Fly.io Cloud!"
+                            status_msg = f"☁️ Synced +{diff} new drops from Cloud!"
                             status_timer = time.time()
                     except Exception:
                         pass
