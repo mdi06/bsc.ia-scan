@@ -29,10 +29,9 @@ import select
 import tty
 import termios
 import threading
-import webbrowser
 import shutil
 from concurrent.futures import ThreadPoolExecutor
-from typing import Optional, Dict, Any, List, Tuple, Iterable, Set
+from typing import Optional, Dict, Any, List, Tuple, Iterable
 
 from filters import EQUITY_SYMBOLS_CORE, EXCLUDED_PEGS_CONTRACTS, PEG_SYMBOLS_CORE
 
