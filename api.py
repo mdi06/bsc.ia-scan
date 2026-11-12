@@ -24,6 +24,7 @@ from fastapi.staticfiles import StaticFiles
 import uvicorn
 
 import monitor
+from common.runtime import run_memory_guard_loop
 from db import db
 
 app = FastAPI(
@@ -121,19 +122,6 @@ async def global_exception_handler(request: Request, exc: Exception):
     )
 
 
-def run_api_memory_guard():
-    """Periodically trims heap memory and runs garbage collection in the API process."""
-    import gc
-    while True:
-        time.sleep(300)
-        gc.collect()
-        try:
-            import ctypes
-            ctypes.CDLL("libc.so.6").malloc_trim(0)
-        except Exception:
-            pass
-
-
 BOGUS_SCAM_CONTRACTS = [
     "0xd0523ce816e2b404db5633d181572cded33d7fa9",  # PrinterAi ($100T fake price on $0.0002 LP)
     "0xc5a5f6337bd9d1ee1a7367a804fce07094956922",  # The Bank ($99.7K fake price on $0.00 LP)
@@ -153,7 +141,7 @@ BOGUS_SET = set(c.lower() for c in BOGUS_SCAM_CONTRACTS)
 @app.on_event("startup")
 def startup_event():
     import threading
-    t = threading.Thread(target=run_api_memory_guard, daemon=True, name="ApiMemoryGuard")
+    t = threading.Thread(target=run_memory_guard_loop, daemon=True, name="ApiMemoryGuard")
     t.start()
 
 

@@ -25,6 +25,7 @@ import urllib.request
 import urllib.parse
 
 import monitor
+from common.runtime import run_memory_guard_loop
 from db import db
 from typing import Optional, List, Dict, Any, Tuple
 
@@ -47,19 +48,6 @@ def get_shared_history(force_refresh: bool = False) -> List[Dict[str, Any]]:
 enrichment_pool = concurrent.futures.ThreadPoolExecutor(max_workers=3, thread_name_prefix="AlphaEnricher")
 discovery_pool = concurrent.futures.ThreadPoolExecutor(max_workers=3, thread_name_prefix="CandidateAnalyzer")
 fast_sweep_pool = concurrent.futures.ThreadPoolExecutor(max_workers=3, thread_name_prefix="FastSweeper")
-
-
-def run_memory_guard_loop():
-    """Periodically trims heap memory and calls gc.collect() every 5m to prevent RSS fragmentation."""
-    import gc
-    while True:
-        time.sleep(300)
-        gc.collect()
-        try:
-            import ctypes
-            ctypes.CDLL("libc.so.6").malloc_trim(0)
-        except Exception:
-            pass
 
 
 def _enrich_contract_background(rpc: monitor.BscRpcClient, contract_addr: str, deployer_addr: Optional[str], det: dict):
