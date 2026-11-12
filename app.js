@@ -1034,6 +1034,26 @@ if (typeof window !== 'undefined') window.toggleFollowWallet = toggleFollowWalle
 let hasLoadedSmartDrops = false;
 let isLoadingSmartDrops = false;
 
+// Appends drops that are not already in allDrops (matched by lowercase contract). Returns how many were added.
+// Used by "Load Older Drops" so overlapping pages never produce duplicate rows.
+function appendUniqueDrops(drops) {
+  if (!Array.isArray(drops)) return 0;
+  const present = new Set(allDrops.map(d => (d.contract || '').toLowerCase()));
+  let added = 0;
+  drops.forEach(p => {
+    const c = (p.contract || '').toLowerCase();
+    if (c) {
+      knownContracts.add(c);
+      if (isSniperReady(p)) knownSniperReady.add(c);
+      if (present.has(c)) return;
+      present.add(c);
+    }
+    allDrops.push(p);
+    added++;
+  });
+  return added;
+}
+
 function mergeDropsIntoAllDrops(newDrops) {
   if (!Array.isArray(newDrops) || newDrops.length === 0) return 0;
   let added = 0;
@@ -8288,6 +8308,7 @@ if (typeof document !== 'undefined') {
 }
 
 // Load older drops when user scrolls or clicks Load More button
+let loadMoreOffset = null; // rows of the server feed already requested by loadMoreDrops
 async function loadMoreDrops() {
   if (isLoadingMore || !hasMoreDrops) return;
   isLoadingMore = true;
@@ -8295,7 +8316,9 @@ async function loadMoreDrops() {
   if (btn) btn.innerHTML = '<span>⏳ Loading Older Drops...</span>';
 
   try {
-    const offset = allDrops.length;
+    // Page by how many rows we already requested from the server, not allDrops.length:
+    // allDrops also holds secondary/smart items, so its length drifts from the server's feed order.
+    const offset = loadMoreOffset !== null ? loadMoreOffset : allDrops.length;
     let res;
     try {
       res = await fetchWithTimeout(`${BACKEND_URL}/api/feed?limit=150&offset=${offset}`, { cache: 'default' }, 8000);
@@ -8307,12 +8330,8 @@ async function loadMoreDrops() {
     if (!res.ok) throw new Error('Failed to load more');
     const data = await res.json();
     if (data && data.projects && data.projects.length > 0) {
-      data.projects.forEach(p => {
-        const c = (p.contract || '').toLowerCase();
-        if (c) knownContracts.add(c);
-        if (isSniperReady(p) && c) knownSniperReady.add(c);
-        allDrops.push(p);
-      });
+      appendUniqueDrops(data.projects);
+      loadMoreOffset = offset + data.projects.length;
       hasMoreDrops = Boolean(data.has_more);
       if (data.stats) globalStats = data.stats;
       renderTable();
@@ -9644,6 +9663,7 @@ if (typeof module !== 'undefined' && module.exports) {
     loadSmartDrops,
     loadSecondaryDrops,
     mergeDropsIntoAllDrops,
+    appendUniqueDrops,
     getFilteredDrops,
     renderSmartLeaderboardRows,
     onSmartSearchInput,
