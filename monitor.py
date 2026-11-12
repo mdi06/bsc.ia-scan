@@ -4048,8 +4048,8 @@ def refresh_project_metrics(rpc: BscRpcClient, item: Dict[str, Any], wallet: str
 
         # Update momentum & velocity metrics
         update_momentum_metrics(item)
-    except Exception:
-        pass
+    except Exception as exc:
+        _log.debug("metrics refresh failed for %s: %s", item.get("contract"), exc)
 
 
 def refresh_all_metrics(rpc: BscRpcClient, history: List[Dict[str, Any]], wallet: str, fast: bool = False):
