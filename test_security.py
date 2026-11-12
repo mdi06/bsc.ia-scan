@@ -61,3 +61,34 @@ def test_unhandled_error_does_not_leak_details(monkeypatch):
     assert r.json() == {"success": False, "error": "internal_error"}
     assert "secret-internal-detail" not in r.text
     assert "traceback" not in r.text.lower()
+
+
+WALLET = "0x" + "a" * 40
+
+
+def test_favorites_cap_returns_413(monkeypatch):
+    monkeypatch.setattr(api.db, "save_favorites", lambda *a, **k: True)
+    favs = [f"0x{i:040x}" for i in range(501)]
+    r = client.post("/api/favorites", json={"wallet": WALLET, "favorites": favs})
+    assert r.status_code == 413
+    ok = client.post("/api/favorites", json={"wallet": WALLET, "favorites": favs[:500]})
+    assert ok.status_code == 200 and len(ok.json()["favorites"]) == 500
+
+
+def test_favorites_address_validation(monkeypatch):
+    monkeypatch.setattr(api.db, "save_favorites", lambda *a, **k: True)
+    assert client.post("/api/favorites", json={"wallet": "0x" + "z" * 40, "favorites": []}).status_code == 400
+    assert client.post("/api/favorites", json={"wallet": WALLET[:-1], "favorites": []}).status_code == 400
+    good = "0x" + "B" * 40
+    bad = ["0x" + "g" * 40, "0x" + "c" * 39, "0x" + "c" * 40 + "\n"]
+    r = client.post("/api/favorites", json={"wallet": WALLET, "favorites": [good] + bad})
+    assert r.status_code == 200
+    assert r.json()["favorites"] == [good.lower()]
+
+
+def test_startup_does_not_purge(monkeypatch):
+    called = []
+    monkeypatch.setattr(api.db, "delete_projects", lambda t: called.append(t) or 0)
+    monkeypatch.setattr("threading.Thread.start", lambda self: None)
+    api.startup_event()
+    assert called == []

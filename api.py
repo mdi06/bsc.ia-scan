@@ -13,6 +13,7 @@ import sys
 import time
 import json
 import hashlib
+import re
 import secrets
 from typing import Optional, List, Dict, Any
 from fastapi import FastAPI, Query, HTTPException, Request, Depends
@@ -95,6 +96,8 @@ BOGUS_SCAM_CONTRACTS = [
     "0x431a6136ee1b2f76378c8a14b53ef11ba9099b7a",  # Apple (AAPLB)
     "0x360d0b00c3c3a9d70e6e7372cfbe85e68b95973c",  # DogeZilla (Legacy meme clone with $0 mcap / sub-decimal display bug)
 ]
+ADDRESS_RE = re.compile(r"^0x[0-9a-fA-F]{40}$")
+MAX_FAVORITES = 500
 BOGUS_SET = set(c.lower() for c in BOGUS_SCAM_CONTRACTS)
 
 
@@ -103,12 +106,6 @@ def startup_event():
     import threading
     t = threading.Thread(target=run_api_memory_guard, daemon=True, name="ApiMemoryGuard")
     t.start()
-    try:
-        purged = db.delete_projects(BOGUS_SCAM_CONTRACTS)
-        if purged:
-            print(f"[FastAPI Startup] Automatically purged {purged} bogus scam/stock contracts from database", flush=True)
-    except Exception as e:
-        print(f"[FastAPI Startup Purge Error] {e}", flush=True)
 
 
 @app.post("/api/admin/purge-bogus", dependencies=[Depends(require_admin)])
@@ -546,7 +543,7 @@ def get_projects(
 @app.get("/favorites")
 def get_favorites(wallet: str = Query(..., description="0x... BSC wallet address")):
     w = (wallet or "").lower().strip()
-    if not w or not w.startswith("0x") or len(w) != 42:
+    if not ADDRESS_RE.fullmatch(w):
         raise HTTPException(
             status_code=400,
             detail="Valid 0x... BSC wallet address required in ?wallet= parameter"
@@ -568,14 +565,19 @@ async def post_favorites(request: Request):
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid JSON body")
 
-    wallet = (incoming.get("wallet") or "").lower().strip()
-    if not wallet or not wallet.startswith("0x") or len(wallet) != 42:
+    if not isinstance(incoming, dict):
+        raise HTTPException(status_code=400, detail="Expected JSON object")
+
+    wallet = str(incoming.get("wallet") or "").lower().strip()
+    if not ADDRESS_RE.fullmatch(wallet):
         raise HTTPException(status_code=400, detail="Valid 0x... BSC wallet address required")
 
     raw_favs = incoming.get("favorites", [])
     if not isinstance(raw_favs, list):
         raw_favs = []
-    clean_favs = [c.lower() for c in raw_favs if isinstance(c, str) and c.startswith("0x") and len(c) == 42]
+    if len(raw_favs) > MAX_FAVORITES:
+        raise HTTPException(status_code=413, detail=f"Too many favorites (max {MAX_FAVORITES})")
+    clean_favs = [c.lower() for c in raw_favs if isinstance(c, str) and ADDRESS_RE.fullmatch(c)]
     clean_favs = list(dict.fromkeys(clean_favs))
     ts = int(incoming.get("timestamp") or time.time())
 
