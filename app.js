@@ -1107,6 +1107,19 @@ function appendUniqueDrops(drops) {
   return added;
 }
 
+// Re-counts every filter pill / tab badge from allDrops (or the server's totals where it has them). These counts
+// were only refreshed by renderTable(), so a merge of more drops (smart drops, the secondary list) left them at the
+// count of whatever page was rendered last: FREE MINTS showed 109 instead of 1,290 depending on load timing.
+function refreshFilterPillCounts() {
+  if (typeof document === 'undefined') return;
+  updateSniperReadyCount();
+  updateNftSurgeCount();
+  updateProxyCount();
+  updateLaunchpadCount();
+  updateFreeMintsCount();
+  updateSecondaryTabCount();
+}
+
 function mergeDropsIntoAllDrops(newDrops) {
   if (!Array.isArray(newDrops) || newDrops.length === 0) return 0;
   let added = 0;
@@ -1142,6 +1155,7 @@ function mergeDropsIntoAllDrops(newDrops) {
     if (rEl) {
       rEl.textContent = Math.max(allDrops.length, globalStats ? globalStats.total : 0);
     }
+    refreshFilterPillCounts();
   }
   return added;
 }
@@ -9637,6 +9651,8 @@ if (typeof module !== 'undefined' && module.exports) {
     loadSmartDrops,
     loadSecondaryDrops,
     mergeDropsIntoAllDrops,
+    refreshFilterPillCounts,
+    updateFreeMintsCount,
     appendUniqueDrops,
     getFilteredDrops,
     renderSmartLeaderboardRows,

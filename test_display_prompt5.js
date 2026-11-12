@@ -312,6 +312,25 @@ console.log('✔ BNB price: null until known, "—" without it, "≈" when stale
   assert.strictEqual(app.compute24hPulseMetrics([], [seedMars], 0, null).topRunners.length, 0, 'no live drops: no runners (not seed entries)');
   console.log('✔ Pulse runners: live drops only, seeds excluded: PASS');
 
+  // ---------------------------------------------------------------------------------------- filter pills after a merge
+  // The first page is rendered (pills count it), then the seeded smart drops / secondary list are merged in. The pills used
+  // to keep the first page's count (FREE MINTS 109 instead of 1,290) unless something happened to call renderTable().
+  const mk = (i, extra) => ({ contract: '0x' + i.toString(16).padStart(40, '0'), name: 'Pill ' + i, symbol: 'P' + i,
+    standard: 'BEP-20 Token (18 decimals)', block: 1000 + i, ...extra });
+  const firstPage = [mk(1, { has_free_mint: true, mint_price_str: 'FREE' }), mk(2, { mint_price_str: 'DEX Traded' })];
+  app.setGlobalStats(null);
+  tableHtml(firstPage);                                                    // renderTable() counts the pills
+  assert.strictEqual(getEl('freeMintsCount').innerHTML, '1', 'first page: one free mint');
+  const rest = [];
+  for (let i = 10; i < 40; i++) rest.push(mk(i, { has_free_mint: true, mint_price_str: 'FREE' }));    // 30 more free mints
+  for (let i = 40; i < 45; i++) rest.push(mk(i, { token_price_usd: 0.1, lp_usd: 9000, volume_24h: 500, mint_price_str: 'DEX Traded' }));
+  app.mergeDropsIntoAllDrops(rest);                                        // what loadSmartDrops / loadSecondaryDrops do
+  assert.strictEqual(getEl('freeMintsCount').innerHTML, '31', 'FREE MINTS follows the merged set (1 + 30), not the first page');
+  assert.strictEqual(String(getEl('secondaryTabCount').innerHTML), '5', 'the SECONDARY badge follows the merged set too');
+  app.mergeDropsIntoAllDrops([mk(10, {})]);                                // nothing new: counts unchanged
+  assert.strictEqual(getEl('freeMintsCount').innerHTML, '31');
+  console.log('✔ Filter pills are re-counted after a merge (no more stale FREE MINTS / LAUNCHPAD counts): PASS');
+
   console.log('🎉 Prompt 5 display tests passed.');
   process.exit(0);
 })().catch((e) => { console.error(e); process.exit(1); });
