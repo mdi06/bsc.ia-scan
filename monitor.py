@@ -785,43 +785,8 @@ def analyze_contract(rpc: BscRpcClient, contract_addr: str, wallet_addr: str) ->
             target_addrs.append(raw_core_addr)
 
     # Check supply (max supply and current minted/total supply)
-    for t_addr in target_addrs:
-        if info["max_supply"] is None:
-            for sel_name in ["maxSupply()", "MAX_SUPPLY()", "max_supply()", "cap()", "MAX_TOKENS()", "maxTokens()", "maxBoxes()", "MAX_BOXES()"]:
-                s_res = rpc.call_contract(t_addr, keccak_selector(sel_name))
-                if s_res and len(s_res) >= 66:
-                    try:
-                        raw_s = int(s_res[:66], 16)
-                        if raw_s >= 2**128 or raw_s == (2**256 - 1) or raw_s >= 10**30:
-                            info["max_supply"] = None
-                            break
-                        if classification.get("category") == "TOKEN":
-                            dec = classification.get("decimals", 18) or 18
-                            info["max_supply"] = raw_s / (10 ** dec)
-                        else:
-                            info["max_supply"] = raw_s
-                        break
-                    except Exception as exc:
-                        _log.debug("could not parse max supply %r for %s: %s", s_res, contract_addr, exc)
-
-        if info["total_minted"] is None or info["total_minted"] == 0:
-            for sel_name in ["totalMinted()", "_totalMinted()", "totalSupply()", "currentSupply()", "tokenCount()", "nextTokenId()", "_nextTokenId()", "currentTokenId()", "lifetimeCommitted()", "miningCommitted()"]:
-                m_res = rpc.call_contract(t_addr, keccak_selector(sel_name))
-                if m_res and len(m_res) >= 66:
-                    try:
-                        raw_m = int(m_res[:66], 16)
-                        if "nextTokenId" in sel_name and raw_m > 0:
-                            raw_m = raw_m - 1
-                        if classification.get("category") == "TOKEN":
-                            dec = classification.get("decimals", 18) or 18
-                            info["total_minted"] = raw_m / (10 ** dec)
-                            # Note: Do not set max_supply = total_minted for standard BEP-20 tokens;
-                            # ERC-20 supply is pre-minted, so mint progress requires a bonding curve/cap getter.
-                        else:
-                            info["total_minted"] = raw_m
-                        break
-                    except Exception as exc:
-                        _log.debug("could not parse total minted %r for %s: %s", m_res, contract_addr, exc)
+    token_decimals = classification.get("decimals", 18) if classification.get("category") == "TOKEN" else None
+    info["max_supply"], info["total_minted"] = read_supply(rpc, target_addrs, token_decimals)
 
     # Inspect bytecode constants if max_supply still not found (e.g. PUSH2 24444 -> 0x615f7c)
     if info["max_supply"] is None:
@@ -1140,32 +1105,60 @@ def _call_uint(rpc: BscRpcClient, contract: str, func_sig: str) -> Optional[int]
         return None
 
 
-def get_token_count(rpc: BscRpcClient, contract: str) -> Optional[int]:
-    """Number of tokens minted so far, from the first mint-counter getter the contract exposes.
-    Raw count (NFT semantics): not scaled by decimals, so don't use it for fungible tokens."""
-    for sig in ("totalMinted()", "_totalMinted()", "tokenCount()", "currentSupply()",
-                "nextTokenId()", "_nextTokenId()", "currentTokenId()"):
-        raw = _call_uint(rpc, contract, sig)
-        if raw is not None:
-            # nextTokenId-style counters point at the next id to mint (ids start at 1)
-            return raw - 1 if "nexttokenid" in sig.lower() and raw > 0 else raw
-    return None
+MAX_SUPPLY_GETTERS = ("maxSupply()", "MAX_SUPPLY()", "max_supply()", "cap()", "MAX_TOKENS()", "maxTokens()",
+                      "maxBoxes()", "MAX_BOXES()")
+MINTED_GETTERS = ("totalMinted()", "_totalMinted()", "totalSupply()", "currentSupply()", "tokenCount()",
+                  "nextTokenId()", "_nextTokenId()", "currentTokenId()", "lifetimeCommitted()", "miningCommitted()")
 
 
-def get_total_supply(rpc: BscRpcClient, contract: str) -> Optional[int]:
-    """totalSupply() as a raw integer (NFT semantics: not scaled by decimals)."""
-    return _call_uint(rpc, contract, "totalSupply()")
+def read_supply(
+    rpc: BscRpcClient,
+    target_addrs: List[str],
+    token_decimals: Optional[int] = None,
+    need_max: bool = True,
+) -> Tuple[Optional[float], Optional[float]]:
+    """(max_supply, total_minted) read from the first getters that answer on `target_addrs`
+    (the contract itself, then its core() companion if it has one).
 
+    token_decimals=None returns raw integers (NFTs and fair-mint dispensers). For BEP-20 tokens pass
+    their decimals and values are divided by 10**decimals; `decimals or 18` is deliberate, it is what
+    analyze_contract has always stored, and stored values must stay comparable with fresh reads.
+    need_max=False skips the cap probes (about 8 calls) when the cap is already known."""
+    def scale(raw: int):
+        if token_decimals is None:
+            return raw
+        return raw / (10 ** (token_decimals or 18))
 
-def get_max_supply(rpc: BscRpcClient, contract: str) -> Optional[int]:
-    """Supply cap from the first cap getter the contract exposes; None if there is none or it is
-    effectively unlimited (>= 2**128, same cut-off as analyze_contract)."""
-    for sig in ("maxSupply()", "MAX_SUPPLY()", "max_supply()", "cap()", "MAX_TOKENS()", "maxTokens()",
-                "maxBoxes()", "MAX_BOXES()"):
-        raw = _call_uint(rpc, contract, sig)
-        if raw is not None:
-            return None if raw >= 2**128 or raw >= 10**30 else raw
-    return None
+    max_supply = None
+    total_minted = None
+    for t_addr in target_addrs:
+        if need_max and max_supply is None:
+            for sel_name in MAX_SUPPLY_GETTERS:
+                s_res = rpc.call_contract(t_addr, keccak_selector(sel_name))
+                if s_res and len(s_res) >= 66:
+                    try:
+                        raw_s = int(s_res[:66], 16)
+                        if raw_s >= 2**128 or raw_s == (2**256 - 1) or raw_s >= 10**30:
+                            max_supply = None  # effectively unlimited
+                            break
+                        max_supply = scale(raw_s)
+                        break
+                    except Exception as exc:
+                        _log.debug("could not parse max supply %r for %s: %s", s_res, t_addr, exc)
+
+        if total_minted is None or total_minted == 0:
+            for sel_name in MINTED_GETTERS:
+                m_res = rpc.call_contract(t_addr, keccak_selector(sel_name))
+                if m_res and len(m_res) >= 66:
+                    try:
+                        raw_m = int(m_res[:66], 16)
+                        if "nextTokenId" in sel_name and raw_m > 0:
+                            raw_m = raw_m - 1  # nextTokenId-style counters point at the next id (ids start at 1)
+                        total_minted = scale(raw_m)
+                        break
+                    except Exception as exc:
+                        _log.debug("could not parse total minted %r for %s: %s", m_res, t_addr, exc)
+    return max_supply, total_minted
 
 
 def fetch_bnb_price_usd(rpc: BscRpcClient) -> Optional[float]:
