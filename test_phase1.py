@@ -100,7 +100,7 @@ def test_db_favorites_crud(temp_db):
     assert retrieved["updated_at"] == 1730001111
 
 
-def test_fastapi_endpoints(tmp_path):
+def test_fastapi_endpoints(tmp_path, monkeypatch):
     """Tests the modernized FastAPI application using TestClient."""
     import monitor
     orig_file = monitor.HISTORY_FILE
@@ -148,8 +148,9 @@ def test_fastapi_endpoints(tmp_path):
         assert get_fav.status_code == 200
         assert get_fav.json()["favorites"] == ["0x105d904d64520d9bcefb66af936c2cce59037777"]
 
-        # 6. /api/sync
-        sync_res = client.post("/api/sync", json=[
+        # 6. /api/sync (admin-only since the A1 security change: needs bearer ADMIN_TOKEN)
+        monkeypatch.setenv("ADMIN_TOKEN", "test-admin-token")
+        sync_res = client.post("/api/sync", headers={"Authorization": "Bearer test-admin-token"}, json=[
             {"contract": "0x3333333333333333333333333333333333333333", "name": "Sync Test", "block": 50000000}
         ])
         assert sync_res.status_code == 200

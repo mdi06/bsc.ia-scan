@@ -45,14 +45,10 @@ ALTER TABLE user_favorites ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "Public read projects" ON projects
     FOR SELECT USING (true);
 
--- Allow service_role and backend to insert / update projects
-CREATE POLICY "Public upsert projects" ON projects
-    FOR ALL USING (true) WITH CHECK (true);
+-- Writes to projects are performed by the backend with the service role key,
+-- which bypasses RLS. No public write policy is defined on purpose.
 
--- Allow public read & write to favorites (authenticated by wallet in request)
+-- Allow public read of favorites; writes go through the backend (service role)
 CREATE POLICY "Public read user_favorites" ON user_favorites
     FOR SELECT USING (true);
-
-CREATE POLICY "Public upsert user_favorites" ON user_favorites
-    FOR ALL USING (true) WITH CHECK (true);
 

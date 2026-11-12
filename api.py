@@ -13,8 +13,10 @@ import sys
 import time
 import json
 import hashlib
+import re
+import secrets
 from typing import Optional, List, Dict, Any
-from fastapi import FastAPI, Query, HTTPException, Request
+from fastapi import FastAPI, Query, HTTPException, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse, Response, RedirectResponse, FileResponse
@@ -33,14 +35,79 @@ app = FastAPI(
 # GZip compression middleware: shrinks JSON/text responses by 80-90% to protect Render 5GB bandwidth
 app.add_middleware(GZipMiddleware, minimum_size=500)
 
+# --- Basic in-memory rate limiting (fixed 60s window per client IP) ---
+RATE_LIMIT_WINDOW = 60
+RATE_LIMIT_MAX = 120
+RATE_LIMIT_MAX_TRACKED_IPS = 50000
+RATE_LIMIT_EXEMPT = {"/healthz", "/health"}
+_rate_window_id = 0
+_rate_counts: Dict[str, int] = {}
+
+
+def _client_ip(request: Request) -> str:
+    # Cloudflare (in front of Render) overwrites CF-Connecting-IP, so clients cannot spoof it.
+    # Fly sets Fly-Client-IP. X-Forwarded-For is the last resort (its first entry is client-controlled).
+    ip = request.headers.get("cf-connecting-ip") or request.headers.get("fly-client-ip")
+    if not ip:
+        xff = request.headers.get("x-forwarded-for", "")
+        ip = xff.split(",")[0].strip() if xff else ""
+    if not ip:
+        ip = request.client.host if request.client else "unknown"
+    return ip
+
+
+@app.middleware("http")
+async def rate_limit_middleware(request: Request, call_next):
+    global _rate_window_id
+    path = request.url.path
+    if request.method == "OPTIONS" or not path.startswith("/api/") or path in RATE_LIMIT_EXEMPT:
+        return await call_next(request)
+
+    now = time.time()
+    window_id = int(now // RATE_LIMIT_WINDOW)
+    if window_id != _rate_window_id:
+        # New window: drop every old counter so the dict stays bounded.
+        _rate_counts.clear()
+        _rate_window_id = window_id
+    ip = _client_ip(request)
+    if ip not in _rate_counts and len(_rate_counts) >= RATE_LIMIT_MAX_TRACKED_IPS:
+        _rate_counts.clear()  # hard cap against key-flooding; fails open for this window
+    count = _rate_counts.get(ip, 0) + 1
+    _rate_counts[ip] = count
+    if count > RATE_LIMIT_MAX:
+        retry_after = max(1, int((window_id + 1) * RATE_LIMIT_WINDOW - now) + 1)
+        return JSONResponse(
+            status_code=429,
+            headers={"Retry-After": str(retry_after)},
+            content={"success": False, "error": "rate_limited"},
+        )
+    return await call_next(request)
+
+
 # CORS Middleware for Vercel, Render & cross-origin frontend
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
+    allow_credentials=False,  # public read-mostly API; admin uses bearer tokens, not cookies
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+def require_admin(request: Request) -> None:
+    """Gate for write/delete endpoints. Requires `Authorization: Bearer <ADMIN_TOKEN>`.
+
+    If ADMIN_TOKEN is unset/empty the endpoints are disabled (503), never open.
+    """
+    expected = os.environ.get("ADMIN_TOKEN", "")
+    if not expected:
+        raise HTTPException(status_code=503, detail="admin disabled")
+    header = request.headers.get("authorization", "")
+    scheme, _, token = header.partition(" ")
+    if scheme.lower() != "bearer" or not token:
+        raise HTTPException(status_code=401, detail="unauthorized")
+    if not secrets.compare_digest(token.strip().encode("utf-8"), expected.encode("utf-8")):
+        raise HTTPException(status_code=401, detail="unauthorized")
 
 
 @app.exception_handler(Exception)
@@ -50,12 +117,7 @@ async def global_exception_handler(request: Request, exc: Exception):
     print(f"[🔥 API Unhandled Error] {request.method} {request.url.path}: {exc}\n{tb}", flush=True)
     return JSONResponse(
         status_code=500,
-        headers={
-            "Access-Control-Allow-Origin": "*",
-            "Access-Control-Allow-Methods": "*",
-            "Access-Control-Allow-Headers": "*",
-        },
-        content={"success": False, "error": str(exc), "traceback": tb}
+        content={"success": False, "error": "internal_error"}
     )
 
 
@@ -83,6 +145,8 @@ BOGUS_SCAM_CONTRACTS = [
     "0x431a6136ee1b2f76378c8a14b53ef11ba9099b7a",  # Apple (AAPLB)
     "0x360d0b00c3c3a9d70e6e7372cfbe85e68b95973c",  # DogeZilla (Legacy meme clone with $0 mcap / sub-decimal display bug)
 ]
+ADDRESS_RE = re.compile(r"^0x[0-9a-fA-F]{40}$")
+MAX_FAVORITES = 500
 BOGUS_SET = set(c.lower() for c in BOGUS_SCAM_CONTRACTS)
 
 
@@ -91,16 +155,10 @@ def startup_event():
     import threading
     t = threading.Thread(target=run_api_memory_guard, daemon=True, name="ApiMemoryGuard")
     t.start()
-    try:
-        purged = db.delete_projects(BOGUS_SCAM_CONTRACTS)
-        if purged:
-            print(f"[FastAPI Startup] Automatically purged {purged} bogus scam/stock contracts from database", flush=True)
-    except Exception as e:
-        print(f"[FastAPI Startup Purge Error] {e}", flush=True)
 
 
-@app.post("/api/admin/purge-bogus")
-@app.delete("/api/projects/{contract}")
+@app.post("/api/admin/purge-bogus", dependencies=[Depends(require_admin)])
+@app.delete("/api/projects/{contract}", dependencies=[Depends(require_admin)])
 def purge_bogus_endpoint(contract: Optional[str] = None):
     targets = [contract.lower()] if contract else BOGUS_SCAM_CONTRACTS
     cnt = db.delete_projects(targets)
@@ -534,7 +592,7 @@ def get_projects(
 @app.get("/favorites")
 def get_favorites(wallet: str = Query(..., description="0x... BSC wallet address")):
     w = (wallet or "").lower().strip()
-    if not w or not w.startswith("0x") or len(w) != 42:
+    if not ADDRESS_RE.fullmatch(w):
         raise HTTPException(
             status_code=400,
             detail="Valid 0x... BSC wallet address required in ?wallet= parameter"
@@ -556,14 +614,19 @@ async def post_favorites(request: Request):
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid JSON body")
 
-    wallet = (incoming.get("wallet") or "").lower().strip()
-    if not wallet or not wallet.startswith("0x") or len(wallet) != 42:
+    if not isinstance(incoming, dict):
+        raise HTTPException(status_code=400, detail="Expected JSON object")
+
+    wallet = str(incoming.get("wallet") or "").lower().strip()
+    if not ADDRESS_RE.fullmatch(wallet):
         raise HTTPException(status_code=400, detail="Valid 0x... BSC wallet address required")
 
     raw_favs = incoming.get("favorites", [])
     if not isinstance(raw_favs, list):
         raw_favs = []
-    clean_favs = [c.lower() for c in raw_favs if isinstance(c, str) and c.startswith("0x") and len(c) == 42]
+    if len(raw_favs) > MAX_FAVORITES:
+        raise HTTPException(status_code=413, detail=f"Too many favorites (max {MAX_FAVORITES})")
+    clean_favs = [c.lower() for c in raw_favs if isinstance(c, str) and ADDRESS_RE.fullmatch(c)]
     clean_favs = list(dict.fromkeys(clean_favs))
     ts = int(incoming.get("timestamp") or time.time())
 
@@ -577,8 +640,8 @@ async def post_favorites(request: Request):
     }
 
 
-@app.post("/api/sync")
-@app.post("/sync")
+@app.post("/api/sync", dependencies=[Depends(require_admin)])
+@app.post("/sync", dependencies=[Depends(require_admin)])
 async def post_sync(request: Request):
     try:
         incoming = await request.json()

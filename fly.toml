@@ -3,6 +3,8 @@
 # See https://fly.io/docs/reference/configuration/ for information about how to use this file.
 #
 
+# Secrets (not stored here): set ADMIN_TOKEN with `fly secrets set ADMIN_TOKEN=...`
+# Without it, /api/sync, /sync, /api/admin/purge-bogus and DELETE /api/projects/{contract} return 503.
 app = 'agent-id-monitor'
 primary_region = 'sin'
 
