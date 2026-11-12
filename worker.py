@@ -58,10 +58,12 @@ def _enrich_contract_background(rpc: monitor.BscRpcClient, contract_addr: str, d
                     if mkt.get("token_symbol"):
                         item["token_symbol"] = mkt["token_symbol"]
                     item["token_price_usd"] = mkt.get("token_price_usd", 0)
-                    item["holders"] = max(item.get("holders", 1), mkt.get("holders", 1))
-                    item["buys_24h"] = max(item.get("buys_24h", 0), mkt.get("buys_24h", 0))
-                    item["buys_1h"] = max(item.get("buys_1h", 0), mkt.get("buys_1h", 0))
-                    item["sells_24h"] = mkt.get("sells_24h", 0)
+                    # counts the sources did not report (None) are left as they were; never replaced by a guess
+                    for k in ("holders", "buys_24h", "buys_1h"):
+                        if mkt.get(k) is not None:
+                            item[k] = max(item.get(k) or 0, mkt[k])
+                    if mkt.get("sells_24h") is not None:
+                        item["sells_24h"] = mkt["sells_24h"]
                     item["volume_24h"] = mkt.get("volume_24h", 0.0)
                     item["market_cap"] = mkt.get("market_cap", 0.0)
                     item["fdv"] = mkt.get("fdv", 0.0)
@@ -411,7 +413,11 @@ def _sweep_kind(item: dict) -> Optional[str]:
 
 
 def _token_decimals(item: dict) -> Optional[int]:
-    """Decimals recorded in a BEP-20 standard string like 'BEP-20 Token (18 decimals)'."""
+    """Decimals of the token, from the stored `token_decimals` (set from decimals() of the token itself, or of the
+    token a Fair-Mint dispenser hands out), else from a BEP-20 standard string like 'BEP-20 Token (18 decimals)'."""
+    stored = item.get("token_decimals")
+    if isinstance(stored, int) and 0 <= stored <= 36:
+        return stored
     m = re.search(r"\((\d+) decimals\)", str(item.get("standard") or ""))
     return int(m.group(1)) if m else None
 
@@ -441,7 +447,7 @@ def fast_sweep_contract(rpc: monitor.BscRpcClient, item: dict) -> tuple:
     - fair-mint dispensers: raw counts.
     Tokens and fair-mint contracts are swept only once they have a known cap, since "progress" means
     nothing without one. The holder estimate is NFT-only (a token's supply isn't a holder count).
-    Returns (contract, minted, supply, holders, changed); anything else is reported unchanged."""
+    Returns (contract, minted, supply, holders_estimate, changed); anything else is reported unchanged."""
     c = item.get("contract")
     kind = _sweep_kind(item)
     if not c or not c.startswith("0x") or len(c) != 42 or kind is None:
@@ -476,11 +482,13 @@ def fast_sweep_contract(rpc: monitor.BscRpcClient, item: dict) -> tuple:
         if supply is not None and supply != cur_supply:
             changed = True
 
-        holders = item.get("holders", 1)
+        # An NFT collection's holder count is only an estimate here (about 85% of the minted items). It is
+        # returned for holders_estimate; it is never written to `holders`, which is a measured number.
+        holders_estimate = None
         if kind == "nft" and minted is not None and minted > 0:
-            holders = max(holders, min(minted, int(minted * 0.85) + 1))
+            holders_estimate = min(minted, int(minted * 0.85) + 1)
 
-        return c, minted, supply, holders, changed
+        return c, minted, supply, holders_estimate, changed
     except Exception:
         return c, None, None, None, False
 
@@ -532,7 +540,7 @@ def run_fast_track_progress_sweeper_loop():
             for item in active_contracts:
                 tot = item.get("total_minted", 0) or 0
                 sup = item.get("max_supply") or 0
-                holders = item.get("holders", 0) or 0
+                holders = max(item.get("holders") or 0, item.get("holders_estimate") or 0)
                 pct = (tot / sup * 100.0) if sup > 0 else 0.0
 
                 if pct >= 45.0 or holders >= 50:
@@ -579,7 +587,7 @@ def run_fast_track_progress_sweeper_loop():
                             if supply is not None:
                                 it["max_supply"] = supply
                             if holders is not None:
-                                it["holders"] = max(it.get("holders", 0) or 0, holders)
+                                it["holders_estimate"] = max(it.get("holders_estimate") or 0, holders)
 
                             new_sup = it.get("max_supply") or 0
                             new_minted = it.get("total_minted", 0) or 0
@@ -735,13 +743,54 @@ def _needs_pancake_fallback(item: Dict[str, Any]) -> bool:
     return bool(active) and not (item.get("lp_usd") or 0) > 0 and not known_pair
 
 
+SUPPLY_DISAGREEMENT_FACTOR = 100.0
+
+
+def _correct_supply_from_market(item: Dict[str, Any], mcap: float, fdv: float, price: float) -> None:
+    """Sanity check for a BEP-20 token's stored supply. DexScreener's marketCap / priceUsd (or fdv / priceUsd)
+    is the supply the market uses; when our stored supply is off from it by more than SUPPLY_DISAGREEMENT_FACTOR
+    (a wrong decimals scale, a counter getter that answered instead of totalSupply) the market-implied supply
+    wins. A stored cap is rescaled by the same factor so progress is unchanged. Logged. Only BEP-20 tokens."""
+    if monitor.supply_for_market_cap(item.get("standard"), item.get("total_minted")) is None:
+        return
+    implied_cap = mcap if mcap > 0 else fdv
+    if implied_cap <= 0 or price <= 0:
+        return
+    implied = implied_cap / price
+    stored = float(item["total_minted"])
+    ratio = implied / stored
+    if 1.0 / SUPPLY_DISAGREEMENT_FACTOR <= ratio <= SUPPLY_DISAGREEMENT_FACTOR:
+        return
+    print(f"[⚠️ Market Engine] {item.get('contract')} stored supply {stored:g} disagrees with DexScreener "
+          f"(marketCap/price = {implied:g}); using the market-implied supply", flush=True)
+    item["supply_corrected_from"] = stored
+    item["total_minted"] = implied
+    if item.get("max_supply"):
+        item["max_supply"] = float(item["max_supply"]) * ratio
+
+
+def _price_bnb_from_pair(pair: Dict[str, Any], price_usd: float) -> Optional[float]:
+    """Token price in BNB: DexScreener's priceNative only when the pair is quoted in WBNB (otherwise it is in the
+    quote token, e.g. USDT), else priceUsd / the live BNB price. None when neither is available."""
+    quote = ((pair.get("quoteToken") or {}).get("address") or "").lower()
+    if quote == monitor.WBNB_ADDRESS.lower() and pair.get("priceNative"):
+        return float(pair["priceNative"])
+    if price_usd > 0 and monitor.bnb_price_is_live():
+        return price_usd / monitor.cached_bnb_price()
+    return None
+
+
 def _apply_dex_pair(item: Dict[str, Any], pair: Dict[str, Any], now: Optional[float] = None) -> None:
     """Copies a DexScreener pair's price, liquidity, volume, market cap and trade counts onto a drop and
     stamps it fresh (market_updated_at). Raises if the pair has malformed numbers."""
     lp_info = pair.get("liquidity", {})
     item["lp_usd"] = float(lp_info.get("usd") or 0.0)
-    if pair.get("priceUsd"):
-        item["token_price_usd"] = float(pair.get("priceUsd"))
+    price = float(pair.get("priceUsd") or 0.0)
+    if price:
+        item["token_price_usd"] = price
+        px_bnb = _price_bnb_from_pair(pair, price)
+        if px_bnb:
+            item["token_price_bnb"] = px_bnb
     if pair.get("baseToken", {}).get("symbol"):
         item["token_symbol"] = pair["baseToken"]["symbol"]
     if pair.get("url"):
@@ -751,14 +800,15 @@ def _apply_dex_pair(item: Dict[str, Any], pair: Dict[str, Any], now: Optional[fl
 
     mcap = float(pair.get("marketCap") or 0.0)
     fdv = float(pair.get("fdv") or 0.0)
-    if mcap == 0 and fdv == 0 and (item.get("token_price_usd") or 0.0) > 0:
-        supply_val = float(item.get("total_minted") or item.get("max_supply") or 0.0)
-        if supply_val > 0.0:
-            if supply_val > 1e14:
-                supply_val = supply_val / 1e18
-            mcap = supply_val * float(item["token_price_usd"])
-    item["market_cap"] = mcap if mcap > 0 else fdv
-    item["fdv"] = fdv
+    _correct_supply_from_market(item, mcap, fdv, float(item.get("token_price_usd") or 0.0))
+    if mcap == 0 and fdv == 0:
+        # DexScreener gave no market cap: estimate from our supply, but only where its unit is certain
+        # (a BEP-20 token's whole-token supply). Otherwise the market cap is unknown, not a guess.
+        est = monitor.market_cap_from_supply(item.get("standard"), item.get("total_minted"),
+                                             item.get("max_supply"), item.get("token_price_usd"))
+        mcap = est or 0.0
+    item["market_cap"] = (mcap if mcap > 0 else fdv) or None
+    item["fdv"] = fdv or None
 
     item["price_change_24h"] = float((pair.get("priceChange", {}) or {}).get("h24") or 0.0)
 
@@ -939,6 +989,53 @@ def clear_foreign_pair_market(item: Dict[str, Any]) -> None:
     item.pop("market_source", None)
 
 
+def clean_count_junk(item: Dict[str, Any]) -> List[str]:
+    """Resets the count fields an old fallback filled with total_minted (H3) to None, in place. Returns what it
+    changed. Rules:
+    - buys_24h above 1e6 that equals total_minted, or ANY buys_24h equal to total_minted on a record without a
+      DexScreener pair (a real buy count never mirrors the mint count there);
+    - holders equal to total_minted (above 1) on a record without a DexScreener pair;
+    - a non-integer holders value (e.g. 74574586.24)."""
+    changed: List[str] = []
+    tm = item.get("total_minted")
+    has_dex = "dexscreener.com" in str(item.get("pair_url") or "") or item.get("market_source") == "dexscreener"
+
+    def same(a, b) -> bool:
+        try:
+            return a is not None and b is not None and float(b) > 0 and abs(float(a) - float(b)) <= 1e-9 * max(1.0, abs(float(b)))
+        except (TypeError, ValueError):
+            return False
+
+    b24 = item.get("buys_24h")
+    if b24 is not None and same(b24, tm) and (float(b24) > 1e6 or not has_dex):
+        item["buys_24h"] = None
+        changed.append("buys_24h")
+    h = item.get("holders")
+    if h is not None:
+        try:
+            frac = float(h) != int(float(h))
+        except (TypeError, ValueError, OverflowError):
+            frac = True
+        if frac or (same(h, tm) and float(h) > 1 and not has_dex):
+            item["holders"] = None
+            changed.append("holders")
+    return changed
+
+
+def migrate_zero_decimal_supply(item: Dict[str, Any]) -> bool:
+    """A 0-decimal BEP-20 token's supply was stored as raw / 1e18 (H5). Multiplies total_minted and max_supply
+    back by 1e18 when the record is a 0-decimal token and total_minted looks scaled (below 1e-3)."""
+    m = re.search(r"\(0 decimals\)", str(item.get("standard") or ""))
+    tm = item.get("total_minted")
+    if not m or "BEP-20" not in str(item.get("standard")) or not tm or not (0 < float(tm) < 1e-3):
+        return False
+    item["total_minted"] = round(float(tm) * 1e18)
+    if item.get("max_supply"):
+        item["max_supply"] = round(float(item["max_supply"]) * 1e18)
+    item["token_decimals"] = 0
+    return True
+
+
 def run_market_dynamics_updater_loop():
     """Every 120s, refreshes liquidity, price and volume for recent drops from DexScreener (Pancake reserves as fallback)."""
     print("[📈 Market Engine] Initializing 24/7 Market Dynamics Updater...", flush=True)
@@ -1000,6 +1097,7 @@ def run_market_dynamics_updater_loop():
             if dex_failures:
                 print(f"[⚠️ Market Engine] DexScreener failed for {dex_failures} batch(es): {last_dex_error}", flush=True)
 
+            monitor.refresh_bnb_price(rpc)  # cached 60s; _apply_dex_pair needs a live rate for token_price_bnb
             now = time.time()
             changed_items, pancake_candidates, no_pair_items, updated_count = _apply_market_sweep(
                 history, dex_updates, now)

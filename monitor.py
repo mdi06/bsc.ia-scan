@@ -787,6 +787,9 @@ def analyze_contract(rpc: BscRpcClient, contract_addr: str, wallet_addr: str) ->
     # Check supply (max supply and current minted/total supply)
     token_decimals = classification.get("decimals", 18) if classification.get("category") == "TOKEN" else None
     info["max_supply"], info["total_minted"] = read_supply(rpc, target_addrs, token_decimals)
+    # decimals of the token itself (BEP-20) or of the token a Fair-Mint dispenser hands out
+    if classification.get("decimals") is not None:
+        info["token_decimals"] = classification["decimals"]
 
     # Inspect bytecode constants if max_supply still not found (e.g. PUSH2 24444 -> 0x615f7c)
     if info["max_supply"] is None:
@@ -1120,14 +1123,23 @@ def read_supply(
     """(max_supply, total_minted) read from the first getters that answer on `target_addrs`
     (the contract itself, then its core() companion if it has one).
 
-    token_decimals=None returns raw integers (NFTs and fair-mint dispensers). For BEP-20 tokens pass
-    their decimals and values are divided by 10**decimals; `decimals or 18` is deliberate, it is what
-    analyze_contract has always stored, and stored values must stay comparable with fresh reads.
+    SUPPLY UNITS (the one convention the rest of the code relies on):
+    - BEP-20 token: whole tokens, i.e. the raw integer divided by 10**decimals(), where `token_decimals` is the
+      token's real decimals() (0 is a real value: a 0-decimal token's raw supply is already whole tokens).
+    - NFT: an item count (token_decimals=None, raw integer).
+    - Fair-Mint dispenser: token_decimals=None, the raw integer of the dispenser's own counter. Dispensers
+      mix item counts and raw token amounts, so this is NOT a token supply and must never feed a market cap.
+    For a BEP-20 token totalSupply() is read first: counter-style getters (totalMinted, tokenCount, ...) can
+    answer with something that is not the supply.
     need_max=False skips the cap probes (about 8 calls) when the cap is already known."""
     def scale(raw: int):
         if token_decimals is None:
             return raw
-        return raw / (10 ** (token_decimals or 18))
+        return raw / (10 ** token_decimals)
+
+    minted_getters = MINTED_GETTERS
+    if token_decimals is not None:
+        minted_getters = ("totalSupply()",) + tuple(g for g in MINTED_GETTERS if g != "totalSupply()")
 
     max_supply = None
     total_minted = None
@@ -1147,7 +1159,7 @@ def read_supply(
                         _log.debug("could not parse max supply %r for %s: %s", s_res, t_addr, exc)
 
         if total_minted is None or total_minted == 0:
-            for sel_name in MINTED_GETTERS:
+            for sel_name in minted_getters:
                 m_res = rpc.call_contract(t_addr, keccak_selector(sel_name))
                 if m_res and len(m_res) >= 66:
                     try:
@@ -1159,6 +1171,29 @@ def read_supply(
                     except Exception as exc:
                         _log.debug("could not parse total minted %r for %s: %s", m_res, t_addr, exc)
     return max_supply, total_minted
+
+
+def supply_for_market_cap(standard: Any, total_minted: Any, max_supply: Any = None) -> Optional[float]:
+    """Supply in WHOLE TOKENS for a market-cap estimate, or None when the unit isn't certain.
+    Only BEP-20 tokens qualify: read_supply stores their supply as raw / 10**decimals(). NFT counts and
+    Fair-Mint dispenser counters are not token supplies. No magnitude guessing (the old `> 1e14 -> / 1e18`)."""
+    if "BEP-20" not in str(standard or ""):
+        return None
+    try:
+        supply = float(total_minted or max_supply or 0.0)
+    except (TypeError, ValueError):
+        return None
+    return supply if supply > 0 else None
+
+
+def market_cap_from_supply(standard: Any, total_minted: Any, max_supply: Any, price_usd: Any) -> Optional[float]:
+    """supply x price for a BEP-20 token, None if the supply unit or the price isn't known."""
+    supply = supply_for_market_cap(standard, total_minted, max_supply)
+    try:
+        price = float(price_usd or 0.0)
+    except (TypeError, ValueError):
+        return None
+    return supply * price if supply and price > 0 else None
 
 
 def fetch_bnb_price_usd(rpc: BscRpcClient) -> Optional[float]:
@@ -1241,10 +1276,10 @@ def fetch_token_market_data(token_addr: str) -> Dict[str, Any]:
     - 24h & 1h purchase count (buys), sells, and volume via DexScreener API
     """
     res = {
-        "holders": 0,
-        "buys_24h": 0,
-        "buys_1h": 0,
-        "sells_24h": 0,
+        "holders": None,    # None = no source answered; 0 would claim "zero holders"
+        "buys_24h": None,
+        "buys_1h": None,
+        "sells_24h": None,
         "volume_24h": 0.0,
         "market_cap": 0.0,
         "fdv": 0.0,
@@ -1406,7 +1441,12 @@ def fetch_token_market_data(token_addr: str) -> Dict[str, Any]:
                 res["price_change_24h"] = float((p.get("priceChange") or {}).get("h24") or 0.0)
                 res["pair_url"] = p.get("url", "")
                 res["market_price_usd"] = float(p.get("priceUsd") or 0.0)
-                res["market_price_bnb"] = float(p.get("priceNative") or 0.0)
+                # priceNative is in the QUOTE token (USDT for USDT pairs): it is a BNB price only for a WBNB pair
+                px_usd = res["market_price_usd"]
+                if ((p.get("quoteToken") or {}).get("address") or "").lower() == WBNB_ADDRESS.lower():
+                    res["market_price_bnb"] = float(p.get("priceNative") or 0.0)
+                elif px_usd > 0 and bnb_price_is_live():
+                    res["market_price_bnb"] = px_usd / cached_bnb_price()
                 res["lp_usd"] = float((p.get("liquidity") or {}).get("usd", 0.0) or 0.0)
                 res["dex_id"] = p.get("dexId", "")
                 res["pair_address"] = p.get("pairAddress", "")
@@ -1709,7 +1749,7 @@ def evaluate_sniper_ready(item: Dict[str, Any]) -> Dict[str, Any]:
     else:
         prog = (tm / ms) if (ms and ms > 0) else 0.0
 
-    agents = int(item.get("holders", 0) or item.get("unique_minters", 0) or 0)
+    agents = int((item.get("holders") or 0) or item.get("unique_minters", 0) or 0)
 
     # Progress check
     is_sold_out = (prog >= 0.999) or (is_nft and bool(ms) and bool(tm) and tm >= ms)
@@ -2274,11 +2314,15 @@ def analyze_market_interest(
             _store_linked_market(stats, mkt_data)
         mkt_data = {}
 
+    # Counts a source really reported. Unknown stays None in the result (below); the score code uses 0 meanwhile.
+    count_keys = ("holders", "buys_24h", "buys_1h", "sells_24h")
+    known_counts = {k: mkt_data.get(k) for k in count_keys if mkt_data and mkt_data.get(k) is not None}
+
     if mkt_data:
-        stats["holders"] = mkt_data.get("holders", 0)
-        stats["buys_24h"] = mkt_data.get("buys_24h", 0)
-        stats["buys_1h"] = mkt_data.get("buys_1h", 0)
-        stats["sells_24h"] = mkt_data.get("sells_24h", 0)
+        stats["holders"] = mkt_data.get("holders") or 0
+        stats["buys_24h"] = mkt_data.get("buys_24h") or 0
+        stats["buys_1h"] = mkt_data.get("buys_1h") or 0
+        stats["sells_24h"] = mkt_data.get("sells_24h") or 0
         stats["volume_24h"] = mkt_data.get("volume_24h", 0.0)
         stats["market_cap"] = mkt_data.get("market_cap", 0.0)
         stats["fdv"] = mkt_data.get("fdv", 0.0)
@@ -2300,17 +2344,11 @@ def analyze_market_interest(
             stats["risk_badge"] = mkt_data.get("risk_badge", "🟢 Clean")
             stats["risk_flags"] = mkt_data.get("risk_flags", [])
 
-    # For direct NFT/token mints without DEX pair yet
-    if stats["holders"] == 0 and details.get("total_minted"):
-        stats["holders"] = details.get("total_minted", 0)
-    if stats["buys_24h"] == 0 and details.get("total_minted"):
-        stats["buys_24h"] = details.get("total_minted", 0)
     if stats.get("market_cap", 0.0) == 0.0 and stats.get("token_price_usd", 0.0) > 0.0:
-        supply_val = float(details.get("total_minted") or details.get("max_supply") or 0.0)
-        if supply_val > 0.0:
-            if supply_val > 1e14:
-                supply_val = supply_val / 1e18
-            stats["market_cap"] = supply_val * float(stats["token_price_usd"])
+        est = market_cap_from_supply(cls.get("standard"), details.get("total_minted"), details.get("max_supply"),
+                                     stats["token_price_usd"])
+        if est:
+            stats["market_cap"] = est
 
     # If no token security was fetched, audit NFT risk
     if not stats.get("security"):
@@ -2668,6 +2706,9 @@ def analyze_market_interest(
     if s_eval["is_ready"]:
         signals.insert(0, "🎯 High-Conviction Sniper Ready (Passed 60% & Anti-Rug)")
 
+    # Unknown counts stay None (never total_minted, never a made-up 1); known ones are whole numbers.
+    for k in count_keys:
+        stats[k] = int(known_counts[k]) if k in known_counts else None
     return stats
 
 
@@ -3103,15 +3144,18 @@ def parse_element_trade_log(log: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     Decodes an ERC721SellOrderFilled event log from Element Exchanger router:
     Contract: 0xb3e3dfcb2d9f3dde16d78b9e6eb3538eb32b5ae1
     Topic: 0x9c248aa1a265aa616f707b979d57f4529bb63a4fc34dc7fc61fdddc18410f74e
-    Data words:
+    Data words (checked against a real on-chain event; the event has a dynamic `fees` array):
       w[0]: orderHash
       w[1]: seller
       w[2]: buyer
-      w[3]: fee
+      w[3]: nonce
       w[4]: paymentToken (0xeeee... or WBNB)
       w[5]: price in wei
-      w[6]: tokenId
+      w[6]: offset of the dynamic `fees` array (0x120)
       w[7]: collection
+      w[8]: tokenId
+      w[9...]: the fees array (length, then entries)
+    A short 8-word log (no fees array) is still read with the tokenId in w[6].
     """
     if not isinstance(log, dict):
         return None
@@ -3133,7 +3177,7 @@ def parse_element_trade_log(log: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         )
         price_wei = int(words[5], 16)
         price_bnb = price_wei / 1e18 if is_bnb else 0.0
-        token_id = int(words[6], 16)
+        token_id = int(words[8], 16) if len(words) >= 9 else int(words[6], 16)
         seller = "0x" + words[1][24:].lower()
         buyer = "0x" + words[2][24:].lower()
         tx_hash = log.get("transactionHash", "")
@@ -3242,6 +3286,7 @@ def scan_element_nft_volume(
     from_b = max(0, head - lookback_blocks)
     fills: Dict[str, List[float]] = {}
     trade_logs: List[Dict[str, Any]] = []
+    failed_chunks = 0
 
     # Pull Element logs in chunks of up to 10,000 blocks
     for b in range(from_b, head + 1, 10000):
@@ -3256,14 +3301,20 @@ def scan_element_nft_volume(
             logs = rpc.get_logs(params)
             for l in logs:
                 parsed = parse_element_trade_log(l)
-                if parsed:
+                if parsed and parsed["is_bnb"]:  # fills paid in another token have no BNB price: not a BNB sale
                     c = parsed["collection"]
                     if c not in fills:
                         fills[c] = []
                     fills[c].append(parsed["price_bnb"])
                     trade_logs.append(parsed)
         except Exception as exc:
+            failed_chunks += 1
             _log.debug("Element fill logs failed for blocks %s-%s: %s", b, to_b, exc)
+
+    if failed_chunks:
+        # Totals from the chunks that did answer would understate sales and volume: write nothing this round.
+        _log.warning("Element scan: %d log chunk(s) failed; keeping the previous secondary-market stats", failed_chunks)
+        return {}
 
     results: Dict[str, Dict[str, Any]] = {}
 
@@ -3312,8 +3363,10 @@ def scan_element_nft_volume(
         eval_res = evaluate_nft_surge(it, c_fills, secondary_moves=moves, user_held=user_held)
         it["secondary_sales_count"] = eval_res["sales_count"]
         it["secondary_vol_bnb"] = eval_res["vol_bnb"]
-        it["floor_price_bnb"] = eval_res["floor_price_bnb"]
-        it["high_price_bnb"] = eval_res["high_price_bnb"]
+        if eval_res["sales_count"] > 0:
+            # a window without fills says nothing about the floor: keep the last one we saw
+            it["floor_price_bnb"] = eval_res["floor_price_bnb"]
+            it["high_price_bnb"] = eval_res["high_price_bnb"]
         it["secondary_transfers"] = eval_res["secondary_transfers"]
         it["is_nft_surge"] = eval_res["is_nft_surge"]
         it["nft_surge_badge"] = eval_res["badge"]
@@ -4175,6 +4228,8 @@ def refresh_project_metrics(rpc: BscRpcClient, item: Dict[str, Any], wallet: str
         item["mint_price_bnb"] = details.get("mint_price_bnb", 0.0)
         item["mint_value_wei"] = details.get("mint_value_wei", "0")
         item["total_minted"] = details.get("total_minted", item.get("total_minted", 0))
+        if details.get("token_decimals") is not None:
+            item["token_decimals"] = details["token_decimals"]
         if details.get("website"):
             item["website"] = details["website"]
         if details.get("twitter"):
@@ -4185,10 +4240,10 @@ def refresh_project_metrics(rpc: BscRpcClient, item: Dict[str, Any], wallet: str
         if not fast:
             mkt = analyze_market_interest(rpc, addr, item.get("deployer"), details)
             # Live DEX, Holders & Purchase metrics
-            item["holders"] = mkt.get("holders", item.get("holders", 0))
-            item["buys_24h"] = mkt.get("buys_24h", item.get("buys_24h", 0))
-            item["buys_1h"] = mkt.get("buys_1h", item.get("buys_1h", 0))
-            item["sells_24h"] = mkt.get("sells_24h", item.get("sells_24h", 0))
+            # a count the sources did not report (None) keeps whatever the record already had
+            for k in ("holders", "buys_24h", "buys_1h", "sells_24h"):
+                if mkt.get(k) is not None:
+                    item[k] = mkt[k]
             item["volume_24h"] = mkt.get("volume_24h", item.get("volume_24h", 0.0))
             item.update(linked_market_fields(mkt))
             if mkt.get("pair_url"):
@@ -4483,7 +4538,7 @@ def build_interactive_dashboard(
         else:
             m_text.append("   ▫ Contract Check:    Standard EVM Asset Contract\n", style="green")
             if tm and tm > 0:
-                h_count = item.get("holders", 0)
+                h_count = (item.get("holders") or 0)
                 m_text.append(f"   ▫ Distribution:      {h_count:,} unique holders across {tm:,} mints\n", style="cyan")
 
         if item.get("risk_flags"):
@@ -4613,10 +4668,10 @@ def build_interactive_dashboard(
             for sig in item["signals"]:
                 m_text.append(f"   ▫ {sig}\n", style="dim white")
 
-        hld = item.get("holders", 0)
-        buys = item.get("buys_24h", 0)
-        buys_1h = item.get("buys_1h", 0)
-        sells = item.get("sells_24h", 0)
+        hld = (item.get("holders") or 0)
+        buys = (item.get("buys_24h") or 0)
+        buys_1h = (item.get("buys_1h") or 0)
+        sells = (item.get("sells_24h") or 0)
         vol = item.get("volume_24h", 0.0)
         
         m_text.append("\n• On-Chain Holders & Purchases (24h Activity):\n", style="bold white")
@@ -5025,12 +5080,8 @@ def build_interactive_dashboard(
             safety_formatted = format_structured_safety(item)
             interest_str = format_structured_interest(item)
 
-            hld = item.get("holders", 0)
-            buys = item.get("buys_24h", 0)
-            if hld == 0 and item.get("total_minted"):
-                hld = item["total_minted"]
-            if buys == 0 and item.get("total_minted") and ("NFT" in str(item.get("standard", ""))):
-                buys = item["total_minted"]
+            hld = item.get("holders") or 0
+            buys = item.get("buys_24h") or 0
 
             if hld > 0 or buys > 0:
                 h_str = format_count(hld)
@@ -5077,9 +5128,9 @@ def build_interactive_dashboard(
         t_price = sel_item.get("token_price_usd", 0)
         calldata = replace_calldata_recipient(sel_item.get("mint_calldata"), wallet, extra_addresses=sel_item.get("smart_wallets"))
         val_wei = sel_item.get("mint_value_wei", "0")
-        hld = sel_item.get("holders", 0)
-        buys = sel_item.get("buys_24h", 0)
-        buys_1h = sel_item.get("buys_1h", 0)
+        hld = (sel_item.get("holders") or 0)
+        buys = (sel_item.get("buys_24h") or 0)
+        buys_1h = (sel_item.get("buys_1h") or 0)
         vol = sel_item.get("volume_24h", 0.0)
 
         # Line 1: Contract, Deployer, Standard & Supply

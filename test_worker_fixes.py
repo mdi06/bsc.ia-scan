@@ -141,8 +141,9 @@ def test_read_supply_raw_and_scaled():
     assert (cap, minted) == (1000.0, 250.0)
     cap, minted = monitor.read_supply(_rpc_for(c, **{"cap()": 5000, "totalSupply()": 1250}), [c], 6)
     assert (cap, minted) == (0.005, 0.00125)
-    # decimals 0 is scaled as 18, exactly like analyze_contract has always stored it
-    assert monitor.read_supply(_rpc_for(c, **{"totalSupply()": 10**18}), [c], 0) == (None, 1.0)
+    # a 0-decimal token's raw supply is already whole tokens (H5: it used to be divided by 1e18)
+    assert monitor.read_supply(_rpc_for(c, **{"totalSupply()": 10**18}), [c], 0) == (None, 1e18)
+    assert monitor.read_supply(_rpc_for(c, **{"totalSupply()": 1_000_000}), [c], 0) == (None, 1_000_000.0)
 
 
 def test_read_supply_need_max_false_skips_cap_probes_and_uses_core():
@@ -195,7 +196,7 @@ def test_fast_sweep_scales_capped_bep20_and_keeps_holders():
     item = {"contract": c, "standard": "BEP-20 Token (18 decimals)", "total_minted": 100.0,
             "max_supply": 1000.0, "holders": 77}
     addr, minted, supply, holders, changed = _sweep(rpc, item)
-    assert (minted, supply, holders, changed) == (400.0, 1000.0, 77, True)  # not 340 "holders"
+    assert (minted, supply, holders, changed) == (400.0, 1000.0, None, True)  # no holder estimate for tokens
 
     item["total_minted"] = 400.0
     assert worker.fast_sweep_contract(rpc, item)[4] is False
@@ -205,7 +206,7 @@ def test_fast_sweep_fair_mint_is_raw_and_needs_a_cap():
     c = "0x" + "6" * 40
     rpc = _rpc_for(c, **{"totalMinted()": 1500})
     item = {"contract": c, "standard": "Fair-Mint Contract (Dispenses $WAT Token)", "total_minted": 4, "max_supply": 8000}
-    assert _sweep(rpc, item)[1:] == (1500, 8000, item.get("holders", 1), True)
+    assert _sweep(rpc, item)[1:] == (1500, 8000, None, True)
     item["max_supply"] = None  # no cap -> progress means nothing, so it is left alone
     assert _sweep(rpc, item) == (c, None, None, None, False)
 
@@ -316,9 +317,13 @@ def test_apply_dex_pair_copies_metrics_and_computes_missing_market_cap():
     assert (item["token_price_usd"], item["lp_usd"], item["market_cap"], item["buys_24h"], item["buys_1h"]) == (0.2636, 7_114_700.0, 48_450_648, 652, 40)
     assert item["pair_url"] == "https://dexscreener.com/bsc/0xpair"
     # DexScreener gave no market cap: fall back to price x supply, like before
-    item2 = {"total_minted": 1000.0}
+    item2 = {"total_minted": 1000.0, "standard": "BEP-20 Token (18 decimals)"}
     worker._apply_dex_pair(item2, {"liquidity": {"usd": 5}, "priceUsd": "2"})
     assert item2["market_cap"] == 2000.0
+    # ... but only where the supply's unit is certain (H4): an NFT / dispenser counter is not a token supply
+    item3 = {"total_minted": 1000.0, "standard": "ERC-721 (NFT Collection)"}
+    worker._apply_dex_pair(item3, {"liquidity": {"usd": 5}, "priceUsd": "2"})
+    assert item3["market_cap"] is None
 
 
 def test_apply_pancake_estimate(monkeypatch):
