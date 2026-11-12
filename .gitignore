@@ -19,3 +19,5 @@ data/
 *.db-wal
 *.db-shm
 scratch/
+
+AUDIT_NOTES.md
