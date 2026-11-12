@@ -492,10 +492,12 @@ function formatCryptoPrice(val, isNet = false) {
   return `${sign}$${fullStr}`;
 }
 
-// Known major pegged / Layer-1 tokens and synthetic equities on BSC
+// Known major pegged / Layer-1 tokens and synthetic equities on BSC.
+// These lists, isExcludedMajorAsset, getSanitizedMcap, isSecondaryMarketAsset and computeItemProfit mirror
+// filters.py / monitor.py line by line; test_parity_python_js.py fails when they drift.
 const EXCLUDED_PEGS_SYMBOLS = new Set([
-  'BTCB', 'WBTC', 'BTC', 'ETH', 'WETH', 'WBNB', 'BNB', 'USDT', 'USDC', 'BUSD', 
-  'DAI', 'TUSD', 'FDUSD', 'CAKE', 'U', 'OSK',
+  'BTCB', 'WBTC', 'BTC', 'ETH', 'WETH', 'WBNB', 'BNB', 'USDT', 'USDC', 'BUSD',
+  'DAI', 'TUSD', 'FDUSD', 'CAKE', 'U', 'OSK', 'FIST',
   'SOL', 'XRP', 'ADA', 'DOGE', 'DOT', 'AVAX', 'MATIC', 'POL', 'LINK', 'LTC', 'SHIB', 'UNI',
   'ZEC', 'BCH', 'XLM', 'EOS', 'ATOM', 'TRX', 'FIL', 'NEAR', 'XMR', 'ETC', 'APT', 'SUI', 'PEPE', 'FLOKI', 'DOGEZILLA'
 ]);
@@ -508,9 +510,22 @@ const EXCLUDED_PEGS_CONTRACTS = new Set([
   '0xe9e7cea3dedca5984780bafc599bd69add087d56', // BUSD
   '0x2170ed0880ac9a755fd29b2688956bd959f933f8', // ETH (Binance-Peg)
   '0x14016e85a25a55f2e084741d69d9d82361f38e2b', // DAI
-  '0x0e09fabb73bd3ade0a17ecc321fd13a19e81ce82', // CAKE
+  '0x0e09fabb73bd3ade0a17ecc321fd13a19e81ce82'  // CAKE
+]);
+
+// Contracts the API removes outright (filters.BOGUS_SCAM_CONTRACTS)
+const BOGUS_SCAM_CONTRACTS = new Set([
+  '0xd0523ce816e2b404db5633d181572cded33d7fa9', // PrinterAi
+  '0xc5a5f6337bd9d1ee1a7367a804fce07094956922', // The Bank
+  '0x2170ed0880ac9a755fd29b2688956bd959f933f8', // Binance-Peg ETH
+  '0x7425889fe94f9d693e8daefe88bcced6acfef4c0', // METAB
+  '0xbe9d156892e55e7154bcd3cb0fea677f9d3103e1', // SPCXB
+  '0x80106cb3ead06659a5ad19df39d9b4733863b9b0', // MSFTB
+  '0x5b1910eaad6450e50f816082aa078c41f10c292f', // TSLAB
+  '0x431a6136ee1b2f76378c8a14b53ef11ba9099b7a', // AAPLB
   '0x360d0b00c3c3a9d70e6e7372cfbe85e68b95973c'  // DogeZilla legacy clone
 ]);
+const EXCLUDED_NATIVE_PLACEHOLDER = '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee';
 
 const SYNTHETIC_EQUITY_SYMBOLS = new Set([
   'TSLA', 'TSLAB', 'AAPL', 'AAPLB', 'MSFT', 'MSFTB', 'META', 'METAB', 'SPCXB', 'NVDA', 'NVDAB', 
@@ -520,67 +535,92 @@ const SYNTHETIC_EQUITY_SYMBOLS = new Set([
   'NFLX', 'NFLXB', 'INTC', 'INTCB', 'DIS', 'DISB', 'UBER', 'UBERB', 'BA', 'BAAB'
 ]);
 
-// Determine if a token is a major pegged/infrastructure asset, stablecoin, synthetic stock, or DEX platform token
-function isExcludedMajorAsset(d) {
-  if (!d) return true;
-  const c = String(d.contract || d.address || '').toLowerCase().trim();
-  const sym = String(d.symbol || d.token_symbol || '').toUpperCase().trim();
-  const name = String(d.name || '').toUpperCase().trim();
+// Matched as whole words / phrases, not substrings ("ETF" must not hit "Rocketfi")
+const EXCLUDED_NAME_PHRASES = [
+  'ETF', 'PROSHARES', 'DIREXION', 'BEAR 3X', 'BULL 3X', 'INVESQO', 'INVESCO',
+  'BSTOCKS', 'TOKENIZED STOCK', 'S&P 500', 'NASDAQ', 'ISHARES', 'VANGUARD',
+  'PANCAKESWAP', 'BINANCE-PEG', 'WRAPPED BNB', 'TETHER USD', 'USD COIN', 'ZCASH', 'DOGEZILLA'
+];
+const EXCLUDED_NAME_RE = new RegExp(
+  EXCLUDED_NAME_PHRASES.map(p => '(?<![A-Z0-9])' + p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(?![A-Z0-9])').join('|')
+);
 
-  if (c === '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee') return true;
-  if (EXCLUDED_PEGS_CONTRACTS.has(c) || EXCLUDED_PEGS_SYMBOLS.has(sym) || SYNTHETIC_EQUITY_SYMBOLS.has(sym)) {
-    return true;
-  }
-  // bStocks / tokenized synthetic stocks & Wall Street ETFs
-  if (name.includes('BSTOCKS') || name.includes('TOKENIZED') || name.includes('S&P 500') || 
-      name.includes('ETF') || name.includes('PROSHARES') || name.includes('DIREXION') || 
-      name.includes('BEAR 3X') || name.includes('BULL 3X') || name.includes('INVESQO') || 
-      name.includes('INVESCO') || name.includes('ISHARES') || name.includes('VANGUARD') ||
-      name.includes('NASDAQ') || (name === 'SPY' && sym.startsWith('SPY'))) {
-    return true;
-  }
-  if (name.includes('PANCAKESWAP') || name.includes('BINANCE-PEG') || name.includes('WRAPPED BNB') || name.includes('TETHER USD') || name.includes('USD COIN') || name.includes('ZCASH') || name.includes('DOGEZILLA')) {
-    return true;
-  }
-  // Exclude legacy multi-million assets with huge supply mismatches or no Agent ID association
-  const rawMc = Number(d.market_cap || d.fdv || 0);
-  if (rawMc > 50000000 && (!d.smart_wallets || d.smart_wallets.length === 0) && !d.is_graduated) {
-    return true;
-  }
-  return false;
+// Finite number or 0 (the same coercion as filters._num)
+function numOrZero(v) {
+  const n = Number(v || 0);
+  return Number.isFinite(n) ? n : 0;
 }
 
-// Compute Individual Project Profit and Maintain ATH High-Water Mark
-function computeItemProfit(item, bnbPriceUsd = bnbPrice) {
-  const isPegged = isExcludedMajorAsset(item);
-  if (isPegged) {
-    return { secUsd: 0, mintUsd: 0, profit: 0, athProfit: 0, athPrice: 0, multiplier: 0, isSold: false, isFree: false };
-  }
+// Determine if a token is a major pegged/infrastructure asset, stablecoin, synthetic stock, known scam or DEX platform token
+function isExcludedMajorAsset(d) {
+  if (!d || typeof d !== 'object' || Object.keys(d).length === 0) return true;
+  const c = String(d.contract || d.address || '').toLowerCase().trim();
+  if (EXCLUDED_PEGS_CONTRACTS.has(c) || BOGUS_SCAM_CONTRACTS.has(c) || c === EXCLUDED_NATIVE_PLACEHOLDER) return true;
+  const sym = String(d.symbol || d.token_symbol || '').toUpperCase().trim();
+  if (EXCLUDED_PEGS_SYMBOLS.has(sym) || SYNTHETIC_EQUITY_SYMBOLS.has(sym)) return true;
+  return EXCLUDED_NAME_RE.test(String(d.name || '').toUpperCase().trim());
+}
 
-  const flUsd = Number(item.floor_price_usd || 0);
-  const flBnb = Number(item.floor_price_bnb || 0);
-  const tkUsd = Number(item.token_price_usd || item.market_price_usd || 0);
+// Interest tier from the score: the worker's bands (filters.interest_tier)
+function interestTier(score) {
+  const s = numOrZero(score);
+  if (s >= 80) return 'SURGING';
+  if (s >= 50) return 'HIGH';
+  if (s >= 25) return 'MODERATE';
+  return 'EARLY';
+}
+
+// One badge for every table render path (renderTable and appendNextTableBatch): the real score, one threshold set
+function interestBadgeHtml(score) {
+  const sc = numOrZero(score);
+  switch (interestTier(sc)) {
+    case 'SURGING': return `<span style="color: var(--color-red); font-weight:700;">🔥 Surging (${sc})</span>`;
+    case 'HIGH': return `<span style="color: var(--color-magenta); font-weight:700;">🚀 High (${sc})</span>`;
+    case 'MODERATE': return `<span style="color: var(--color-yellow); font-weight:600;">⚡ Moderate (${sc})</span>`;
+    default: return `<span style="color: var(--text-dim);">🌱 Early (${sc})</span>`;
+  }
+}
+
+// Compute Individual Project Profit and Maintain ATH High-Water Mark.
+// Line-by-line twin of monitor.update_post_mint_profit_metrics (rules are written out above it there):
+//   cost known = paid mint price above zero, or a VERIFIED free mint (has_free_mint / "FREE"); "DEX Traded" has none.
+//   profit / multiplier are null unless the cost is known; a loss stays negative; a free mint has no multiplier.
+//   ATH price needs >= ATH_MIN_LP_USD of pool liquidity (floors excepted); ATH profit = max(previous, current).
+// The client therefore recomputes exactly what the server would: it never overwrites the server's ATH with a
+// different rule. Returns multiplier = ATH multiplier, currentMultiplier = the current one.
+const ATH_MIN_LP_USD = 1000;
+const ATH_RESET_FACTOR = 50;
+
+function round2(x) { return Math.floor(x * 100 + 0.5) / 100; }
+function sig10(x) { return Number(Number(x).toPrecision(10)); }
+function noProfit() {
+  return { secUsd: 0, mintUsd: null, profit: null, athPrice: null, athProfit: null, multiplier: null,
+           currentMultiplier: null, isSold: false, isFree: false };
+}
+
+function computeItemProfit(item, bnbPriceUsd = bnbPrice) {
+  if (isExcludedMajorAsset(item)) return noProfit();
+
+  const flUsd = numOrZero(item.floor_price_usd);
+  const flBnb = numOrZero(item.floor_price_bnb);
+  const tkUsd = numOrZero(item.token_price_usd || item.market_price_usd);
+  const priceFromPair = !(flUsd > 0 || flBnb > 0);
   const secUsd = flUsd > 0 ? flUsd : (flBnb > 0 ? flBnb * bnbPriceUsd : tkUsd);
 
   // Micro-pool / scam price distortion guard: reject astronomical prices (> $1000) or micro-wei supplies
-  const tmVal = Number(item.total_minted || 0);
-  const lpVal = Number(item.lp_usd || 0);
+  const tmVal = numOrZero(item.total_minted);
+  const lpVal = numOrZero(item.lp_usd);
   if (secUsd > 1000.0 || (tmVal > 0 && tmVal < 1e-6) || (lpVal > 0 && lpVal < 5.0 && secUsd > 5.0)) {
-    return { secUsd: 0, mintUsd: 0, profit: 0, athProfit: 0, athPrice: 0, multiplier: 0, isSold: false, isFree: false };
+    return noProfit();
   }
 
   const pStr = String(item.mint_price_str || '').toUpperCase();
-  const vWei = Number(item.mint_value_wei || 0);
-  const hasFreeFlag = Boolean(item.has_free_mint);
-  const isFree = Boolean(hasFreeFlag || pStr.includes('FREE') || (vWei === 0 && Number(item.mint_price_bnb || 0) === 0 && !pStr.includes('PAID') && !pStr.includes('DEX') && !pStr.includes('TBD')));
-  
-  // If mint price is unknown (TBD) and not verified free or with calldata, cannot claim 0 mint cost
-  if (pStr.includes('TBD') && !hasFreeFlag && !item.mint_calldata) {
-    return { secUsd: 0, mintUsd: 0, profit: 0, athProfit: 0, athPrice: 0, multiplier: 0, isSold: false, isFree: false };
-  }
-
-  const mintUsd = isFree ? 0 : (vWei > 0 ? (vWei / 1e18) * bnbPriceUsd : Number(item.mint_price_bnb || 0) * bnbPriceUsd);
-  const profit = secUsd > 0 ? (secUsd - mintUsd) : 0;
+  const vWei = Math.trunc(numOrZero(item.mint_value_wei));
+  const verifiedFree = Boolean(item.has_free_mint) || pStr.includes('FREE');
+  const paidUsd = vWei > 0 ? (vWei / 1e18) * bnbPriceUsd : numOrZero(item.mint_price_bnb) * bnbPriceUsd;
+  const isFree = verifiedFree;
+  const costKnown = !pStr.includes('DEX') && (verifiedFree || paidUsd > 0);
+  const mintUsd = costKnown ? (isFree ? 0 : paidUsd) : null;
 
   let rawMs = item.max_supply;
   if (rawMs !== null && rawMs !== undefined && (Number(rawMs) >= 1e20 || !isFinite(Number(rawMs)))) {
@@ -588,36 +628,57 @@ function computeItemProfit(item, bnbPriceUsd = bnbPrice) {
   }
   const ms = Number(rawMs || 0);
   const tm = Number(item.total_minted || 0);
-  const isSold = Boolean(ms > 0 && tm >= ms);
+  const isSold = Boolean(ms > 0 && tm && tm >= ms);
 
-  const athPrice = Math.max(Number(item.ath_price_usd || 0), secUsd);
-  const athProfit = Math.max(Number(item.ath_profit_usd || 0), profit);
-  let multiplier = Number(item.ath_multiplier || 0);
-  if (!multiplier && mintUsd > 0 && athPrice > 0) {
-    multiplier = Number((athPrice / mintUsd).toFixed(2));
+  let profit = null;
+  let multiplier = null;
+  if (costKnown && secUsd > 0) {
+    profit = secUsd - mintUsd;
+    multiplier = mintUsd > 0 ? round2(secUsd / mintUsd) : null;
   }
 
-  // Update item in place
-  if (secUsd > Number(item.ath_price_usd || 0) && secUsd > 0) {
-    item.ath_price_usd = athPrice;
-    item.ath_profit_usd = athProfit;
-    item.ath_multiplier = multiplier || null;
-  } else if (!item.ath_price_usd && secUsd > 0) {
-    item.ath_price_usd = athPrice;
-    item.ath_profit_usd = athProfit;
-    item.ath_multiplier = multiplier || null;
+  // --- ATH (high-water mark) ---
+  const lpOk = !priceFromPair || lpVal >= ATH_MIN_LP_USD;
+  let prevAth = numOrZero(item.ath_price_usd);
+  if (prevAth > 0 && secUsd > 0 && priceFromPair && lpVal < ATH_MIN_LP_USD && prevAth > ATH_RESET_FACTOR * secUsd) {
+    // a poisoned ATH (thin pool spike, stale seed): drop it, it is re-learned from a trustworthy price
+    item.ath_price_usd = null;
+    item.ath_profit_usd = null;
+    item.ath_multiplier = null;
+    prevAth = 0;
   }
-  item.current_profit_usd = profit;
-  item.mint_cost_usd = mintUsd;
-  item.secondary_price_usd = secUsd;
+  if (secUsd > 0 && lpOk && secUsd > prevAth) {
+    item.ath_price_usd = sig10(secUsd);
+  }
+  const athPrice = numOrZero(item.ath_price_usd);
+
+  if (costKnown && profit !== null && lpOk) {
+    const prevP = item.ath_profit_usd;
+    item.ath_profit_usd = sig10((prevP === null || prevP === undefined) ? profit : Math.max(Number(prevP), profit));
+  } else if (!costKnown) {
+    item.ath_profit_usd = null;
+  }
+  if (costKnown && !isFree && mintUsd > 0 && athPrice > 0) {
+    const m = round2(athPrice / mintUsd);
+    const prevM = item.ath_multiplier;
+    item.ath_multiplier = (prevM === null || prevM === undefined) ? m : Math.max(Number(prevM), m);
+  } else {
+    item.ath_multiplier = null;
+  }
+
+  item.current_profit_usd = profit !== null ? sig10(profit) : null;
+  item.current_multiplier = multiplier;
+  item.mint_cost_usd = mintUsd !== null ? Math.round(mintUsd * 10000) / 10000 : null;
+  item.secondary_price_usd = secUsd > 0 ? sig10(secUsd) : null;
 
   return {
     secUsd,
     mintUsd,
     profit,
-    athPrice,
-    athProfit,
-    multiplier,
+    athPrice: item.ath_price_usd === undefined ? null : item.ath_price_usd,
+    athProfit: item.ath_profit_usd === undefined ? null : item.ath_profit_usd,
+    multiplier: item.ath_multiplier === undefined ? null : item.ath_multiplier,
+    currentMultiplier: multiplier,
     isSold,
     isFree
   };
@@ -2074,7 +2135,7 @@ function applyOverviewStatsFallback() {
   const localSecondary = allDrops.filter(d => isSecondaryMarketAsset(d)).length;
   const localSniper = allDrops.filter(d => isSniperReady(d)).length;
   const localProxy = allDrops.filter(d => Boolean(d.is_proxy_clone)).length;
-  const localNft = allDrops.filter(d => evaluateNftSurge(d).surge).length;
+  const localNft = allDrops.filter(d => evaluateNftSurge(d).is_nft_surge).length;
 
   globalStats = {
     total: (globalStats && globalStats.total) ? globalStats.total : allDrops.length,
@@ -2670,39 +2731,33 @@ function updateLaunchpadCount() {
   if (pillEl) pillEl.textContent = cnt;
 }
 
+// Market cap to show, or null (unknown / excluded / implausible). Twin of filters.sanitized_mcap.
+const MCAP_GUARD_ABOVE_USD = 50000000;
+const MCAP_GUARD_LP_BELOW_USD = 250000;
 function getSanitizedMcap(d) {
-  if (!d) return 0;
-  if (isExcludedMajorAsset(d)) return 0;
-  let mc = Number(d.market_cap || d.fdv || 0);
-  if (mc === 0) {
-    const px = Number(d.token_price_usd || d.market_price_usd || 0);
-    const tm = Number(d.total_minted || 0);
-    const ms = Number(d.max_supply || 0);
-    if (px > 0) {
-      if (tm > 0 && tm < 1e14) mc = tm * px;
-      else if (ms > 0 && ms < 1e14) mc = ms * px;
-      else if (tm >= 1e14) mc = (tm / 1e18) * px;
-      else if (ms >= 1e14) mc = (ms / 1e18) * px;
-    }
+  if (!d || isExcludedMajorAsset(d)) return null;
+  let mc = numOrZero(d.market_cap) || numOrZero(d.fdv);
+  if (mc <= 0) {
+    // supply x price only where the supply unit is certain (a BEP-20 token's whole-token supply); no magnitude guess
+    const px = numOrZero(d.token_price_usd) || numOrZero(d.market_price_usd);
+    const supply = numOrZero(d.total_minted) || numOrZero(d.max_supply);
+    if (px > 0 && supply > 0 && String(d.standard || '').includes('BEP-20')) mc = supply * px;
   }
-  // Sanity check: eliminate artificial/illiquid multi-million valuations that lack proportional pool liquidity
-  if (mc > 50000000 && Number(d.lp_usd || 0) < 250000) return 0;
-  if (mc > 100000000 && Number(d.lp_usd || 0) < 500000) return 0;
+  if (mc <= 0) return null;
+  // Sanity check: an implausible valuation without proportional pool liquidity is not shown
+  if (mc > MCAP_GUARD_ABOVE_USD && numOrZero(d.lp_usd) < MCAP_GUARD_LP_BELOW_USD) return null;
   return mc;
 }
 
-// Secondary Market asset detector
+// Secondary Market asset detector (twin of filters.is_secondary_market)
 function isSecondaryMarketAsset(d) {
-  if (!d) return false;
-  if (isExcludedMajorAsset(d)) {
-    return false;
-  }
-  const lp = Number(d.lp_usd || 0);
-  const mc = getSanitizedMcap(d);
-  const px = Number(d.token_price_usd || 0);
-  const vol = Number(d.volume_24h || 0);
-  const secVol = Number(d.secondary_vol_bnb || 0);
-  const hasPair = Boolean(d.pair_address);
+  if (!d || isExcludedMajorAsset(d)) return false;
+  const lp = numOrZero(d.lp_usd);
+  const mc = getSanitizedMcap(d) || 0;
+  const px = numOrZero(d.token_price_usd);
+  const vol = numOrZero(d.volume_24h);
+  const secVol = numOrZero(d.secondary_vol_bnb);
+  const hasPair = Boolean(d.pair_address || d.pair_url);
   const isGrad = Boolean(d.is_graduated);
   return lp > 50 || mc > 500 || (px > 0 && vol > 0) || secVol > 0 || hasPair || isGrad;
 }
@@ -4204,8 +4259,8 @@ function getFilteredDrops() {
     list.sort((a, b) => {
       const ma = getSanitizedMcap(a);
       const mb = getSanitizedMcap(b);
-      if (ma === 0 && mb > 0) return 1;
-      if (mb === 0 && ma > 0) return -1;
+      if (!ma && mb > 0) return 1;   // getSanitizedMcap is null (unknown) rather than 0
+      if (!mb && ma > 0) return -1;
       return ma - mb;
     });
   } else if (sortMode === 'VOLUME' || sortMode === 'VOLUME_DESC') {
@@ -5015,11 +5070,7 @@ function renderTable(keepLimit = false) {
     }
 
     // Interest badge
-    const score = Number(item.score || 0);
-    let intBadge = `<span style="color: var(--text-dim);">🧊 Cold (${score})</span>`;
-    if (score >= 70) intBadge = `<span style="color: var(--color-magenta); font-weight:700;">🚀 Viral (${score})</span>`;
-    else if (score >= 50) intBadge = `<span style="color: var(--color-red); font-weight:700;">🔥 High (${score})</span>`;
-    else if (score >= 25) intBadge = `<span style="color: var(--color-yellow); font-weight:700;">🌱 Warm (${score})</span>`;
+    const intBadge = interestBadgeHtml(item.score);
 
     // Holders / Buys
     const hld = Number(item.holders || item.total_minted || 0);
@@ -5388,15 +5439,7 @@ function appendNextTableBatch() {
     }
 
     // Interest Badge
-    const sc = Number(item.score || 0);
-    let intBadge = `<span style="color: var(--text-dim);">Cold (0)</span>`;
-    if (sc >= 80) {
-      intBadge = `<span style="color: var(--color-red); font-weight:700;">🔥 Hot (${sc})</span>`;
-    } else if (sc >= 50) {
-      intBadge = `<span style="color: var(--color-yellow); font-weight:600;">⚡ Med (${sc})</span>`;
-    } else if (sc >= 20) {
-      intBadge = `<span style="color: var(--color-cyan);">🌱 Warm (${sc})</span>`;
-    }
+    const intBadge = interestBadgeHtml(item.score);
 
     // Progress Bar
     const isNft = std.includes('721') || std.includes('NFT');
@@ -9622,6 +9665,14 @@ if (typeof document !== 'undefined') {
 
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
+    EXCLUDED_PEGS_SYMBOLS,
+    EXCLUDED_PEGS_CONTRACTS,
+    BOGUS_SCAM_CONTRACTS,
+    SYNTHETIC_EQUITY_SYMBOLS,
+    EXCLUDED_NAME_PHRASES,
+    isExcludedMajorAsset,
+    interestTier,
+    interestBadgeHtml,
     pad32,
     buildPancakeSwapSellCalldata,
     evaluatePortfolioExit,

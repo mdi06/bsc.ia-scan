@@ -22,6 +22,7 @@ from fastapi.responses import JSONResponse, Response, RedirectResponse, FileResp
 from fastapi.staticfiles import StaticFiles
 import uvicorn
 
+import filters
 import monitor
 from common.runtime import run_memory_guard_loop
 from db import db
@@ -185,68 +186,16 @@ def _etag_matches(client_etag: Optional[str], target_etag: str) -> bool:
 
 
 def is_bogus_or_synthetic_asset(d: dict) -> bool:
-    if not d or not isinstance(d, dict):
-        return True
-    c = str(d.get("contract") or "").lower().strip()
-    if c in BOGUS_SET or c in EXCLUDED_PEGS_CONTRACTS:
-        return True
-    sym = str(d.get("symbol") or "").upper().strip()
-    if sym in EXCLUDED_PEGS_SYMBOLS or sym in SYNTHETIC_EQUITY_SYMBOLS:
-        return True
-    name = str(d.get("name") or "").upper().strip()
-    if any(k in name for k in (
-        'ETF', 'PROSHARES', 'DIREXION', 'BEAR 3X', 'BULL 3X', 'INVESQO', 'INVESCO', 
-        'BSTOCKS', 'TOKENIZED STOCK', 'S&P 500', 'NASDAQ', 'ISHARES', 'VANGUARD',
-        'PANCAKESWAP', 'BINANCE-PEG', 'WRAPPED BNB', 'TETHER USD', 'USD COIN', 'ZCASH', 'DOGEZILLA'
-    )):
-        return True
-    return False
+    return filters.is_excluded_asset(d)
 
-def get_sanitized_mcap(d: dict) -> float:
-    if not d or not isinstance(d, dict):
-        return 0.0
-    try:
-        mc = float(d.get("market_cap") or d.get("fdv") or 0.0)
-        if mc == 0.0:
-            px = float(d.get("token_price_usd") or d.get("market_price_usd") or 0.0)
-            tm = float(d.get("total_minted") or 0.0)
-            ms = float(d.get("max_supply") or 0.0)
-            if px > 0:
-                if 0 < tm < 1e14:
-                    mc = tm * px
-                elif 0 < ms < 1e14:
-                    mc = ms * px
-                elif tm >= 1e14:
-                    mc = (tm / 1e18) * px
-                elif ms >= 1e14:
-                    mc = (ms / 1e18) * px
-        if mc > 100_000_000 and float(d.get("lp_usd") or 0.0) < 50_000:
-            return 0.0
-        return mc
-    except Exception:
-        return 0.0
+
+def get_sanitized_mcap(d: dict):
+    """Market cap to show, or None (unknown / excluded / implausible). The one rule shared with app.js."""
+    return filters.sanitized_mcap(d)
+
 
 def is_secondary_market_asset(d: dict) -> bool:
-    if not d or not isinstance(d, dict):
-        return False
-    try:
-        c = str(d.get("contract") or "").lower().strip()
-        sym = str(d.get("symbol") or "").upper().strip()
-        name = str(d.get("name") or "").upper().strip()
-        if c in EXCLUDED_PEGS_CONTRACTS or sym in EXCLUDED_PEGS_SYMBOLS or sym in SYNTHETIC_EQUITY_SYMBOLS:
-            return False
-        if "ZCASH" in name or "DOGEZILLA" in name or "BINANCE-PEG" in name or "PANCAKESWAP" in name:
-            return False
-        lp = float(d.get("lp_usd") or 0.0)
-        mc = get_sanitized_mcap(d)
-        px = float(d.get("token_price_usd") or 0.0)
-        vol = float(d.get("volume_24h") or 0.0)
-        sec_vol = float(d.get("secondary_vol_bnb") or 0.0)
-        has_pair = bool(d.get("pair_address") or d.get("pair_url"))
-        is_grad = bool(d.get("is_graduated"))
-        return lp > 50.0 or mc > 500.0 or (px > 0 and vol > 0) or sec_vol > 0 or has_pair or is_grad
-    except Exception:
-        return False
+    return filters.is_secondary_market(d)
 
 
 # Predicates behind /api/feed?filter=<name>; also used for the per-filter counts in the overview stats.
@@ -446,7 +395,7 @@ def get_feed(
     if predicate:
         target_list = [d for d in all_projs if predicate(d)]
         if filter == "secondary":
-            target_list.sort(key=lambda x: get_sanitized_mcap(x), reverse=True)
+            target_list.sort(key=lambda x: get_sanitized_mcap(x) or 0.0, reverse=True)
 
     target_total = len(target_list)
     paginated = target_list[offset : offset + limit]

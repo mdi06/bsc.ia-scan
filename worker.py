@@ -704,6 +704,16 @@ def _mark_market_fresh(item: Dict[str, Any], source: str, now: Optional[float] =
     item["market_source"] = source
 
 
+def _refresh_profit_fields(item: Dict[str, Any]) -> None:
+    """Recomputes the served profit / ATH fields (current_profit_usd, ath_*, secondary_price_usd, ...) from the
+    record's current market data. Called wherever market data changes; before this only the terminal UI did, so
+    served values were days old. Never raises."""
+    try:
+        monitor.update_post_mint_profit_metrics(item)
+    except Exception as e:
+        print(f"[⚠️ Market Engine] profit refresh failed for {item.get('contract')}: {e}", flush=True)
+
+
 def _market_source(item: Dict[str, Any]) -> Optional[str]:
     src = item.get("market_source")
     if src:
@@ -817,36 +827,12 @@ def _apply_dex_pair(item: Dict[str, Any], pair: Dict[str, Any], now: Optional[fl
     item["sells_24h"] = int((txns.get("h24", {}) or {}).get("sells") or 0)
     item["buys_1h"] = int((txns.get("h1", {}) or {}).get("buys") or 0)
     _mark_market_fresh(item, "dexscreener", now)
+    _refresh_profit_fields(item)
 
 
 def _recompute_interest(item: Dict[str, Any]) -> None:
-    """Interest score, rating and sniper readiness from the drop's current metrics."""
-    score = 0
-    lp = float(item.get("lp_usd") or 0.0)
-    vol = float(item.get("volume_24h") or 0.0)
-    b24 = int(item.get("buys_24h") or 0)
-
-    if lp > 50000: score += 40
-    elif lp > 10000: score += 30
-    elif lp > 2000: score += 20
-    elif lp > 500: score += 10
-
-    if vol > 20000: score += 30
-    elif vol > 5000: score += 20
-    elif vol > 500: score += 10
-
-    if b24 > 500: score += 30
-    elif b24 > 100: score += 20
-    elif b24 > 20: score += 10
-
-    if item.get("smart_wallets"):
-        score += len(item["smart_wallets"]) * 5
-
-    item["score"] = min(100, score)
-    if score >= 80: item["rating"] = "🔥 SURGING"
-    elif score >= 50: item["rating"] = "🚀 HIGH"
-    elif score >= 25: item["rating"] = "⚡ MODERATE"
-    else: item["rating"] = "🌱 EARLY"
+    """Interest score, rating and sniper readiness from the drop's current metrics (monitor.compute_interest)."""
+    item["score"], item["rating"] = monitor.compute_interest(item)
 
     eva = monitor.evaluate_sniper_readiness(item)
     item["sniper_ready"] = eva.get("sniper_ready", False)
@@ -901,6 +887,7 @@ def _apply_pancake_estimate(rpc, item: Dict[str, Any], now: Optional[float] = No
         item["token_price_bnb"] = wbnb_reserve / token_reserve
         item["token_price_usd"] = item["token_price_bnb"] * bnb_usd
     _mark_market_fresh(item, "pancake", now)
+    _refresh_profit_fields(item)
     return True
 
 
@@ -1137,6 +1124,7 @@ def run_market_dynamics_updater_loop():
                 try:
                     if _expire_stale_market(item, time.time()):
                         _recompute_interest(item)
+                        _refresh_profit_fields(item)  # the cleared price must not leave a served profit behind
                         expired.append(item)
                 except Exception as e:
                     print(f"[⚠️ Market Engine] stale-market expiry failed for {item.get('contract')}: {e}", flush=True)
@@ -1189,6 +1177,7 @@ def _sweep_element_nft_once(rpc, history) -> List[Dict[str, Any]]:
             if tuple(item.get(k) or 0 for k in ELEMENT_SURGE_FIELDS) == before:
                 continue
             floor = float(item.get("floor_price_bnb") or 0.0)
+            _refresh_profit_fields(item)  # a new floor changes the NFT's profit / ATH
             if floor > 0:
                 item["floor_price_str"] = f"{floor:.3f} BNB"
             signal = (results.get(item["contract"].lower()) or {}).get("badge_plain")

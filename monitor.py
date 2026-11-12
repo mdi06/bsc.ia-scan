@@ -27,12 +27,14 @@ import subprocess
 import argparse
 import select
 import tty
+import math
 import termios
 import threading
 import shutil
 from concurrent.futures import ThreadPoolExecutor
 from typing import Optional, Dict, Any, List, Tuple, Iterable
 
+import filters
 from filters import EQUITY_SYMBOLS_CORE, EXCLUDED_PEGS_CONTRACTS, PEG_SYMBOLS_CORE
 
 # Swallowed best-effort failures are logged at DEBUG: printing would corrupt the Rich TUI.
@@ -1898,74 +1900,66 @@ def filter_and_sort_projects(history: List[Dict[str, Any]], active_filter: str, 
     return filtered
 
 
+# --- Post-mint profit / ATH rules (the JavaScript twin is computeItemProfit in app.js; the parity test keeps them equal)
+#   mint cost  known  : the paid mint price (wei, else BNB) is above zero, or the mint is VERIFIED free
+#                       (has_free_mint, or the price string says FREE). Otherwise profit and multiplier are None.
+#   "DEX Traded"      : no mint position at all, so no profit.
+#   profit            : sec_usd - mint cost; negative when under water (a loss is real data); free mint: the price.
+#   multiplier        : sec_usd / mint cost; None for a free mint.
+#   ATH price         : only from a price backed by >= ATH_MIN_LP_USD of pool liquidity (an NFT floor needs none);
+#                       a stored ATH more than ATH_RESET_FACTOR x the current price on a thin pool is dropped.
+#   ATH profit        : max(previous ATH profit, current profit), starting from the first observed value.
+#   ATH multiplier    : max(previous, ATH price / mint cost); None for a free mint.
+ATH_MIN_LP_USD = 1000.0
+ATH_RESET_FACTOR = 50.0
+
+
+def _round2(x: float) -> float:
+    return math.floor(x * 100.0 + 0.5) / 100.0  # same arithmetic as Math.floor(x * 100 + 0.5) / 100 in app.js
+
+
+def _sig10(x: float) -> float:
+    return float(f"{x:.10g}")
+
+
+def _no_profit() -> Dict[str, Any]:
+    return {
+        "sec_usd": 0.0, "mint_usd": None, "profit": None,
+        "ath_price_usd": None, "ath_profit_usd": None, "ath_multiplier": None, "current_multiplier": None,
+        "is_sold": False, "is_free": False,
+    }
+
+
 def update_post_mint_profit_metrics(item: Dict[str, Any], bnb_price: Optional[float] = None) -> Dict[str, Any]:
     """
-    Computes and updates post-mint profit and ATH metrics on an item.
-    Tracks persistent high-water mark (ATH price, ATH net profit, and ATH multiple).
-    Filters out pegged crypto assets (BTCB, WBNB, USDT, USDC, BUSD), synthetic stocks, and system infra.
+    Computes and updates post-mint profit and ATH metrics on an item (rules above).
+    Filters out pegged crypto assets, synthetic stocks, known scams and system infra.
     """
     if bnb_price is None:
         bnb_price = cached_bnb_price()
     c = (item.get("contract") or "").lower()
-    sym = (item.get("symbol") or "").upper()
-    is_pegged = (
-        c in EXCLUDED_PEGS_CONTRACTS
-        or sym in PEG_SYMBOLS_CORE
-        or sym in EQUITY_SYMBOLS_CORE
-    )
-    if is_pegged or is_system_infra(item):
-        return {
-            "sec_usd": 0.0,
-            "mint_usd": 0.0,
-            "profit": 0.0,
-            "ath_price_usd": 0.0,
-            "ath_profit_usd": 0.0,
-            "ath_multiplier": 0.0,
-            "is_sold": False,
-            "is_free": False
-        }
+    if filters.is_excluded_asset(item) or is_system_infra(item):
+        return _no_profit()
 
     fl_usd = float(item.get("floor_price_usd") or 0.0)
     fl_bnb = float(item.get("floor_price_bnb") or 0.0)
     tk_usd = float(item.get("token_price_usd") or item.get("market_price_usd") or 0.0)
+    price_from_pair = not (fl_usd > 0 or fl_bnb > 0)
     sec_usd = fl_usd if fl_usd > 0 else (fl_bnb * bnb_price if fl_bnb > 0 else tk_usd)
 
     # Micro-wei / scam price distortion guard: reject astronomical prices (> $1000) or micro-wei supplies
     tm_val = float(item.get("total_minted") or 0.0)
     lp_val = float(item.get("lp_usd") or 0.0)
     if sec_usd > 1000.0 or (0.0 < tm_val < 1e-6) or (0.0 < lp_val < 5.0 and sec_usd > 5.0):
-        return {
-            "sec_usd": 0.0,
-            "mint_usd": 0.0,
-            "profit": 0.0,
-            "ath_price_usd": 0.0,
-            "ath_profit_usd": 0.0,
-            "ath_multiplier": 0.0,
-            "is_sold": False,
-            "is_free": False
-        }
+        return _no_profit()
 
     p_str = str(item.get("mint_price_str") or "").upper()
     v_wei = int(item.get("mint_value_wei") or 0)
-    has_free_flag = bool(item.get("has_free_mint"))
-    has_calldata = bool(item.get("mint_calldata"))
-    is_free = bool(has_free_flag or "FREE" in p_str or (v_wei == 0 and float(item.get("mint_price_bnb") or 0) == 0.0 and "PAID" not in p_str and "DEX" not in p_str and "TBD" not in p_str))
-
-    # If mint price is unknown (TBD) and not verified free or with calldata, cannot claim 0 mint cost
-    if "TBD" in p_str and not has_free_flag and not has_calldata:
-        return {
-            "sec_usd": 0.0,
-            "mint_usd": 0.0,
-            "profit": 0.0,
-            "ath_price_usd": 0.0,
-            "ath_profit_usd": 0.0,
-            "ath_multiplier": 0.0,
-            "is_sold": False,
-            "is_free": False
-        }
-
-    mint_usd = 0.0 if is_free else ((v_wei / 1e18 * bnb_price) if v_wei > 0 else (float(item.get("mint_price_bnb") or 0) * bnb_price))
-    profit = (sec_usd - mint_usd) if sec_usd > 0 else 0.0
+    verified_free = bool(item.get("has_free_mint")) or "FREE" in p_str
+    paid_usd = (v_wei / 1e18 * bnb_price) if v_wei > 0 else (float(item.get("mint_price_bnb") or 0) * bnb_price)
+    is_free = verified_free
+    cost_known = (not "DEX" in p_str) and (verified_free or paid_usd > 0)
+    mint_usd = (0.0 if is_free else paid_usd) if cost_known else None
 
     raw_ms = item.get("max_supply")
     if raw_ms is not None:
@@ -1977,41 +1971,53 @@ def update_post_mint_profit_metrics(item: Dict[str, Any], bnb_price: Optional[fl
     tm = item.get("total_minted") or 0
     is_sold = bool(raw_ms and float(raw_ms) > 0 and tm and float(tm) >= float(raw_ms))
 
-    # Multiplier
-    if mint_usd > 0 and sec_usd > 0:
-        multiplier = round(sec_usd / mint_usd, 2)
-    elif is_free and sec_usd > 0:
-        multiplier = None  # Free mint (pure net alpha)
+    profit = None
+    multiplier = None
+    if cost_known and sec_usd > 0:
+        profit = sec_usd - mint_usd
+        multiplier = _round2(sec_usd / mint_usd) if mint_usd > 0 else None
+
+    # --- ATH (high-water mark) -----------------------------------------------------------------------------
+    lp_ok = (not price_from_pair) or lp_val >= ATH_MIN_LP_USD
+    prev_ath = float(item.get("ath_price_usd") or 0.0)
+    if prev_ath > 0 and sec_usd > 0 and price_from_pair and lp_val < ATH_MIN_LP_USD and prev_ath > ATH_RESET_FACTOR * sec_usd:
+        # a poisoned ATH (thin pool spike, stale seed): drop it, it is re-learned from a trustworthy price
+        item["ath_price_usd"] = None
+        item["ath_profit_usd"] = None
+        item["ath_multiplier"] = None
+        prev_ath = 0.0
+    if sec_usd > 0 and lp_ok and sec_usd > prev_ath:
+        item["ath_price_usd"] = _sig10(sec_usd)
+        item["ath_timestamp"] = int(time.time())
+    ath_price = float(item.get("ath_price_usd") or 0.0)
+
+    if cost_known and profit is not None and lp_ok:
+        prev_p = item.get("ath_profit_usd")
+        item["ath_profit_usd"] = _sig10(profit if prev_p is None else max(float(prev_p), profit))
+    elif not cost_known:
+        item["ath_profit_usd"] = None
+    if cost_known and not is_free and mint_usd > 0 and ath_price > 0:
+        m = _round2(ath_price / mint_usd)
+        prev_m = item.get("ath_multiplier")
+        item["ath_multiplier"] = m if prev_m is None else max(float(prev_m), m)
     else:
-        multiplier = 0.0
+        item["ath_multiplier"] = None
 
-    # High-water mark (ATH) persistence
-    cur_ath = float(item.get("ath_price_usd") or 0.0)
-    if sec_usd > cur_ath and sec_usd > 0:
-        item["ath_price_usd"] = float(f"{sec_usd:.10g}")
-        item["ath_profit_usd"] = float(f"{profit:.10g}") if profit > 0 else 0.0
-        item["ath_multiplier"] = multiplier
-        item["ath_timestamp"] = int(time.time())
-    elif not item.get("ath_price_usd") and sec_usd > 0:
-        item["ath_price_usd"] = float(f"{sec_usd:.10g}")
-        item["ath_profit_usd"] = float(f"{profit:.10g}") if profit > 0 else 0.0
-        item["ath_multiplier"] = multiplier
-        item["ath_timestamp"] = int(time.time())
-
-    item["current_profit_usd"] = float(f"{profit:.10g}") if profit > 0 else 0.0
+    item["current_profit_usd"] = _sig10(profit) if profit is not None else None
     item["current_multiplier"] = multiplier
-    item["mint_cost_usd"] = round(mint_usd, 4)
-    item["secondary_price_usd"] = float(f"{sec_usd:.10g}") if sec_usd > 0 else 0.0
+    item["mint_cost_usd"] = round(mint_usd, 4) if mint_usd is not None else None
+    item["secondary_price_usd"] = _sig10(sec_usd) if sec_usd > 0 else None
 
     return {
         "sec_usd": sec_usd,
         "mint_usd": mint_usd,
         "profit": profit,
-        "ath_price_usd": float(item.get("ath_price_usd") or sec_usd),
-        "ath_profit_usd": float(item.get("ath_profit_usd") or profit),
+        "ath_price_usd": item.get("ath_price_usd"),
+        "ath_profit_usd": item.get("ath_profit_usd"),
         "ath_multiplier": item.get("ath_multiplier"),
+        "current_multiplier": multiplier,
         "is_sold": is_sold,
-        "is_free": is_free
+        "is_free": is_free,
     }
 
 
@@ -2051,7 +2057,7 @@ def compute_market_cap_stats(history: List[Dict[str, Any]], bnb_price: Optional[
         sec_usd = prof_info["sec_usd"]
         ath_profit = prof_info["ath_profit_usd"]
 
-        if sec_usd > 0 and ath_profit > 0:
+        if sec_usd > 0 and ath_profit is not None and ath_profit > 0:
             gainers.append({
                 "item": it,
                 "contract": it.get("contract", ""),
@@ -2068,8 +2074,10 @@ def compute_market_cap_stats(history: List[Dict[str, Any]], bnb_price: Optional[
             })
 
     fill_rate_pct = (sold_out_cnt / capped_total * 100.0) if capped_total else 0.0
-    sold_gainers = sorted([g for g in gainers if g["is_sold"]], key=lambda x: max(x["ath_profit_usd"], x["profit"]), reverse=True)
-    all_gainers = sorted(gainers, key=lambda x: max(x["ath_profit_usd"], x["profit"]), reverse=True)
+    def peak(g):
+        return max(g["ath_profit_usd"], g["profit"] if g["profit"] is not None else g["ath_profit_usd"])
+    sold_gainers = sorted([g for g in gainers if g["is_sold"]], key=peak, reverse=True)
+    all_gainers = sorted(gainers, key=peak, reverse=True)
 
     top_gainer = sold_gainers[0] if sold_gainers else (all_gainers[0] if all_gainers else None)
     runner_up = sold_gainers[1] if len(sold_gainers) > 1 else (all_gainers[1] if len(all_gainers) > 1 else None)
@@ -2123,6 +2131,46 @@ def _store_linked_market(stats: Dict[str, Any], mkt: Dict[str, Any], merge: bool
         if merge and stats.get(dst) and src not in ("lp_usd",):
             continue
         stats[dst] = val
+
+
+RATING_BY_TIER = {"SURGING": "🔥 SURGING", "HIGH": "🚀 HIGH", "MODERATE": "⚡ MODERATE", "EARLY": "🌱 EARLY"}
+
+
+def compute_interest(item: Dict[str, Any]) -> Tuple[int, str]:
+    """The single interest score (0-100) and rating label. analyze_market_interest and the worker's
+    _recompute_interest both call this, so a stored score never depends on which of them ran last.
+    Bands: liquidity (0-40), 24h volume (0-30), 24h buys (0-30), +5 per smart wallet. A honeypot scores 0 and a
+    HIGH risk rating costs 25 points (the guard analyze_market_interest always applied). The JavaScript badge
+    uses the same tiers (filters.interest_tier / interestTier in app.js)."""
+    lp = float(item.get("lp_usd") or 0.0)
+    vol = float(item.get("volume_24h") or 0.0)
+    b24 = int(item.get("buys_24h") or 0)
+
+    score = 0
+    if lp > 50000: score += 40
+    elif lp > 10000: score += 30
+    elif lp > 2000: score += 20
+    elif lp > 500: score += 10
+
+    if vol > 20000: score += 30
+    elif vol > 5000: score += 20
+    elif vol > 500: score += 10
+
+    if b24 > 500: score += 30
+    elif b24 > 100: score += 20
+    elif b24 > 20: score += 10
+
+    if item.get("smart_wallets"):
+        score += len(item["smart_wallets"]) * 5
+
+    risk = item.get("risk_level")
+    if risk == "RUG":
+        score = 0
+    elif risk == "HIGH":
+        score = max(0, score - 25)
+
+    score = min(100, score)
+    return score, RATING_BY_TIER[filters.interest_tier(score)]
 
 
 def analyze_market_interest(
@@ -2681,17 +2729,13 @@ def analyze_market_interest(
         for f in stats["risk_flags"][:2]:
             signals.append(f"Safety: {f}")
 
-    stats["score"] = min(100, score)
     stats["signals"] = signals
-
-    if stats["score"] >= 75:
-        stats["rating"] = "🚀 VIRAL RUSH / SNIPER FRENZY"
-    elif stats["score"] >= 50:
-        stats["rating"] = "🔥 HIGH TRACTION"
-    elif stats["score"] >= 25:
-        stats["rating"] = "🌱 WARMING UP / SEEDED"
-    else:
-        stats["rating"] = "❄️ COLD / DORMANT"
+    # `score` above only fed the human-readable signals; the stored score is the one shared formula.
+    stats["score"], stats["rating"] = compute_interest({
+        "lp_usd": stats.get("lp_usd"), "volume_24h": stats.get("volume_24h"), "buys_24h": stats.get("buys_24h"),
+        "smart_wallets": details.get("smart_wallets") or details.get("smart_minters") or [],
+        "risk_level": stats.get("risk_level"),
+    })
 
     # 7. Evaluate Assisted Sniper Readiness
     proxy_item = dict(details)
