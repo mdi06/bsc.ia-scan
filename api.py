@@ -250,6 +250,16 @@ def is_secondary_market_asset(d: dict) -> bool:
         return False
 
 
+# Predicates behind /api/feed?filter=<name>; also used for the per-filter counts in the overview stats.
+FEED_FILTERS = {
+    "secondary": is_secondary_market_asset,
+    "smart": lambda d: d.get("smart_wallets") or d.get("smart_minters"),
+    "sniper_ready": lambda d: d.get("sniper_ready"),
+    "proxy": lambda d: d.get("is_proxy_clone"),
+    "nft_surge": lambda d: d.get("is_nft_surge"),
+}
+
+
 def compute_global_overview_stats(all_projs=None) -> dict:
     try:
         if all_projs is None:
@@ -260,11 +270,12 @@ def compute_global_overview_stats(all_projs=None) -> dict:
         total = len(all_projs)
         latest_block = all_projs[0].get("block") if all_projs else None
 
-        smart_count = sum(1 for d in all_projs if (d.get("smart_wallets") or d.get("smart_minters")))
-        sniper_ready_count = sum(1 for d in all_projs if d.get("sniper_ready"))
-        proxy_count = sum(1 for d in all_projs if d.get("is_proxy_clone"))
-        nft_surge_count = sum(1 for d in all_projs if d.get("is_nft_surge"))
-        secondary_count = sum(1 for d in all_projs if is_secondary_market_asset(d))
+        counts = {name: sum(1 for d in all_projs if pred(d)) for name, pred in FEED_FILTERS.items()}
+        smart_count = counts["smart"]
+        sniper_ready_count = counts["sniper_ready"]
+        proxy_count = counts["proxy"]
+        nft_surge_count = counts["nft_surge"]
+        secondary_count = counts["secondary"]
 
         local_stats = {}
         try:
@@ -424,19 +435,12 @@ def get_feed(
             }
         )
 
-    # Filter target list if requested
     target_list = all_projs
-    if filter == "secondary":
-        target_list = [d for d in all_projs if is_secondary_market_asset(d)]
-        target_list.sort(key=lambda x: get_sanitized_mcap(x), reverse=True)
-    elif filter == "smart":
-        target_list = [d for d in all_projs if (d.get("smart_wallets") or d.get("smart_minters"))]
-    elif filter == "sniper_ready":
-        target_list = [d for d in all_projs if d.get("sniper_ready")]
-    elif filter == "proxy":
-        target_list = [d for d in all_projs if d.get("is_proxy_clone")]
-    elif filter == "nft_surge":
-        target_list = [d for d in all_projs if d.get("is_nft_surge")]
+    predicate = FEED_FILTERS.get(filter)
+    if predicate:
+        target_list = [d for d in all_projs if predicate(d)]
+        if filter == "secondary":
+            target_list.sort(key=lambda x: get_sanitized_mcap(x), reverse=True)
 
     target_total = len(target_list)
     paginated = target_list[offset : offset + limit]
