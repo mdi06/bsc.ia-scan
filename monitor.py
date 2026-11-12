@@ -1116,9 +1116,45 @@ def fetch_bnb_price_usd(rpc: BscRpcClient) -> Optional[float]:
         return None
 
 
+BNB_PRICE_FALLBACK_USD = 705.0  # used until the first successful lookup
+BNB_PRICE_TTL_SEC = 60.0
+_bnb_price_state = {"usd": BNB_PRICE_FALLBACK_USD, "fetched_at": 0.0, "live": False}
+_bnb_price_lock = threading.Lock()
+_bnb_price_rpc: Optional[BscRpcClient] = None
+
+
+def cached_bnb_price() -> float:
+    """Last known BNB/USD. Never touches the network, so it is safe in render paths."""
+    return _bnb_price_state["usd"]
+
+
+def refresh_bnb_price(rpc: Optional[BscRpcClient] = None, max_age: float = BNB_PRICE_TTL_SEC) -> float:
+    """Returns BNB/USD, re-reading the Pancake WBNB/USDT pool when the cached value is older than `max_age`.
+    A failed lookup keeps the last good price (or BNB_PRICE_FALLBACK_USD if there never was one)."""
+    global _bnb_price_rpc
+    with _bnb_price_lock:
+        now = time.time()
+        if now - _bnb_price_state["fetched_at"] >= max_age:
+            if rpc is None:
+                if _bnb_price_rpc is None:
+                    _bnb_price_rpc = BscRpcClient(RPC_ENDPOINTS)
+                rpc = _bnb_price_rpc
+            price = fetch_bnb_price_usd(rpc)
+            if price and price > 0:
+                _bnb_price_state.update(usd=price, live=True)
+            else:
+                _log.debug("BNB price lookup failed; keeping $%.2f", _bnb_price_state["usd"])
+            _bnb_price_state["fetched_at"] = now  # also after a failure, so a down RPC isn't retried per call
+        return _bnb_price_state["usd"]
+
+
+def bnb_price_is_live() -> bool:
+    """True once at least one on-chain lookup has succeeded (otherwise the price is the static fallback)."""
+    return _bnb_price_state["live"]
+
+
 def get_bnb_price_usd(rpc: BscRpcClient) -> float:
-    price = fetch_bnb_price_usd(rpc)
-    return price if price is not None else 750.0
+    return refresh_bnb_price(rpc)
 
 
 def fetch_token_market_data(token_addr: str) -> Dict[str, Any]:
@@ -1458,13 +1494,15 @@ def is_system_infra(item: Dict[str, Any]) -> bool:
     return False
 
 
-def format_floor_trade_price(item: Dict[str, Any], bnb_price: float = 705.0) -> str:
+def format_floor_trade_price(item: Dict[str, Any], bnb_price: Optional[float] = None) -> str:
     """
     Formats the secondary market trading price or NFT floor price:
     - For NFTs: Floor price in BNB and USD valuation (e.g. '0.00016 BNB ($0.11)')
     - For Tokens: DEX trading price from PancakeSwap/DexScreener (e.g. '$0.000071', '$0.0517')
     - For Pre-market / unlisted: '—'
     """
+    if bnb_price is None:
+        bnb_price = cached_bnb_price()
     floor_bnb = item.get("floor_price_bnb")
     floor_usd = item.get("floor_price_usd")
     token_usd = item.get("token_price_usd") or 0.0
@@ -1511,13 +1549,15 @@ def format_floor_trade_price(item: Dict[str, Any], bnb_price: float = 705.0) -> 
     return "[dim]—[/dim]"
 
 
-def format_lp_or_volume(item: Dict[str, Any], bnb_price: float = 705.0) -> str:
+def format_lp_or_volume(item: Dict[str, Any], bnb_price: Optional[float] = None) -> str:
     """
     Formats the LP / Vol cell:
     - If project has a DEX Liquidity Pool: displays LP depth in USD (e.g. '$14,105', '$4,591')
     - If NFT collection without DEX pool: displays collection trading volume (e.g. '0.74 BNB', or '—' if 0)
     - If Token without DEX pool: displays 'None'
     """
+    if bnb_price is None:
+        bnb_price = cached_bnb_price()
     lp_usd = float(item.get("lp_usd", 0) or 0)
     if lp_usd > 0:
         return f"[green]${lp_usd:,.0f}[/green]"
@@ -1741,12 +1781,14 @@ def filter_and_sort_projects(history: List[Dict[str, Any]], active_filter: str, 
     return filtered
 
 
-def update_post_mint_profit_metrics(item: Dict[str, Any], bnb_price: float = 705.0) -> Dict[str, Any]:
+def update_post_mint_profit_metrics(item: Dict[str, Any], bnb_price: Optional[float] = None) -> Dict[str, Any]:
     """
     Computes and updates post-mint profit and ATH metrics on an item.
     Tracks persistent high-water mark (ATH price, ATH net profit, and ATH multiple).
     Filters out pegged crypto assets (BTCB, WBNB, USDT, USDC, BUSD), synthetic stocks, and system infra.
     """
+    if bnb_price is None:
+        bnb_price = cached_bnb_price()
     c = (item.get("contract") or "").lower()
     sym = (item.get("symbol") or "").upper()
     is_pegged = (
@@ -1856,7 +1898,7 @@ def update_post_mint_profit_metrics(item: Dict[str, Any], bnb_price: float = 705
     }
 
 
-def compute_market_cap_stats(history: List[Dict[str, Any]], bnb_price: float = 705.0) -> Dict[str, Any]:
+def compute_market_cap_stats(history: List[Dict[str, Any]], bnb_price: Optional[float] = None) -> Dict[str, Any]:
     """
     Computes overall mint statistics:
     - Percentage of collections that filled their mint cap (Sold Out)
@@ -1865,6 +1907,8 @@ def compute_market_cap_stats(history: List[Dict[str, Any]], bnb_price: float = 7
     - Top post-mint gainer (highest profit / ROI after mint is over)
     - All-time top gainers leaderboard list
     """
+    if bnb_price is None:
+        bnb_price = cached_bnb_price()
     capped_total = 0
     sold_out_cnt = 0
     near_cap_cnt = 0
@@ -2161,7 +2205,7 @@ def analyze_market_interest(
                     vol_wei = int(m_data.get("vol24") or m_data.get("volAll") or 0)
                     if vol_wei > 0:
                         stats["volume_bnb"] = round(vol_wei / 1e18, 2)
-                        stats["volume_24h"] = (vol_wei / 1e18) * 705.0
+                        stats["volume_24h"] = (vol_wei / 1e18) * cached_bnb_price()
             except Exception as exc:
                 _log.debug("oathbots market.json fetch failed: %s", exc)
         if not stats.get("volume_bnb") and details.get("volume_bnb"):
@@ -3149,7 +3193,7 @@ def scan_element_nft_volume(
     return results
 
 
-def evaluate_portfolio_exit(item: Dict[str, Any], bnb_price: float = 705.0) -> Dict[str, Any]:
+def evaluate_portfolio_exit(item: Dict[str, Any], bnb_price: Optional[float] = None) -> Dict[str, Any]:
     """
     Evaluates take-profit and stop-loss conviction signals for an asset held in portfolio:
     - Native Gas (BNB): Operational Gas reserve.
@@ -3162,6 +3206,8 @@ def evaluate_portfolio_exit(item: Dict[str, Any], bnb_price: float = 705.0) -> D
       * 🔻 STOP LOSS: Position dropped >= 30% below entry cost
       * ⏳ HODL: Within normal volatility bounds
     """
+    if bnb_price is None:
+        bnb_price = cached_bnb_price()
     contract = (item.get("contract") or "").lower()
     is_nft = bool(item.get("is_nft"))
     std = str(item.get("standard") or "")
@@ -3368,7 +3414,7 @@ def build_portfolio_data(rpc: BscRpcClient, wallet: str, history: List[Dict[str,
     try:
         bnb_price = get_bnb_price_usd(rpc)
     except Exception:
-        bnb_price = 705.0
+        bnb_price = cached_bnb_price()
 
     native_usd = bnb_bal * bnb_price
 
@@ -4395,7 +4441,7 @@ def build_interactive_dashboard(
             m_text.append("\n")
         elif item.get("floor_price_bnb") and float(item["floor_price_bnb"]) > 0:
             f_b = float(item["floor_price_bnb"])
-            f_u = float(item.get("floor_price_usd") or (f_b * 705.0))
+            f_u = float(item.get("floor_price_usd") or (f_b * cached_bnb_price()))
             m_text.append(f"\n• Secondary Floor Price:  {f_b:g} BNB (${f_u:.2f} USD)  |  Element Marketplace\n", style="bold cyan")
 
         m_text.append(f"• Interest Score:   {score}/100 ({rating})\n", style="bold yellow")
@@ -4758,7 +4804,7 @@ def build_interactive_dashboard(
             fl_b = sel_s.get("floor_price_bnb")
             t_p = sel_s.get("token_price_usd", 0)
             if fl_b and float(fl_b) > 0:
-                sd_text.append(f"• Secondary Floor: {float(fl_b):g} BNB (${float(fl_b)*705:.2f} USD)  |  Element Marketplace\n", style="bold cyan")
+                sd_text.append(f"• Secondary Floor: {float(fl_b):g} BNB (${float(fl_b)*cached_bnb_price():.2f} USD)  |  Element Marketplace\n", style="bold cyan")
             elif t_p > 0:
                 sd_text.append(f"• Secondary DEX Price: ${t_p:.6f} USD  |  PancakeSwap\n", style="bold green")
 
@@ -4954,7 +5000,7 @@ def build_interactive_dashboard(
             m_parts.append(f"DEX Price: ${t_price:.4f} USD  |  Pool: ${lp_usd:,.0f}")
         elif floor_bnb and float(floor_bnb) > 0:
             vol_str = f" ({float(vol_b):g} BNB vol)" if (vol_b and float(vol_b) > 0) else ""
-            m_parts.append(f"Floor: {float(floor_bnb):g} BNB (${float(sel_item.get('floor_price_usd') or float(floor_bnb)*705):.2f}){vol_str}")
+            m_parts.append(f"Floor: {float(floor_bnb):g} BNB (${float(sel_item.get('floor_price_usd') or float(floor_bnb)*cached_bnb_price()):.2f}){vol_str}")
         elif lp_usd > 0:
             m_parts.append(f"DEX Pool: ${lp_usd:,.0f}")
         elif vol_b and float(vol_b) > 0:
@@ -5136,6 +5182,8 @@ def run_live_monitor(rpc: BscRpcClient, wallet: str, plain: bool = False):
                             status_timer = time.time()
                     except Exception as exc:
                         _log.debug("cloud history sync failed: %s", exc)
+
+                refresh_bnb_price(rpc)  # re-reads the price only when the cached one is over a minute old
 
                 curr_b = rpc.get_block_number()
                 if curr_b <= latest_block[0]:
@@ -6882,6 +6930,8 @@ def main():
 
     args = parser.parse_args()
     rpc = BscRpcClient(RPC_ENDPOINTS)
+    # Warm the BNB/USD price in the background so USD values don't start from the fallback.
+    threading.Thread(target=refresh_bnb_price, args=(rpc,), daemon=True).start()
 
     if args.command == "live":
         run_live_monitor(rpc, args.wallet, plain=args.plain)

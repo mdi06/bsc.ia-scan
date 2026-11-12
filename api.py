@@ -352,6 +352,16 @@ def get_overview_stats(request: Request):
     )
 
 
+@app.get("/api/bnb-price")
+def get_bnb_price():
+    """Live BNB/USD from the Pancake WBNB/USDT pool (cached 60s). `live` is false until a lookup has succeeded."""
+    price = monitor.refresh_bnb_price()
+    return JSONResponse(
+        content={"success": True, "bnb_price_usd": price, "live": monitor.bnb_price_is_live()},
+        headers={"Cache-Control": "public, max-age=30"},
+    )
+
+
 @app.get("/agent_id_stats.json")
 @app.get("/data/agent_id_stats.json")
 def get_agent_id_stats_json():
