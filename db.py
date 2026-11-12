@@ -179,6 +179,9 @@ class DatabaseManager:
                 conn.close()
 
     def _get_sqlite_connection(self) -> sqlite3.Connection:
+        # In Supabase mode _init_sqlite never runs, so the (gitignored) data/ dir may not exist
+        # on a fresh deploy; the SQLite fallback paths would then crash with "unable to open database file".
+        Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
         conn = sqlite3.connect(self.db_path, timeout=10.0, check_same_thread=False)
         conn.row_factory = sqlite3.Row
         return conn
