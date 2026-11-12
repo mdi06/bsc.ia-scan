@@ -38,7 +38,7 @@ app.add_middleware(GZipMiddleware, minimum_size=500)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
+    allow_credentials=False,  # public read-mostly API; admin uses bearer tokens, not cookies
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -67,12 +67,7 @@ async def global_exception_handler(request: Request, exc: Exception):
     print(f"[🔥 API Unhandled Error] {request.method} {request.url.path}: {exc}\n{tb}", flush=True)
     return JSONResponse(
         status_code=500,
-        headers={
-            "Access-Control-Allow-Origin": "*",
-            "Access-Control-Allow-Methods": "*",
-            "Access-Control-Allow-Headers": "*",
-        },
-        content={"success": False, "error": str(exc), "traceback": tb}
+        content={"success": False, "error": "internal_error"}
     )
 
 

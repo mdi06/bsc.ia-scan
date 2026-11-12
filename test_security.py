@@ -49,3 +49,15 @@ def test_correct_token_passes_auth(monkeypatch):
     r = client.post("/api/admin/purge-bogus", headers={"Authorization": "Bearer s3cret"})
     assert r.status_code == 200
     assert r.json()["success"] is True
+
+
+def test_unhandled_error_does_not_leak_details(monkeypatch):
+    def boom(*a, **k):
+        raise RuntimeError("secret-internal-detail")
+
+    monkeypatch.setattr(api.db, "get_project_count", boom)
+    r = client.get("/healthz")
+    assert r.status_code == 500
+    assert r.json() == {"success": False, "error": "internal_error"}
+    assert "secret-internal-detail" not in r.text
+    assert "traceback" not in r.text.lower()
