@@ -107,3 +107,14 @@ def test_rate_limit_returns_429_with_retry_after(monkeypatch):
     assert client.get("/api/favorites?wallet=bad", headers={"Fly-Client-IP": "203.0.113.10"}).status_code == 400
     assert client.get("/healthz", headers=h).status_code == 200
     api._rate_counts.clear()
+
+
+def test_rate_limit_prefers_cf_connecting_ip_over_spoofable_xff(monkeypatch):
+    monkeypatch.setattr(api, "RATE_LIMIT_MAX", 2)
+    api._rate_counts.clear()
+    for i in range(2):
+        h = {"CF-Connecting-IP": "203.0.113.50", "X-Forwarded-For": f"198.51.100.{i}"}
+        assert client.get("/api/favorites?wallet=bad", headers=h).status_code == 400
+    h = {"CF-Connecting-IP": "203.0.113.50", "X-Forwarded-For": "198.51.100.99"}
+    assert client.get("/api/favorites?wallet=bad", headers=h).status_code == 429
+    api._rate_counts.clear()

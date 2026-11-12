@@ -45,7 +45,9 @@ _rate_counts: Dict[str, int] = {}
 
 
 def _client_ip(request: Request) -> str:
-    ip = request.headers.get("fly-client-ip")
+    # Cloudflare (in front of Render) overwrites CF-Connecting-IP, so clients cannot spoof it.
+    # Fly sets Fly-Client-IP. X-Forwarded-For is the last resort (its first entry is client-controlled).
+    ip = request.headers.get("cf-connecting-ip") or request.headers.get("fly-client-ip")
     if not ip:
         xff = request.headers.get("x-forwarded-for", "")
         ip = xff.split(",")[0].strip() if xff else ""
