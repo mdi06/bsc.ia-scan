@@ -333,3 +333,16 @@ def test_bnb_price_endpoint_reports_live_and_as_of(monkeypatch, price_state):
     price_state.update(ok_at=time.time() - 10 * monitor.BNB_PRICE_TTL_SEC, fetched_at=0.0)
     body = TestClient(api.app).get("/api/bnb-price").json()
     assert body["live"] is False and body["bnb_price_usd"] == 688.0
+
+
+def test_stale_recheck_slice_rotates_and_is_bounded():
+    items = [{"contract": f"0x{i:040x}"} for i in range(150)]
+    worker._stale_recheck_offset = 0
+    seen = []
+    for _ in range(3):
+        chunk = worker._next_stale_slice(items)
+        assert len(chunk) == worker.STALE_RECHECK_PER_SWEEP
+        seen += [c["contract"] for c in chunk]
+    assert len(set(seen)) == 150          # 3 sweeps of 60 wrap around and cover every record
+    assert worker._next_stale_slice([]) == []
+    assert len(worker._next_stale_slice(items[:5])) == 5

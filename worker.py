@@ -670,6 +670,22 @@ STALE_CLEARED_FIELDS = (
 )
 
 
+STALE_RECHECK_PER_SWEEP = 60
+_stale_recheck_offset = 0
+
+
+def _next_stale_slice(stale_items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """The next STALE_RECHECK_PER_SWEEP records of the stale list, wrapping around, advancing each call."""
+    global _stale_recheck_offset
+    if not stale_items:
+        return []
+    start = _stale_recheck_offset % len(stale_items)
+    doubled = stale_items + stale_items
+    n = min(STALE_RECHECK_PER_SWEEP, len(stale_items))
+    _stale_recheck_offset = (start + n) % len(stale_items)
+    return doubled[start:start + n]
+
+
 def _has_market_data(item: Dict[str, Any]) -> bool:
     return any(item.get(f) for f in STALE_CLEARED_FIELDS)
 
@@ -946,10 +962,13 @@ def run_market_dynamics_updater_loop():
             ]
             active_old = [
                 x for x in history[150:]
-                if not monitor.is_system_infra(x)
-                and ((x.get("lp_usd") or 0) > 0 or (x.get("token_price_usd") or 0) > 0 or x.get("market_stale"))
+                if not monitor.is_system_infra(x) and ((x.get("lp_usd") or 0) > 0 or (x.get("token_price_usd") or 0) > 0)
             ]
-            contracts_to_check = recent_drops + active_old
+            # Records whose market data was cleared as stale are looked up again a few per sweep (round robin),
+            # so one that DexScreener starts listing later recovers without ~all of them being polled every sweep.
+            stale_old = [x for x in history[150:] if x.get("market_stale") and x.get("contract")
+                         and not monitor.is_system_infra(x) and x not in active_old]
+            contracts_to_check = recent_drops + active_old + _next_stale_slice(stale_old)
 
             batch_size = 30
             dex_updates = {}
