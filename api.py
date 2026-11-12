@@ -35,6 +35,53 @@ app = FastAPI(
 # GZip compression middleware: shrinks JSON/text responses by 80-90% to protect Render 5GB bandwidth
 app.add_middleware(GZipMiddleware, minimum_size=500)
 
+# --- Basic in-memory rate limiting (fixed 60s window per client IP) ---
+RATE_LIMIT_WINDOW = 60
+RATE_LIMIT_MAX = 120
+RATE_LIMIT_MAX_TRACKED_IPS = 50000
+RATE_LIMIT_EXEMPT = {"/healthz", "/health"}
+_rate_window_id = 0
+_rate_counts: Dict[str, int] = {}
+
+
+def _client_ip(request: Request) -> str:
+    ip = request.headers.get("fly-client-ip")
+    if not ip:
+        xff = request.headers.get("x-forwarded-for", "")
+        ip = xff.split(",")[0].strip() if xff else ""
+    if not ip:
+        ip = request.client.host if request.client else "unknown"
+    return ip
+
+
+@app.middleware("http")
+async def rate_limit_middleware(request: Request, call_next):
+    global _rate_window_id
+    path = request.url.path
+    if request.method == "OPTIONS" or not path.startswith("/api/") or path in RATE_LIMIT_EXEMPT:
+        return await call_next(request)
+
+    now = time.time()
+    window_id = int(now // RATE_LIMIT_WINDOW)
+    if window_id != _rate_window_id:
+        # New window: drop every old counter so the dict stays bounded.
+        _rate_counts.clear()
+        _rate_window_id = window_id
+    ip = _client_ip(request)
+    if ip not in _rate_counts and len(_rate_counts) >= RATE_LIMIT_MAX_TRACKED_IPS:
+        _rate_counts.clear()  # hard cap against key-flooding; fails open for this window
+    count = _rate_counts.get(ip, 0) + 1
+    _rate_counts[ip] = count
+    if count > RATE_LIMIT_MAX:
+        retry_after = max(1, int((window_id + 1) * RATE_LIMIT_WINDOW - now) + 1)
+        return JSONResponse(
+            status_code=429,
+            headers={"Retry-After": str(retry_after)},
+            content={"success": False, "error": "rate_limited"},
+        )
+    return await call_next(request)
+
+
 # CORS Middleware for Vercel, Render & cross-origin frontend
 app.add_middleware(
     CORSMiddleware,

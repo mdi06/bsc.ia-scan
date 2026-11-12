@@ -92,3 +92,18 @@ def test_startup_does_not_purge(monkeypatch):
     monkeypatch.setattr("threading.Thread.start", lambda self: None)
     api.startup_event()
     assert called == []
+
+
+def test_rate_limit_returns_429_with_retry_after(monkeypatch):
+    monkeypatch.setattr(api, "RATE_LIMIT_MAX", 3)
+    api._rate_counts.clear()
+    h = {"Fly-Client-IP": "203.0.113.9"}
+    for _ in range(3):
+        assert client.get("/api/favorites?wallet=bad", headers=h).status_code == 400
+    r = client.get("/api/favorites?wallet=bad", headers=h)
+    assert r.status_code == 429
+    assert int(r.headers["Retry-After"]) >= 1
+    # other clients and exempt health routes are unaffected
+    assert client.get("/api/favorites?wallet=bad", headers={"Fly-Client-IP": "203.0.113.10"}).status_code == 400
+    assert client.get("/healthz", headers=h).status_code == 200
+    api._rate_counts.clear()
