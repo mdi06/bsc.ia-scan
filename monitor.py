@@ -31,6 +31,7 @@ import termios
 import threading
 import webbrowser
 import shutil
+from concurrent.futures import ThreadPoolExecutor
 from typing import Optional, Dict, Any, List, Tuple, Iterable, Set
 
 from filters import EQUITY_SYMBOLS_CORE, EXCLUDED_PEGS_CONTRACTS, PEG_SYMBOLS_CORE
@@ -2586,8 +2587,8 @@ def notify_alert():
     sys.stdout.flush()
     try:
         subprocess.Popen(["afplay", "/System/Library/Sounds/Glass.aiff"], stderr=subprocess.DEVNULL)
-    except Exception:
-        pass
+    except Exception as exc:
+        _log.debug("could not play alert sound: %s", exc)
 
 
 KNOWN_PROJECTS = [
@@ -2786,8 +2787,8 @@ def preview_snipe_call(wallet: str, to: str, value_wei: str, calldata: str) -> D
                     if sim_code and sim_code != "000000000":
                         return {"success": False, "error": {"message": err_detail or f"Simulation reverted (code {sim_code})"}}
                 return res
-            except Exception:
-                pass
+            except Exception as exc:
+                _log.debug("baw contract-call preview returned non-JSON output: %s", exc)
         return {"success": False, "error": {"message": proc.stderr or "CLI error"}}
     except Exception as e:
         return {"success": False, "error": {"message": str(e)}}
@@ -2807,8 +2808,8 @@ def execute_snipe_call(request_id: str) -> Dict[str, Any]:
         if proc.stdout:
             try:
                 return json.loads(proc.stdout)
-            except Exception:
-                pass
+            except Exception as exc:
+                _log.debug("baw contract-call execute returned non-JSON output: %s", exc)
         return {"success": False, "error": {"message": proc.stderr or "CLI error"}}
     except Exception as e:
         return {"success": False, "error": {"message": str(e)}}
@@ -2825,8 +2826,8 @@ def get_wallet_balance(rpc: BscRpcClient, contract_addr: str, wallet: str) -> in
         res = rpc.call("eth_call", [{"to": contract_addr, "data": data}, "latest"])
         if res and isinstance(res, str) and res.startswith("0x"):
             return int(res, 16)
-    except Exception:
-        pass
+    except Exception as exc:
+        _log.debug("balanceOf lookup failed for %s on %s: %s", wallet, contract_addr, exc)
     return 0
 
 
@@ -2837,7 +2838,6 @@ def check_holdings(rpc: BscRpcClient, wallet: str):
     history = load_history()
     print(f"\n{C_BOLD}🔍 Checking On-Chain Holdings for wallet {wallet}...{C_RESET}\n")
     found = []
-    from concurrent.futures import ThreadPoolExecutor
 
     def _check(item):
         c = item.get("contract")
