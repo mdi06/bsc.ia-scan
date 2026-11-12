@@ -31,6 +31,8 @@ import webbrowser
 import shutil
 from typing import Optional, Dict, Any, List, Tuple, Iterable, Set
 
+from filters import EQUITY_SYMBOLS_CORE, EXCLUDED_PEGS_CONTRACTS, PEG_SYMBOLS_CORE
+
 try:
     from rich.console import Console, Group
     from rich.table import Table
@@ -1732,27 +1734,6 @@ def filter_and_sort_projects(history: List[Dict[str, Any]], active_filter: str, 
     return filtered
 
 
-EXCLUDED_PEGS_SYMBOLS = {
-    "BTCB", "WBTC", "BTC", "ETH", "WETH", "WBNB", "BNB", "USDT", "USDC", "BUSD",
-    "DAI", "TUSD", "FDUSD", "CAKE", "U", "OSK", "FIST"
-}
-
-EXCLUDED_PEGS_CONTRACTS = {
-    "0x7130d2a12b9bcbfae4f2634d864a1ee1ce3ead9c",  # BTCB
-    "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c",  # WBNB
-    "0x55d398326f99059ff775485246999027b3197955",  # USDT
-    "0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d",  # USDC
-    "0xe9e7cea3dedca5984780bafc599bd69add087d56",  # BUSD
-    "0x2170ed0880ac9a755fd29b2688956bd959f933f8",  # ETH (Binance-Peg)
-    "0x14016e85a25a55f2e084741d69d9d82361f38e2b",  # DAI
-    "0x0e09fabb73bd3ade0a17ecc321fd13a19e81ce82"   # CAKE
-}
-
-SYNTHETIC_EQUITY_SYMBOLS = {
-    "TSLAB", "AAPLB", "MSFTB", "METAB", "SPCXB", "NVDA", "NVDAB", "AMZNB", "GOOGLB", "MRNAB", "SOXSB", "CRCLB", "QQQB", "MSTRB"
-}
-
-
 def update_post_mint_profit_metrics(item: Dict[str, Any], bnb_price: float = 705.0) -> Dict[str, Any]:
     """
     Computes and updates post-mint profit and ATH metrics on an item.
@@ -1763,8 +1744,8 @@ def update_post_mint_profit_metrics(item: Dict[str, Any], bnb_price: float = 705
     sym = (item.get("symbol") or "").upper()
     is_pegged = (
         c in EXCLUDED_PEGS_CONTRACTS
-        or sym in EXCLUDED_PEGS_SYMBOLS
-        or sym in SYNTHETIC_EQUITY_SYMBOLS
+        or sym in PEG_SYMBOLS_CORE
+        or sym in EQUITY_SYMBOLS_CORE
     )
     if is_pegged or is_system_infra(item):
         return {
