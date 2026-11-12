@@ -27,6 +27,27 @@ HISTORY_FILE = os.path.join(BASE_DIR, "history.json")
 FAVORITES_FILE = os.path.join(BASE_DIR, "user_favorites.json")
 
 
+def scrub_non_finite(obj):
+    """Replaces NaN / +-Infinity floats inside `obj` (dicts / lists, in place) with None and returns obj.
+    A non-finite float cannot be stored as JSON, and it made the change-detection fingerprint raise, which
+    dropped the whole upsert batch."""
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            if isinstance(v, float):
+                if v != v or v in (float("inf"), float("-inf")):
+                    obj[k] = None
+            elif isinstance(v, (dict, list)):
+                scrub_non_finite(v)
+    elif isinstance(obj, list):
+        for i, v in enumerate(obj):
+            if isinstance(v, float):
+                if v != v or v in (float("inf"), float("-inf")):
+                    obj[i] = None
+            elif isinstance(v, (dict, list)):
+                scrub_non_finite(v)
+    return obj
+
+
 class DatabaseManager:
     def __init__(self, db_path: Optional[str] = None):
         self.supabase_url = os.getenv("SUPABASE_URL", "").strip().rstrip("/")
@@ -62,6 +83,9 @@ class DatabaseManager:
         self._cached_json_etag: Optional[str] = None
         self._sqlite_ready = False
         self._cache_dirty = True
+        # Bumped whenever the project data changes (an upsert / delete here, or a refresh that brought new data in).
+        # HTTP ETags are built from it, so a conditional GET can never get a 304 for changed content.
+        self._content_version = 0
 
         # httpx client, recreated when the PID changes (see `client`)
         self._client_instance = None
@@ -302,6 +326,7 @@ class DatabaseManager:
                             self._last_synced_updated_at = max_ts
                             self._cache_initialized = True
                             self._cache_dirty = True
+                            self._content_version += 1
                             self._last_cache_time = now
                             items = list(self._projects_cache.values())
                             items.sort(key=lambda x: x.get("block", 0) or 0, reverse=True)
@@ -348,12 +373,17 @@ class DatabaseManager:
                     self._last_synced_updated_at = max_ts
                     self._cache_initialized = True
                     self._cache_dirty = True
+                    self._content_version += 1
                     self._last_cache_time = now
                     items = list(self._projects_cache.values())
                     items.sort(key=lambda x: x.get("block", 0) or 0, reverse=True)
                     return items
             finally:
                 conn.close()
+
+    def content_version(self) -> int:
+        """Counter that changes whenever the project data changes (see _content_version)."""
+        return self._content_version
 
     def get_history_json(self) -> Tuple[bytes, str]:
         """Returns (minified UTF-8 JSON of all projects, ETag of those exact bytes).
@@ -533,6 +563,7 @@ class DatabaseManager:
             contract = (p.get("contract") or "").lower().strip()
             if not contract or not contract.startswith("0x"):
                 continue
+            scrub_non_finite(p)
             clean_records.append(p)
 
         if not clean_records and not self._retry_queue:
@@ -579,6 +610,7 @@ class DatabaseManager:
             if changed_records or cache_changed:
                 self._cache_initialized = True
                 self._cache_dirty = True
+                self._content_version += 1
             if changed_records:
                 self._last_cache_time = now_ts
                 if now_ts > self._last_synced_updated_at:
@@ -751,6 +783,7 @@ class DatabaseManager:
         with self._cache_lock:
             for c in clean:
                 self._projects_cache.pop(c, None)
+                self._content_version += 1
                 self._p_fingerprints.pop(c, None)
                 self._p_written_at.pop(c, None)
                 self._retry_queue.discard(c)

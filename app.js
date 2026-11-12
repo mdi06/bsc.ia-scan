@@ -1170,7 +1170,9 @@ async function loadSmartDrops() {
     }
 
     if (res && res.ok) {
-      const drops = await res.json();
+      const body = await res.json();
+      // the static seed file is a bare array; /api/smart-drops answers {seeded, as_of, items} (?shape=array is the old shape)
+      const drops = Array.isArray(body) ? body : (body && Array.isArray(body.items) ? body.items : null);
       if (Array.isArray(drops) && drops.length > 0) {
         mergeDropsIntoAllDrops(drops);
         hasLoadedSmartDrops = true;
@@ -1275,8 +1277,9 @@ async function syncSeededSmartHunters() {
       const resApi = await fetchWithTimeout(`${BACKEND_URL}/api/smart-hunters`, { cache: 'default' }, 4000);
       if (resApi.ok) {
         const dataApi = await resApi.json();
-        if (dataApi && Array.isArray(dataApi.hunters) && dataApi.hunters.length > 0) {
-          smartHuntersCache = dataApi.hunters;
+        const apiHunters = dataApi && (Array.isArray(dataApi.items) ? dataApi.items : dataApi.hunters);
+        if (Array.isArray(apiHunters) && apiHunters.length > 0) {
+          smartHuntersCache = apiHunters;
           return;
         }
       }
