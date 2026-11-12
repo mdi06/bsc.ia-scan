@@ -491,6 +491,26 @@ def _next_cold_batch(items: list, offset: int, size: int = 50):
     return (items + items)[start:start + size], start + size
 
 
+MAX_SNIPER_ALERT_LINES = 5
+
+
+def _format_sniper_alert(item: Dict[str, Any]) -> str:
+    """One log line for a drop that just became sniper-ready."""
+    return (f"[🎯 HIGH-PRIORITY SNIPER ALERT] {item.get('name')} ({item.get('contract')}) | "
+            f"Progress: {item.get('total_minted')}/{item.get('max_supply')} | "
+            f"Status: {item.get('sniper_badge')} | Rating: {item.get('rating')}")
+
+
+def _print_sniper_alerts(alerts: List[Dict[str, Any]], max_lines: int = MAX_SNIPER_ALERT_LINES) -> None:
+    """Prints each alert on one line, and a summary for the rest. A drop is alerted once (sniper_ready_alerted),
+    so the first sweep after a restart can find hundreds of drops that were ready long before; listing them all
+    flooded the log."""
+    for item in alerts[:max_lines]:
+        print(_format_sniper_alert(item), flush=True)
+    if len(alerts) > max_lines:
+        print(f"[🎯 Sniper] +{len(alerts) - max_lines} more drops are now sniper-ready (alerts shown for the first {max_lines}).", flush=True)
+
+
 def run_fast_track_progress_sweeper_loop():
     """Every 15s, refreshes on-chain minted/supply for active drops. Drops past 45% minted or with
     50+ holders are swept every cycle; the rest in batches of 50 every 4th cycle."""
@@ -607,13 +627,7 @@ def run_fast_track_progress_sweeper_loop():
                         monitor.save_history(history, delta=changed_items)
                     print(f"[⚡ Fast-Track Sweeper] Updated on-chain progress for {updates_count} contracts.", flush=True)
 
-                for alert_item in sniper_alerts:
-                    print(
-                        f"\n🎯 [HIGH-PRIORITY SNIPER ALERT] {alert_item.get('name')} ({alert_item.get('contract')})\n"
-                        f"   Progress: {alert_item.get('total_minted')}/{alert_item.get('max_supply')} | "
-                        f"Status: {alert_item.get('sniper_badge')} | Rating: {alert_item.get('rating')}\n",
-                        flush=True
-                    )
+                _print_sniper_alerts(sniper_alerts)
 
         except Exception as e:
             print(f"[⚠️ Fast-Track Sweeper Error] {e}", flush=True)
