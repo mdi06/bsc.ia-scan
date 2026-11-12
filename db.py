@@ -35,6 +35,14 @@ class DatabaseManager:
             self.supabase_url = self.supabase_url[:-8].rstrip("/")
         self.supabase_key = os.getenv("SUPABASE_KEY", os.getenv("SUPABASE_SERVICE_ROLE_KEY", os.getenv("SUPABASE_ANON_KEY", ""))).strip()
         
+        if (self.supabase_key
+                and "SUPABASE_KEY" not in os.environ
+                and "SUPABASE_SERVICE_ROLE_KEY" not in os.environ
+                and "SUPABASE_ANON_KEY" in os.environ):
+            print("[⚠️ DB Warning] Using SUPABASE_ANON_KEY as the backend key. Writes will fail once RLS "
+                  "is tightened; set SUPABASE_SERVICE_ROLE_KEY (or SUPABASE_KEY) to the service role key.",
+                  flush=True)
+
         self.mode = "supabase" if (self.supabase_url and self.supabase_key) else "sqlite"
         self.db_path = db_path or os.getenv("DB_PATH", DEFAULT_DB_PATH)
         
