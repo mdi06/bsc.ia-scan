@@ -458,13 +458,18 @@ class DatabaseManager:
         holders = int(p.get("holders") or 0)
         prog = round(float(p.get("progress") or 0.0), 1)
 
+        # Mint progress in 1% steps: the sweeper changes total_minted without touching "progress".
+        tm = float(p.get("total_minted") or 0.0)
+        ms = float(p.get("max_supply") or 0.0)
+        mint_pct = int(tm / ms * 100) if ms > 0 else 0
+
         return (
             f"{prog}_{holders}_{p.get('score')}_"
             f"{p.get('sniper_ready')}_{p.get('is_proxy_clone')}_{p.get('is_nft_surge')}_"
             f"{p.get('risk_level')}_{p.get('risk_badge')}_{p.get('status')}_"
             f"{px_bucket}_{p.get('token_symbol')}_{lp_k}_"
             f"{mc_k}_{vol_k}_{p.get('mint_value_wei')}_{p.get('mint_price_str')}_"
-            f"{p.get('secondary_sales_count')}_{float(p.get('floor_price_bnb') or 0.0):.3g}"
+            f"{p.get('secondary_sales_count')}_{float(p.get('floor_price_bnb') or 0.0):.3g}_{mint_pct}"
         )
 
     def upsert_projects(self, projects: List[Dict[str, Any]]):

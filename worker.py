@@ -392,42 +392,81 @@ def run_discovery_loop():
         time.sleep(1.0)
 
 
-def _is_erc721_drop(item: dict) -> bool:
-    """True for ERC-721 / NFT collections. The raw on-chain counts the fast sweeper reads are only
-    correct for these: fungible tokens store supply scaled by decimals, and ERC-1155 supply is per id."""
+def _sweep_kind(item: dict) -> Optional[str]:
+    """Which kind of contract the fast sweeper is looking at, from the stored standard:
+    "nft" (ERC-721), "token" (BEP-20) or "fair" (fair-mint dispenser); None for anything else
+    (ERC-1155 supply is per id, custom contracts have no known supply getters)."""
     std = str(item.get("standard") or "")
-    return ("721" in std or "NFT" in std or bool(item.get("is_nft"))) and "1155" not in std
+    if "1155" in std:
+        return None
+    if "721" in std or "NFT" in std or item.get("is_nft"):
+        return "nft"
+    if "BEP-20" in std:
+        return "token"
+    if "Fair-Mint" in std:
+        return "fair"
+    return None
 
 
-# contract -> time of the last supply-cap probe, so contracts without a cap getter aren't re-probed every sweep
+def _token_decimals(item: dict) -> Optional[int]:
+    """Decimals recorded in a BEP-20 standard string like 'BEP-20 Token (18 decimals)'."""
+    m = re.search(r"\((\d+) decimals\)", str(item.get("standard") or ""))
+    return int(m.group(1)) if m else None
+
+
+# contract -> time of the last supply-cap probe, so NFTs without a cap getter aren't re-probed every sweep
 _supply_probe_at: Dict[str, float] = {}
 SUPPLY_PROBE_INTERVAL_SEC = 3600.0
+# contract -> its core() companion address (or None); analyze_contract reads supply from both
+_core_addr_cache: Dict[str, Optional[str]] = {}
+
+
+def _supply_targets(rpc: monitor.BscRpcClient, c: str) -> List[str]:
+    """The contract plus its core() companion, the same addresses analyze_contract reads supply from."""
+    if c not in _core_addr_cache:
+        res = rpc.call_contract(c, monitor.keccak_selector("core()"))
+        core = "0x" + res[-40:].lower() if res and len(res) >= 66 else None
+        _core_addr_cache[c] = core if core and int(core, 16) != 0 else None
+    core = _core_addr_cache[c]
+    return [c, core] if core else [c]
 
 
 def fast_sweep_contract(rpc: monitor.BscRpcClient, item: dict) -> tuple:
-    """Reads minted/supply for one ERC-721 contract straight from the chain (no third-party APIs).
-    Returns (contract, minted, supply, holders, changed); other contract types are reported unchanged."""
+    """Reads minted/supply for one contract straight from the chain (no third-party APIs), the same
+    way analyze_contract does, so fresh values stay comparable with what is already stored:
+    - NFTs: raw counts; the cap is probed (at most hourly) when it isn't known yet.
+    - BEP-20 tokens: supply scaled by the decimals in the standard string.
+    - fair-mint dispensers: raw counts.
+    Tokens and fair-mint contracts are swept only once they have a known cap, since "progress" means
+    nothing without one. The holder estimate is NFT-only (a token's supply isn't a holder count).
+    Returns (contract, minted, supply, holders, changed); anything else is reported unchanged."""
     c = item.get("contract")
-    if not c or not c.startswith("0x") or len(c) != 42 or not _is_erc721_drop(item):
+    kind = _sweep_kind(item)
+    if not c or not c.startswith("0x") or len(c) != 42 or kind is None:
         return c, None, None, None, False
 
     try:
         cur_minted = item.get("total_minted", 0)
         cur_supply = item.get("max_supply")
+        has_cap = bool(cur_supply)
 
-        minted = monitor.get_token_count(rpc, c)
-        if minted is None or minted == 0:
-            minted = monitor.get_total_supply(rpc, c)
+        decimals = None
+        if kind == "token":
+            decimals = _token_decimals(item)
+            if decimals is None:
+                return c, None, None, None, False  # can't scale without decimals
+        if kind != "nft" and not has_cap:
+            return c, None, None, None, False
 
-        if cur_supply is None or cur_supply == 0:
+        probe_cap = False
+        if not has_cap:
             now = time.time()
             if now - _supply_probe_at.get(c, 0.0) >= SUPPLY_PROBE_INTERVAL_SEC:
                 _supply_probe_at[c] = now
-                supply = monitor.get_max_supply(rpc, c)
-            else:
-                supply = None
-        else:
-            supply = cur_supply
+                probe_cap = True
+
+        found_cap, minted = monitor.read_supply(rpc, _supply_targets(rpc, c), decimals, need_max=probe_cap)
+        supply = cur_supply if has_cap else found_cap
 
         changed = False
         if minted is not None and minted != cur_minted:
@@ -435,18 +474,21 @@ def fast_sweep_contract(rpc: monitor.BscRpcClient, item: dict) -> tuple:
         if supply is not None and supply != cur_supply:
             changed = True
 
-        prog = 0.0
-        if supply and supply > 0 and minted is not None:
-            prog = min(100.0, (minted / supply) * 100.0)
-
-        # Holder count is estimated from minted supply; it is not read from the chain.
         holders = item.get("holders", 1)
-        if minted is not None and minted > 0:
+        if kind == "nft" and minted is not None and minted > 0:
             holders = max(holders, min(minted, int(minted * 0.85) + 1))
 
         return c, minted, supply, holders, changed
     except Exception:
         return c, None, None, None, False
+
+
+def _next_cold_batch(items: list, offset: int, size: int = 50):
+    """The next `size` items, wrapping around the list, and the offset to continue from."""
+    if len(items) <= size:
+        return list(items), 0
+    start = offset % len(items)
+    return (items + items)[start:start + size], start + size
 
 
 def run_fast_track_progress_sweeper_loop():
@@ -457,6 +499,7 @@ def run_fast_track_progress_sweeper_loop():
     rpc = monitor.BscRpcClient(monitor.RPC_ENDPOINTS)
 
     lane2_counter = 0
+    lane2_offset = 0
 
     while True:
         try:
@@ -470,7 +513,7 @@ def run_fast_track_progress_sweeper_loop():
             active_contracts = [
                 x for x in history
                 if not monitor.is_system_infra(x)
-                and _is_erc721_drop(x)
+                and (_sweep_kind(x) == "nft" or x.get("max_supply"))  # tokens/fair-mint need a known cap
                 and (
                     not x.get("max_supply")
                     or (x.get("total_minted") or 0) < (x.get("max_supply") or 0)
@@ -498,8 +541,10 @@ def run_fast_track_progress_sweeper_loop():
             lane2_counter += 1
             sweep_targets = list(lane1_items)
             if lane2_counter >= 4 or not lane1_items:
-                # Bounded batch of cold contracts, to avoid exhausting the RPC pool.
-                sweep_targets.extend(lane2_items[:50])
+                # A bounded batch of cold contracts per cycle, to avoid exhausting the RPC pool. The batch
+                # moves along the list each time, so every cold contract is eventually swept.
+                batch, lane2_offset = _next_cold_batch(lane2_items, lane2_offset)
+                sweep_targets.extend(batch)
                 lane2_counter = 0
 
             if sweep_targets:
