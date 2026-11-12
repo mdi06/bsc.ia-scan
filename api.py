@@ -46,8 +46,8 @@ _rate_counts: Dict[str, int] = {}
 
 def _client_ip(request: Request) -> str:
     # Cloudflare (in front of Render) overwrites CF-Connecting-IP, so clients cannot spoof it.
-    # Fly sets Fly-Client-IP. X-Forwarded-For is the last resort (its first entry is client-controlled).
-    ip = request.headers.get("cf-connecting-ip") or request.headers.get("fly-client-ip")
+    # X-Forwarded-For is the last resort (its first entry is client-controlled).
+    ip = request.headers.get("cf-connecting-ip")
     if not ip:
         xff = request.headers.get("x-forwarded-for", "")
         ip = xff.split(",")[0].strip() if xff else ""
@@ -675,7 +675,7 @@ def root_handler(request: Request):
     """
     accept = request.headers.get("accept", "")
     host = request.headers.get("host", "")
-    if os.environ.get("RENDER") or "onrender.com" in host or "fly.dev" in host:
+    if os.environ.get("RENDER") or "onrender.com" in host:
         if "application/json" in accept and "text/html" not in accept:
             return {"status": "ok", "service": "agent-id-backend", "frontend": "https://agent-id-monitor.vercel.app"}
         return RedirectResponse(url="https://agent-id-monitor.vercel.app", status_code=302)
