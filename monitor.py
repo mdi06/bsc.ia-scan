@@ -1129,6 +1129,45 @@ def get_reserves(rpc: BscRpcClient, pair_addr: str) -> Optional[Tuple[int, int]]
     return int(res[2:66], 16), int(res[66:130], 16)
 
 
+def _call_uint(rpc: BscRpcClient, contract: str, func_sig: str) -> Optional[int]:
+    """Calls a no-argument view function and returns its uint256 result, or None if it reverts or is absent."""
+    res = rpc.call_contract(contract, keccak_selector(func_sig))
+    if not res or len(res) < 66:
+        return None
+    try:
+        return int(res[:66], 16)
+    except ValueError:
+        return None
+
+
+def get_token_count(rpc: BscRpcClient, contract: str) -> Optional[int]:
+    """Number of tokens minted so far, from the first mint-counter getter the contract exposes.
+    Raw count (NFT semantics): not scaled by decimals, so don't use it for fungible tokens."""
+    for sig in ("totalMinted()", "_totalMinted()", "tokenCount()", "currentSupply()",
+                "nextTokenId()", "_nextTokenId()", "currentTokenId()"):
+        raw = _call_uint(rpc, contract, sig)
+        if raw is not None:
+            # nextTokenId-style counters point at the next id to mint (ids start at 1)
+            return raw - 1 if "nexttokenid" in sig.lower() and raw > 0 else raw
+    return None
+
+
+def get_total_supply(rpc: BscRpcClient, contract: str) -> Optional[int]:
+    """totalSupply() as a raw integer (NFT semantics: not scaled by decimals)."""
+    return _call_uint(rpc, contract, "totalSupply()")
+
+
+def get_max_supply(rpc: BscRpcClient, contract: str) -> Optional[int]:
+    """Supply cap from the first cap getter the contract exposes; None if there is none or it is
+    effectively unlimited (>= 2**128, same cut-off as analyze_contract)."""
+    for sig in ("maxSupply()", "MAX_SUPPLY()", "max_supply()", "cap()", "MAX_TOKENS()", "maxTokens()",
+                "maxBoxes()", "MAX_BOXES()"):
+        raw = _call_uint(rpc, contract, sig)
+        if raw is not None:
+            return None if raw >= 2**128 or raw >= 10**30 else raw
+    return None
+
+
 def fetch_bnb_price_usd(rpc: BscRpcClient) -> Optional[float]:
     """BNB/USD from the PancakeSwap V2 WBNB/USDT pool reserves, or None if the lookup fails."""
     try:

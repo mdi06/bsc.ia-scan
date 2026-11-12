@@ -116,3 +116,64 @@ def test_pair_helpers_handle_missing_pair_and_failures():
     assert monitor.get_pair_address(zero_pair, monitor.PANCAKE_FACTORY_V2, "0x" + "1" * 40, monitor.WBNB_ADDRESS) is None
     assert monitor.get_pair_address(_FakeRpc({}), monitor.PANCAKE_FACTORY_V2, "0x" + "1" * 40, monitor.WBNB_ADDRESS) is None
     assert monitor.get_reserves(_FakeRpc({}), "0x" + "ab" * 20) is None
+
+
+def _uint(n):
+    return "0x" + hex(n)[2:].zfill(64)
+
+
+def _rpc_for(contract, **getters):
+    import monitor
+    return _FakeRpc({(contract, monitor.keccak_selector(sig)[:10]): _uint(v) for sig, v in getters.items()})
+
+
+def test_supply_helpers_read_first_available_getter():
+    import monitor
+    c = "0x" + "1" * 40
+    assert monitor.get_token_count(_rpc_for(c, **{"totalMinted()": 42}), c) == 42
+    assert monitor.get_token_count(_rpc_for(c, **{"nextTokenId()": 43}), c) == 42  # ids start at 1
+    assert monitor.get_token_count(_rpc_for(c), c) is None
+    assert monitor.get_total_supply(_rpc_for(c, **{"totalSupply()": 7}), c) == 7
+    assert monitor.get_max_supply(_rpc_for(c, **{"MAX_SUPPLY()": 1000}), c) == 1000
+    assert monitor.get_max_supply(_rpc_for(c, **{"maxSupply()": 2**256 - 1}), c) is None  # "unlimited"
+    assert monitor.get_max_supply(_rpc_for(c), c) is None
+
+
+def test_fast_sweep_reads_erc721_and_flags_change():
+    c = "0x" + "2" * 40
+    rpc = _rpc_for(c, **{"totalMinted()": 500, "maxSupply()": 1000})
+    item = {"contract": c, "standard": "ERC-721 (NFT Collection)", "total_minted": 100, "max_supply": None, "holders": 3}
+    worker._supply_probe_at.clear()
+    addr, minted, supply, holders, changed = worker.fast_sweep_contract(rpc, item)
+    assert (addr, minted, supply, changed) == (c, 500, 1000, True)
+    assert holders == 426  # min(500, int(500 * 0.85) + 1)
+
+    # unchanged on-chain state -> not flagged
+    item.update(total_minted=500, max_supply=1000)
+    assert worker.fast_sweep_contract(rpc, item)[4] is False
+
+
+def test_fast_sweep_ignores_tokens_and_1155():
+    c = "0x" + "3" * 40
+    rpc = _rpc_for(c, **{"totalSupply()": 10**27})
+    for std in ("BEP-20 Token (18 decimals)", "Fair-Mint Contract (Dispenses token)", "ERC-1155 (Multi-Token NFT)", "Custom Smart Contract"):
+        item = {"contract": c, "standard": std, "total_minted": 0}
+        assert worker.fast_sweep_contract(rpc, item) == (c, None, None, None, False)
+
+
+def test_fast_sweep_does_not_reprobe_missing_supply_cap_every_sweep():
+    c = "0x" + "4" * 40
+    calls = []
+
+    class Counting(_FakeRpc):
+        def call_contract(self, to, data):
+            calls.append(data[:10])
+            return super().call_contract(to, data)
+
+    rpc = Counting(_rpc_for(c, **{"totalMinted()": 5}).replies)
+    item = {"contract": c, "standard": "ERC-721 (NFT Collection)", "total_minted": 5, "max_supply": None}
+    worker._supply_probe_at.clear()
+    worker.fast_sweep_contract(rpc, item)
+    first = len(calls)
+    worker.fast_sweep_contract(rpc, item)
+    assert len(calls) - first < first  # second sweep skipped the 8 cap probes

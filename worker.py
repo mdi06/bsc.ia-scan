@@ -392,10 +392,23 @@ def run_discovery_loop():
         time.sleep(1.0)
 
 
+def _is_erc721_drop(item: dict) -> bool:
+    """True for ERC-721 / NFT collections. The raw on-chain counts the fast sweeper reads are only
+    correct for these: fungible tokens store supply scaled by decimals, and ERC-1155 supply is per id."""
+    std = str(item.get("standard") or "")
+    return ("721" in std or "NFT" in std or bool(item.get("is_nft"))) and "1155" not in std
+
+
+# contract -> time of the last supply-cap probe, so contracts without a cap getter aren't re-probed every sweep
+_supply_probe_at: Dict[str, float] = {}
+SUPPLY_PROBE_INTERVAL_SEC = 3600.0
+
+
 def fast_sweep_contract(rpc: monitor.BscRpcClient, item: dict) -> tuple:
-    """Reads minted/supply for one contract straight from the chain (no third-party APIs)."""
+    """Reads minted/supply for one ERC-721 contract straight from the chain (no third-party APIs).
+    Returns (contract, minted, supply, holders, changed); other contract types are reported unchanged."""
     c = item.get("contract")
-    if not c or not c.startswith("0x") or len(c) != 42:
+    if not c or not c.startswith("0x") or len(c) != 42 or not _is_erc721_drop(item):
         return c, None, None, None, False
 
     try:
@@ -407,7 +420,12 @@ def fast_sweep_contract(rpc: monitor.BscRpcClient, item: dict) -> tuple:
             minted = monitor.get_total_supply(rpc, c)
 
         if cur_supply is None or cur_supply == 0:
-            supply = monitor.get_max_supply(rpc, c)
+            now = time.time()
+            if now - _supply_probe_at.get(c, 0.0) >= SUPPLY_PROBE_INTERVAL_SEC:
+                _supply_probe_at[c] = now
+                supply = monitor.get_max_supply(rpc, c)
+            else:
+                supply = None
         else:
             supply = cur_supply
 
@@ -452,6 +470,7 @@ def run_fast_track_progress_sweeper_loop():
             active_contracts = [
                 x for x in history
                 if not monitor.is_system_infra(x)
+                and _is_erc721_drop(x)
                 and (
                     not x.get("max_supply")
                     or (x.get("total_minted") or 0) < (x.get("max_supply") or 0)
