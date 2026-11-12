@@ -621,6 +621,49 @@ def run_fast_track_progress_sweeper_loop():
         time.sleep(15)
 
 
+# One request covers up to 30 token addresses and returns the most liquid pair for each. The older
+# /latest/dex/tokens/ endpoint returns at most 30 pairs *in total*, so a token with many pairs
+# (e.g. FIST) used up the whole response and most of the other 29 tokens got no update at all.
+DEXSCREENER_TOKENS_URL = "https://api.dexscreener.com/tokens/v1/bsc/"
+DEXSCREENER_PAIRS_URL = "https://api.dexscreener.com/latest/dex/pairs/bsc/"
+
+
+def _fetch_dexscreener_pairs(url: str) -> List[Dict[str, Any]]:
+    """GET a DexScreener URL and return its list of pair objects (the API answers with either a bare list
+    or {"pairs": [...]})."""
+    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+    with urllib.request.urlopen(req, timeout=10) as resp:
+        data = json.loads(resp.read().decode())
+    if isinstance(data, list):
+        return data
+    return data.get("pairs") or []
+
+
+def _collect_dex_pairs(pairs: List[Dict[str, Any]], wanted_tokens: set, dex_updates: Dict[str, Dict[str, Any]]) -> None:
+    """Records pairs in `dex_updates`, keyed by pair address and by base-token address. Only pairs where one
+    of our tokens is the BASE token count for the token key (otherwise e.g. GEN's metrics would be assigned
+    to ANTFUN in a GEN/ANTFUN pair); the most liquid such pair wins."""
+    for pair in pairs:
+        b_addr = ((pair.get("baseToken") or {}).get("address") or "").lower()
+        p_addr = (pair.get("pairAddress") or "").lower()
+        if b_addr and b_addr in wanted_tokens:
+            pair_liq = float((pair.get("liquidity") or {}).get("usd") or 0.0)
+            existing = dex_updates.get(b_addr)
+            if not existing or pair_liq > float((existing.get("liquidity") or {}).get("usd") or 0.0):
+                dex_updates[b_addr] = pair
+        if p_addr:
+            dex_updates[p_addr] = pair
+
+
+def _needs_pancake_fallback(item: Dict[str, Any]) -> bool:
+    """The Pancake WBNB-pool estimate is only for drops DexScreener doesn't know. It counts one pool only
+    (FIST: $88K from that pool vs $7.1M real liquidity), so it must never overwrite liquidity or a DexScreener
+    pair we already have, or a single missed DexScreener answer would corrupt good data."""
+    active = (item.get("total_minted") or 0) > 0 or item.get("smart_wallets") or (item.get("score") or 0) > 0
+    known_pair = "dexscreener.com" in str(item.get("pair_url") or "")
+    return bool(active) and not (item.get("lp_usd") or 0) > 0 and not known_pair
+
+
 def run_market_dynamics_updater_loop():
     """Every 120s, refreshes liquidity, price and volume for recent drops from DexScreener (Pancake reserves as fallback)."""
     print("[📈 Market Engine] Initializing 24/7 Market Dynamics Updater...", flush=True)
@@ -650,6 +693,7 @@ def run_market_dynamics_updater_loop():
 
             batch_size = 30
             dex_updates = {}
+            dex_failures = 0
             for i in range(0, len(contracts_to_check), batch_size):
                 chunk = contracts_to_check[i:i + batch_size]
                 chunk_addrs = [x["contract"] for x in chunk if x.get("contract")]
@@ -663,43 +707,17 @@ def run_market_dynamics_updater_loop():
                         chunk_pairs.append(m.group(1).lower())
                 try:
                     if chunk_addrs:
-                        url = f"https://api.dexscreener.com/latest/dex/tokens/{','.join(chunk_addrs)}"
-                        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-                        with urllib.request.urlopen(req, timeout=10) as resp:
-                            data = json.loads(resp.read().decode())
-                            pairs = data.get("pairs") or []
-                            for pair in pairs:
-                                b_tok = pair.get("baseToken", {})
-                                b_addr = (b_tok.get("address") or "").lower()
-                                p_addr = (pair.get("pairAddress") or "").lower()
-                                # Accuracy Guard: Only record pairs where our token is the BASE token.
-                                # Avoids assigning foreign token metrics (e.g. GEN in GEN/ANTFUN pair) to our token.
-                                if b_addr and b_addr in chunk_addrs_set:
-                                    pair_liq = float((pair.get("liquidity") or {}).get("usd") or 0.0)
-                                    existing = dex_updates.get(b_addr)
-                                    if not existing or pair_liq > float((existing.get("liquidity") or {}).get("usd") or 0.0):
-                                        dex_updates[b_addr] = pair
-                                if p_addr:
-                                    dex_updates[p_addr] = pair
+                        _collect_dex_pairs(_fetch_dexscreener_pairs(DEXSCREENER_TOKENS_URL + ",".join(chunk_addrs)),
+                                           chunk_addrs_set, dex_updates)
                     if chunk_pairs:
-                        url_p = f"https://api.dexscreener.com/latest/dex/pairs/bsc/{','.join(chunk_pairs)}"
-                        req_p = urllib.request.Request(url_p, headers={"User-Agent": "Mozilla/5.0"})
-                        with urllib.request.urlopen(req_p, timeout=10) as resp_p:
-                            data_p = json.loads(resp_p.read().decode())
-                            for pair in (data_p.get("pairs") or []):
-                                b_tok = pair.get("baseToken", {})
-                                b_addr = (b_tok.get("address") or "").lower()
-                                p_addr = (pair.get("pairAddress") or "").lower()
-                                if b_addr and b_addr in chunk_addrs_set:
-                                    pair_liq = float((pair.get("liquidity") or {}).get("usd") or 0.0)
-                                    existing = dex_updates.get(b_addr)
-                                    if not existing or pair_liq > float((existing.get("liquidity") or {}).get("usd") or 0.0):
-                                        dex_updates[b_addr] = pair
-                                if p_addr:
-                                    dex_updates[p_addr] = pair
-                except Exception:
-                    pass  # DexScreener is best-effort; the next sweep retries
+                        _collect_dex_pairs(_fetch_dexscreener_pairs(DEXSCREENER_PAIRS_URL + ",".join(chunk_pairs)),
+                                           chunk_addrs_set, dex_updates)
+                except Exception as e:
+                    dex_failures += 1  # best-effort: the next sweep retries
+                    last_dex_error = e
                 time.sleep(0.5)
+            if dex_failures:
+                print(f"[⚠️ Market Engine] DexScreener failed for {dex_failures} batch(es): {last_dex_error}", flush=True)
 
             updated_count = 0
             changed_items = []
@@ -760,7 +778,7 @@ def run_market_dynamics_updater_loop():
                         item_changed = True
                     except Exception as e:
                         print(f"[⚠️ Market Engine] bad DexScreener data for {c}: {e}", flush=True)
-                elif (item.get("total_minted") or 0) > 0 or item.get("smart_wallets") or (item.get("score") or 0) > 0:
+                elif _needs_pancake_fallback(item):
                     try:
                         pair_addr = monitor.get_pair_address(rpc, monitor.PANCAKE_FACTORY_V2, c, monitor.WBNB_ADDRESS)
                         if pair_addr:

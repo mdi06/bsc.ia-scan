@@ -255,3 +255,50 @@ def test_cold_batch_rotates_through_every_item():
         seen += batch
     assert set(seen) == set(items[:120]) and len(seen) == 150  # 120 covered, wrapped 30 again
     assert worker._next_cold_batch([1, 2, 3], 7) == ([1, 2, 3], 0)
+
+
+def _pair(base, pair, liq, px="1", quote="0x" + "f" * 40):
+    return {"baseToken": {"address": base}, "quoteToken": {"address": quote}, "pairAddress": pair,
+            "liquidity": {"usd": liq}, "priceUsd": px}
+
+
+def test_collect_dex_pairs_picks_most_liquid_base_pair_and_ignores_quote_side():
+    fist, other = "0x" + "a" * 40, "0x" + "b" * 40
+    updates = {}
+    worker._collect_dex_pairs([
+        _pair(fist, "0xp1", 500, "0.2634"),
+        _pair(fist, "0xp2", 7_000_000, "0.2636"),
+        _pair(other, "0xp3", 10, "5"),
+        _pair("0x" + "c" * 40, "0xp4", 99, "9", quote=fist),   # FIST is only the QUOTE here: not recorded for FIST
+    ], {fist, other}, updates)
+    assert updates[fist]["pairAddress"] == "0xp2"
+    assert updates[other]["pairAddress"] == "0xp3"
+    assert "0xp4" in updates and "0x" + "c" * 40 not in updates  # known by pair address only
+
+
+def test_fetch_dexscreener_pairs_accepts_list_and_dict_bodies(monkeypatch):
+    import io, json, urllib.request
+
+    seen = []
+
+    def fake_urlopen(req, timeout=0):
+        seen.append(req.full_url)
+        return io.BytesIO(json.dumps(body["v"]).encode())
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    body = {"v": [{"pairAddress": "0x1"}]}
+    assert worker._fetch_dexscreener_pairs("https://x/a") == [{"pairAddress": "0x1"}]
+    body["v"] = {"pairs": [{"pairAddress": "0x2"}]}
+    assert worker._fetch_dexscreener_pairs("https://x/b") == [{"pairAddress": "0x2"}]
+    body["v"] = {"pairs": None}
+    assert worker._fetch_dexscreener_pairs("https://x/c") == []
+    assert worker.DEXSCREENER_TOKENS_URL.endswith("/tokens/v1/bsc/")  # not the 30-pairs-total endpoint
+
+
+def test_pancake_fallback_never_overwrites_known_liquidity_or_dexscreener_pair():
+    base = {"total_minted": 5}
+    assert worker._needs_pancake_fallback(base) is True
+    assert worker._needs_pancake_fallback({**base, "lp_usd": 7_000_000}) is False          # FIST case
+    assert worker._needs_pancake_fallback({**base, "pair_url": "https://dexscreener.com/bsc/0xabc"}) is False
+    assert worker._needs_pancake_fallback({**base, "pair_url": "https://pancakeswap.finance/info/v2/pairs/0x1"}) is True
+    assert worker._needs_pancake_fallback({"total_minted": 0, "score": 0}) is False         # nothing worth estimating
