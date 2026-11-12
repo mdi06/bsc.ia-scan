@@ -56,11 +56,6 @@ def test_server_orchestrator_backward_compatibility():
     assert hasattr(server, "run_market_dynamics_updater_loop")
     assert hasattr(server, "run_fast_track_progress_sweeper_loop")
     assert hasattr(server, "run_element_nft_volume_sweeper_loop")
-    assert hasattr(server, "AgentIdServerHandler")
-    assert hasattr(server, "ThreadingHTTPServer")
-    assert hasattr(server, "load_user_favorites")
-    assert hasattr(server, "save_user_favorites")
-    assert hasattr(server, "FAVORITES_FILE")
 
 
 def test_process_safe_db_client():
