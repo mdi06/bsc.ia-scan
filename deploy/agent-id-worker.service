@@ -1,0 +1,21 @@
+# systemd unit for the ingestion worker on a Linux host (see DEPLOY_WORKER.md).
+# Install: sudo cp deploy/agent-id-worker.service /etc/systemd/system/ && sudo systemctl daemon-reload
+#          sudo systemctl enable --now agent-id-worker
+# Logs:    journalctl -u agent-id-worker -f
+[Unit]
+Description=Agent ID Monitor ingestion worker
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=agentid
+WorkingDirectory=/opt/agent-id-monitor
+EnvironmentFile=/opt/agent-id-monitor/.env.worker
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/agent-id-monitor/.venv/bin/python server.py --worker-only
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

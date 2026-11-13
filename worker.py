@@ -279,6 +279,70 @@ def _process_registry_candidate(rpc, tx_h, b, snd, tx_val, inp, wallet, known_in
         print(f"[⚠️ Registry Candidate Notice {tx_h}] {e}", flush=True)
 
 
+class SharedBlockSource:
+    """One full-block download (eth_getBlockByNumber with transactions, ~140 KB raw / ~30 KB gzipped on BSC) shared
+    by the loops that read every block: the discovery loop and the proxy-factory watcher used to download each block
+    twice. A block is kept until every reader has taken it, at most `max_blocks` of them (the loops skip ahead
+    when more than 30 blocks behind, so older ones would never be read). Two readers asking for the same block at
+    once share one request. Empty / failed answers are not kept, so each caller's retry logic still applies."""
+
+    def __init__(self, readers: int = 2, max_blocks: int = 32, wait_sec: float = 10.0):
+        self.readers = readers
+        self.max_blocks = max_blocks
+        self.wait_sec = wait_sec
+        self._lock = threading.Lock()
+        self._blocks: Dict[int, tuple] = {}        # number -> (block, set of reader names that took it)
+        self._inflight: Dict[int, threading.Event] = {}
+        self.fetches = 0                             # RPC block downloads (for logs / tests)
+
+    def _take(self, num: int, reader: str):
+        """The cached block for `reader`, dropped once every reader has it. Call with the lock held."""
+        ent = self._blocks.get(num)
+        if ent is None:
+            return None
+        block, took = ent
+        took.add(reader)
+        if len(took) >= self.readers:
+            del self._blocks[num]
+        return block
+
+    def get(self, rpc, num: int, reader: str) -> Dict[str, Any]:
+        with self._lock:
+            block = self._take(num, reader)
+            if block is not None:
+                return block
+            ev = self._inflight.get(num)
+            owner = ev is None
+            if owner:
+                ev = self._inflight[num] = threading.Event()
+        if not owner:
+            ev.wait(self.wait_sec)
+            with self._lock:
+                block = self._take(num, reader)
+            if block is not None:
+                return block
+            return self._fetch(rpc, num)       # the other reader's download failed: try ourselves
+        block = None
+        try:
+            block = self._fetch(rpc, num)
+            return block
+        finally:
+            with self._lock:
+                self._inflight.pop(num, None)
+                if block and "transactions" in block:
+                    self._blocks[num] = (block, {reader})
+                    while len(self._blocks) > self.max_blocks:
+                        del self._blocks[min(self._blocks)]
+            ev.set()
+
+    def _fetch(self, rpc, num: int) -> Dict[str, Any]:
+        self.fetches += 1
+        return rpc.get_block(num, full_tx=True)
+
+
+SHARED_BLOCKS = SharedBlockSource()
+
+
 def run_discovery_loop():
     """Scans each new BSC block for smart-wallet calls and Agent ID registry references."""
     print("[🚀 Worker Engine] Initializing 24/7 Autonomous Scanner...", flush=True)
@@ -325,7 +389,7 @@ def run_discovery_loop():
 
             for b in range(last_block + 1, end_block + 1):
                 try:
-                    block = rpc.get_block(b, full_tx=True)
+                    block = SHARED_BLOCKS.get(rpc, b, "discovery")
                 except Exception as e:
                     print(f"[⚠️ Block Fetch Notice #{b}] {e}", flush=True)
                     last_block = b
@@ -335,7 +399,7 @@ def run_discovery_loop():
                     # Retry once before skipping
                     time.sleep(0.3)
                     try:
-                        block = rpc.get_block(b, full_tx=True)
+                        block = SHARED_BLOCKS.get(rpc, b, "discovery")
                     except Exception as e:
                         print(f"[⚠️ Block Retry Notice #{b}] {e}", flush=True)
                     if not block or "transactions" not in block:
@@ -1320,7 +1384,7 @@ def run_proxy_factory_watcher_loop():
                     print(f"[🧩 Proxy Factory Watcher] {curr_block - last_block} blocks behind; jumping to #{first_block}", flush=True)
                 for b in range(first_block, end_block + 1):
                     try:
-                        blk = rpc.get_block(b, full_tx=True)
+                        blk = SHARED_BLOCKS.get(rpc, b, "proxy")
                     except Exception:
                         continue
                     txs = blk.get("transactions", [])

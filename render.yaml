@@ -8,6 +8,10 @@ services:
     envVars:
       - key: PYTHONUNBUFFERED
         value: "1"
+      # API only: the worker (block scanning) runs on a separate host, see DEPLOY_WORKER.md. It downloads every
+      # BSC block, far beyond the free tier's 5 GB/month bandwidth.
+      - key: RUN_WORKER
+        value: "0"
       - key: SUPABASE_URL
         sync: false
       - key: SUPABASE_KEY
