@@ -656,9 +656,20 @@ function numOrZero(v) {
   return Number.isFinite(n) ? n : 0;
 }
 
+// The server's answers for this record (api.with_server_metrics): { excluded, market_cap, secondary, profit? }.
+// null when the record does not carry them (old cached responses, the static seeded_*.json / feed_snapshot.json
+// files, anything the browser built or changed itself); the callers below then calculate by themselves, with the
+// code that mirrors the server's.
+function serverMetrics(d) {
+  const sm = d && typeof d === 'object' ? d.server_metrics : null;
+  return sm && typeof sm === 'object' ? sm : null;
+}
+
 // Determine if a token is a major pegged/infrastructure asset, stablecoin, synthetic stock, known scam or DEX platform token
 function isExcludedMajorAsset(d) {
   if (!d || typeof d !== 'object' || Object.keys(d).length === 0) return true;
+  const sm = serverMetrics(d);
+  if (sm && typeof sm.excluded === 'boolean') return sm.excluded;
   const c = String(d.contract || d.address || '').toLowerCase().trim();
   if (EXCLUDED_PEGS_CONTRACTS.has(c) || BOGUS_SCAM_CONTRACTS.has(c) || c === EXCLUDED_NATIVE_PLACEHOLDER) return true;
   const sym = String(d.symbol || d.token_symbol || '').toUpperCase().trim();
@@ -704,6 +715,23 @@ function noProfit() {
 }
 
 function computeItemProfit(item, bnbPriceUsd = bnbPrice) {
+  // The server's figures (monitor.update_post_mint_profit_metrics on the same record), when it sent them
+  const sm = serverMetrics(item);
+  if (sm && sm.profit && typeof sm.profit === 'object') {
+    const sp = sm.profit;
+    const n = v => (v === null || v === undefined) ? null : v;
+    return {
+      secUsd: Number(sp.sec_usd || 0),
+      mintUsd: n(sp.mint_usd),
+      profit: n(sp.profit),
+      athPrice: n(sp.ath_price_usd),
+      athProfit: n(sp.ath_profit_usd),
+      multiplier: n(sp.ath_multiplier),
+      currentMultiplier: n(sp.current_multiplier),
+      isSold: Boolean(sp.is_sold),
+      isFree: Boolean(sp.is_free)
+    };
+  }
   if (isExcludedMajorAsset(item)) return noProfit();
 
   const flUsd = numOrZero(item.floor_price_usd);
@@ -859,7 +887,7 @@ function saveSavedTopGainers() {
   if (!bnbPriceLive) return;  // USD values computed with a stale / missing BNB price are not cached
   try {
     if (typeof localStorage !== 'undefined') {
-      localStorage.setItem(SAVED_TOP_MARKETS_KEY, JSON.stringify(savedTopGainers));
+      localStorage.setItem(SAVED_TOP_MARKETS_KEY, JSON.stringify(savedTopGainers, (k, v) => (k === 'server_metrics' ? undefined : v)));  // a saved record outlives the figures the server computed for it
     }
   } catch (e) {}
 }
@@ -991,6 +1019,7 @@ function updateSavedTopMarkets(incomingDrops) {
           existing.isFree = pInfo.isFree || existing.isFree;
           existing.holders = Number(item.holders || existing.holders || 0);
           existing.item = { ...existing.item, ...item };
+          if (!item.server_metrics) delete existing.item.server_metrics;   // never keep figures of an older copy
           changed = true;
         }
       } else {
@@ -1186,7 +1215,10 @@ function applyMarketOverlay(drops, market) {
         changed = true;
       }
     });
-    if (changed) updated++;
+    if (changed) {
+      updated++;
+      delete d.server_metrics;   // computed from the numbers just replaced; the browser calculates it from now on
+    }
   });
   return updated;
 }
@@ -2773,6 +2805,11 @@ function updateLaunchpadCount() {
 const MCAP_GUARD_ABOVE_USD = 50000000;
 const MCAP_GUARD_LP_BELOW_USD = 250000;
 function getSanitizedMcap(d) {
+  const sm = serverMetrics(d);
+  if (sm && Object.prototype.hasOwnProperty.call(sm, 'market_cap')) {
+    const v = Number(sm.market_cap);   // the server's value: a positive number, or null (unknown / implausible)
+    return sm.market_cap !== null && Number.isFinite(v) && v > 0 ? v : null;
+  }
   if (!d || isExcludedMajorAsset(d)) return null;
   let mc = numOrZero(d.market_cap) || numOrZero(d.fdv);
   if (mc <= 0) {
@@ -2789,6 +2826,8 @@ function getSanitizedMcap(d) {
 
 // Secondary Market asset detector (twin of filters.is_secondary_market)
 function isSecondaryMarketAsset(d) {
+  const sm = serverMetrics(d);
+  if (sm && typeof sm.secondary === 'boolean') return sm.secondary;
   if (!d || isExcludedMajorAsset(d)) return false;
   const lp = numOrZero(d.lp_usd);
   const mc = getSanitizedMcap(d) || 0;
