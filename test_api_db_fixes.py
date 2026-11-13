@@ -85,4 +85,19 @@ def test_market_data_includes_tokens_the_feed_excludes(tmp_db):
     assert data[fist]["market_cap"] == 48450648.0           # ...but its market numbers are available
     assert data[fist]["token_price_usd"] == 0.2636
     assert f"0x{3:040x}" not in data and f"0x{2:040x}" in data
-    assert set(data[fist]) == set(api.MARKET_FIELDS)
+    assert set(data[fist]) == set(api.MARKET_FIELDS) | set(api.MARKET_FRESHNESS_FIELDS)
+
+
+def test_market_data_includes_stale_records_and_is_nan_safe(tmp_db):
+    """A record the worker cleared as stale is listed (so a seeded copy of it is cleared in the browser), and a
+    non-finite value in a record does not turn the endpoint into an HTTP 500."""
+    tmp_db.upsert_projects([
+        _proj(1, token_price_usd=None, lp_usd=None, market_stale=True),
+        _proj(2, token_price_usd=2.0, lp_usd=100.0, volume_24h=float("nan")),
+    ])
+    res = TestClient(api.app).get("/api/market-data")
+    assert res.status_code == 200
+    data = res.json()
+    stale = data[f"0x{1:040x}"]
+    assert stale["market_stale"] is True and stale["token_price_usd"] is None
+    assert data[f"0x{2:040x}"]["volume_24h"] is None

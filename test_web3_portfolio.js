@@ -304,10 +304,22 @@ console.log('✔ openInspectModalByContract Target Resolution (allDrops + PulseI
 const app = require('./app.js');
 const { updateSavedTopMarkets, getSavedTopGainers, setSavedTopGainers, computeStats, loadSavedTopGainers } = app;
 
-// 1. Initialize persistent memory with baseline legends
+// 1. A fresh client starts with an EMPTY leaderboard: there is no hard-coded list of invented winners any more.
+// (A BNB price is needed for profits; there is no built-in fallback price.)
+app.setBnbPriceState(705.0, true);
 loadSavedTopGainers();
+assert.strictEqual(getSavedTopGainers().length, 0, 'No invented baseline winners: the saved list starts empty');
+// A winner delivered by the API is kept in the separate memory
+app.mergeTopGainersList([{
+  name: 'AGENT人生8', symbol: 'AGENT人生8', contract: '0xca45f13730154fbbf2d93acf169de83f52864f80',
+  standard: 'BEP-20 Token (18 decimals)', secUsd: 0.04794, mintUsd: 0.0, profit: 0.04794, athPrice: 0.04794,
+  athProfit: 0.04794, multiplier: 0, isSold: true, isFree: true, holders: 100,
+  item: { name: 'AGENT人生8', symbol: 'AGENT人生8', contract: '0xca45f13730154fbbf2d93acf169de83f52864f80',
+          standard: 'BEP-20 Token (18 decimals)', mint_price_str: 'FREE', has_free_mint: true, token_price_usd: 0.04794,
+          lp_usd: 20000, ath_price_usd: 0.04794 }
+}]);
 const initialMemory = getSavedTopGainers();
-assert(initialMemory.length > 0, 'Saved top gainers must contain baseline legends');
+assert(initialMemory.length > 0, 'Saved top gainers must contain the winner the API delivered');
 const hasAgent8 = initialMemory.some(g => (g.name || '').includes('AGENT人生8') || (g.contract || '').toLowerCase() === '0xca45f13730154fbbf2d93acf169de83f52864f80');
 assert(hasAgent8, 'Saved top gainers must contain AGENT人生8');
 
@@ -1334,6 +1346,23 @@ const samplePulseDrops = [
   }
 ];
 
+// Real fixtures with a KNOWN mint cost: a paid NFT and a paid token. (There is no built-in BNB price.)
+app.setBnbPriceState(705.0, true);
+const nftDrop = {
+  contract: '0x5555555555555555555555555555555555555555',
+  name: 'Real NFT', symbol: 'RNFT', standard: 'ERC-721 (NFT Collection)',
+  mint_price_str: '0.0100 BNB', mint_price_bnb: 0.01, mint_value_wei: '10000000000000000',
+  floor_price_usd: 35.25, volume_24h: 300, holders: 400,
+  market_url: 'https://element.market/collections/real-nft', detected_at: '2026-11-12 10:00:00'
+};
+const athDrop = {
+  contract: '0x6666666666666666666666666666666666666666',
+  name: 'Paid Token', symbol: 'PAID', standard: 'BEP-20 Token (18 decimals)',
+  mint_price_str: '0.0001 BNB', mint_price_bnb: 0.0001, mint_value_wei: '100000000000000',
+  token_price_usd: 0.5, lp_usd: 20000, volume_24h: 250, price_change_24h: 0, market_cap: 600,
+  detected_at: '2026-11-12 10:00:00'
+};
+
 const pulseMetrics = compute24hPulseMetrics(samplePulseDrops, [tradingDrop, cakeDrop], 132123566);
 assert(pulseMetrics.topRunner, 'Must compute a top 24h runner');
 assert.notStrictEqual(pulseMetrics.topRunner.symbol.toUpperCase(), 'CAKE', 'Top runner must NEVER be CAKE');
@@ -1348,15 +1377,21 @@ assert.strictEqual(pulseMetrics.threatsBlockedCount >= 1, true, 'Threats blocked
 assert(pulseMetrics.macroHeadline.includes('AntFun') || pulseMetrics.macroHeadline.includes('ANTFUN'), 'Macro headline should highlight the market leader');
 
 // Test positive gainer runner selection
-const pulseWithRunner = compute24hPulseMetrics([...samplePulseDrops, snowballDrop], [tradingDrop], 132123566);
+const pulseWithRunner = compute24hPulseMetrics([...samplePulseDrops, snowballDrop, nftDrop, athDrop], [tradingDrop], 132123566);
 assert.strictEqual(pulseWithRunner.topRunner.symbol, 'SNOWBALL', 'Top runner should be the surging token SnowBall (+110%)');
 assert.strictEqual(Array.isArray(pulseWithRunner.topRunners), true, 'topRunners must be an array');
 assert(pulseWithRunner.topRunners.length >= 1, 'topRunners array must not be empty');
 assert.strictEqual(Array.isArray(pulseWithRunner.topSmartMints), true, 'topSmartMints must be an array');
 assert.strictEqual(Array.isArray(pulseWithRunner.topAthMints), true, 'topAthMints must be an array');
-assert(pulseWithRunner.topAthMints.length >= 1, 'topAthMints array must not be empty');
+assert.deepStrictEqual(pulseWithRunner.topAthMints.map(a => a.name), ['Paid Token'], 'Only records with a known mint cost have an ATH-from-mint row (SnowBall has none)');
+assert(pulseWithRunner.topAthMints.every(a => a.mintUsd !== null && a.profit > 0), 'ATH rows need a known cost and a real profit');
 assert.strictEqual(Array.isArray(pulseWithRunner.topNftSurges), true, 'topNftSurges must be an array');
-assert(pulseWithRunner.topNftSurges.length >= 1, 'topNftSurges array must not be empty');
+assert.deepStrictEqual(pulseWithRunner.topNftSurges.map(n => n.name), ['Real NFT'], 'Only the real NFT: fewer than 3 candidates means fewer cards, not invented ones');
+['FishingAi Rod', 'Agent Cards', 'Oathbots'].forEach(fake => {
+  assert(!pulseWithRunner.topNftSurges.some(n => n.name === fake), `No hard-coded ${fake} card`);
+});
+assert.strictEqual(compute24hPulseMetrics([], [], 0).topNftSurges.length, 0, 'No NFT data: an empty list, not fake cards');
+assert.strictEqual(compute24hPulseMetrics([], [], 0).topAthMints.length, 0, 'No ATH data: an empty list, not baseline winners');
 pulseWithRunner.topNftSurges.forEach((nft, idx) => {
   assert(nft.gainPct > 0, `NFT surge at index ${idx} must have positive post-mint gain (got ${nft.gainPct})`);
   const rowHtml = renderPulseNftRow(nft, idx);
@@ -1377,7 +1412,13 @@ function getMock(id) {
 const savedGetElemPulse = global.document.getElementById;
 global.document.getElementById = (id) => getMock(id);
 
-setAllDrops(samplePulseDrops);
+setAllDrops([...samplePulseDrops, nftDrop, athDrop]);
+app.setPulse24hServer(null);
+updateDailyPulseUI();
+assert.strictEqual(getMock('pulseGradCount').textContent, '—', 'Without the server aggregates the Pulse shows "—", not a partial local sum');
+assert.strictEqual(getMock('pulse24hVol').textContent, '—', 'DEX volume is "—" until the server numbers arrive');
+app.setPulse24hServer({ since: null, graduated: 4, dex_volume_usd: 1234567, smart_inflows: 9, smart_clusters: 1,
+  top_hunter: 'adadcarry.ai', top_hunter_count: 2, clean_mints: 3, refunds: 1, threats_blocked: 1, new_drops: 5 });
 updateDailyPulseUI();
 
 const runnerNameEl = getMock('pulseRunnerName');
@@ -1401,7 +1442,11 @@ assert(nftSurgesListEl.innerHTML.includes('Element'), 'pulseNftSurgesList must r
 assert(nftSurgesListEl.innerHTML.includes('%') || nftSurgesListEl.innerHTML.includes('x'), 'pulseNftSurgesList must render % gain or multiplier from mint');
 
 const gradCountEl = getMock('pulseGradCount');
-assert(Number(gradCountEl.textContent) >= 1, 'pulseGradCount must be populated');
+assert.strictEqual(String(gradCountEl.textContent), '4', 'pulseGradCount renders the SERVER number');
+assert.strictEqual(getMock('pulse24hVol').textContent, '$1.2M', 'DEX volume renders the server number');
+assert.strictEqual(String(getMock('pulseSmartInflows').textContent), '9', 'smart inflows render the server number');
+assert.strictEqual(String(getMock('pulseThreatsBlocked').textContent), '1', 'threats render the server number');
+app.setPulse24hServer(null);
 const headlineEl = getMock('pulseMacroHeadline');
 assert(headlineEl.textContent.length > 20, 'pulseMacroHeadline must be populated');
 

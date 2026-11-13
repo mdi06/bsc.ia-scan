@@ -8,6 +8,7 @@ worker.py's job.
 """
 
 import json
+import math
 import os
 import re
 import secrets
@@ -22,6 +23,7 @@ from fastapi.responses import JSONResponse, Response, RedirectResponse, FileResp
 from fastapi.staticfiles import StaticFiles
 import uvicorn
 
+import filters
 import monitor
 from common.runtime import run_memory_guard_loop
 from db import db
@@ -33,10 +35,50 @@ from filters import (
     SYNTHETIC_EQUITY_SYMBOLS,
 )
 
+def sanitize_non_finite(obj):
+    """Deep copy of `obj` with NaN / +-Infinity floats replaced by None. A non-finite float is not valid JSON:
+    one of them in one record used to make /api/feed answer HTTP 500 for the whole page."""
+    if isinstance(obj, float):
+        return obj if math.isfinite(obj) else None
+    if isinstance(obj, dict):
+        return {k: sanitize_non_finite(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [sanitize_non_finite(v) for v in obj]
+    return obj
+
+
+class SafeJSONResponse(JSONResponse):
+    """JSONResponse that turns non-finite floats into null instead of raising (allow_nan=False makes the stock
+    class fail with ValueError). The fast path costs nothing extra: the clean payload is encoded once."""
+
+    def render(self, content) -> bytes:
+        try:
+            return super().render(content)
+        except ValueError:
+            return super().render(sanitize_non_finite(content))
+
+
+_sanitized_history_cache = {"etag": None, "bytes": None}
+
+
+def sanitize_history_bytes(data: bytes, etag: str) -> bytes:
+    """/history.json is pre-encoded by db.py with json.dumps, which writes NaN / Infinity as bare tokens that
+    JSON.parse in the browser rejects. Re-encode only when such a token is present (cached per ETag)."""
+    if b"NaN" not in data and b"Infinity" not in data:
+        return data
+    if _sanitized_history_cache["etag"] == etag and _sanitized_history_cache["bytes"] is not None:
+        return _sanitized_history_cache["bytes"]
+    cleaned = json.dumps(sanitize_non_finite(json.loads(data)), separators=(",", ":"), allow_nan=False).encode("utf-8")
+    _sanitized_history_cache.update(etag=etag, bytes=cleaned)
+    return cleaned
+
+
+
 app = FastAPI(
     title="Agent ID Monitor Backend",
     version="2.0.0",
-    description="High-performance async FastAPI backend powered by Supabase / SQLite WAL"
+    description="High-performance async FastAPI backend powered by Supabase / SQLite WAL",
+    default_response_class=SafeJSONResponse,
 )
 
 # Compress responses to stay under Render's 5 GB monthly bandwidth cap.
@@ -83,7 +125,7 @@ async def rate_limit_middleware(request: Request, call_next):
     _rate_counts[ip] = count
     if count > RATE_LIMIT_MAX:
         retry_after = max(1, int((window_id + 1) * RATE_LIMIT_WINDOW - now) + 1)
-        return JSONResponse(
+        return SafeJSONResponse(
             status_code=429,
             headers={"Retry-After": str(retry_after)},
             content={"success": False, "error": "rate_limited"},
@@ -121,7 +163,7 @@ def require_admin(request: Request) -> None:
 async def global_exception_handler(request: Request, exc: Exception):
     tb = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
     print(f"[🔥 API Unhandled Error] {request.method} {request.url.path}: {exc}\n{tb}", flush=True)
-    return JSONResponse(
+    return SafeJSONResponse(
         status_code=500,
         content={"success": False, "error": "internal_error"}
     )
@@ -163,7 +205,7 @@ def get_virtual_history_json(request: Request):
     if _etag_matches(request.headers.get("if-none-match"), etag):
         return Response(status_code=304)
     return Response(
-        content=data,
+        content=sanitize_history_bytes(data, etag),
         media_type="application/json",
         headers={
             "Cache-Control": "public, max-age=120, stale-while-revalidate=300",
@@ -185,68 +227,16 @@ def _etag_matches(client_etag: Optional[str], target_etag: str) -> bool:
 
 
 def is_bogus_or_synthetic_asset(d: dict) -> bool:
-    if not d or not isinstance(d, dict):
-        return True
-    c = str(d.get("contract") or "").lower().strip()
-    if c in BOGUS_SET or c in EXCLUDED_PEGS_CONTRACTS:
-        return True
-    sym = str(d.get("symbol") or "").upper().strip()
-    if sym in EXCLUDED_PEGS_SYMBOLS or sym in SYNTHETIC_EQUITY_SYMBOLS:
-        return True
-    name = str(d.get("name") or "").upper().strip()
-    if any(k in name for k in (
-        'ETF', 'PROSHARES', 'DIREXION', 'BEAR 3X', 'BULL 3X', 'INVESQO', 'INVESCO', 
-        'BSTOCKS', 'TOKENIZED STOCK', 'S&P 500', 'NASDAQ', 'ISHARES', 'VANGUARD',
-        'PANCAKESWAP', 'BINANCE-PEG', 'WRAPPED BNB', 'TETHER USD', 'USD COIN', 'ZCASH', 'DOGEZILLA'
-    )):
-        return True
-    return False
+    return filters.is_excluded_asset(d)
 
-def get_sanitized_mcap(d: dict) -> float:
-    if not d or not isinstance(d, dict):
-        return 0.0
-    try:
-        mc = float(d.get("market_cap") or d.get("fdv") or 0.0)
-        if mc == 0.0:
-            px = float(d.get("token_price_usd") or d.get("market_price_usd") or 0.0)
-            tm = float(d.get("total_minted") or 0.0)
-            ms = float(d.get("max_supply") or 0.0)
-            if px > 0:
-                if 0 < tm < 1e14:
-                    mc = tm * px
-                elif 0 < ms < 1e14:
-                    mc = ms * px
-                elif tm >= 1e14:
-                    mc = (tm / 1e18) * px
-                elif ms >= 1e14:
-                    mc = (ms / 1e18) * px
-        if mc > 100_000_000 and float(d.get("lp_usd") or 0.0) < 50_000:
-            return 0.0
-        return mc
-    except Exception:
-        return 0.0
+
+def get_sanitized_mcap(d: dict):
+    """Market cap to show, or None (unknown / excluded / implausible). The one rule shared with app.js."""
+    return filters.sanitized_mcap(d)
+
 
 def is_secondary_market_asset(d: dict) -> bool:
-    if not d or not isinstance(d, dict):
-        return False
-    try:
-        c = str(d.get("contract") or "").lower().strip()
-        sym = str(d.get("symbol") or "").upper().strip()
-        name = str(d.get("name") or "").upper().strip()
-        if c in EXCLUDED_PEGS_CONTRACTS or sym in EXCLUDED_PEGS_SYMBOLS or sym in SYNTHETIC_EQUITY_SYMBOLS:
-            return False
-        if "ZCASH" in name or "DOGEZILLA" in name or "BINANCE-PEG" in name or "PANCAKESWAP" in name:
-            return False
-        lp = float(d.get("lp_usd") or 0.0)
-        mc = get_sanitized_mcap(d)
-        px = float(d.get("token_price_usd") or 0.0)
-        vol = float(d.get("volume_24h") or 0.0)
-        sec_vol = float(d.get("secondary_vol_bnb") or 0.0)
-        has_pair = bool(d.get("pair_address") or d.get("pair_url"))
-        is_grad = bool(d.get("is_graduated"))
-        return lp > 50.0 or mc > 500.0 or (px > 0 and vol > 0) or sec_vol > 0 or has_pair or is_grad
-    except Exception:
-        return False
+    return filters.is_secondary_market(d)
 
 
 # Predicates behind /api/feed?filter=<name>; also used for the per-filter counts in the overview stats.
@@ -257,6 +247,69 @@ FEED_FILTERS = {
     "proxy": lambda d: d.get("is_proxy_clone"),
     "nft_surge": lambda d: d.get("is_nft_surge"),
 }
+
+
+PULSE_WINDOW_SEC = 24 * 3600
+
+
+def compute_pulse_24h(projects, now=None) -> dict:
+    """24h Pulse aggregates over the FULL dataset (not whatever page the browser has loaded).
+
+    The window is time based: records whose `detected_at` ("YYYY-MM-DD HH:MM:SS", the server's local clock, the
+    same clock that wrote it) is within the last 24 hours. `since` is that cutoff in the same format, so clients
+    can filter their own lists with a plain string comparison and no timezone guessing."""
+    now = time.time() if now is None else now
+    since = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(now - PULSE_WINDOW_SEC))
+    new_drops = graduated = smart_inflows = clusters = clean = refunds = threats = 0
+    dex_volume = 0.0
+    hunters: Dict[str, int] = {}
+    for d in projects:
+        if not isinstance(d, dict) or is_bogus_or_synthetic_asset(d):
+            continue
+        if str(d.get("detected_at") or "") < since:
+            continue
+        new_drops += 1
+        if is_secondary_market_asset(d) or d.get("is_graduated"):
+            graduated += 1
+        dex_volume += filters._num(d.get("volume_24h"))
+
+        wallets = d.get("smart_wallets") or d.get("smart_minters") or []
+        if wallets:
+            smart_inflows += len(wallets)
+            if len(wallets) >= 3:
+                clusters += 1
+            for w in wallets:
+                key = str(w).lower()
+                hunters[key] = hunters.get(key, 0) + 1
+
+        level = str(d.get("risk_level") or "SAFE").upper()
+        badge = str(d.get("risk_badge") or "").upper()
+        if any(k in badge for k in ("HONEYPOT", "SERIAL", "DRAIN")) or level in ("RUG", "HIGH"):
+            threats += 1
+        else:
+            clean += 1
+        if isinstance(d.get("security"), dict) and d["security"].get("has_refund"):
+            refunds += 1
+
+    top_hunter, top_count = None, 0
+    for w, cnt in hunters.items():
+        if cnt > top_count:
+            top_hunter, top_count = w, cnt
+    return {
+        "window_hours": 24,
+        "since": since,
+        "as_of": int(now),
+        "new_drops": new_drops,
+        "graduated": graduated,
+        "dex_volume_usd": dex_volume,
+        "smart_inflows": smart_inflows,
+        "smart_clusters": clusters,
+        "top_hunter": top_hunter,
+        "top_hunter_count": top_count,
+        "clean_mints": clean,
+        "refunds": refunds,
+        "threats_blocked": threats,
+    }
 
 
 def compute_global_overview_stats(all_projs=None) -> dict:
@@ -309,7 +362,8 @@ def compute_global_overview_stats(all_projs=None) -> dict:
             "latest_block": latest_block,
             "agent_wallets": total_agent_wallets,
             "total_created_wallets": total_agent_wallets,
-            "agent_wallets_block": agent_wallets_block
+            "agent_wallets_block": agent_wallets_block,
+            "pulse_24h": compute_pulse_24h(all_projs),
         }
     except Exception as e:
         print(f"[⚠️ Overview Stats Fallback Error] {e}", flush=True)
@@ -323,7 +377,8 @@ def compute_global_overview_stats(all_projs=None) -> dict:
             "latest_block": None,
             "agent_wallets": monitor.DEFAULT_AGENT_WALLET_COUNT,
             "total_created_wallets": monitor.DEFAULT_AGENT_WALLET_COUNT,
-            "agent_wallets_block": 0
+            "agent_wallets_block": 0,
+            "pulse_24h": None,
         }
 
 
@@ -334,11 +389,13 @@ def compute_global_overview_stats(all_projs=None) -> dict:
 def get_overview_stats(request: Request):
     """Summary counts for the overview header, with ETag/304 support."""
     stats = compute_global_overview_stats()
-    stats_etag = f'"{stats["total"]}-{stats["agent_wallets"]}-{stats.get("agent_wallets_block")}-{stats.get("latest_block")}"'
+    pulse = stats.get("pulse_24h") or {}
+    pulse_tag = f'{pulse.get("new_drops")}.{pulse.get("graduated")}.{round(pulse.get("dex_volume_usd") or 0)}.{pulse.get("smart_inflows")}.{pulse.get("threats_blocked")}'
+    stats_etag = f'"v{db.content_version()}-{stats["total"]}-{stats["agent_wallets"]}-{stats.get("agent_wallets_block")}-{stats.get("latest_block")}-{pulse_tag}"'
     client_etag = request.headers.get("if-none-match")
     if _etag_matches(client_etag, stats_etag):
         return Response(status_code=304, headers={"ETag": stats_etag, "Cache-Control": "public, max-age=5"})
-    return JSONResponse(
+    return SafeJSONResponse(
         status_code=200,
         headers={"ETag": stats_etag, "Cache-Control": "public, max-age=5"},
         content={
@@ -357,28 +414,33 @@ def get_overview_stats(request: Request):
 def get_bnb_price():
     """Live BNB/USD from the Pancake WBNB/USDT pool (cached 60s). `live` is false until a lookup has succeeded."""
     price = monitor.refresh_bnb_price()
-    return JSONResponse(
-        content={"success": True, "bnb_price_usd": price, "live": monitor.bnb_price_is_live()},
+    return SafeJSONResponse(
+        content={"success": True, "bnb_price_usd": price, "live": monitor.bnb_price_is_live(),
+                 "as_of": monitor.bnb_price_as_of()},
         headers={"Cache-Control": "public, max-age=30"},
     )
 
 
 MARKET_FIELDS = ("token_price_usd", "market_cap", "fdv", "lp_usd", "volume_24h", "price_change_24h",
                  "buys_24h", "sells_24h", "buys_1h")
+# Freshness of those numbers (worker: market_updated_at / market_stale / market_source).
+MARKET_FRESHNESS_FIELDS = ("market_stale", "market_updated_at", "market_source")
 
 
 @app.get("/api/market-data")
 def get_market_data():
-    """Latest market numbers for every tracked contract that has a price or liquidity, keyed by address.
+    """Latest market numbers for every tracked contract that has a price or liquidity, keyed by address,
+    plus the contracts whose market data the worker cleared as stale (fields None, market_stale True).
 
     Not filtered by the feed's exclusion lists on purpose: the frontend uses this to refresh the static
-    seeded files (seeded_smart_drops.json), which contain drops that /api/feed never returns."""
+    seeded files (seeded_smart_drops.json), which contain drops that /api/feed never returns. Stale
+    contracts are included so a seeded drop does not keep its frozen numbers once the live record is cleared."""
     out = {}
     for p in db.get_all_projects():
         c = (p.get("contract") or "").lower()
-        if c and (p.get("token_price_usd") or p.get("lp_usd")):
-            out[c] = {k: p.get(k) for k in MARKET_FIELDS}
-    return JSONResponse(content=out, headers={"Cache-Control": "public, max-age=60"})
+        if c and (p.get("token_price_usd") or p.get("lp_usd") or p.get("market_stale")):
+            out[c] = {k: p.get(k) for k in MARKET_FIELDS + MARKET_FRESHNESS_FIELDS}
+    return SafeJSONResponse(content=out, headers={"Cache-Control": "public, max-age=60"})
 
 
 @app.get("/agent_id_stats.json")
@@ -388,7 +450,7 @@ def get_agent_id_stats_json():
     local_st = monitor.load_agent_id_stats() or {}
     cloud_st = db.get_agent_id_stats() or {}
     stats = cloud_st if int(cloud_st.get("total_created_wallets") or 0) > int(local_st.get("total_created_wallets") or 0) else local_st
-    return JSONResponse(
+    return SafeJSONResponse(
         content=stats,
         headers={"Cache-Control": "public, max-age=15", "Access-Control-Allow-Origin": "*"}
     )
@@ -407,6 +469,7 @@ def get_feed(
     Returns 304 / empty payloads when the client is up to date, to save bandwidth.
     """
     raw_projs = db.get_all_projects()
+    content_version = db.content_version()   # read after the (possibly refreshing) load: the ETag follows the data served
     all_projs = [p for p in raw_projs if not is_bogus_or_synthetic_asset(p)]
     total = len(all_projs)
     latest_block = all_projs[0].get("block") if all_projs else None
@@ -422,11 +485,11 @@ def get_feed(
         delta = [p for p in all_projs if int(p.get("block") or 0) > since_block]
 
         if not delta:
-            delta_etag = f'"{total}-{total_agent_wallets}-delta-{since_block}"'
+            delta_etag = f'"v{content_version}-{total}-{total_agent_wallets}-delta-{since_block}"'
             if _etag_matches(client_etag, delta_etag):
                 return Response(status_code=304, headers={"ETag": delta_etag, "Cache-Control": "public, max-age=5"})
             # No new drops: send a minimal payload without the nested stats.
-            return JSONResponse(
+            return SafeJSONResponse(
                 status_code=200,
                 headers={"ETag": delta_etag, "Cache-Control": "public, max-age=5"},
                 content={
@@ -441,8 +504,8 @@ def get_feed(
                 }
             )
 
-        delta_etag = f'"{latest_block}-{total}-{total_agent_wallets}-delta-{since_block}"'
-        return JSONResponse(
+        delta_etag = f'"v{content_version}-{latest_block}-{total}-{total_agent_wallets}-delta-{since_block}"'
+        return SafeJSONResponse(
             status_code=200,
             headers={"ETag": delta_etag, "Cache-Control": "public, max-age=5"},
             content={
@@ -463,16 +526,16 @@ def get_feed(
     if predicate:
         target_list = [d for d in all_projs if predicate(d)]
         if filter == "secondary":
-            target_list.sort(key=lambda x: get_sanitized_mcap(x), reverse=True)
+            target_list.sort(key=lambda x: get_sanitized_mcap(x) or 0.0, reverse=True)
 
     target_total = len(target_list)
     paginated = target_list[offset : offset + limit]
 
-    feed_etag = f'"{latest_block}-{total}-{total_agent_wallets}-{offset}-{limit}-{filter or ""}"'
+    feed_etag = f'"v{content_version}-{latest_block}-{total}-{total_agent_wallets}-{offset}-{limit}-{filter or ""}"'
     if _etag_matches(client_etag, feed_etag):
         return Response(status_code=304, headers={"ETag": feed_etag, "Cache-Control": "public, max-age=5"})
 
-    return JSONResponse(
+    return SafeJSONResponse(
         status_code=200,
         headers={"ETag": feed_etag, "Cache-Control": "public, max-age=5"},
         content={
@@ -491,53 +554,173 @@ def get_feed(
     )
 
 
+TOP_GAINERS_LIMIT = 50
+# Record fields the frontend's leaderboard code reads from `item` (isValidTopMarketItem, modals, links).
+TOP_GAINER_ITEM_FIELDS = (
+    "contract", "name", "symbol", "standard", "market_url", "pair_url", "token_price_usd", "floor_price_usd",
+    "floor_price_bnb", "ath_price_usd", "ath_profit_usd", "ath_multiplier", "mint_price_str", "mint_price_bnb",
+    "mint_value_wei", "has_free_mint", "mint_calldata", "total_minted", "max_supply", "lp_usd", "holders",
+    "block", "detected_at", "market_stale", "market_updated_at",
+)
+
+
+def compute_live_top_gainers(projects, limit: int = TOP_GAINERS_LIMIT) -> list:
+    """Top post-mint gainers from the CURRENT records, ranked by the ATH multiplier.
+
+    Only records whose mint cost is known (a paid mint, or a verified free one) and whose ATH profit is positive
+    qualify (monitor.update_post_mint_profit_metrics decides, the same rules app.js uses). A free mint has no
+    multiplier, so it ranks after every paid one, by ATH profit."""
+    rows = []
+    for p in projects:
+        if not isinstance(p, dict) or is_bogus_or_synthetic_asset(p):
+            continue
+        d = dict(p)
+        try:
+            info = monitor.update_post_mint_profit_metrics(d)
+        except Exception:
+            continue
+        ath_profit = d.get("ath_profit_usd")
+        ath_price = d.get("ath_price_usd")
+        if info["mint_usd"] is None or ath_profit is None or ath_profit <= 0 or not ath_price or ath_price <= 0:
+            continue
+        mult = d.get("ath_multiplier")
+        rows.append({
+            "name": d.get("name") or "Unknown",
+            "symbol": d.get("symbol") or "",
+            "contract": d.get("contract") or "",
+            "standard": d.get("standard") or "",
+            "secUsd": info["sec_usd"],
+            "mintUsd": info["mint_usd"],
+            "profit": info["profit"],
+            "athPrice": ath_price,
+            "athProfit": ath_profit,
+            "multiplier": mult,
+            "isSold": bool(info["is_sold"]),
+            "isFree": bool(info["is_free"]),
+            "holders": int(filters._num(d.get("holders"))),
+            "item": {k: d[k] for k in TOP_GAINER_ITEM_FIELDS if k in d},
+        })
+    rows.sort(key=lambda r: (r["multiplier"] is not None, r["multiplier"] or 0.0, r["athProfit"]), reverse=True)
+    return rows[:limit]
+
+
+def _seed_file(name: str) -> str:
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), name)
+
+
+def _seed_as_of(path: str):
+    """When the seed file was last written (unix seconds), the best "as of" the file itself offers."""
+    try:
+        return int(os.path.getmtime(path))
+    except OSError:
+        return None
+
+
+def _load_seed(name: str):
+    path = _seed_file(name)
+    if not os.path.exists(path):
+        return None, None
+    with open(path, "r") as f:
+        return json.load(f), _seed_as_of(path)
+
+
 @app.get("/api/top-gainers")
 def get_top_gainers():
-    """Top post-mint gainers (Hall of Fame), read from seeded_top_gainers.json."""
-    base_dir = os.path.dirname(os.path.abspath(__file__))
-    seed_file = os.path.join(base_dir, "seeded_top_gainers.json")
-    if os.path.exists(seed_file):
-        try:
-            with open(seed_file, "r") as f:
-                data = json.load(f)
-            return {"success": True, "count": len(data), "gainers": data}
-        except Exception as e:
-            return {"success": False, "error": str(e), "gainers": []}
-    return {"success": True, "count": 0, "gainers": []}
+    """Top post-mint gainers (Hall of Fame), computed live from the current records.
+
+    Falls back to seeded_top_gainers.json only when no record qualifies yet; that response says so
+    (`seeded: true`, `as_of` = the file's date) so the UI can label it."""
+    try:
+        monitor.refresh_bnb_price()
+        live = compute_live_top_gainers(db.get_all_projects())
+    except Exception as e:
+        print(f"[⚠️ Top Gainers] live computation failed: {e}", flush=True)
+        live = []
+    if live:
+        return {"success": True, "count": len(live), "gainers": live, "seeded": False,
+                "as_of": int(time.time()), "bnb_price_live": monitor.bnb_price_is_live()}
+    try:
+        data, as_of = _load_seed("seeded_top_gainers.json")
+    except Exception as e:
+        return {"success": False, "error": str(e), "gainers": [], "seeded": True, "as_of": None}
+    data = data or []
+    return {"success": True, "count": len(data), "gainers": data, "seeded": True, "as_of": as_of}
 
 
 @app.get("/api/smart-hunters")
 def get_smart_hunters():
-    """Top smart-wallet hunters and win rates, read from seeded_smart_hunters.json."""
-    base_dir = os.path.dirname(os.path.abspath(__file__))
-    seed_file = os.path.join(base_dir, "seeded_smart_hunters.json")
-    if os.path.exists(seed_file):
-        try:
-            with open(seed_file, "r") as f:
-                data = json.load(f)
-            return {"success": True, "count": len(data), "hunters": data}
-        except Exception as e:
-            return {"success": False, "error": str(e), "hunters": []}
-    return {"success": True, "count": 0, "hunters": []}
+    """Smart-wallet hunters and win rates. Not computed live yet: served from seeded_smart_hunters.json and
+    labelled as a seed (`seeded: true`, `as_of`). `items` and the older `hunters` key carry the same list."""
+    try:
+        data, as_of = _load_seed("seeded_smart_hunters.json")
+    except Exception as e:
+        return {"success": False, "error": str(e), "hunters": [], "items": [], "seeded": True, "as_of": None}
+    data = data or []
+    return {"success": True, "count": len(data), "seeded": True, "as_of": as_of, "items": data, "hunters": data}
 
 
 @app.get("/api/smart-drops")
-def get_smart_drops():
-    """Historical smart-money drops, read from seeded_smart_drops.json."""
-    base_dir = os.path.dirname(os.path.abspath(__file__))
-    seed_file = os.path.join(base_dir, "seeded_smart_drops.json")
-    if os.path.exists(seed_file):
-        try:
-            with open(seed_file, "r") as f:
-                data = json.load(f)
-            return Response(
-                content=json.dumps(data),
-                media_type="application/json",
-                headers={"Cache-Control": "public, max-age=300"}
-            )
-        except Exception as e:
-            return JSONResponse({"success": False, "error": str(e), "drops": []}, status_code=500)
-    return JSONResponse({"success": True, "count": 0, "drops": []})
+def get_smart_drops(shape: Optional[str] = Query(None)):
+    """Historical smart-money drops. Not computed live yet: served from seeded_smart_drops.json, wrapped as
+    {seeded: true, as_of, items}. `?shape=array` returns the old bare JSON array (compatibility path)."""
+    try:
+        data, as_of = _load_seed("seeded_smart_drops.json")
+    except Exception as e:
+        return SafeJSONResponse({"success": False, "error": str(e), "items": [], "drops": [], "seeded": True}, status_code=500)
+    data = data or []
+    if shape == "array":
+        return SafeJSONResponse(content=data, headers={"Cache-Control": "public, max-age=300"})
+    return SafeJSONResponse(
+        content={"success": True, "count": len(data), "seeded": True, "as_of": as_of, "items": data, "drops": data},
+        headers={"Cache-Control": "public, max-age=300"},
+    )
+
+
+# ----------------------------------------------------------------------------------------- /api/projects
+SOLD_OUT_PCT = 99.9
+
+
+def derive_progress(p: dict):
+    """Mint progress in percent: total_minted / max_supply when the cap is real (not the 1e20+ "uncapped"
+    sentinel), else a stored `progress`, else None. The worker never wrote `progress` into the record, so
+    `?min_progress=` used to match nothing."""
+    try:
+        ms = float(p.get("max_supply") or 0.0)
+        tm = p.get("total_minted")
+        if tm is not None and 0.0 < ms < 1e20:
+            return max(0.0, min(100.0, float(tm) / ms * 100.0))
+    except (TypeError, ValueError):
+        pass
+    stored = p.get("progress")
+    if isinstance(stored, (int, float)) and not isinstance(stored, bool) and math.isfinite(stored) and stored > 0:
+        return float(stored)
+    return None
+
+
+def derive_status(p: dict, progress=None) -> str:
+    """SOLD_OUT (the real cap is reached), TRADING (it trades on a DEX / Element), MINTING (progress below the
+    cap), else TRACKING. An explicit non-default `status` stored on the record is kept."""
+    stored = str(p.get("status") or "")
+    if stored and stored.upper() != "TRACKING":
+        return stored
+    if progress is None:
+        progress = derive_progress(p)
+    if progress is not None and progress >= SOLD_OUT_PCT:
+        return "SOLD_OUT"
+    if is_secondary_market_asset(p):
+        return "TRADING"
+    if progress is not None and progress > 0:
+        return "MINTING"
+    return "TRACKING"
+
+
+def with_derived_fields(p: dict) -> dict:
+    """A copy of the record with `progress` and `status` filled in from its own data."""
+    progress = derive_progress(p)
+    out = dict(p)
+    out["progress"] = progress
+    out["status"] = derive_status(p, progress)
+    return out
 
 
 @app.get("/api/projects")
@@ -551,20 +734,38 @@ def get_projects(
     sort_by: str = Query("block"),
     order: str = Query("desc")
 ):
-    """Project list with search, status/sniper/progress filters, sorting and pagination."""
-    res = db.get_projects(
-        limit=limit,
-        offset=offset,
-        search=search,
-        status=status,
-        sniper_ready=sniper_ready,
-        min_progress=min_progress,
-        sort_by=sort_by,
-        order=order
-    )
-    if isinstance(res, dict) and "projects" in res:
-        res["projects"] = [p for p in res["projects"] if not is_bogus_or_synthetic_asset(p)]
-    return res
+    """Project list with search, status/sniper/progress filters, sorting and pagination.
+
+    Bogus / pegged / synthetic assets are removed FIRST, so `total` and `count` describe the list that is
+    actually returned. `status` and `progress` are derived from each record (see derive_status)."""
+    projs = [with_derived_fields(p) for p in db.get_all_projects() if isinstance(p, dict) and not is_bogus_or_synthetic_asset(p)]
+
+    if search:
+        q = search.lower().strip()
+        projs = [p for p in projs if q in (p.get("name") or "").lower() or q in (p.get("symbol") or "").lower()
+                 or q in (p.get("contract") or "").lower()]
+    if status:
+        st = status.lower().strip()
+        projs = [p for p in projs if str(p.get("status") or "").lower() == st]
+    if sniper_ready is not None:
+        projs = [p for p in projs if bool(p.get("sniper_ready")) == sniper_ready]
+    if min_progress is not None:
+        projs = [p for p in projs if p["progress"] is not None and p["progress"] >= min_progress]
+
+    reverse = order.lower() == "desc"
+    if sort_by == "progress":
+        known = sorted([p for p in projs if p["progress"] is not None], key=lambda x: x["progress"], reverse=reverse)
+        projs = known + [p for p in projs if p["progress"] is None]          # unknown progress always last
+    elif sort_by == "holders":
+        projs.sort(key=lambda x: int(filters._num(x.get("holders"))), reverse=reverse)
+    elif sort_by == "score":
+        projs.sort(key=lambda x: filters._num(x.get("score")), reverse=reverse)
+    else:
+        projs.sort(key=lambda x: int(filters._num(x.get("block"))), reverse=reverse)
+
+    total = len(projs)
+    page = projs[offset: offset + limit]
+    return {"success": True, "total": total, "count": len(page), "offset": offset, "limit": limit, "projects": page}
 
 
 # Main route: /api/favorites. /favorites is an alias kept for older clients.

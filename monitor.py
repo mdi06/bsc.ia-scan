@@ -27,12 +27,14 @@ import subprocess
 import argparse
 import select
 import tty
+import math
 import termios
 import threading
 import shutil
 from concurrent.futures import ThreadPoolExecutor
 from typing import Optional, Dict, Any, List, Tuple, Iterable
 
+import filters
 from filters import EQUITY_SYMBOLS_CORE, EXCLUDED_PEGS_CONTRACTS, PEG_SYMBOLS_CORE
 
 # Swallowed best-effort failures are logged at DEBUG: printing would corrupt the Rich TUI.
@@ -787,6 +789,9 @@ def analyze_contract(rpc: BscRpcClient, contract_addr: str, wallet_addr: str) ->
     # Check supply (max supply and current minted/total supply)
     token_decimals = classification.get("decimals", 18) if classification.get("category") == "TOKEN" else None
     info["max_supply"], info["total_minted"] = read_supply(rpc, target_addrs, token_decimals)
+    # decimals of the token itself (BEP-20) or of the token a Fair-Mint dispenser hands out
+    if classification.get("decimals") is not None:
+        info["token_decimals"] = classification["decimals"]
 
     # Inspect bytecode constants if max_supply still not found (e.g. PUSH2 24444 -> 0x615f7c)
     if info["max_supply"] is None:
@@ -1120,14 +1125,23 @@ def read_supply(
     """(max_supply, total_minted) read from the first getters that answer on `target_addrs`
     (the contract itself, then its core() companion if it has one).
 
-    token_decimals=None returns raw integers (NFTs and fair-mint dispensers). For BEP-20 tokens pass
-    their decimals and values are divided by 10**decimals; `decimals or 18` is deliberate, it is what
-    analyze_contract has always stored, and stored values must stay comparable with fresh reads.
+    SUPPLY UNITS (the one convention the rest of the code relies on):
+    - BEP-20 token: whole tokens, i.e. the raw integer divided by 10**decimals(), where `token_decimals` is the
+      token's real decimals() (0 is a real value: a 0-decimal token's raw supply is already whole tokens).
+    - NFT: an item count (token_decimals=None, raw integer).
+    - Fair-Mint dispenser: token_decimals=None, the raw integer of the dispenser's own counter. Dispensers
+      mix item counts and raw token amounts, so this is NOT a token supply and must never feed a market cap.
+    For a BEP-20 token totalSupply() is read first: counter-style getters (totalMinted, tokenCount, ...) can
+    answer with something that is not the supply.
     need_max=False skips the cap probes (about 8 calls) when the cap is already known."""
     def scale(raw: int):
         if token_decimals is None:
             return raw
-        return raw / (10 ** (token_decimals or 18))
+        return raw / (10 ** token_decimals)
+
+    minted_getters = MINTED_GETTERS
+    if token_decimals is not None:
+        minted_getters = ("totalSupply()",) + tuple(g for g in MINTED_GETTERS if g != "totalSupply()")
 
     max_supply = None
     total_minted = None
@@ -1147,7 +1161,7 @@ def read_supply(
                         _log.debug("could not parse max supply %r for %s: %s", s_res, t_addr, exc)
 
         if total_minted is None or total_minted == 0:
-            for sel_name in MINTED_GETTERS:
+            for sel_name in minted_getters:
                 m_res = rpc.call_contract(t_addr, keccak_selector(sel_name))
                 if m_res and len(m_res) >= 66:
                     try:
@@ -1159,6 +1173,29 @@ def read_supply(
                     except Exception as exc:
                         _log.debug("could not parse total minted %r for %s: %s", m_res, t_addr, exc)
     return max_supply, total_minted
+
+
+def supply_for_market_cap(standard: Any, total_minted: Any, max_supply: Any = None) -> Optional[float]:
+    """Supply in WHOLE TOKENS for a market-cap estimate, or None when the unit isn't certain.
+    Only BEP-20 tokens qualify: read_supply stores their supply as raw / 10**decimals(). NFT counts and
+    Fair-Mint dispenser counters are not token supplies. No magnitude guessing (the old `> 1e14 -> / 1e18`)."""
+    if "BEP-20" not in str(standard or ""):
+        return None
+    try:
+        supply = float(total_minted or max_supply or 0.0)
+    except (TypeError, ValueError):
+        return None
+    return supply if supply > 0 else None
+
+
+def market_cap_from_supply(standard: Any, total_minted: Any, max_supply: Any, price_usd: Any) -> Optional[float]:
+    """supply x price for a BEP-20 token, None if the supply unit or the price isn't known."""
+    supply = supply_for_market_cap(standard, total_minted, max_supply)
+    try:
+        price = float(price_usd or 0.0)
+    except (TypeError, ValueError):
+        return None
+    return supply * price if supply and price > 0 else None
 
 
 def fetch_bnb_price_usd(rpc: BscRpcClient) -> Optional[float]:
@@ -1186,7 +1223,9 @@ def fetch_bnb_price_usd(rpc: BscRpcClient) -> Optional[float]:
 
 BNB_PRICE_FALLBACK_USD = 705.0  # used until the first successful lookup
 BNB_PRICE_TTL_SEC = 60.0
-_bnb_price_state = {"usd": BNB_PRICE_FALLBACK_USD, "fetched_at": 0.0, "live": False}
+BNB_PRICE_STALE_AFTER_TTLS = 3  # the price stops counting as live once its last success is older than 3 TTLs
+# fetched_at = last *attempt* (throttles retries); ok_at = last *successful* lookup (0.0 = never).
+_bnb_price_state = {"usd": BNB_PRICE_FALLBACK_USD, "fetched_at": 0.0, "live": False, "ok_at": 0.0}
 _bnb_price_lock = threading.Lock()
 _bnb_price_rpc: Optional[BscRpcClient] = None
 
@@ -1209,16 +1248,23 @@ def refresh_bnb_price(rpc: Optional[BscRpcClient] = None, max_age: float = BNB_P
                 rpc = _bnb_price_rpc
             price = fetch_bnb_price_usd(rpc)
             if price and price > 0:
-                _bnb_price_state.update(usd=price, live=True)
+                _bnb_price_state.update(usd=price, live=True, ok_at=now)
             else:
                 _log.debug("BNB price lookup failed; keeping $%.2f", _bnb_price_state["usd"])
             _bnb_price_state["fetched_at"] = now  # also after a failure, so a down RPC isn't retried per call
         return _bnb_price_state["usd"]
 
 
+def bnb_price_as_of() -> Optional[float]:
+    """Unix time of the last successful BNB/USD lookup, or None if there never was one."""
+    return _bnb_price_state.get("ok_at") or None
+
+
 def bnb_price_is_live() -> bool:
-    """True once at least one on-chain lookup has succeeded (otherwise the price is the static fallback)."""
-    return _bnb_price_state["live"]
+    """True while the last *successful* on-chain lookup is recent (within BNB_PRICE_STALE_AFTER_TTLS TTLs).
+    After a longer RPC outage the cached price is reported as not live."""
+    ok_at = _bnb_price_state.get("ok_at") or 0.0
+    return bool(_bnb_price_state["live"]) and ok_at > 0 and (time.time() - ok_at) <= BNB_PRICE_STALE_AFTER_TTLS * BNB_PRICE_TTL_SEC
 
 
 def get_bnb_price_usd(rpc: BscRpcClient) -> float:
@@ -1232,10 +1278,10 @@ def fetch_token_market_data(token_addr: str) -> Dict[str, Any]:
     - 24h & 1h purchase count (buys), sells, and volume via DexScreener API
     """
     res = {
-        "holders": 0,
-        "buys_24h": 0,
-        "buys_1h": 0,
-        "sells_24h": 0,
+        "holders": None,    # None = no source answered; 0 would claim "zero holders"
+        "buys_24h": None,
+        "buys_1h": None,
+        "sells_24h": None,
         "volume_24h": 0.0,
         "market_cap": 0.0,
         "fdv": 0.0,
@@ -1397,7 +1443,12 @@ def fetch_token_market_data(token_addr: str) -> Dict[str, Any]:
                 res["price_change_24h"] = float((p.get("priceChange") or {}).get("h24") or 0.0)
                 res["pair_url"] = p.get("url", "")
                 res["market_price_usd"] = float(p.get("priceUsd") or 0.0)
-                res["market_price_bnb"] = float(p.get("priceNative") or 0.0)
+                # priceNative is in the QUOTE token (USDT for USDT pairs): it is a BNB price only for a WBNB pair
+                px_usd = res["market_price_usd"]
+                if ((p.get("quoteToken") or {}).get("address") or "").lower() == WBNB_ADDRESS.lower():
+                    res["market_price_bnb"] = float(p.get("priceNative") or 0.0)
+                elif px_usd > 0 and bnb_price_is_live():
+                    res["market_price_bnb"] = px_usd / cached_bnb_price()
                 res["lp_usd"] = float((p.get("liquidity") or {}).get("usd", 0.0) or 0.0)
                 res["dex_id"] = p.get("dexId", "")
                 res["pair_address"] = p.get("pairAddress", "")
@@ -1700,7 +1751,7 @@ def evaluate_sniper_ready(item: Dict[str, Any]) -> Dict[str, Any]:
     else:
         prog = (tm / ms) if (ms and ms > 0) else 0.0
 
-    agents = int(item.get("holders", 0) or item.get("unique_minters", 0) or 0)
+    agents = int((item.get("holders") or 0) or item.get("unique_minters", 0) or 0)
 
     # Progress check
     is_sold_out = (prog >= 0.999) or (is_nft and bool(ms) and bool(tm) and tm >= ms)
@@ -1849,74 +1900,66 @@ def filter_and_sort_projects(history: List[Dict[str, Any]], active_filter: str, 
     return filtered
 
 
+# --- Post-mint profit / ATH rules (the JavaScript twin is computeItemProfit in app.js; the parity test keeps them equal)
+#   mint cost  known  : the paid mint price (wei, else BNB) is above zero, or the mint is VERIFIED free
+#                       (has_free_mint, or the price string says FREE). Otherwise profit and multiplier are None.
+#   "DEX Traded"      : no mint position at all, so no profit.
+#   profit            : sec_usd - mint cost; negative when under water (a loss is real data); free mint: the price.
+#   multiplier        : sec_usd / mint cost; None for a free mint.
+#   ATH price         : only from a price backed by >= ATH_MIN_LP_USD of pool liquidity (an NFT floor needs none);
+#                       a stored ATH more than ATH_RESET_FACTOR x the current price on a thin pool is dropped.
+#   ATH profit        : max(previous ATH profit, current profit), starting from the first observed value.
+#   ATH multiplier    : max(previous, ATH price / mint cost); None for a free mint.
+ATH_MIN_LP_USD = 1000.0
+ATH_RESET_FACTOR = 50.0
+
+
+def _round2(x: float) -> float:
+    return math.floor(x * 100.0 + 0.5) / 100.0  # same arithmetic as Math.floor(x * 100 + 0.5) / 100 in app.js
+
+
+def _sig10(x: float) -> float:
+    return float(f"{x:.10g}")
+
+
+def _no_profit() -> Dict[str, Any]:
+    return {
+        "sec_usd": 0.0, "mint_usd": None, "profit": None,
+        "ath_price_usd": None, "ath_profit_usd": None, "ath_multiplier": None, "current_multiplier": None,
+        "is_sold": False, "is_free": False,
+    }
+
+
 def update_post_mint_profit_metrics(item: Dict[str, Any], bnb_price: Optional[float] = None) -> Dict[str, Any]:
     """
-    Computes and updates post-mint profit and ATH metrics on an item.
-    Tracks persistent high-water mark (ATH price, ATH net profit, and ATH multiple).
-    Filters out pegged crypto assets (BTCB, WBNB, USDT, USDC, BUSD), synthetic stocks, and system infra.
+    Computes and updates post-mint profit and ATH metrics on an item (rules above).
+    Filters out pegged crypto assets, synthetic stocks, known scams and system infra.
     """
     if bnb_price is None:
         bnb_price = cached_bnb_price()
     c = (item.get("contract") or "").lower()
-    sym = (item.get("symbol") or "").upper()
-    is_pegged = (
-        c in EXCLUDED_PEGS_CONTRACTS
-        or sym in PEG_SYMBOLS_CORE
-        or sym in EQUITY_SYMBOLS_CORE
-    )
-    if is_pegged or is_system_infra(item):
-        return {
-            "sec_usd": 0.0,
-            "mint_usd": 0.0,
-            "profit": 0.0,
-            "ath_price_usd": 0.0,
-            "ath_profit_usd": 0.0,
-            "ath_multiplier": 0.0,
-            "is_sold": False,
-            "is_free": False
-        }
+    if filters.is_excluded_asset(item) or is_system_infra(item):
+        return _no_profit()
 
     fl_usd = float(item.get("floor_price_usd") or 0.0)
     fl_bnb = float(item.get("floor_price_bnb") or 0.0)
     tk_usd = float(item.get("token_price_usd") or item.get("market_price_usd") or 0.0)
+    price_from_pair = not (fl_usd > 0 or fl_bnb > 0)
     sec_usd = fl_usd if fl_usd > 0 else (fl_bnb * bnb_price if fl_bnb > 0 else tk_usd)
 
     # Micro-wei / scam price distortion guard: reject astronomical prices (> $1000) or micro-wei supplies
     tm_val = float(item.get("total_minted") or 0.0)
     lp_val = float(item.get("lp_usd") or 0.0)
     if sec_usd > 1000.0 or (0.0 < tm_val < 1e-6) or (0.0 < lp_val < 5.0 and sec_usd > 5.0):
-        return {
-            "sec_usd": 0.0,
-            "mint_usd": 0.0,
-            "profit": 0.0,
-            "ath_price_usd": 0.0,
-            "ath_profit_usd": 0.0,
-            "ath_multiplier": 0.0,
-            "is_sold": False,
-            "is_free": False
-        }
+        return _no_profit()
 
     p_str = str(item.get("mint_price_str") or "").upper()
     v_wei = int(item.get("mint_value_wei") or 0)
-    has_free_flag = bool(item.get("has_free_mint"))
-    has_calldata = bool(item.get("mint_calldata"))
-    is_free = bool(has_free_flag or "FREE" in p_str or (v_wei == 0 and float(item.get("mint_price_bnb") or 0) == 0.0 and "PAID" not in p_str and "DEX" not in p_str and "TBD" not in p_str))
-
-    # If mint price is unknown (TBD) and not verified free or with calldata, cannot claim 0 mint cost
-    if "TBD" in p_str and not has_free_flag and not has_calldata:
-        return {
-            "sec_usd": 0.0,
-            "mint_usd": 0.0,
-            "profit": 0.0,
-            "ath_price_usd": 0.0,
-            "ath_profit_usd": 0.0,
-            "ath_multiplier": 0.0,
-            "is_sold": False,
-            "is_free": False
-        }
-
-    mint_usd = 0.0 if is_free else ((v_wei / 1e18 * bnb_price) if v_wei > 0 else (float(item.get("mint_price_bnb") or 0) * bnb_price))
-    profit = (sec_usd - mint_usd) if sec_usd > 0 else 0.0
+    verified_free = bool(item.get("has_free_mint")) or "FREE" in p_str
+    paid_usd = (v_wei / 1e18 * bnb_price) if v_wei > 0 else (float(item.get("mint_price_bnb") or 0) * bnb_price)
+    is_free = verified_free
+    cost_known = (not "DEX" in p_str) and (verified_free or paid_usd > 0)
+    mint_usd = (0.0 if is_free else paid_usd) if cost_known else None
 
     raw_ms = item.get("max_supply")
     if raw_ms is not None:
@@ -1928,41 +1971,53 @@ def update_post_mint_profit_metrics(item: Dict[str, Any], bnb_price: Optional[fl
     tm = item.get("total_minted") or 0
     is_sold = bool(raw_ms and float(raw_ms) > 0 and tm and float(tm) >= float(raw_ms))
 
-    # Multiplier
-    if mint_usd > 0 and sec_usd > 0:
-        multiplier = round(sec_usd / mint_usd, 2)
-    elif is_free and sec_usd > 0:
-        multiplier = None  # Free mint (pure net alpha)
+    profit = None
+    multiplier = None
+    if cost_known and sec_usd > 0:
+        profit = sec_usd - mint_usd
+        multiplier = _round2(sec_usd / mint_usd) if mint_usd > 0 else None
+
+    # --- ATH (high-water mark) -----------------------------------------------------------------------------
+    lp_ok = (not price_from_pair) or lp_val >= ATH_MIN_LP_USD
+    prev_ath = float(item.get("ath_price_usd") or 0.0)
+    if prev_ath > 0 and sec_usd > 0 and price_from_pair and lp_val < ATH_MIN_LP_USD and prev_ath > ATH_RESET_FACTOR * sec_usd:
+        # a poisoned ATH (thin pool spike, stale seed): drop it, it is re-learned from a trustworthy price
+        item["ath_price_usd"] = None
+        item["ath_profit_usd"] = None
+        item["ath_multiplier"] = None
+        prev_ath = 0.0
+    if sec_usd > 0 and lp_ok and sec_usd > prev_ath:
+        item["ath_price_usd"] = _sig10(sec_usd)
+        item["ath_timestamp"] = int(time.time())
+    ath_price = float(item.get("ath_price_usd") or 0.0)
+
+    if cost_known and profit is not None and lp_ok:
+        prev_p = item.get("ath_profit_usd")
+        item["ath_profit_usd"] = _sig10(profit if prev_p is None else max(float(prev_p), profit))
+    elif not cost_known:
+        item["ath_profit_usd"] = None
+    if cost_known and not is_free and mint_usd > 0 and ath_price > 0:
+        m = _round2(ath_price / mint_usd)
+        prev_m = item.get("ath_multiplier")
+        item["ath_multiplier"] = m if prev_m is None else max(float(prev_m), m)
     else:
-        multiplier = 0.0
+        item["ath_multiplier"] = None
 
-    # High-water mark (ATH) persistence
-    cur_ath = float(item.get("ath_price_usd") or 0.0)
-    if sec_usd > cur_ath and sec_usd > 0:
-        item["ath_price_usd"] = float(f"{sec_usd:.10g}")
-        item["ath_profit_usd"] = float(f"{profit:.10g}") if profit > 0 else 0.0
-        item["ath_multiplier"] = multiplier
-        item["ath_timestamp"] = int(time.time())
-    elif not item.get("ath_price_usd") and sec_usd > 0:
-        item["ath_price_usd"] = float(f"{sec_usd:.10g}")
-        item["ath_profit_usd"] = float(f"{profit:.10g}") if profit > 0 else 0.0
-        item["ath_multiplier"] = multiplier
-        item["ath_timestamp"] = int(time.time())
-
-    item["current_profit_usd"] = float(f"{profit:.10g}") if profit > 0 else 0.0
+    item["current_profit_usd"] = _sig10(profit) if profit is not None else None
     item["current_multiplier"] = multiplier
-    item["mint_cost_usd"] = round(mint_usd, 4)
-    item["secondary_price_usd"] = float(f"{sec_usd:.10g}") if sec_usd > 0 else 0.0
+    item["mint_cost_usd"] = round(mint_usd, 4) if mint_usd is not None else None
+    item["secondary_price_usd"] = _sig10(sec_usd) if sec_usd > 0 else None
 
     return {
         "sec_usd": sec_usd,
         "mint_usd": mint_usd,
         "profit": profit,
-        "ath_price_usd": float(item.get("ath_price_usd") or sec_usd),
-        "ath_profit_usd": float(item.get("ath_profit_usd") or profit),
+        "ath_price_usd": item.get("ath_price_usd"),
+        "ath_profit_usd": item.get("ath_profit_usd"),
         "ath_multiplier": item.get("ath_multiplier"),
+        "current_multiplier": multiplier,
         "is_sold": is_sold,
-        "is_free": is_free
+        "is_free": is_free,
     }
 
 
@@ -2002,7 +2057,7 @@ def compute_market_cap_stats(history: List[Dict[str, Any]], bnb_price: Optional[
         sec_usd = prof_info["sec_usd"]
         ath_profit = prof_info["ath_profit_usd"]
 
-        if sec_usd > 0 and ath_profit > 0:
+        if sec_usd > 0 and ath_profit is not None and ath_profit > 0:
             gainers.append({
                 "item": it,
                 "contract": it.get("contract", ""),
@@ -2019,8 +2074,10 @@ def compute_market_cap_stats(history: List[Dict[str, Any]], bnb_price: Optional[
             })
 
     fill_rate_pct = (sold_out_cnt / capped_total * 100.0) if capped_total else 0.0
-    sold_gainers = sorted([g for g in gainers if g["is_sold"]], key=lambda x: max(x["ath_profit_usd"], x["profit"]), reverse=True)
-    all_gainers = sorted(gainers, key=lambda x: max(x["ath_profit_usd"], x["profit"]), reverse=True)
+    def peak(g):
+        return max(g["ath_profit_usd"], g["profit"] if g["profit"] is not None else g["ath_profit_usd"])
+    sold_gainers = sorted([g for g in gainers if g["is_sold"]], key=peak, reverse=True)
+    all_gainers = sorted(gainers, key=peak, reverse=True)
 
     top_gainer = sold_gainers[0] if sold_gainers else (all_gainers[0] if all_gainers else None)
     runner_up = sold_gainers[1] if len(sold_gainers) > 1 else (all_gainers[1] if len(all_gainers) > 1 else None)
@@ -2036,6 +2093,84 @@ def compute_market_cap_stats(history: List[Dict[str, Any]], bnb_price: Optional[
         "all_gainers": all_gainers,
         "sold_gainers": sold_gainers
     }
+
+
+# Market numbers of the token an NFT / Fair-Mint dispenser hands out. They describe the *linked* token, never the
+# dispenser record, so they live under their own keys and never feed lp_usd / market_cap / pair_url.
+_LINKED_MARKET_KEYS = {
+    "lp_usd": "linked_lp_usd",
+    "market_cap": "linked_market_cap",
+    "fdv": "linked_fdv",
+    "token_price_usd": "linked_price_usd",
+    "volume_24h": "linked_volume_24h",
+    "pair_url": "linked_pair_url",
+    "lp_pool": "linked_lp_pool",
+}
+
+
+def linked_market_fields(mkt: Dict[str, Any]) -> Dict[str, Any]:
+    """The linked_token / linked_* entries of an analyze_market_interest result, for copying onto a record."""
+    keys = set(_LINKED_MARKET_KEYS.values()) | {"linked_token"}
+    return {k: v for k, v in (mkt or {}).items() if k in keys}
+
+
+def _store_linked_market(stats: Dict[str, Any], mkt: Dict[str, Any], merge: bool = False) -> None:
+    """Copies a linked token's market numbers from `mkt` (fetch_token_market_data output, or the Pancake scratch
+    dict) into stats under linked_* keys. With merge=True existing linked values are only improved on."""
+    src_names = {"token_price_usd": ("token_price_usd", "market_price_usd")}
+    for src, dst in _LINKED_MARKET_KEYS.items():
+        val = None
+        for name in src_names.get(src, (src,)):
+            if mkt.get(name):
+                val = mkt[name]
+                break
+        if not val:
+            continue
+        if merge and src in ("lp_usd", "volume_24h") and stats.get(dst) and val <= stats[dst]:
+            continue
+        if merge and stats.get(dst) and src not in ("lp_usd",):
+            continue
+        stats[dst] = val
+
+
+RATING_BY_TIER = {"SURGING": "🔥 SURGING", "HIGH": "🚀 HIGH", "MODERATE": "⚡ MODERATE", "EARLY": "🌱 EARLY"}
+
+
+def compute_interest(item: Dict[str, Any]) -> Tuple[int, str]:
+    """The single interest score (0-100) and rating label. analyze_market_interest and the worker's
+    _recompute_interest both call this, so a stored score never depends on which of them ran last.
+    Bands: liquidity (0-40), 24h volume (0-30), 24h buys (0-30), +5 per smart wallet. A honeypot scores 0 and a
+    HIGH risk rating costs 25 points (the guard analyze_market_interest always applied). The JavaScript badge
+    uses the same tiers (filters.interest_tier / interestTier in app.js)."""
+    lp = float(item.get("lp_usd") or 0.0)
+    vol = float(item.get("volume_24h") or 0.0)
+    b24 = int(item.get("buys_24h") or 0)
+
+    score = 0
+    if lp > 50000: score += 40
+    elif lp > 10000: score += 30
+    elif lp > 2000: score += 20
+    elif lp > 500: score += 10
+
+    if vol > 20000: score += 30
+    elif vol > 5000: score += 20
+    elif vol > 500: score += 10
+
+    if b24 > 500: score += 30
+    elif b24 > 100: score += 20
+    elif b24 > 20: score += 10
+
+    if item.get("smart_wallets"):
+        score += len(item["smart_wallets"]) * 5
+
+    risk = item.get("risk_level")
+    if risk == "RUG":
+        score = 0
+    elif risk == "HIGH":
+        score = max(0, score - 25)
+
+    score = min(100, score)
+    return score, RATING_BY_TIER[filters.interest_tier(score)]
 
 
 def analyze_market_interest(
@@ -2217,11 +2352,25 @@ def analyze_market_interest(
             mkt_data = alt_data
             target_token = contract_addr
 
+    # An NFT / Fair-Mint dispenser is not the token it dispenses. When the market data belongs to a *linked*
+    # token (target_token != this contract), none of it may become the record's own price / liquidity / market
+    # cap / pair_url: it is kept under separate linked_* keys (see _LINKED_MARKET_KEYS).
+    is_linked = bool(target_token) and target_token != contract_addr
+    if is_linked:
+        stats["linked_token"] = target_token
+        if mkt_data:
+            _store_linked_market(stats, mkt_data)
+        mkt_data = {}
+
+    # Counts a source really reported. Unknown stays None in the result (below); the score code uses 0 meanwhile.
+    count_keys = ("holders", "buys_24h", "buys_1h", "sells_24h")
+    known_counts = {k: mkt_data.get(k) for k in count_keys if mkt_data and mkt_data.get(k) is not None}
+
     if mkt_data:
-        stats["holders"] = mkt_data.get("holders", 0)
-        stats["buys_24h"] = mkt_data.get("buys_24h", 0)
-        stats["buys_1h"] = mkt_data.get("buys_1h", 0)
-        stats["sells_24h"] = mkt_data.get("sells_24h", 0)
+        stats["holders"] = mkt_data.get("holders") or 0
+        stats["buys_24h"] = mkt_data.get("buys_24h") or 0
+        stats["buys_1h"] = mkt_data.get("buys_1h") or 0
+        stats["sells_24h"] = mkt_data.get("sells_24h") or 0
         stats["volume_24h"] = mkt_data.get("volume_24h", 0.0)
         stats["market_cap"] = mkt_data.get("market_cap", 0.0)
         stats["fdv"] = mkt_data.get("fdv", 0.0)
@@ -2243,17 +2392,11 @@ def analyze_market_interest(
             stats["risk_badge"] = mkt_data.get("risk_badge", "🟢 Clean")
             stats["risk_flags"] = mkt_data.get("risk_flags", [])
 
-    # For direct NFT/token mints without DEX pair yet
-    if stats["holders"] == 0 and details.get("total_minted"):
-        stats["holders"] = details.get("total_minted", 0)
-    if stats["buys_24h"] == 0 and details.get("total_minted"):
-        stats["buys_24h"] = details.get("total_minted", 0)
     if stats.get("market_cap", 0.0) == 0.0 and stats.get("token_price_usd", 0.0) > 0.0:
-        supply_val = float(details.get("total_minted") or details.get("max_supply") or 0.0)
-        if supply_val > 0.0:
-            if supply_val > 1e14:
-                supply_val = supply_val / 1e18
-            stats["market_cap"] = supply_val * float(stats["token_price_usd"])
+        est = market_cap_from_supply(cls.get("standard"), details.get("total_minted"), details.get("max_supply"),
+                                     stats["token_price_usd"])
+        if est:
+            stats["market_cap"] = est
 
     # If no token security was fetched, audit NFT risk
     if not stats.get("security"):
@@ -2282,14 +2425,17 @@ def analyze_market_interest(
             stats["total_volume_bnb"] = details["total_volume_bnb"]
 
     # 4. Multi-Quote Secondary Liquidity Check on PancakeSwap V2
+    # `mk` is where the pool numbers land: the record itself, or (for a linked token) a scratch dict that is
+    # stored under linked_* keys afterwards.
+    mk = {} if is_linked else stats
     if target_token:
         try:
             bnb_price = get_bnb_price_usd(rpc)
-            best_lp_usd = stats.get("lp_usd", 0.0)
-            best_lp_wbnb = stats.get("lp_wbnb", 0.0)
+            best_lp_usd = mk.get("lp_usd", 0.0)
+            best_lp_wbnb = mk.get("lp_wbnb", 0.0)
             best_pair_addr = None
-            best_px_usd = stats.get("token_price_usd", 0.0)
-            best_px_bnb = stats.get("token_price_bnb", 0.0)
+            best_px_usd = mk.get("token_price_usd", 0.0)
+            best_px_bnb = mk.get("token_price_bnb", 0.0)
             token_dec = details.get("decimals", 18) or 18
 
             for qt in QUOTE_TOKENS:
@@ -2334,19 +2480,21 @@ def analyze_market_interest(
                 except Exception as exc:
                     _log.debug("PancakeSwap pair lookup failed: %s", exc)
 
-            if best_lp_usd > stats.get("lp_usd", 0.0):
-                stats["lp_usd"] = best_lp_usd
-                stats["lp_wbnb"] = best_lp_wbnb
+            if best_lp_usd > mk.get("lp_usd", 0.0):
+                mk["lp_usd"] = best_lp_usd
+                mk["lp_wbnb"] = best_lp_wbnb
                 if best_pair_addr:
-                    stats["lp_pool"] = best_pair_addr
-                    if not stats.get("pair_url"):
-                        stats["pair_url"] = f"https://dexscreener.com/bsc/{best_pair_addr}"
-            if best_px_usd > 0 and stats.get("token_price_usd", 0.0) == 0:
-                stats["token_price_usd"] = best_px_usd
-            if best_px_bnb > 0 and stats.get("token_price_bnb", 0.0) == 0:
-                stats["token_price_bnb"] = best_px_bnb
+                    mk["lp_pool"] = best_pair_addr
+                    if not mk.get("pair_url"):
+                        mk["pair_url"] = f"https://dexscreener.com/bsc/{best_pair_addr}"
+            if best_px_usd > 0 and mk.get("token_price_usd", 0.0) == 0:
+                mk["token_price_usd"] = best_px_usd
+            if best_px_bnb > 0 and mk.get("token_price_bnb", 0.0) == 0:
+                mk["token_price_bnb"] = best_px_bnb
         except Exception as exc:
             _log.debug("BNB price lookup failed: %s", exc)
+    if is_linked:
+        _store_linked_market(stats, mk, merge=True)
 
     # Supply metrics
     max_sup = details.get("max_supply")
@@ -2581,17 +2729,13 @@ def analyze_market_interest(
         for f in stats["risk_flags"][:2]:
             signals.append(f"Safety: {f}")
 
-    stats["score"] = min(100, score)
     stats["signals"] = signals
-
-    if stats["score"] >= 75:
-        stats["rating"] = "🚀 VIRAL RUSH / SNIPER FRENZY"
-    elif stats["score"] >= 50:
-        stats["rating"] = "🔥 HIGH TRACTION"
-    elif stats["score"] >= 25:
-        stats["rating"] = "🌱 WARMING UP / SEEDED"
-    else:
-        stats["rating"] = "❄️ COLD / DORMANT"
+    # `score` above only fed the human-readable signals; the stored score is the one shared formula.
+    stats["score"], stats["rating"] = compute_interest({
+        "lp_usd": stats.get("lp_usd"), "volume_24h": stats.get("volume_24h"), "buys_24h": stats.get("buys_24h"),
+        "smart_wallets": details.get("smart_wallets") or details.get("smart_minters") or [],
+        "risk_level": stats.get("risk_level"),
+    })
 
     # 7. Evaluate Assisted Sniper Readiness
     proxy_item = dict(details)
@@ -2606,6 +2750,9 @@ def analyze_market_interest(
     if s_eval["is_ready"]:
         signals.insert(0, "🎯 High-Conviction Sniper Ready (Passed 60% & Anti-Rug)")
 
+    # Unknown counts stay None (never total_minted, never a made-up 1); known ones are whole numbers.
+    for k in count_keys:
+        stats[k] = int(known_counts[k]) if k in known_counts else None
     return stats
 
 
@@ -3041,15 +3188,18 @@ def parse_element_trade_log(log: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     Decodes an ERC721SellOrderFilled event log from Element Exchanger router:
     Contract: 0xb3e3dfcb2d9f3dde16d78b9e6eb3538eb32b5ae1
     Topic: 0x9c248aa1a265aa616f707b979d57f4529bb63a4fc34dc7fc61fdddc18410f74e
-    Data words:
+    Data words (checked against a real on-chain event; the event has a dynamic `fees` array):
       w[0]: orderHash
       w[1]: seller
       w[2]: buyer
-      w[3]: fee
+      w[3]: nonce
       w[4]: paymentToken (0xeeee... or WBNB)
       w[5]: price in wei
-      w[6]: tokenId
+      w[6]: offset of the dynamic `fees` array (0x120)
       w[7]: collection
+      w[8]: tokenId
+      w[9...]: the fees array (length, then entries)
+    A short 8-word log (no fees array) is still read with the tokenId in w[6].
     """
     if not isinstance(log, dict):
         return None
@@ -3071,7 +3221,7 @@ def parse_element_trade_log(log: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         )
         price_wei = int(words[5], 16)
         price_bnb = price_wei / 1e18 if is_bnb else 0.0
-        token_id = int(words[6], 16)
+        token_id = int(words[8], 16) if len(words) >= 9 else int(words[6], 16)
         seller = "0x" + words[1][24:].lower()
         buyer = "0x" + words[2][24:].lower()
         tx_hash = log.get("transactionHash", "")
@@ -3180,6 +3330,7 @@ def scan_element_nft_volume(
     from_b = max(0, head - lookback_blocks)
     fills: Dict[str, List[float]] = {}
     trade_logs: List[Dict[str, Any]] = []
+    failed_chunks = 0
 
     # Pull Element logs in chunks of up to 10,000 blocks
     for b in range(from_b, head + 1, 10000):
@@ -3194,14 +3345,20 @@ def scan_element_nft_volume(
             logs = rpc.get_logs(params)
             for l in logs:
                 parsed = parse_element_trade_log(l)
-                if parsed:
+                if parsed and parsed["is_bnb"]:  # fills paid in another token have no BNB price: not a BNB sale
                     c = parsed["collection"]
                     if c not in fills:
                         fills[c] = []
                     fills[c].append(parsed["price_bnb"])
                     trade_logs.append(parsed)
         except Exception as exc:
+            failed_chunks += 1
             _log.debug("Element fill logs failed for blocks %s-%s: %s", b, to_b, exc)
+
+    if failed_chunks:
+        # Totals from the chunks that did answer would understate sales and volume: write nothing this round.
+        _log.warning("Element scan: %d log chunk(s) failed; keeping the previous secondary-market stats", failed_chunks)
+        return {}
 
     results: Dict[str, Dict[str, Any]] = {}
 
@@ -3250,8 +3407,10 @@ def scan_element_nft_volume(
         eval_res = evaluate_nft_surge(it, c_fills, secondary_moves=moves, user_held=user_held)
         it["secondary_sales_count"] = eval_res["sales_count"]
         it["secondary_vol_bnb"] = eval_res["vol_bnb"]
-        it["floor_price_bnb"] = eval_res["floor_price_bnb"]
-        it["high_price_bnb"] = eval_res["high_price_bnb"]
+        if eval_res["sales_count"] > 0:
+            # a window without fills says nothing about the floor: keep the last one we saw
+            it["floor_price_bnb"] = eval_res["floor_price_bnb"]
+            it["high_price_bnb"] = eval_res["high_price_bnb"]
         it["secondary_transfers"] = eval_res["secondary_transfers"]
         it["is_nft_surge"] = eval_res["is_nft_surge"]
         it["nft_surge_badge"] = eval_res["badge"]
@@ -4113,6 +4272,8 @@ def refresh_project_metrics(rpc: BscRpcClient, item: Dict[str, Any], wallet: str
         item["mint_price_bnb"] = details.get("mint_price_bnb", 0.0)
         item["mint_value_wei"] = details.get("mint_value_wei", "0")
         item["total_minted"] = details.get("total_minted", item.get("total_minted", 0))
+        if details.get("token_decimals") is not None:
+            item["token_decimals"] = details["token_decimals"]
         if details.get("website"):
             item["website"] = details["website"]
         if details.get("twitter"):
@@ -4123,11 +4284,12 @@ def refresh_project_metrics(rpc: BscRpcClient, item: Dict[str, Any], wallet: str
         if not fast:
             mkt = analyze_market_interest(rpc, addr, item.get("deployer"), details)
             # Live DEX, Holders & Purchase metrics
-            item["holders"] = mkt.get("holders", item.get("holders", 0))
-            item["buys_24h"] = mkt.get("buys_24h", item.get("buys_24h", 0))
-            item["buys_1h"] = mkt.get("buys_1h", item.get("buys_1h", 0))
-            item["sells_24h"] = mkt.get("sells_24h", item.get("sells_24h", 0))
+            # a count the sources did not report (None) keeps whatever the record already had
+            for k in ("holders", "buys_24h", "buys_1h", "sells_24h"):
+                if mkt.get(k) is not None:
+                    item[k] = mkt[k]
             item["volume_24h"] = mkt.get("volume_24h", item.get("volume_24h", 0.0))
+            item.update(linked_market_fields(mkt))
             if mkt.get("pair_url"):
                 item["pair_url"] = mkt["pair_url"]
             if mkt.get("website"):
@@ -4420,7 +4582,7 @@ def build_interactive_dashboard(
         else:
             m_text.append("   ▫ Contract Check:    Standard EVM Asset Contract\n", style="green")
             if tm and tm > 0:
-                h_count = item.get("holders", 0)
+                h_count = (item.get("holders") or 0)
                 m_text.append(f"   ▫ Distribution:      {h_count:,} unique holders across {tm:,} mints\n", style="cyan")
 
         if item.get("risk_flags"):
@@ -4550,10 +4712,10 @@ def build_interactive_dashboard(
             for sig in item["signals"]:
                 m_text.append(f"   ▫ {sig}\n", style="dim white")
 
-        hld = item.get("holders", 0)
-        buys = item.get("buys_24h", 0)
-        buys_1h = item.get("buys_1h", 0)
-        sells = item.get("sells_24h", 0)
+        hld = (item.get("holders") or 0)
+        buys = (item.get("buys_24h") or 0)
+        buys_1h = (item.get("buys_1h") or 0)
+        sells = (item.get("sells_24h") or 0)
         vol = item.get("volume_24h", 0.0)
         
         m_text.append("\n• On-Chain Holders & Purchases (24h Activity):\n", style="bold white")
@@ -4962,12 +5124,8 @@ def build_interactive_dashboard(
             safety_formatted = format_structured_safety(item)
             interest_str = format_structured_interest(item)
 
-            hld = item.get("holders", 0)
-            buys = item.get("buys_24h", 0)
-            if hld == 0 and item.get("total_minted"):
-                hld = item["total_minted"]
-            if buys == 0 and item.get("total_minted") and ("NFT" in str(item.get("standard", ""))):
-                buys = item["total_minted"]
+            hld = item.get("holders") or 0
+            buys = item.get("buys_24h") or 0
 
             if hld > 0 or buys > 0:
                 h_str = format_count(hld)
@@ -5014,9 +5172,9 @@ def build_interactive_dashboard(
         t_price = sel_item.get("token_price_usd", 0)
         calldata = replace_calldata_recipient(sel_item.get("mint_calldata"), wallet, extra_addresses=sel_item.get("smart_wallets"))
         val_wei = sel_item.get("mint_value_wei", "0")
-        hld = sel_item.get("holders", 0)
-        buys = sel_item.get("buys_24h", 0)
-        buys_1h = sel_item.get("buys_1h", 0)
+        hld = (sel_item.get("holders") or 0)
+        buys = (sel_item.get("buys_24h") or 0)
+        buys_1h = (sel_item.get("buys_1h") or 0)
         vol = sel_item.get("volume_24h", 0.0)
 
         # Line 1: Contract, Deployer, Standard & Supply
@@ -5348,6 +5506,7 @@ def run_live_monitor(rpc: BscRpcClient, wallet: str, plain: bool = False):
                                             "sells_24h": mkt.get("sells_24h", 0),
                                             "volume_24h": mkt.get("volume_24h", 0.0),
                                             "pair_url": mkt.get("pair_url", ""),
+                                            **linked_market_fields(mkt),
                                             "mint_calldata": mint_cd,
                                             "signals": mkt.get("signals", [f"Discovered via smart wallet {aid}"]),
                                             "detected_at": time.strftime("%Y-%m-%d %H:%M:%S"),
@@ -5437,6 +5596,7 @@ def run_live_monitor(rpc: BscRpcClient, wallet: str, plain: bool = False):
                                     "sells_24h": mkt.get("sells_24h", 0),
                                     "volume_24h": mkt.get("volume_24h", 0.0),
                                     "pair_url": mkt.get("pair_url", ""),
+                                    **linked_market_fields(mkt),
                                     "mint_calldata": det.get("mint_calldata", "0x1249c58b"),
                                     "signals": mkt.get("signals", []),
                                     "detected_at": time.strftime("%Y-%m-%d %H:%M:%S"),

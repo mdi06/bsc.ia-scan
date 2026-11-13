@@ -27,6 +27,27 @@ HISTORY_FILE = os.path.join(BASE_DIR, "history.json")
 FAVORITES_FILE = os.path.join(BASE_DIR, "user_favorites.json")
 
 
+def scrub_non_finite(obj):
+    """Replaces NaN / +-Infinity floats inside `obj` (dicts / lists, in place) with None and returns obj.
+    A non-finite float cannot be stored as JSON, and it made the change-detection fingerprint raise, which
+    dropped the whole upsert batch."""
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            if isinstance(v, float):
+                if v != v or v in (float("inf"), float("-inf")):
+                    obj[k] = None
+            elif isinstance(v, (dict, list)):
+                scrub_non_finite(v)
+    elif isinstance(obj, list):
+        for i, v in enumerate(obj):
+            if isinstance(v, float):
+                if v != v or v in (float("inf"), float("-inf")):
+                    obj[i] = None
+            elif isinstance(v, (dict, list)):
+                scrub_non_finite(v)
+    return obj
+
+
 class DatabaseManager:
     def __init__(self, db_path: Optional[str] = None):
         self.supabase_url = os.getenv("SUPABASE_URL", "").strip().rstrip("/")
@@ -52,6 +73,8 @@ class DatabaseManager:
         # upserts update the cache immediately so new drops show up without waiting for a refresh.
         self._projects_cache: Dict[str, Dict[str, Any]] = {}
         self._p_fingerprints: Dict[str, str] = {}
+        self._p_written_at: Dict[str, float] = {}  # contract -> when it was last durably written
+        self._retry_queue: set = set()  # contracts whose last remote write failed; resent by the next upsert
         self._cache_initialized = False
         self._last_cache_time = 0.0
         self._last_synced_updated_at = 0
@@ -60,6 +83,9 @@ class DatabaseManager:
         self._cached_json_etag: Optional[str] = None
         self._sqlite_ready = False
         self._cache_dirty = True
+        # Bumped whenever the project data changes (an upsert / delete here, or a refresh that brought new data in).
+        # HTTP ETags are built from it, so a conditional GET can never get a 304 for changed content.
+        self._content_version = 0
 
         # httpx client, recreated when the PID changes (see `client`)
         self._client_instance = None
@@ -300,6 +326,7 @@ class DatabaseManager:
                             self._last_synced_updated_at = max_ts
                             self._cache_initialized = True
                             self._cache_dirty = True
+                            self._content_version += 1
                             self._last_cache_time = now
                             items = list(self._projects_cache.values())
                             items.sort(key=lambda x: x.get("block", 0) or 0, reverse=True)
@@ -346,12 +373,17 @@ class DatabaseManager:
                     self._last_synced_updated_at = max_ts
                     self._cache_initialized = True
                     self._cache_dirty = True
+                    self._content_version += 1
                     self._last_cache_time = now
                     items = list(self._projects_cache.values())
                     items.sort(key=lambda x: x.get("block", 0) or 0, reverse=True)
                     return items
             finally:
                 conn.close()
+
+    def content_version(self) -> int:
+        """Counter that changes whenever the project data changes (see _content_version)."""
+        return self._content_version
 
     def get_history_json(self) -> Tuple[bytes, str]:
         """Returns (minified UTF-8 JSON of all projects, ETag of those exact bytes).
@@ -434,12 +466,38 @@ class DatabaseManager:
         with self._cache_lock:
             return self._projects_cache.get(c)
 
+    # A record is written again after this long even if its fingerprint did not change, so fields that are only
+    # bucketed (price, LP, volume) and market_updated_at cannot stay stale in the database forever.
+    FORCE_WRITE_AFTER_SEC = float(os.getenv("DB_FORCE_WRITE_AFTER_SEC", 30 * 60))
+    SUPABASE_CHUNK_SIZE = 50
+
+    @staticmethod
+    def _sig(v: Any, digits: int = 3) -> str:
+        """`digits` significant digits of a number, "-" for None / non-numbers (so None != 0)."""
+        try:
+            if v is None or isinstance(v, bool):
+                return "-"
+            f = float(v)
+            return "0" if f == 0 else f"{f:.{digits}g}"
+        except (TypeError, ValueError):
+            return "-"
+
+    @staticmethod
+    def _exact(v: Any) -> str:
+        """repr of a number or flag, exact; "-" for None."""
+        return "-" if v is None else repr(v)
+
     @staticmethod
     def _compute_fingerprint(p: Dict[str, Any]) -> str:
         """Computes a compact signature to detect if mutable metrics have actually changed significantly.
         Quantizes floating-point values (price, LP, mcap, volume) to prevent micro-fluctuations (sub-cent / sub-1%)
         from triggering continuous multi-megabyte outbound REST syncs to Supabase on Render.
-        """
+
+        Counts, flags and all-time-high fields are compared exactly; continuous values are bucketed. Fields that
+        move on every tick without meaning anything new (market_updated_at) are left out and covered by
+        FORCE_WRITE_AFTER_SEC instead."""
+        sig, exact = DatabaseManager._sig, DatabaseManager._exact
+
         # Quantize price to 3 significant digits (e.g., 0.00412 vs 0.004123456)
         px = float(p.get("token_price_usd") or 0.0)
         px_bucket = f"{px:.3g}" if px > 0 else "0"
@@ -463,6 +521,12 @@ class DatabaseManager:
         ms = float(p.get("max_supply") or 0.0)
         mint_pct = int(tm / ms * 100) if ms > 0 else 0
 
+        # None (unknown) must differ from 0, and a cleared market must differ from a priced one
+        fdv = p.get("fdv")
+        fdv_k = "-" if fdv is None else (int(float(fdv) / 1000) if float(fdv) > 5000 else int(float(fdv) / 100))
+        chg = p.get("price_change_24h")
+        chg_s = "-" if chg is None else f"{float(chg):.1f}"
+
         return (
             f"{prog}_{holders}_{p.get('score')}_"
             f"{p.get('sniper_ready')}_{p.get('is_proxy_clone')}_{p.get('is_nft_surge')}_"
@@ -470,45 +534,84 @@ class DatabaseManager:
             f"{px_bucket}_{p.get('token_symbol')}_{lp_k}_"
             f"{mc_k}_{vol_k}_{p.get('mint_value_wei')}_{p.get('mint_price_str')}_"
             f"{p.get('secondary_sales_count')}_{float(p.get('floor_price_bnb') or 0.0):.3g}_{mint_pct}"
+            # counts: exact
+            f"|{exact(p.get('buys_24h'))}_{exact(p.get('sells_24h'))}_{exact(p.get('buys_1h'))}"
+            # continuous: bucketed
+            f"|{chg_s}_{fdv_k}_{sig(p.get('lp_wbnb'))}_{sig(p.get('token_price_bnb'))}"
+            f"_{sig(p.get('high_price_bnb'))}_{sig(p.get('secondary_vol_bnb'))}"
+            # all-time-high fields: exact. Current profit / multiplier follow the price (and BNB/USD) on every
+            # tick, so they are bucketed like the price they derive from; exact would defeat the whole guard.
+            f"|{exact(p.get('ath_price_usd'))}_{exact(p.get('ath_profit_usd'))}_{exact(p.get('ath_multiplier'))}"
+            f"_{sig(p.get('current_profit_usd'))}_{sig(p.get('current_multiplier'))}"
+            # freshness flag: exact
+            f"|{exact(p.get('market_stale'))}"
         )
 
     def upsert_projects(self, projects: List[Dict[str, Any]]):
         """Batch upserts projects into SQLite or Supabase and updates in-memory cache.
-        Includes Bandwidth Guard: Filters out unchanged records to avoid redundant Supabase REST calls."""
-        if not projects:
+        Includes Bandwidth Guard: Filters out unchanged records to avoid redundant Supabase REST calls.
+
+        - The in-memory cache always takes the offered values, even when the remote write is skipped.
+        - A record's fingerprint is remembered only after its write succeeded. A failed chunk leaves its
+          records dirty, so the next call offers them again, and the chunks after it are still sent.
+        - A record is also rewritten when its last write is older than FORCE_WRITE_AFTER_SEC."""
+        if not projects and not self._retry_queue:
             return
 
         clean_records = []
-        for p in projects:
+        for p in projects or []:
             contract = (p.get("contract") or "").lower().strip()
             if not contract or not contract.startswith("0x"):
                 continue
+            scrub_non_finite(p)
             clean_records.append(p)
 
-        if not clean_records:
+        if not clean_records and not self._retry_queue:
             return
 
         now_ts = int(time.time())
+        mono = time.time()
 
         # 1. Update in-memory cache and isolate truly modified/dirty records
         changed_records = []
+        pending_fp: Dict[str, str] = {}
+        cache_changed = False
         with self._cache_lock:
             for p in clean_records:
                 c = p["contract"].lower()
                 fp = self._compute_fingerprint(p)
-                if c in self._p_fingerprints and self._p_fingerprints[c] == fp:
+
+                cached = self._projects_cache.get(c)
+                if cached is None:
+                    self._projects_cache[c] = dict(p)
+                    cache_changed = True
+                elif cached is not p and any(cached.get(k) != v for k, v in p.items()):
+                    cached.update(p)
+                    cache_changed = True
+
+                unchanged = c in self._p_fingerprints and self._p_fingerprints[c] == fp
+                fresh_write = (mono - self._p_written_at.get(c, 0.0)) < self.FORCE_WRITE_AFTER_SEC
+                if unchanged and fresh_write:
                     # Clean/identical project record - skip outbound network I/O
                     continue
-                self._p_fingerprints[c] = fp
+                pending_fp[c] = fp
                 changed_records.append(p)
-                if c in self._projects_cache:
-                    self._projects_cache[c].update(p)
-                else:
-                    self._projects_cache[c] = dict(p)
 
-            if changed_records:
+            # Records whose earlier remote write failed are resent even if nobody offers them again.
+            offered = {p["contract"].lower() for p in changed_records}
+            for c in sorted(self._retry_queue - offered):
+                queued = self._projects_cache.get(c)
+                if queued is not None:
+                    pending_fp[c] = self._compute_fingerprint(queued)
+                    changed_records.append(queued)
+                else:
+                    self._retry_queue.discard(c)  # deleted in the meantime
+
+            if changed_records or cache_changed:
                 self._cache_initialized = True
                 self._cache_dirty = True
+                self._content_version += 1
+            if changed_records:
                 self._last_cache_time = now_ts
                 if now_ts > self._last_synced_updated_at:
                     self._last_synced_updated_at = now_ts
@@ -517,12 +620,26 @@ class DatabaseManager:
         if not changed_records:
             return
 
+        def mark_written(records: List[Dict[str, Any]]):
+            with self._cache_lock:
+                for rec in records:
+                    c = rec["contract"].lower()
+                    self._p_fingerprints[c] = pending_fp[c]
+                    self._p_written_at[c] = mono
+                    self._retry_queue.discard(c)
+
         # 2. Supabase Cloud Sync (ONLY sync truly modified records)
+        to_sqlite = changed_records
         if self.mode == "supabase":
-            try:
-                rows = []
-                for p in changed_records:
-                    rows.append({
+            failed: List[Dict[str, Any]] = []
+            client = self.client
+            for i in range(0, len(changed_records), self.SUPABASE_CHUNK_SIZE):
+                recs = changed_records[i : i + self.SUPABASE_CHUNK_SIZE]
+                if not (HAS_HTTPX and client):
+                    failed.extend(recs)
+                    continue
+                try:
+                    rows = [{
                         "contract": p["contract"].lower(),
                         "name": str(p.get("name", "")),
                         "symbol": str(p.get("symbol", "")),
@@ -539,28 +656,32 @@ class DatabaseManager:
                         "data": p,
                         "detected_at": str(p.get("detected_at", "")),
                         "updated_at": now_ts
-                    })
-                client = self.client
-                if HAS_HTTPX and client:
+                    } for p in recs]
                     # Supabase upsert requires Prefer: resolution=merge-duplicates
-                    # Batch in chunks of 50 to avoid request size limits and connection timeouts
-                    batch_size = 50
-                    all_ok = True
-                    for i in range(0, len(rows), batch_size):
-                        chunk = rows[i : i + batch_size]
-                        resp = client.post(
-                            "/rest/v1/projects?on_conflict=contract",
-                            json=chunk,
-                            headers={"Prefer": "resolution=merge-duplicates"}
-                        )
-                        if resp.status_code not in (200, 201):
-                            all_ok = False
-                            print(f"[⚠️ Supabase Chunk Error] HTTP {resp.status_code}: {resp.text[:120]}", flush=True)
-                            break
-                    if all_ok:
-                        return
-            except Exception as e:
-                print(f"[⚠️ Supabase Upsert Error] {e} - Falling back to local SQLite", flush=True)
+                    resp = client.post(
+                        "/rest/v1/projects?on_conflict=contract",
+                        json=rows,
+                        headers={"Prefer": "resolution=merge-duplicates"}
+                    )
+                    if resp.status_code in (200, 201):
+                        mark_written(recs)
+                    else:
+                        failed.extend(recs)
+                        print(f"[⚠️ Supabase Chunk Error] HTTP {resp.status_code}: {resp.text[:120]}", flush=True)
+                except Exception as e:
+                    failed.extend(recs)
+                    print(f"[⚠️ Supabase Upsert Error] {e}", flush=True)
+            if not failed:
+                return
+            # Only the records Supabase did not take go to the local fallback; they stay dirty (no fingerprint)
+            # so the next call offers them again.
+            print(f"[⚠️ Supabase] {len(failed)} record(s) not written; will retry on the next upsert", flush=True)
+            to_sqlite = failed
+            sqlite_commits_fingerprint = False
+            with self._cache_lock:
+                self._retry_queue.update(p["contract"].lower() for p in failed)
+        else:
+            sqlite_commits_fingerprint = True
 
         # 3. SQLite Persistence (WAL Mode)
         with self._lock:
@@ -568,7 +689,7 @@ class DatabaseManager:
             try:
                 cur = conn.cursor()
                 payloads = []
-                for p in changed_records:
+                for p in to_sqlite:
                     payloads.append((
                         p["contract"].lower(),
                         p.get("name", ""),
@@ -611,8 +732,13 @@ class DatabaseManager:
                         updated_at=excluded.updated_at;
                 """, payloads)
                 conn.commit()
+                if sqlite_commits_fingerprint:
+                    mark_written(to_sqlite)
             except Exception as e:
                 print(f"[⚠️ SQLite Upsert Error] {e}", flush=True)
+                if sqlite_commits_fingerprint:
+                    with self._cache_lock:
+                        self._retry_queue.update(p["contract"].lower() for p in to_sqlite)
             finally:
                 conn.close()
 
@@ -657,7 +783,10 @@ class DatabaseManager:
         with self._cache_lock:
             for c in clean:
                 self._projects_cache.pop(c, None)
+                self._content_version += 1
                 self._p_fingerprints.pop(c, None)
+                self._p_written_at.pop(c, None)
+                self._retry_queue.discard(c)
             self._cached_json_bytes = None
             self._last_cache_time = 0.0
 

@@ -20,3 +20,15 @@ assert.ok(!('price_change_24h' in seeded[0]), 'null values do not overwrite or c
 assert.strictEqual(seeded[1].token_price_usd, 1, 'unknown contracts are untouched');
 assert.strictEqual(app.applyMarketOverlay(seeded, market), 0, 'idempotent');
 console.log('✔ applyMarketOverlay refreshes seeded drops from live market data: PASS');
+
+// A seeded drop whose live record the worker cleared as stale loses its frozen numbers too.
+const STALE = '0x' + 'c'.repeat(40);
+const seededStale = [{ contract: STALE, name: 'Gone', token_price_usd: 0.002061, lp_usd: 9280.36, market_cap: 247000 }];
+const staleMarket = { [STALE]: { token_price_usd: null, market_cap: null, fdv: null, lp_usd: null, volume_24h: null,
+  price_change_24h: null, buys_24h: null, sells_24h: null, buys_1h: null, market_stale: true, market_updated_at: null } };
+assert.strictEqual(app.applyMarketOverlay(seededStale, staleMarket), 1);
+assert.strictEqual(seededStale[0].token_price_usd, null, 'stale: the frozen seed price is cleared');
+assert.strictEqual(seededStale[0].lp_usd, null);
+assert.strictEqual(seededStale[0].market_stale, true, 'and the stale flag is carried for the badge');
+assert.strictEqual(app.applyMarketOverlay(seededStale, staleMarket), 0, 'idempotent');
+console.log('✔ applyMarketOverlay clears seeded numbers of a record that went stale: PASS');

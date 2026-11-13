@@ -112,7 +112,7 @@ class TestTopProfits(unittest.TestCase):
         item_btcb = dict(self.mock_btcb)
         prof_btcb = monitor.update_post_mint_profit_metrics(item_btcb, bnb_price=705.0)
         self.assertEqual(prof_btcb["sec_usd"], 0.0)
-        self.assertEqual(prof_btcb["profit"], 0.0)
+        self.assertIsNone(prof_btcb["profit"])  # an excluded asset has no profit (unknown, not 0)
 
         history = [self.mock_btcb, self.mock_free_mint, self.mock_paid_mint]
         stats = monitor.compute_market_cap_stats(history, bnb_price=705.0)
@@ -187,6 +187,7 @@ class TestTopProfits(unittest.TestCase):
         const pPaid = app.computeItemProfit(paidItem, 705.0);
         const pBtcb = app.computeItemProfit(btcbItem, 705.0);
 
+        app.setBnbPriceState(705.0, true);  // there is no built-in fallback BNB price any more
         const stats = app.computeStats([btcbItem, freeItem, paidItem]);
 
         console.log(JSON.stringify({
@@ -205,7 +206,7 @@ class TestTopProfits(unittest.TestCase):
         self.assertAlmostEqual(data["freeProfit"], 0.05, places=4)
         self.assertAlmostEqual(data["paidProfit"], 28.20, places=2)
         self.assertEqual(data["paidMultiplier"], 5.0)
-        self.assertEqual(data["btcbProfit"], 0.0)
+        self.assertIsNone(data["btcbProfit"])
         self.assertEqual(data["topGainer"], "CVIP")
         self.assertEqual(data["runnerUp"], "ABOT")
         print("[JS PARITY TEST] 100% parity verified between Node.js app.js and Python monitor.py")
@@ -271,13 +272,13 @@ class TestTopProfits(unittest.TestCase):
         prof_t = monitor.update_post_mint_profit_metrics(mock_tsla)
 
         self.assertEqual(prof_p["sec_usd"], 0.0, "PrinterAi astronomical fake price must be filtered to 0")
-        self.assertEqual(prof_p["profit"], 0.0)
+        self.assertIsNone(prof_p["profit"])
         self.assertEqual(prof_b["sec_usd"], 0.0, "The Bank empty pool manipulation must be filtered to 0")
-        self.assertEqual(prof_b["profit"], 0.0)
+        self.assertIsNone(prof_b["profit"])
         self.assertEqual(prof_e["sec_usd"], 0.0, "Binance-Peg ETH must be excluded from post-mint profits")
-        self.assertEqual(prof_e["profit"], 0.0)
+        self.assertIsNone(prof_e["profit"])
         self.assertEqual(prof_t["sec_usd"], 0.0, "Synthetic stock TSLAB must be excluded from post-mint profits")
-        self.assertEqual(prof_t["profit"], 0.0)
+        self.assertIsNone(prof_t["profit"])
 
         # Check compute_market_cap_stats leaderboard
         history = [mock_printer, mock_bank, mock_eth, mock_tsla, self.mock_free_mint]
@@ -310,10 +311,10 @@ class TestTopProfits(unittest.TestCase):
         self.assertFalse(js_data["bankValid"])
         self.assertFalse(js_data["ethValid"])
         self.assertFalse(js_data["tslaValid"])
-        self.assertEqual(js_data["printerProfit"], 0)
-        self.assertEqual(js_data["bankProfit"], 0)
-        self.assertEqual(js_data["ethProfit"], 0)
-        self.assertEqual(js_data["tslaProfit"], 0)
+        self.assertIsNone(js_data["printerProfit"])  # excluded: no profit, unknown rather than 0
+        self.assertIsNone(js_data["bankProfit"])  # excluded: no profit, unknown rather than 0
+        self.assertIsNone(js_data["ethProfit"])  # excluded: no profit, unknown rather than 0
+        self.assertIsNone(js_data["tslaProfit"])  # excluded: no profit, unknown rather than 0
         print("[SCAM & SYNTH EXCLUSION TEST] Verified: PrinterAi ($100T), The Bank, ETH, and TSLAB 100% blocked!")
 
 

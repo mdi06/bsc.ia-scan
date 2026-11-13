@@ -141,8 +141,9 @@ def test_read_supply_raw_and_scaled():
     assert (cap, minted) == (1000.0, 250.0)
     cap, minted = monitor.read_supply(_rpc_for(c, **{"cap()": 5000, "totalSupply()": 1250}), [c], 6)
     assert (cap, minted) == (0.005, 0.00125)
-    # decimals 0 is scaled as 18, exactly like analyze_contract has always stored it
-    assert monitor.read_supply(_rpc_for(c, **{"totalSupply()": 10**18}), [c], 0) == (None, 1.0)
+    # a 0-decimal token's raw supply is already whole tokens (H5: it used to be divided by 1e18)
+    assert monitor.read_supply(_rpc_for(c, **{"totalSupply()": 10**18}), [c], 0) == (None, 1e18)
+    assert monitor.read_supply(_rpc_for(c, **{"totalSupply()": 1_000_000}), [c], 0) == (None, 1_000_000.0)
 
 
 def test_read_supply_need_max_false_skips_cap_probes_and_uses_core():
@@ -195,7 +196,7 @@ def test_fast_sweep_scales_capped_bep20_and_keeps_holders():
     item = {"contract": c, "standard": "BEP-20 Token (18 decimals)", "total_minted": 100.0,
             "max_supply": 1000.0, "holders": 77}
     addr, minted, supply, holders, changed = _sweep(rpc, item)
-    assert (minted, supply, holders, changed) == (400.0, 1000.0, 77, True)  # not 340 "holders"
+    assert (minted, supply, holders, changed) == (400.0, 1000.0, None, True)  # no holder estimate for tokens
 
     item["total_minted"] = 400.0
     assert worker.fast_sweep_contract(rpc, item)[4] is False
@@ -205,7 +206,7 @@ def test_fast_sweep_fair_mint_is_raw_and_needs_a_cap():
     c = "0x" + "6" * 40
     rpc = _rpc_for(c, **{"totalMinted()": 1500})
     item = {"contract": c, "standard": "Fair-Mint Contract (Dispenses $WAT Token)", "total_minted": 4, "max_supply": 8000}
-    assert _sweep(rpc, item)[1:] == (1500, 8000, item.get("holders", 1), True)
+    assert _sweep(rpc, item)[1:] == (1500, 8000, None, True)
     item["max_supply"] = None  # no cap -> progress means nothing, so it is left alone
     assert _sweep(rpc, item) == (c, None, None, None, False)
 
@@ -316,9 +317,13 @@ def test_apply_dex_pair_copies_metrics_and_computes_missing_market_cap():
     assert (item["token_price_usd"], item["lp_usd"], item["market_cap"], item["buys_24h"], item["buys_1h"]) == (0.2636, 7_114_700.0, 48_450_648, 652, 40)
     assert item["pair_url"] == "https://dexscreener.com/bsc/0xpair"
     # DexScreener gave no market cap: fall back to price x supply, like before
-    item2 = {"total_minted": 1000.0}
+    item2 = {"total_minted": 1000.0, "standard": "BEP-20 Token (18 decimals)"}
     worker._apply_dex_pair(item2, {"liquidity": {"usd": 5}, "priceUsd": "2"})
     assert item2["market_cap"] == 2000.0
+    # ... but only where the supply's unit is certain (H4): an NFT / dispenser counter is not a token supply
+    item3 = {"total_minted": 1000.0, "standard": "ERC-721 (NFT Collection)"}
+    worker._apply_dex_pair(item3, {"liquidity": {"usd": 5}, "priceUsd": "2"})
+    assert item3["market_cap"] is None
 
 
 def test_apply_pancake_estimate(monkeypatch):
@@ -330,7 +335,8 @@ def test_apply_pancake_estimate(monkeypatch):
     monkeypatch.setattr(monitor, "refresh_bnb_price", lambda rpc=None, max_age=60.0: 600.0)
     item = {"contract": token}
     assert worker._apply_pancake_estimate(None, item) is True
-    assert item["lp_wbnb"] == 4.0 and item["lp_usd"] == 2400.0 and item["pair_url"].endswith(pair)
+    # liquidity is two-sided: 2 x the WBNB reserve (4 WBNB at $600 -> $4800), like DexScreener's figure
+    assert item["lp_wbnb"] == 8.0 and item["lp_usd"] == 4800.0 and item["pair_url"].endswith(pair)
     monkeypatch.setattr(monitor, "get_pair_address", lambda rpc, f, a, b: None)
     assert worker._apply_pancake_estimate(None, {"contract": token}) is False
 
@@ -443,3 +449,51 @@ def test_dexscreener_fetch_gives_up_after_repeated_429_and_does_not_retry_other_
     except urllib.error.HTTPError:
         pass
     assert len(calls) == 1
+
+
+def test_rate_limited_sweep_does_not_expire_the_batches_it_never_requested(monkeypatch):
+    """Merge of the 429 back-off (stop requesting) with stale-market expiry: records in the batches a sweep never
+    requested are unknown, not "no pair", so they must keep their market data. Only the batch that answered
+    (with no pair) may expire."""
+    import time as _t
+    import monitor
+    old = _t.time() - 7 * 3600
+    history = [{"contract": f"0x{i:040x}", "standard": "ERC-721 (NFT Collection)", "token_price_usd": 0.5,
+                "lp_usd": 2000.0, "market_source": "dexscreener", "market_updated_at": old} for i in range(1, 91)]
+    calls = []
+
+    def fetch(url):
+        calls.append(url)
+        if len(calls) >= 2:
+            raise _http_429()
+        return []  # first batch answers: DexScreener has no pair for these
+
+    monkeypatch.setattr(worker, "get_shared_history", lambda force_refresh=False: history)
+    monkeypatch.setattr(worker, "_fetch_dexscreener_pairs", fetch)
+    monkeypatch.setattr(monitor, "save_history", lambda h, delta=None: None)
+    monkeypatch.setattr(monitor, "BscRpcClient", lambda eps: object())
+    monkeypatch.setattr(monitor, "refresh_bnb_price", lambda *a, **k: 650.0)
+    monkeypatch.setattr(monitor, "evaluate_sniper_readiness", lambda it: {})
+
+    class Stop(Exception):
+        pass
+
+    def fake_sleep(s):
+        if s >= 100:
+            raise Stop()
+
+    monkeypatch.setattr(worker.time, "sleep", fake_sleep)
+    try:
+        worker.run_market_dynamics_updater_loop()
+    except Stop:
+        pass
+
+    assert len(calls) == 2                                            # stopped after the 429, as before
+    assert all(x["lp_usd"] is None and x["market_stale"] for x in history[:30])
+    assert all(x["lp_usd"] == 2000.0 and not x.get("market_stale") for x in history[30:])
+
+
+def test_unrequested_contracts_lists_the_tail_lowercased():
+    recs = [{"contract": "0xAA"}, {"contract": "0xBb"}, {"contract": None}, {"contract": "0xCC"}]
+    assert worker._unrequested_contracts(recs, 1) == {"0xbb", "0xcc"}
+    assert worker._unrequested_contracts(recs, 9) == set()
