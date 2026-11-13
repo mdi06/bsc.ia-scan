@@ -75,6 +75,15 @@ class DatabaseManager:
         self._p_fingerprints: Dict[str, str] = {}
         self._p_written_at: Dict[str, float] = {}  # contract -> when it was last durably written
         self._retry_queue: set = set()  # contracts whose last remote write failed; resent by the next upsert
+        # Bandwidth (Render's 5 GB/month cap): updates to known records wait here and go to Supabase at most once
+        # per SUPABASE_FLUSH_INTERVAL_SEC; the latest cached version of each is sent (see _select_remote_batch).
+        self._pending_remote: set = set()
+        self._last_remote_flush = time.time()
+        self._flusher_pid: Optional[int] = None
+        # Fixed, bulky fields (mint calldata, GoPlus report, ...) live in their own `static_data` column and are
+        # sent only when they change: contract -> hash of what Supabase holds. Off if the column is missing.
+        self._static_fp: Dict[str, str] = {}
+        self._static_split = os.getenv("DB_STATIC_SPLIT", "1") != "0"
         self._cache_initialized = False
         self._last_cache_time = 0.0
         self._last_synced_updated_at = 0
@@ -299,26 +308,28 @@ class DatabaseManager:
                                         return items
 
                     # 2. Only fetch delta (rows updated since last sync) or initial full load
+                    # The delta skips static_data (bulky, rarely changed): a row whose static hash differs from
+                    # the cached one gets it in a second, targeted request (see _fetch_static_data).
                     if not self._cache_initialized or not self._projects_cache or force_refresh:
                         query_path = "/rest/v1/projects?select=*&order=block.desc&limit=10000"
                     else:
-                        query_path = f"/rest/v1/projects?updated_at=gte.{self._last_synced_updated_at}&select=*&limit=10000"
+                        query_path = (f"/rest/v1/projects?updated_at=gte.{self._last_synced_updated_at}"
+                                      f"&select=contract,data,updated_at&limit=10000")
 
                     resp = client.get(query_path)
                     if resp.status_code == 200:
                         records = resp.json()
+                        need_static = [
+                            (r.get("contract") or "").lower() for r in records
+                            if self._row_needs_static(r)
+                        ]
+                        fetched_static = self._fetch_static_data(client, need_static) if need_static else {}
                         with self._cache_lock:
                             max_ts = self._last_synced_updated_at
                             for r in records:
-                                raw = r.get("data") or {}
-                                if isinstance(raw, str):
-                                    try:
-                                        raw = json.loads(raw)
-                                    except Exception:
-                                        raw = {}
-                                c = (r.get("contract") or raw.get("contract", "")).lower()
-                                if c:
-                                    raw["contract"] = c
+                                c, raw = self._record_from_row(r, fetched_static)
+                                # a queued local update is newer than what Supabase holds: keep it
+                                if c and c not in self._pending_remote:
                                     self._projects_cache[c] = raw
                                 ts = int(r.get("updated_at") or 0)
                                 if ts > max_ts:
@@ -470,6 +481,238 @@ class DatabaseManager:
     # bucketed (price, LP, volume) and market_updated_at cannot stay stale in the database forever.
     FORCE_WRITE_AFTER_SEC = float(os.getenv("DB_FORCE_WRITE_AFTER_SEC", 30 * 60))
     SUPABASE_CHUNK_SIZE = 50
+    # Updates to records Supabase already has are batched: each record is sent at most once per this interval
+    # (new drops are sent at once). 0 sends every change immediately, as before.
+    SUPABASE_FLUSH_INTERVAL_SEC = float(os.getenv("DB_SUPABASE_FLUSH_INTERVAL_SEC", 10 * 60))
+    # Bulky fields that rarely change. Written to the `static_data` column only when their content changes and
+    # left out of `data`, so the frequent market updates do not resend them (mint_calldata alone was ~65% of a
+    # record, up to 98 KB for some contracts).
+    STATIC_FIELDS = ("mint_calldata", "security", "risk_flags", "signals", "tx_hash", "market_url", "deployer")
+    STATIC_VERSION_KEY = "_static_v"
+
+    @staticmethod
+    def _row_data(r: Dict[str, Any]) -> Dict[str, Any]:
+        raw = r.get("data") or {}
+        if isinstance(raw, str):
+            try:
+                raw = json.loads(raw)
+            except Exception:
+                raw = {}
+        return raw if isinstance(raw, dict) else {}
+
+    def _row_needs_static(self, r: Dict[str, Any]) -> bool:
+        """True if a delta row (selected without static_data) carries a static hash the cache does not have."""
+        if "static_data" in r:
+            return False
+        data = self._row_data(r)
+        v = data.get(self.STATIC_VERSION_KEY)
+        if not v:
+            return False  # a full record written before the split (or with it off)
+        c = (r.get("contract") or data.get("contract") or "").lower()
+        return self._static_fp.get(c) != v
+
+    def _fetch_static_data(self, client, contracts: List[str]) -> Dict[str, Dict[str, Any]]:
+        """static_data of `contracts`, 40 per request. Missing / failed lookups are simply absent."""
+        out: Dict[str, Dict[str, Any]] = {}
+        uniq = sorted({c for c in contracts if c})
+        for i in range(0, len(uniq), 40):
+            chunk = uniq[i:i + 40]
+            in_clause = ",".join(f'"{c}"' for c in chunk)
+            try:
+                resp = client.get(f"/rest/v1/projects?select=contract,static_data&contract=in.({in_clause})")
+                if resp.status_code == 200:
+                    for row in resp.json():
+                        st = row.get("static_data")
+                        if isinstance(st, str):
+                            try:
+                                st = json.loads(st)
+                            except Exception:
+                                st = None
+                        if isinstance(st, dict):
+                            out[(row.get("contract") or "").lower()] = st
+            except Exception as e:
+                print(f"[⚠️ Supabase Read Error] static_data: {e}", flush=True)
+        return out
+
+    def _record_from_row(self, r: Dict[str, Any], fetched_static: Dict[str, Dict[str, Any]]) -> tuple:
+        """(contract, record) rebuilt from a Supabase row: `data` plus its static fields, taken from the row's
+        static_data, from a targeted fetch, or kept from the cached record when its hash is unchanged."""
+        data = dict(self._row_data(r))
+        c = (r.get("contract") or data.get("contract") or "").lower()
+        if not c:
+            return "", data
+        data["contract"] = c
+        v = data.pop(self.STATIC_VERSION_KEY, None)
+        if v is None:
+            return c, data  # full record (written before the split, or with it off)
+        static = r.get("static_data") if "static_data" in r else fetched_static.get(c)
+        if isinstance(static, str):
+            try:
+                static = json.loads(static)
+            except Exception:
+                static = None
+        if isinstance(static, dict):
+            self._static_fp[c] = v
+        else:
+            # unchanged hash (or the lookup failed): keep the static fields the cache already has
+            cached = self._projects_cache.get(c) or {}
+            static = {k: cached[k] for k in self.STATIC_FIELDS if k in cached}
+        rec = dict(static)
+        rec.update(data)
+        return c, rec
+
+    @classmethod
+    def _split_static(cls, p: Dict[str, Any]) -> tuple:
+        """(data, static, static_hash): the record without its static fields, those fields, and a short hash of
+        them. `data` carries the hash under STATIC_VERSION_KEY so a reader knows which static_data it needs."""
+        static = {k: p[k] for k in cls.STATIC_FIELDS if k in p}
+        data = {k: v for k, v in p.items() if k not in cls.STATIC_FIELDS and k != cls.STATIC_VERSION_KEY}
+        digest = hashlib.sha1(json.dumps(static, sort_keys=True, default=str).encode()).hexdigest()[:16]
+        data[cls.STATIC_VERSION_KEY] = digest
+        return data, static, digest
+
+    def _select_remote_batch(self, changed_records, pending_fp, new_contracts, mono) -> tuple:
+        """Which records to send to Supabase now, and their fingerprints. New drops always; updates to known
+        records are queued and, once SUPABASE_FLUSH_INTERVAL_SEC has passed since the last flush, sent together
+        in their latest cached version. A queued record leaves the queue only when its write succeeds."""
+        with self._cache_lock:
+            urgent = [p for p in changed_records if p["contract"].lower() in new_contracts]
+            urgent_set = {p["contract"].lower() for p in urgent}
+            for p in changed_records:
+                c = p["contract"].lower()
+                if c not in urgent_set:
+                    self._pending_remote.add(c)
+            interval = self.SUPABASE_FLUSH_INTERVAL_SEC
+            due = interval <= 0 or (mono - self._last_remote_flush) >= interval
+            to_send = list(urgent)
+            if due and self._pending_remote:
+                self._last_remote_flush = mono
+                for c in sorted(self._pending_remote - urgent_set):
+                    rec = self._projects_cache.get(c)
+                    if rec is None:
+                        self._pending_remote.discard(c)  # deleted in the meantime
+                    else:
+                        to_send.append(rec)
+            fps = {}
+            for rec in to_send:
+                c = rec["contract"].lower()
+                fps[c] = pending_fp.get(c) or self._compute_fingerprint(rec)
+            if self._pending_remote and not due:
+                self._ensure_flusher()
+        return to_send, fps
+
+    def _ensure_flusher(self) -> None:
+        """Starts (once per process) a daemon thread that flushes queued updates when they are due, so they go out
+        even when nothing else calls upsert_projects."""
+        pid = os.getpid()
+        if self._flusher_pid == pid or self.SUPABASE_FLUSH_INTERVAL_SEC <= 0:
+            return
+        self._flusher_pid = pid
+
+        def loop():
+            while True:
+                time.sleep(max(5.0, min(60.0, self.SUPABASE_FLUSH_INTERVAL_SEC / 4)))
+                try:
+                    if self._pending_remote and time.time() - self._last_remote_flush >= self.SUPABASE_FLUSH_INTERVAL_SEC:
+                        self.flush_remote()
+                except Exception as e:
+                    print(f"[⚠️ Supabase] background flush failed: {e}", flush=True)
+
+        threading.Thread(target=loop, daemon=True, name="SupabaseFlusher").start()
+
+    def flush_remote(self, force: bool = False) -> None:
+        """Sends the queued updates now if they are due (or always with force=True)."""
+        if force:
+            self._last_remote_flush = 0.0
+        self.upsert_projects([])
+
+    def _supabase_base_row(self, p: Dict[str, Any], now_ts: int) -> Dict[str, Any]:
+        return {
+            "contract": p["contract"].lower(),
+            "name": str(p.get("name", "")),
+            "symbol": str(p.get("symbol", "")),
+            "token_id": str(p.get("token_id", "")),
+            "block": int(p.get("block") or 0),
+            "progress": float(p.get("progress") or 0.0),
+            "holders": int(p.get("holders") or 0),
+            "status": str(p.get("status", "TRACKING")),
+            "risk_level": str(p.get("risk_level", "SAFE")),
+            "risk_badge": str(p.get("risk_badge", "🟢 Clean")),
+            "sniper_ready": bool(p.get("sniper_ready", False)),
+            "is_proxy_clone": bool(p.get("is_proxy_clone", False)),
+            "score": float(p.get("score") or 0.0),
+            "detected_at": str(p.get("detected_at", "")),
+            "updated_at": now_ts,
+        }
+
+    def _supabase_post(self, client, rows) -> Any:
+        # Supabase upsert requires Prefer: resolution=merge-duplicates. Columns absent from the payload (e.g.
+        # static_data on a plain update) are left as they are.
+        return client.post("/rest/v1/projects?on_conflict=contract", json=rows,
+                           headers={"Prefer": "resolution=merge-duplicates"})
+
+    def _supabase_upsert(self, records: List[Dict[str, Any]], now_ts: int, on_written) -> List[Dict[str, Any]]:
+        """Writes `records` to Supabase in chunks. Returns the records that were not written. With the static
+        split on, `data` holds the record minus STATIC_FIELDS and `static_data` is included only for records whose
+        static fields changed since Supabase last took them (PostgREST needs one key set per request, so those go
+        in a separate request). A missing static_data column switches the split off and resends in full."""
+        failed: List[Dict[str, Any]] = []
+        client = self.client
+        for i in range(0, len(records), self.SUPABASE_CHUNK_SIZE):
+            recs = records[i: i + self.SUPABASE_CHUNK_SIZE]
+            if not (HAS_HTTPX and client):
+                failed.extend(recs)
+                continue
+            try:
+                if self._static_split:
+                    with_static, plain, digests = [], [], {}
+                    for p in recs:
+                        c = p["contract"].lower()
+                        data, static, digest = self._split_static(p)
+                        row = self._supabase_base_row(p, now_ts)
+                        row["data"] = data
+                        if self._static_fp.get(c) != digest:
+                            row["static_data"] = static
+                            digests[c] = digest
+                            with_static.append((p, row))
+                        else:
+                            plain.append((p, row))
+                    split_ok = True
+                    for group in (with_static, plain):
+                        if not group:
+                            continue
+                        resp = self._supabase_post(client, [r for _, r in group])
+                        if resp.status_code in (200, 201):
+                            on_written([p for p, _ in group])
+                            for p, r in group:
+                                if "static_data" in r:
+                                    self._static_fp[p["contract"].lower()] = digests[p["contract"].lower()]
+                        elif resp.status_code == 400 and "static_data" in (resp.text or ""):
+                            print("[⚠️ Supabase] no static_data column (run supabase_migrations/002_static_data.sql); "
+                                  "writing full records instead", flush=True)
+                            self._static_split = False
+                            split_ok = False
+                            break
+                        else:
+                            failed.extend(p for p, _ in group)
+                            print(f"[⚠️ Supabase Chunk Error] HTTP {resp.status_code}: {resp.text[:120]}", flush=True)
+                    if split_ok:
+                        continue
+                rows = []
+                for p in recs:
+                    row = self._supabase_base_row(p, now_ts)
+                    row["data"] = p
+                    rows.append(row)
+                resp = self._supabase_post(client, rows)
+                if resp.status_code in (200, 201):
+                    on_written(recs)
+                else:
+                    failed.extend(recs)
+                    print(f"[⚠️ Supabase Chunk Error] HTTP {resp.status_code}: {resp.text[:120]}", flush=True)
+            except Exception as e:
+                failed.extend(recs)
+                print(f"[⚠️ Supabase Upsert Error] {e}", flush=True)
+        return failed
 
     @staticmethod
     def _sig(v: Any, digits: int = 3) -> str:
@@ -545,6 +788,8 @@ class DatabaseManager:
             f"_{sig(p.get('current_profit_usd'))}_{sig(p.get('current_multiplier'))}"
             # freshness flag: exact
             f"|{exact(p.get('market_stale'))}"
+            # the static fields (calldata, GoPlus report, ...): a change to them alone must be written too
+            f"|{DatabaseManager._split_static(p)[2]}"
         )
 
     def upsert_projects(self, projects: List[Dict[str, Any]]):
@@ -555,7 +800,8 @@ class DatabaseManager:
         - A record's fingerprint is remembered only after its write succeeded. A failed chunk leaves its
           records dirty, so the next call offers them again, and the chunks after it are still sent.
         - A record is also rewritten when its last write is older than FORCE_WRITE_AFTER_SEC."""
-        if not projects and not self._retry_queue:
+        flush_pending = self.mode == "supabase" and bool(self._pending_remote)
+        if not projects and not self._retry_queue and not flush_pending:
             return
 
         clean_records = []
@@ -566,7 +812,7 @@ class DatabaseManager:
             scrub_non_finite(p)
             clean_records.append(p)
 
-        if not clean_records and not self._retry_queue:
+        if not clean_records and not self._retry_queue and not flush_pending:
             return
 
         now_ts = int(time.time())
@@ -575,6 +821,7 @@ class DatabaseManager:
         # 1. Update in-memory cache and isolate truly modified/dirty records
         changed_records = []
         pending_fp: Dict[str, str] = {}
+        new_contracts: set = set()   # never seen by this process: a new drop, written to Supabase at once
         cache_changed = False
         with self._cache_lock:
             for p in clean_records:
@@ -585,6 +832,7 @@ class DatabaseManager:
                 if cached is None:
                     self._projects_cache[c] = dict(p)
                     cache_changed = True
+                    new_contracts.add(c)
                 elif cached is not p and any(cached.get(k) != v for k, v in p.items()):
                     cached.update(p)
                     cache_changed = True
@@ -617,69 +865,37 @@ class DatabaseManager:
                     self._last_synced_updated_at = now_ts
 
         # Bandwidth Guard: If zero projects changed, abort outbound network writes immediately
-        if not changed_records:
+        if not changed_records and not flush_pending:
             return
 
-        def mark_written(records: List[Dict[str, Any]]):
+        def mark_written(records: List[Dict[str, Any]], fps: Optional[Dict[str, str]] = None):
+            fps = pending_fp if fps is None else fps
             with self._cache_lock:
                 for rec in records:
                     c = rec["contract"].lower()
-                    self._p_fingerprints[c] = pending_fp[c]
+                    self._p_fingerprints[c] = fps.get(c) or self._compute_fingerprint(rec)
                     self._p_written_at[c] = mono
                     self._retry_queue.discard(c)
+                    self._pending_remote.discard(c)
 
-        # 2. Supabase Cloud Sync (ONLY sync truly modified records)
+        # 2. Supabase Cloud Sync. New drops go out at once; updates to known records are coalesced and sent at
+        # most once per SUPABASE_FLUSH_INTERVAL_SEC (the latest version of each), see _select_remote_batch.
         to_sqlite = changed_records
         if self.mode == "supabase":
-            failed: List[Dict[str, Any]] = []
-            client = self.client
-            for i in range(0, len(changed_records), self.SUPABASE_CHUNK_SIZE):
-                recs = changed_records[i : i + self.SUPABASE_CHUNK_SIZE]
-                if not (HAS_HTTPX and client):
-                    failed.extend(recs)
-                    continue
-                try:
-                    rows = [{
-                        "contract": p["contract"].lower(),
-                        "name": str(p.get("name", "")),
-                        "symbol": str(p.get("symbol", "")),
-                        "token_id": str(p.get("token_id", "")),
-                        "block": int(p.get("block") or 0),
-                        "progress": float(p.get("progress") or 0.0),
-                        "holders": int(p.get("holders") or 0),
-                        "status": str(p.get("status", "TRACKING")),
-                        "risk_level": str(p.get("risk_level", "SAFE")),
-                        "risk_badge": str(p.get("risk_badge", "🟢 Clean")),
-                        "sniper_ready": bool(p.get("sniper_ready", False)),
-                        "is_proxy_clone": bool(p.get("is_proxy_clone", False)),
-                        "score": float(p.get("score") or 0.0),
-                        "data": p,
-                        "detected_at": str(p.get("detected_at", "")),
-                        "updated_at": now_ts
-                    } for p in recs]
-                    # Supabase upsert requires Prefer: resolution=merge-duplicates
-                    resp = client.post(
-                        "/rest/v1/projects?on_conflict=contract",
-                        json=rows,
-                        headers={"Prefer": "resolution=merge-duplicates"}
-                    )
-                    if resp.status_code in (200, 201):
-                        mark_written(recs)
-                    else:
-                        failed.extend(recs)
-                        print(f"[⚠️ Supabase Chunk Error] HTTP {resp.status_code}: {resp.text[:120]}", flush=True)
-                except Exception as e:
-                    failed.extend(recs)
-                    print(f"[⚠️ Supabase Upsert Error] {e}", flush=True)
+            to_send, fps = self._select_remote_batch(changed_records, pending_fp, new_contracts, mono)
+            if not to_send:
+                return
+            failed = self._supabase_upsert(to_send, now_ts, lambda recs: mark_written(recs, fps))
             if not failed:
                 return
             # Only the records Supabase did not take go to the local fallback; they stay dirty (no fingerprint)
-            # so the next call offers them again.
-            print(f"[⚠️ Supabase] {len(failed)} record(s) not written; will retry on the next upsert", flush=True)
+            # so the next flush offers them again.
+            print(f"[⚠️ Supabase] {len(failed)} record(s) not written; will retry on the next flush", flush=True)
             to_sqlite = failed
             sqlite_commits_fingerprint = False
             with self._cache_lock:
                 self._retry_queue.update(p["contract"].lower() for p in failed)
+                self._pending_remote.update(p["contract"].lower() for p in failed)
         else:
             sqlite_commits_fingerprint = True
 

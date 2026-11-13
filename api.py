@@ -516,7 +516,7 @@ def get_feed(
                 "latest_block": latest_block,
                 "agent_wallets": total_agent_wallets,
                 "agent_wallets_block": agent_wallets_block,
-                "projects": delta,
+                "projects": [slim_for_list(p) for p in delta],
                 "stats": stats
             }
         )
@@ -548,10 +548,26 @@ def get_feed(
             "limit": limit,
             "has_more": (offset + limit) < target_total,
             "latest_block": latest_block,
-            "projects": paginated,
+            "projects": [slim_for_list(p) for p in paginated],
             "stats": stats
         }
     )
+
+
+# Calldata longer than this is left out of list responses (feed, top gainers): a few contracts carry up to ~98 KB
+# of it and it was ~70% of a compressed feed page. Such records get has_mint_calldata=true; the browser loads the
+# full record (/api/projects?search=<contract>) when the mint flow needs it.
+LIST_CALLDATA_MAX_CHARS = 512
+
+
+def slim_for_list(p: dict) -> dict:
+    """The record as sent in list responses: unchanged, or a copy without an oversized mint_calldata."""
+    cd = p.get("mint_calldata") if isinstance(p, dict) else None
+    if not isinstance(cd, str) or len(cd) <= LIST_CALLDATA_MAX_CHARS:
+        return p
+    out = {k: v for k, v in p.items() if k != "mint_calldata"}
+    out["has_mint_calldata"] = True
+    return out
 
 
 TOP_GAINERS_LIMIT = 50
@@ -598,7 +614,7 @@ def compute_live_top_gainers(projects, limit: int = TOP_GAINERS_LIMIT) -> list:
             "isSold": bool(info["is_sold"]),
             "isFree": bool(info["is_free"]),
             "holders": int(filters._num(d.get("holders"))),
-            "item": {k: d[k] for k in TOP_GAINER_ITEM_FIELDS if k in d},
+            "item": slim_for_list({k: d[k] for k in TOP_GAINER_ITEM_FIELDS if k in d}),
         })
     rows.sort(key=lambda r: (r["multiplier"] is not None, r["multiplier"] or 0.0, r["athProfit"]), reverse=True)
     return rows[:limit]

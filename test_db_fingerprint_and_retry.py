@@ -55,6 +55,7 @@ def mgr(tmp_path, monkeypatch):
 def sb(mgr):
     fake = FakeSupabase()
     mgr.mode = "supabase"
+    mgr.SUPABASE_FLUSH_INTERVAL_SEC = 0  # these tests are about fingerprints and retries: send every change at once
     mgr._client_instance, mgr._client_pid = fake, os.getpid()
     mgr._init_sqlite()  # the local fallback table, as on a real deploy
     return mgr, fake
