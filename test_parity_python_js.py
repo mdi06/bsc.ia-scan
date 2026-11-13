@@ -381,7 +381,7 @@ def test_overview_fallback_counts_nft_surges():
       const app = require('./app.js');
       const hot = { contract: '0x' + 'a'.repeat(40), standard: 'ERC-721 (NFT Collection)', secondary_sales_count: 6,
                     secondary_vol_bnb: 1.0 };
-      const cold = { contract: '0x' + 'b'.repeat(40), standard: 'ERC-721 (NFT Collection)', secondary_sales_count: 1 };
+      const cold = { contract: '0x' + 'b'.repeat(40), standard: 'ERC-721 (NFT Collection)', secondary_sales_count: 0 };  // any sale would count
       app.setAllDrops([hot, cold]);
       app.setGlobalStats(null);
       app.applyOverviewStatsFallback();
