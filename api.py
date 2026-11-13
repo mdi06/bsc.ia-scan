@@ -883,13 +883,6 @@ def root_handler(request: Request):
     return {"status": "ok", "service": "agent-id-backend"}
 
 
-@app.get("/bnb_agent_id_screen_studio.mp4")
-@app.get("/bnb_agent_id_screen_studio_silent.mp4")
-def redirect_heavy_videos():
-    """Redirect the 7.5 MB videos to Vercel so they don't count against Render's bandwidth."""
-    return RedirectResponse(url="https://agent-id-monitor.vercel.app/bnb_agent_id_screen_studio.mp4", status_code=302)
-
-
 # Local development only: serve the frontend files from this directory.
 workspace_dir = os.path.dirname(os.path.abspath(__file__))
 if not os.environ.get("RENDER") and os.path.exists(os.path.join(workspace_dir, "index.html")):
