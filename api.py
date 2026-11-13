@@ -363,6 +363,24 @@ def get_bnb_price():
     )
 
 
+MARKET_FIELDS = ("token_price_usd", "market_cap", "fdv", "lp_usd", "volume_24h", "price_change_24h",
+                 "buys_24h", "sells_24h", "buys_1h")
+
+
+@app.get("/api/market-data")
+def get_market_data():
+    """Latest market numbers for every tracked contract that has a price or liquidity, keyed by address.
+
+    Not filtered by the feed's exclusion lists on purpose: the frontend uses this to refresh the static
+    seeded files (seeded_smart_drops.json), which contain drops that /api/feed never returns."""
+    out = {}
+    for p in db.get_all_projects():
+        c = (p.get("contract") or "").lower()
+        if c and (p.get("token_price_usd") or p.get("lp_usd")):
+            out[c] = {k: p.get(k) for k in MARKET_FIELDS}
+    return JSONResponse(content=out, headers={"Cache-Control": "public, max-age=60"})
+
+
 @app.get("/agent_id_stats.json")
 @app.get("/data/agent_id_stats.json")
 def get_agent_id_stats_json():
