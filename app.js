@@ -809,7 +809,8 @@ function isValidTopMarketItem(item) {
   if (pStr.includes('DEX TRADED')) return false;
 
   const hasFree = Boolean(item.has_free_mint || (item.item && item.item.has_free_mint));
-  const hasCalldata = Boolean(item.mint_calldata || (item.item && item.item.mint_calldata));
+  const hasCalldata = Boolean(item.mint_calldata || item.has_mint_calldata
+    || (item.item && (item.item.mint_calldata || item.item.has_mint_calldata)));
   if (pStr.includes('TBD') && !hasFree && !hasCalldata) return false;
 
   const flUsd = Number(item.floor_price_usd || (item.item && item.item.floor_price_usd) || 0);
@@ -6134,6 +6135,24 @@ if (typeof window !== 'undefined') {
 }
 
 // Modal Inspection Dialog
+// List responses leave out oversized mint calldata (has_mint_calldata=true marks it). Loads the full record's
+// calldata into `item`; resolves true if it got one.
+async function loadFullMintCalldata(item) {
+  try {
+    const c = String(item.contract || '').toLowerCase();
+    if (!c) return false;
+    const res = await apiFetch(`/api/projects?search=${encodeURIComponent(c)}&limit=5`);
+    if (!res || !res.ok) return false;
+    const data = await res.json();
+    const full = (data.projects || []).find(p => String(p.contract || '').toLowerCase() === c);
+    if (!full || !full.mint_calldata) return false;
+    item.mint_calldata = full.mint_calldata;
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
 function openModal(item, source = 'direct') {
   const modal = document.getElementById('inspectModal');
   const content = document.getElementById('modalContent');
@@ -6141,8 +6160,16 @@ function openModal(item, source = 'direct') {
 
   currentInspectItem = item;
   setModalHash(item);
-  addRecentInspected(item);
-  setupModalTelemetry(item, source);
+  if (source !== 'calldata') {   // a redraw after the calldata arrived is not a new inspection
+    addRecentInspected(item);
+    setupModalTelemetry(item, source);
+  }
+  if (item.has_mint_calldata && !item.mint_calldata && !item._calldataRequested) {
+    item._calldataRequested = true;
+    loadFullMintCalldata(item).then(ok => {
+      if (ok && currentInspectItem === item) openModal(item, 'calldata');
+    });
+  }
 
   const std = String(item.standard || 'ERC-721');
   const isNft = std.includes('721') || std.includes('NFT');
@@ -6160,6 +6187,8 @@ function openModal(item, source = 'direct') {
   const isReady = sEval.is_ready;
   const rawCd = item.mint_calldata;
   const isRecv = !rawCd || rawCd === '0x' || rawCd === 'recv';
+  // the feed left out this record's (large) calldata and it is still loading: never mint with an empty one
+  const calldataPending = Boolean(item.has_mint_calldata && !rawCd);
   const userWallet = connectedWallet || '<YOUR_WALLET>';
   let calldata = isRecv ? '0x' : rawCd;
   if (!isRecv && calldata.startsWith('0x836a1040') && calldata.length >= 138) {
@@ -6632,10 +6661,13 @@ function openModal(item, source = 'direct') {
           </a>
         </div>
         ` : `<div class="mint-btn-container" style="margin-top: 8px;">
-          <button id="modalMintBtn" class="web3-mint-btn" onclick="trackAnalytics('mint_button_clicked', { token_symbol: '${escapeHtml(sym)}', is_free: ${isFree} }); executeWeb3Mint('${cAddr}', '${calldata}', '${valWei}', '${escapeHtml(name)}')">
+          ${calldataPending ? `<button id="modalMintBtn" class="web3-mint-btn sold-out" disabled>
+            <span class="mint-icon">⏳</span>
+            <span id="modalMintBtnText">Loading mint data…</span>
+          </button>` : `<button id="modalMintBtn" class="web3-mint-btn" onclick="trackAnalytics('mint_button_clicked', { token_symbol: '${escapeHtml(sym)}', is_free: ${isFree} }); executeWeb3Mint('${cAddr}', '${calldata}', '${valWei}', '${escapeHtml(name)}')">
             <span class="mint-icon">⚡</span>
             <span id="modalMintBtnText">${connectedWallet ? `1-Click Mint (${mintCostLabel})` : `👛 Connect Wallet & Mint (${mintCostLabel})`}</span>
-          </button>
+          </button>`}
         </div>
         <div id="modalMintStatus" class="mint-status-box" style="display: none; margin-top: 10px;"></div>`}
       `}

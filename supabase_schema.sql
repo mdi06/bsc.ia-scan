@@ -19,6 +19,9 @@ CREATE TABLE IF NOT EXISTS projects (
     is_proxy_clone BOOLEAN DEFAULT FALSE,
     score REAL DEFAULT 0.0,
     data JSONB NOT NULL DEFAULT '{}'::jsonb,
+    -- Bulky fields that rarely change (mint calldata, GoPlus report, ...); written only when they change.
+    -- db.py rebuilds a record as static_data + data. See supabase_migrations/002_static_data.sql.
+    static_data JSONB,
     detected_at TEXT,
     updated_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW())::BIGINT
 );
