@@ -67,3 +67,37 @@ def test_delete_projects_closes_connection_on_error(tmp_db, monkeypatch):
     monkeypatch.setattr(tmp_db, "_get_sqlite_connection", lambda: FakeConn())
     assert tmp_db.delete_projects(["0x" + "1" * 40]) == 0
     assert closed == [True]
+
+
+def test_market_data_includes_tokens_the_feed_excludes(tmp_db):
+    fist = "0xc9882def23bc42d53895b8361d0b1edc7570bc6a"
+    tmp_db.upsert_projects([
+        _proj(1, contract=fist, name="FistToken", symbol="FIST", token_price_usd=0.2636, market_cap=48450648.0, lp_usd=7114700.0, holders=5),
+        _proj(2, token_price_usd=2.0, lp_usd=100.0),
+        _proj(3),  # no price or liquidity: not listed
+    ])
+    client = TestClient(api.app)
+    feed_symbols = [p["symbol"] for p in client.get("/api/feed?limit=500").json()["projects"]]
+    assert "FIST" not in feed_symbols                      # the feed hides it...
+    res = client.get("/api/market-data")
+    data = res.json()
+    assert res.headers["cache-control"] == "public, max-age=60"
+    assert data[fist]["market_cap"] == 48450648.0           # ...but its market numbers are available
+    assert data[fist]["token_price_usd"] == 0.2636
+    assert f"0x{3:040x}" not in data and f"0x{2:040x}" in data
+    assert set(data[fist]) == set(api.MARKET_FIELDS) | set(api.MARKET_FRESHNESS_FIELDS)
+
+
+def test_market_data_includes_stale_records_and_is_nan_safe(tmp_db):
+    """A record the worker cleared as stale is listed (so a seeded copy of it is cleared in the browser), and a
+    non-finite value in a record does not turn the endpoint into an HTTP 500."""
+    tmp_db.upsert_projects([
+        _proj(1, token_price_usd=None, lp_usd=None, market_stale=True),
+        _proj(2, token_price_usd=2.0, lp_usd=100.0, volume_24h=float("nan")),
+    ])
+    res = TestClient(api.app).get("/api/market-data")
+    assert res.status_code == 200
+    data = res.json()
+    stale = data[f"0x{1:040x}"]
+    assert stale["market_stale"] is True and stale["token_price_usd"] is None
+    assert data[f"0x{2:040x}"]["volume_24h"] is None

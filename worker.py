@@ -16,6 +16,7 @@ import json
 import re
 import threading
 import concurrent.futures
+import urllib.error
 import urllib.request
 
 import monitor
@@ -638,12 +639,23 @@ DEXSCREENER_TOKENS_URL = "https://api.dexscreener.com/tokens/v1/bsc/"
 DEXSCREENER_PAIRS_URL = "https://api.dexscreener.com/latest/dex/pairs/bsc/"
 
 
-def _fetch_dexscreener_pairs(url: str) -> List[Dict[str, Any]]:
+def _fetch_dexscreener_pairs(url: str, attempts: int = 3) -> List[Dict[str, Any]]:
     """GET a DexScreener URL and return its list of pair objects (the API answers with either a bare list
-    or {"pairs": [...]})."""
+    or {"pairs": [...]}). On HTTP 429 it waits (the server's Retry-After, else 5s, 10s, ...) and retries."""
     req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-    with urllib.request.urlopen(req, timeout=10) as resp:
-        data = json.loads(resp.read().decode())
+    for attempt in range(1, attempts + 1):
+        try:
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                data = json.loads(resp.read().decode())
+            break
+        except urllib.error.HTTPError as e:
+            if e.code != 429 or attempt == attempts:
+                raise
+            try:
+                wait = float(e.headers.get("Retry-After")) if e.headers else 5.0 * attempt
+            except (TypeError, ValueError):
+                wait = 5.0 * attempt
+            time.sleep(min(max(wait, 1.0), 30.0))
     if isinstance(data, list):
         return data
     return data.get("pairs") or []
@@ -1047,6 +1059,11 @@ def migrate_zero_decimal_supply(item: Dict[str, Any]) -> bool:
     return True
 
 
+def _unrequested_contracts(contracts_to_check: List[Dict[str, Any]], start: int) -> set:
+    """Lower-cased contracts of the records from index `start` on: the batches a sweep never requested."""
+    return {x["contract"].lower() for x in contracts_to_check[start:] if x.get("contract")}
+
+
 def run_market_dynamics_updater_loop():
     """Every 120s, refreshes liquidity, price and volume for recent drops from DexScreener (Pancake reserves as fallback)."""
     print("[📈 Market Engine] Initializing 24/7 Market Dynamics Updater...", flush=True)
@@ -1104,7 +1121,12 @@ def run_market_dynamics_updater_loop():
                     dex_failures += 1  # best-effort: the next sweep retries
                     last_dex_error = e
                     failed_contracts.update(chunk_addrs_set)
-                time.sleep(0.5)
+                    if isinstance(e, urllib.error.HTTPError) and e.code == 429:
+                        # still rate limited after retries: stop and keep what we already have. The batches
+                        # never requested are unknown too, so their records must not expire as "no pair".
+                        failed_contracts.update(_unrequested_contracts(contracts_to_check, i + batch_size))
+                        break
+                time.sleep(1.0)
             if dex_failures:
                 print(f"[⚠️ Market Engine] DexScreener failed for {dex_failures} batch(es): {last_dex_error}", flush=True)
 

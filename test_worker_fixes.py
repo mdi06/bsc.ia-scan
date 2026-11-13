@@ -379,3 +379,107 @@ def test_market_updater_saves_dexscreener_results_before_the_slow_pancake_pass(m
     assert len(rpc_calls) == worker.PANCAKE_FALLBACK_PER_SWEEP        # capped, not all 60
     assert nft["contract"] not in [c for _, c in rpc_calls]           # NFTs are never looked up
     assert len(worker._pancake_checked_at) == worker.PANCAKE_FALLBACK_PER_SWEEP  # cooldown recorded
+
+
+def _http_429(retry_after=None):
+    import urllib.error
+    from email.message import Message
+    hdrs = Message()
+    if retry_after is not None:
+        hdrs["Retry-After"] = str(retry_after)
+    return urllib.error.HTTPError("https://x", 429, "Too Many Requests", hdrs, None)
+
+
+def test_dexscreener_fetch_retries_429_then_succeeds(monkeypatch):
+    import io, json, urllib.request
+    waits, calls = [], []
+
+    def fake_urlopen(req, timeout=0):
+        calls.append(1)
+        if len(calls) < 3:
+            raise _http_429(retry_after=2 if len(calls) == 1 else None)
+        return io.BytesIO(json.dumps([{"pairAddress": "0x1"}]).encode())
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(worker.time, "sleep", lambda s: waits.append(s))
+    assert worker._fetch_dexscreener_pairs("https://x/a") == [{"pairAddress": "0x1"}]
+    assert len(calls) == 3 and waits == [2.0, 5.0 * 2]  # Retry-After honoured, else 5s * attempt
+
+
+def test_dexscreener_fetch_gives_up_after_repeated_429_and_does_not_retry_other_errors(monkeypatch):
+    import urllib.error, urllib.request
+    calls = []
+    monkeypatch.setattr(worker.time, "sleep", lambda s: None)
+
+    def always_429(req, timeout=0):
+        calls.append(1)
+        raise _http_429()
+
+    monkeypatch.setattr(urllib.request, "urlopen", always_429)
+    try:
+        worker._fetch_dexscreener_pairs("https://x/a")
+        assert False, "should raise"
+    except urllib.error.HTTPError as e:
+        assert e.code == 429
+    assert len(calls) == 3
+
+    calls.clear()
+
+    def server_error(req, timeout=0):
+        calls.append(1)
+        raise urllib.error.HTTPError("https://x", 500, "boom", None, None)
+
+    monkeypatch.setattr(urllib.request, "urlopen", server_error)
+    try:
+        worker._fetch_dexscreener_pairs("https://x/a")
+    except urllib.error.HTTPError:
+        pass
+    assert len(calls) == 1
+
+
+def test_rate_limited_sweep_does_not_expire_the_batches_it_never_requested(monkeypatch):
+    """Merge of the 429 back-off (stop requesting) with stale-market expiry: records in the batches a sweep never
+    requested are unknown, not "no pair", so they must keep their market data. Only the batch that answered
+    (with no pair) may expire."""
+    import time as _t
+    import monitor
+    old = _t.time() - 7 * 3600
+    history = [{"contract": f"0x{i:040x}", "standard": "ERC-721 (NFT Collection)", "token_price_usd": 0.5,
+                "lp_usd": 2000.0, "market_source": "dexscreener", "market_updated_at": old} for i in range(1, 91)]
+    calls = []
+
+    def fetch(url):
+        calls.append(url)
+        if len(calls) >= 2:
+            raise _http_429()
+        return []  # first batch answers: DexScreener has no pair for these
+
+    monkeypatch.setattr(worker, "get_shared_history", lambda force_refresh=False: history)
+    monkeypatch.setattr(worker, "_fetch_dexscreener_pairs", fetch)
+    monkeypatch.setattr(monitor, "save_history", lambda h, delta=None: None)
+    monkeypatch.setattr(monitor, "BscRpcClient", lambda eps: object())
+    monkeypatch.setattr(monitor, "refresh_bnb_price", lambda *a, **k: 650.0)
+    monkeypatch.setattr(monitor, "evaluate_sniper_readiness", lambda it: {})
+
+    class Stop(Exception):
+        pass
+
+    def fake_sleep(s):
+        if s >= 100:
+            raise Stop()
+
+    monkeypatch.setattr(worker.time, "sleep", fake_sleep)
+    try:
+        worker.run_market_dynamics_updater_loop()
+    except Stop:
+        pass
+
+    assert len(calls) == 2                                            # stopped after the 429, as before
+    assert all(x["lp_usd"] is None and x["market_stale"] for x in history[:30])
+    assert all(x["lp_usd"] == 2000.0 and not x.get("market_stale") for x in history[30:])
+
+
+def test_unrequested_contracts_lists_the_tail_lowercased():
+    recs = [{"contract": "0xAA"}, {"contract": "0xBb"}, {"contract": None}, {"contract": "0xCC"}]
+    assert worker._unrequested_contracts(recs, 1) == {"0xbb", "0xcc"}
+    assert worker._unrequested_contracts(recs, 9) == set()

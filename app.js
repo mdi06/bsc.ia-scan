@@ -1160,6 +1160,48 @@ function mergeDropsIntoAllDrops(newDrops) {
   return added;
 }
 
+// The seeded files are static snapshots, so their prices and market caps go stale. Overlay the backend's
+// latest market numbers on every drop that came from them (incl. tokens /api/feed never returns).
+const MARKET_OVERLAY_FIELDS = ['token_price_usd', 'market_cap', 'fdv', 'lp_usd', 'volume_24h', 'price_change_24h', 'buys_24h', 'sells_24h', 'buys_1h'];
+
+function applyMarketOverlay(drops, market) {
+  let updated = 0;
+  drops.forEach(d => {
+    const m = market[(d.contract || '').toLowerCase()];
+    if (!m) return;
+    let changed = false;
+    // A record the worker cleared as stale: its numbers are unknown now, so the seeded ones go too.
+    const stale = Boolean(m.market_stale);
+    MARKET_OVERLAY_FIELDS.forEach(k => {
+      const v = m[k] === undefined ? null : m[k];
+      if ((stale || v !== null) && d[k] !== v) {
+        d[k] = v;
+        changed = true;
+      }
+    });
+    ['market_stale', 'market_updated_at', 'market_source'].forEach(k => {
+      if (m[k] !== undefined && m[k] !== null && d[k] !== m[k]) {
+        d[k] = m[k];
+        changed = true;
+      }
+    });
+    if (changed) updated++;
+  });
+  return updated;
+}
+
+async function refreshSeededMarketData(seededDrops) {
+  try {
+    const res = await apiFetch('/api/market-data');
+    if (!res.ok) return 0;
+    const market = await res.json();
+    const targets = allDrops.filter(d => seededDrops.has(d));
+    return applyMarketOverlay(targets, market);
+  } catch (e) {
+    return 0; // keep the seeded numbers
+  }
+}
+
 async function loadSmartDrops() {
   if (hasLoadedSmartDrops) return;
   if (isLoadingSmartDrops) {
@@ -1189,6 +1231,8 @@ async function loadSmartDrops() {
       const drops = Array.isArray(body) ? body : (body && Array.isArray(body.items) ? body.items : null);
       if (Array.isArray(drops) && drops.length > 0) {
         mergeDropsIntoAllDrops(drops);
+        const refreshed = await refreshSeededMarketData(new Set(drops));
+        if (refreshed > 0 && typeof updateDailyPulseUI === 'function') updateDailyPulseUI();
         hasLoadedSmartDrops = true;
       }
     }
@@ -9601,6 +9645,7 @@ if (typeof module !== 'undefined' && module.exports) {
     isLaunchpadDrop,
     formatCryptoPrice,
     computeItemProfit,
+    applyMarketOverlay,
     computeStats,
     openHallOfFameModal,
     openWalletModal,
