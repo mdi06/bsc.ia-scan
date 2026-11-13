@@ -18,6 +18,15 @@ import worker
 
 def main(argv=None) -> int:
     apply = "--apply" in (argv if argv is not None else sys.argv[1:])
+    # Read EVERY row or stop: a read that fails or stops short (Supabase answers at most 1000 rows per request) must
+    # not turn into "0 records need cleaning".
+    from db import db
+    try:
+        rows = db.load_all_strict()
+    except RuntimeError as exc:
+        print(f"ABORT: {exc}. Nothing was changed.")
+        return 2
+    print(f"read {len(rows)} projects ({db.mode} mode)")
     history = monitor.load_history()
     touched = []
     for item in history:
