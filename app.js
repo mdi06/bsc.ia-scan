@@ -2723,16 +2723,8 @@ function evaluateNftSurge(item, fillPrices = [], secondaryMoves = 0, userHeld = 
   const floorBnb = px.length ? Math.min(...px) : Number(item.floor_price_bnb || 0);
   const highBnb = px.length ? Math.max(...px) : Number(item.high_price_bnb || 0);
   const moves = secondaryMoves || Number(item.secondary_transfers || 0);
-  const held = userHeld || Number(item.user_balance || 0);
-
-  const prevF = prevStats ? Number(prevStats.sales_count || 0) : Number(item.prev_sales_count || 0);
-
-  let isHot = false;
-  if (held > 0) {
-    isHot = (salesCnt >= 3 && volBnb > 0) || (prevF > 0 && salesCnt >= 2 * prevF);
-  } else {
-    isHot = (salesCnt >= 5) || (volBnb >= 0.5) || (prevF > 0 && salesCnt >= 5 && salesCnt >= 2 * prevF);
-  }
+  // Any sale in the 24h window marks an active collection (same rule as evaluate_nft_surge in monitor.py).
+  const isHot = salesCnt >= 1;
 
   return {
     is_nft_surge: isHot,

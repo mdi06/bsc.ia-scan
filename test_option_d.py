@@ -91,9 +91,15 @@ class TestOptionD(unittest.TestCase):
         self.assertAlmostEqual(res_held["high_price_bnb"], 0.02, places=4)
         self.assertIn("SURGE", res_held["badge"])
 
-        # 3. Wallet-held item with only 1 sale -> NOT surge
+        # 3. A single sale is enough: any trading in the window marks an active collection
         res_held_cold = monitor.evaluate_nft_surge(nft_item, [0.01], secondary_moves=2, user_held=1)
-        self.assertFalse(res_held_cold["is_nft_surge"])
+        self.assertTrue(res_held_cold["is_nft_surge"])
+        self.assertTrue(monitor.evaluate_nft_surge(nft_item, [0.000015])["is_nft_surge"])
+        # ... and no sale at all is not, whatever was held, moved or seen before
+        res_none = monitor.evaluate_nft_surge(dict(nft_item, secondary_sales_count=9), [], secondary_moves=40,
+                                              user_held=3, prev_stats={"sales_count": 9})
+        self.assertFalse(res_none["is_nft_surge"])
+        self.assertEqual(res_none["badge"], "")
 
         # 4. Unheld item with 5 sales -> SURGE (Crowd traction)
         res_unheld_sales = monitor.evaluate_nft_surge(nft_item, [0.001, 0.001, 0.002, 0.001, 0.003], secondary_moves=15, user_held=0)
@@ -104,9 +110,9 @@ class TestOptionD(unittest.TestCase):
         res_unheld_vol = monitor.evaluate_nft_surge(nft_item, [0.65], secondary_moves=4, user_held=0)
         self.assertTrue(res_unheld_vol["is_nft_surge"])
 
-        # 6. Unheld item with 4 small sales (< 5 sales, < 0.5 BNB) -> NOT surge
+        # 6. Unheld item with 4 small sales (used to be below the 5-sale / 0.5 BNB bar) -> active
         res_unheld_sub = monitor.evaluate_nft_surge(nft_item, [0.01, 0.01, 0.01, 0.01], secondary_moves=5, user_held=0)
-        self.assertFalse(res_unheld_sub["is_nft_surge"])
+        self.assertTrue(res_unheld_sub["is_nft_surge"])
 
         # 7. 2x Volume spike vs previous check
         res_spike = monitor.evaluate_nft_surge(nft_item, [0.01]*6, secondary_moves=10, user_held=0, prev_stats={"sales_count": 3})
@@ -120,6 +126,8 @@ class TestOptionD(unittest.TestCase):
             ({"standard": "ERC-721", "is_nft": True}, [0.005, 0.005], 2, 0, None),
             ({"standard": "ERC-721", "is_nft": True}, [0.001, 0.002, 0.001, 0.003, 0.002], 20, 0, None),
             ({"standard": "ERC-721", "is_nft": True}, [0.75], 5, 0, None),
+            ({"standard": "ERC-721", "is_nft": True}, [0.000015], 0, 0, None),          # one tiny sale: active
+            ({"standard": "ERC-721", "is_nft": True}, [], 12, 3, {"sales_count": 4}),   # no sale: not active
             ({"standard": "BEP-20 Token (18 decimals)", "is_nft": False}, [0.1, 0.2, 0.3], 50, 100, None),
         ]
 

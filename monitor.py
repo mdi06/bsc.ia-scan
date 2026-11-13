@@ -88,9 +88,12 @@ T_721_BUY_FILLED = "0xd90a5c60975c6ff8eafcf02088e7b50ae5d9e156a79206ba553df1c4fb
 # Element stats cover the last 24 hours. The window is set in hours because BSC's block time has changed
 # (3s -> 0.45s): the old fixed 15,000-block window had shrunk to under two hours and was nearly always empty.
 ELEMENT_LOOKBACK_HOURS = 24.0
+NFT_ACTIVE_MIN_SALES = 1             # sales in that window that mark a collection active (is_nft_surge)
 BSC_BLOCK_TIME_FALLBACK_SEC = 0.45   # used only when the block time cannot be measured
 ELEMENT_LOG_CHUNK_BLOCKS = 10000
 ELEMENT_REORG_BLOCKS = 20            # the newest blocks are re-read every scan, never served from the cache
+ELEMENT_LOG_ATTEMPTS = 3             # tries per log chunk: public endpoints time out now and then
+ELEMENT_LOG_RETRY_SEC = 1.0
 T_TRANSFER = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
 
 # Stealth Factory & EIP-1167 / EIP-1967 Proxy Signatures (Option E)
@@ -2892,9 +2895,9 @@ def evaluate_nft_surge(
     - Calculates sales count, total volume in BNB, floor price, and high price from Element trades.
     - Considers real paid trades.
     - Checks secondary transfers (from != 0x0...0).
-    - Detects volume spike:
-      * Held in wallet (user_held > 0): sales >= 3 AND vol > 0 (or 2x spike vs previous check).
-      * Monitored collections: sales >= 5 OR vol >= 0.5 BNB (or 2x spike with >= 5 sales).
+    - Flags the collection (is_nft_surge) when it had at least one BNB sale in the window: the BSC NFT market
+      is thin enough that any trading at all marks an active collection. (The rule used to need 5 sales or
+      0.5 BNB, 3 sales for a held collection.) user_held and prev_stats no longer change the result.
     - Returns standardized evaluation dictionary.
     """
     std = str(item.get("standard") or "")
@@ -2919,13 +2922,7 @@ def evaluate_nft_surge(
             "summary": "Non-NFT Asset"
         }
 
-    prev_f = int(prev_stats.get("sales_count", 0)) if prev_stats else int(item.get("secondary_sales_count", 0) or 0)
-    
-    is_hot = False
-    if user_held > 0:
-        is_hot = (sales_cnt >= 3 and vol_bnb > 0) or (prev_f > 0 and sales_cnt >= 2 * prev_f)
-    else:
-        is_hot = (sales_cnt >= 5) or (vol_bnb >= 0.5) or (prev_f > 0 and sales_cnt >= 5 and sales_cnt >= 2 * prev_f)
+    is_hot = sales_cnt >= NFT_ACTIVE_MIN_SALES
 
     badge = f"[bold magenta]🦋 SURGE ({sales_cnt} sales)[/bold magenta]" if is_hot else ""
     badge_plain = f"🦋 SURGE ({sales_cnt} sales)" if is_hot else ""
@@ -2971,6 +2968,13 @@ def _element_fills(rpc, from_b: int, head: int, cache: Optional[Dict[str, Any]] 
         fills = [f for f in cache["fills"] if f["block"] >= from_b]
         start = cache["to_block"] + 1
 
+    def _remember(read_to: int) -> None:
+        """Caches what was read up to block `read_to`, minus the newest blocks (still open to a reorg)."""
+        settled = min(read_to, head - ELEMENT_REORG_BLOCKS)
+        if cache is not None and settled >= from_b:
+            cache.update(from_block=from_b, to_block=settled, fills=[f for f in fills if f["block"] <= settled])
+
+    last_exc: Optional[Exception] = None
     for b in range(start, head + 1, ELEMENT_LOG_CHUNK_BLOCKS):
         to_b = min(b + ELEMENT_LOG_CHUNK_BLOCKS - 1, head)
         params = {
@@ -2979,21 +2983,26 @@ def _element_fills(rpc, from_b: int, head: int, cache: Optional[Dict[str, Any]] 
             "fromBlock": hex(b),
             "toBlock": hex(to_b)
         }
-        try:
-            logs = fetch(params)
-        except Exception as exc:
+        logs = None
+        for attempt in range(ELEMENT_LOG_ATTEMPTS):
+            try:
+                logs = fetch(params)
+                break
+            except Exception as exc:
+                last_exc = exc
+                if attempt + 1 < ELEMENT_LOG_ATTEMPTS:
+                    time.sleep(ELEMENT_LOG_RETRY_SEC)
+        if logs is None:
             _log.warning("Element fill logs failed for blocks %s-%s (%s); keeping the previous secondary-market stats",
-                         b, to_b, exc)
+                         b, to_b, last_exc)
+            _remember(b - 1)      # the chunks that did answer are kept, so the next scan resumes from here
             return None
         for l in logs:
             parsed = parse_element_trade_log(l)
             if parsed and parsed["is_bnb"]:  # fills paid in another token have no BNB price: not a BNB sale
                 fills.append(parsed)
 
-    if cache is not None:
-        settled = head - ELEMENT_REORG_BLOCKS
-        if settled >= from_b:
-            cache.update(from_block=from_b, to_block=settled, fills=[f for f in fills if f["block"] <= settled])
+    _remember(head)
     return fills
 
 
