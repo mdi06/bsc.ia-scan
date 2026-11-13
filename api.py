@@ -648,7 +648,7 @@ def get_feed(
                 "latest_block": latest_block,
                 "agent_wallets": total_agent_wallets,
                 "agent_wallets_block": agent_wallets_block,
-                "projects": [slim_for_list(p) for p in delta],
+                "projects": serve_records(delta),
                 "stats": stats
             }
         )
@@ -675,7 +675,7 @@ def get_feed(
             "limit": limit,
             "has_more": (offset + limit) < target_total,
             "latest_block": latest_block,
-            "projects": [slim_for_list(p) for p in paginated],
+            "projects": serve_records(paginated),
             "stats": stats
         }
     )
@@ -695,6 +695,73 @@ def slim_for_list(p: dict) -> dict:
     out = {k: v for k, v in p.items() if k != "mint_calldata"}
     out["has_mint_calldata"] = True
     return out
+
+
+# --------------------------------------------------------------------------------- server-computed metrics
+# Several figures were computed here AND again in app.js (profit / mint cost / multiplier, sanitised market cap, the
+# secondary-market test, the excluded-asset test) and the copies drifted. The rules now live in one place per
+# language (filters.py + monitor.update_post_mint_profit_metrics, mirrored line by line by app.js; the parity test
+# keeps them equal), and list / detail responses carry the server's answer so the browser can display it:
+#
+#   server_metrics = {
+#     "excluded":   bool,          filters.is_excluded_asset
+#     "market_cap": float | None,  filters.sanitized_mcap (None = unknown / implausible, shown as "-")
+#     "secondary":  bool,          filters.is_secondary_market
+#     "profit":     {...},         monitor.update_post_mint_profit_metrics' return value (sec_usd, mint_usd, profit,
+#                                  ath_price_usd, ath_profit_usd, ath_multiplier, current_multiplier, is_sold,
+#                                  is_free); left out while the server's BNB/USD price is not live, because the
+#                                  USD amounts need it
+#   }
+#
+# The profit fields that already exist on a record (current_profit_usd, current_multiplier, ath_price_usd,
+# ath_profit_usd, ath_multiplier, mint_cost_usd, secondary_price_usd) are refreshed in the served copy with the
+# same values, as the browser's own calculation would write into the record. The stored record is never changed.
+# app.js uses server_metrics when the record carries it and calculates by itself when it does not (old cached
+# responses, the static seeded_*.json / feed_snapshot.json files, records the browser has changed).
+SERVER_METRICS_KEY = "server_metrics"
+
+
+def with_server_metrics(p: dict, bnb_price=None, bnb_live=None) -> dict:
+    """A copy of the record with `server_metrics` and the refreshed profit fields. `bnb_price` / `bnb_live` default to
+    the server's cached BNB/USD (pass them once per response so every record uses the same price)."""
+    if not isinstance(p, dict):
+        return p
+    if bnb_live is None:
+        bnb_live = monitor.bnb_price_is_live()
+    if bnb_price is None:
+        bnb_price = monitor.cached_bnb_price()
+    out = dict(p)
+    excluded = filters.is_excluded_asset(p)
+    metrics = {
+        "excluded": excluded,
+        "market_cap": filters.sanitized_mcap(p),
+        "secondary": filters.is_secondary_market(p),
+    }
+    if bnb_live and bnb_price and bnb_price > 0:
+        try:
+            info = monitor.update_post_mint_profit_metrics(out, bnb_price)
+        except Exception:
+            info = None
+        if info is not None:
+            # the unix time of a new ATH is bookkeeping for the worker, not part of what is served
+            if "ath_timestamp" in p:
+                out["ath_timestamp"] = p["ath_timestamp"]
+            else:
+                out.pop("ath_timestamp", None)
+            metrics["profit"] = {k: info[k] for k in (
+                "sec_usd", "mint_usd", "profit", "ath_price_usd", "ath_profit_usd", "ath_multiplier",
+                "current_multiplier", "is_sold", "is_free")}
+    out[SERVER_METRICS_KEY] = metrics
+    return out
+
+
+def serve_records(projects, slim: bool = True) -> list:
+    """Records as sent in responses: server-computed metrics added (the BNB/USD price is read once for the whole
+    batch) and, for list responses (`slim`), oversized calldata left out. /api/projects keeps the full record."""
+    live = monitor.bnb_price_is_live()
+    price = monitor.cached_bnb_price()
+    out = [with_server_metrics(p, price, live) for p in projects]
+    return [slim_for_list(p) for p in out] if slim else out
 
 
 TOP_GAINERS_LIMIT = 50
@@ -907,7 +974,7 @@ def get_projects(
         projs.sort(key=lambda x: int(filters._num(x.get("block"))), reverse=reverse)
 
     total = len(projs)
-    page = projs[offset: offset + limit]
+    page = serve_records(projs[offset: offset + limit], slim=False)
     return {"success": True, "total": total, "count": len(page), "offset": offset, "limit": limit, "projects": page}
 
 
