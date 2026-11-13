@@ -7,6 +7,7 @@ db.py cache, plus the static frontend in local development. It does no chain sca
 worker.py's job.
 """
 
+import bisect
 import json
 import math
 import os
@@ -312,74 +313,208 @@ def compute_pulse_24h(projects, now=None) -> dict:
     }
 
 
+def _filter_counts(projects) -> dict:
+    return {name: sum(1 for d in projects if pred(d)) for name, pred in FEED_FILTERS.items()}
+
+
+def _agent_wallet_stats():
+    """(total agent wallets, block of that count), from whichever of the local file and the database is ahead.
+    Read on every request, never cached here: the counter moves without the project data (and its content
+    version) changing."""
+    local_stats = {}
+    try:
+        local_stats = monitor.load_agent_id_stats() or {}
+    except Exception as e:
+        print(f"[⚠️ Overview Stats] local agent-id stats unavailable: {e}", flush=True)
+    cloud_stats = {}
+    try:
+        cloud_stats = db.get_agent_id_stats() or {}
+    except Exception as e:
+        print(f"[⚠️ Overview Stats] cloud agent-id stats unavailable: {e}", flush=True)
+
+    local_count = int(local_stats.get("total_created_wallets") or 0)
+    cloud_count = int(cloud_stats.get("total_created_wallets") or 0)
+    if cloud_count > local_count:
+        best_agent_stats = cloud_stats
+    elif cloud_count == local_count and int(cloud_stats.get("last_block") or 0) > int(local_stats.get("last_block") or 0):
+        best_agent_stats = cloud_stats
+    else:
+        best_agent_stats = local_stats
+
+    total_agent_wallets = int(best_agent_stats.get("total_created_wallets") or monitor.DEFAULT_AGENT_WALLET_COUNT)
+    agent_wallets_block = int(best_agent_stats.get("last_block") or 0)
+    return total_agent_wallets, agent_wallets_block
+
+
+def _overview_stats(all_projs, counts, pulse) -> dict:
+    total_agent_wallets, agent_wallets_block = _agent_wallet_stats()
+    return {
+        "total": len(all_projs),
+        "smart": counts["smart"],
+        "sniper_ready": counts["sniper_ready"],
+        "proxy": counts["proxy"],
+        "nft_surge": counts["nft_surge"],
+        "secondary": counts["secondary"],
+        "latest_block": all_projs[0].get("block") if all_projs else None,
+        "agent_wallets": total_agent_wallets,
+        "total_created_wallets": total_agent_wallets,
+        "agent_wallets_block": agent_wallets_block,
+        "pulse_24h": pulse,
+    }
+
+
+def _overview_stats_fallback(all_projs) -> dict:
+    return {
+        "total": len(all_projs) if all_projs else 0,
+        "smart": 0,
+        "sniper_ready": 0,
+        "proxy": 0,
+        "nft_surge": 0,
+        "secondary": 0,
+        "latest_block": None,
+        "agent_wallets": monitor.DEFAULT_AGENT_WALLET_COUNT,
+        "total_created_wallets": monitor.DEFAULT_AGENT_WALLET_COUNT,
+        "agent_wallets_block": 0,
+        "pulse_24h": None,
+    }
+
+
 def compute_global_overview_stats(all_projs=None) -> dict:
+    """Overview stats computed from scratch (no caching). The request handlers use the cached `_FeedSnapshot.stats`."""
     try:
         if all_projs is None:
             raw_projs = db.get_all_projects()
             all_projs = [p for p in raw_projs if isinstance(p, dict) and not is_bogus_or_synthetic_asset(p)]
         else:
             all_projs = [p for p in all_projs if isinstance(p, dict) and not is_bogus_or_synthetic_asset(p)]
-        total = len(all_projs)
-        latest_block = all_projs[0].get("block") if all_projs else None
-
-        counts = {name: sum(1 for d in all_projs if pred(d)) for name, pred in FEED_FILTERS.items()}
-        smart_count = counts["smart"]
-        sniper_ready_count = counts["sniper_ready"]
-        proxy_count = counts["proxy"]
-        nft_surge_count = counts["nft_surge"]
-        secondary_count = counts["secondary"]
-
-        local_stats = {}
-        try:
-            local_stats = monitor.load_agent_id_stats() or {}
-        except Exception as e:
-            print(f"[⚠️ Overview Stats] local agent-id stats unavailable: {e}", flush=True)
-        cloud_stats = {}
-        try:
-            cloud_stats = db.get_agent_id_stats() or {}
-        except Exception as e:
-            print(f"[⚠️ Overview Stats] cloud agent-id stats unavailable: {e}", flush=True)
-
-        local_count = int(local_stats.get("total_created_wallets") or 0)
-        cloud_count = int(cloud_stats.get("total_created_wallets") or 0)
-        if cloud_count > local_count:
-            best_agent_stats = cloud_stats
-        elif cloud_count == local_count and int(cloud_stats.get("last_block") or 0) > int(local_stats.get("last_block") or 0):
-            best_agent_stats = cloud_stats
-        else:
-            best_agent_stats = local_stats
-
-        total_agent_wallets = int(best_agent_stats.get("total_created_wallets") or monitor.DEFAULT_AGENT_WALLET_COUNT)
-        agent_wallets_block = int(best_agent_stats.get("last_block") or 0)
-
-        return {
-            "total": total,
-            "smart": smart_count,
-            "sniper_ready": sniper_ready_count,
-            "proxy": proxy_count,
-            "nft_surge": nft_surge_count,
-            "secondary": secondary_count,
-            "latest_block": latest_block,
-            "agent_wallets": total_agent_wallets,
-            "total_created_wallets": total_agent_wallets,
-            "agent_wallets_block": agent_wallets_block,
-            "pulse_24h": compute_pulse_24h(all_projs),
-        }
+        return _overview_stats(all_projs, _filter_counts(all_projs), compute_pulse_24h(all_projs))
     except Exception as e:
         print(f"[⚠️ Overview Stats Fallback Error] {e}", flush=True)
-        return {
-            "total": len(all_projs) if all_projs else 0,
-            "smart": 0,
-            "sniper_ready": 0,
-            "proxy": 0,
-            "nft_surge": 0,
-            "secondary": 0,
-            "latest_block": None,
-            "agent_wallets": monitor.DEFAULT_AGENT_WALLET_COUNT,
-            "total_created_wallets": monitor.DEFAULT_AGENT_WALLET_COUNT,
-            "agent_wallets_block": 0,
-            "pulse_24h": None,
-        }
+        return _overview_stats_fallback(all_projs)
+
+
+# ---------------------------------------------------------------------------------------------------------------
+# Per-version cache of what the read endpoints derive from the project list.
+#
+# /api/feed, /api/stats and /api/market-data used to rebuild the exclusion-filtered list, every filter count and
+# the 24h pulse on EVERY request, including the ones that end in a 304. All of it is a pure function of the
+# project list, which only changes when db.content_version() changes, so one `_FeedSnapshot` is kept per version
+# and requests in between reuse it. Only the current snapshot is held (a new version replaces it), so memory does
+# not grow.
+#
+# Two inputs do not move with the content version and are therefore NOT frozen into the snapshot:
+#   * the agent-ID wallet counter (local file + database) is read on every request, exactly as before; it is
+#     two small reads and is what makes the stats ETag follow the counter;
+#   * the 24h pulse also depends on the clock (records age out of the window), so it is recomputed once its
+#     cached value is PULSE_CACHE_TTL_SEC old. That is the same 5 s the stats/feed responses already allow
+#     browsers to cache (Cache-Control max-age=5), so the pulse can lag by at most what a client could already see.
+# ---------------------------------------------------------------------------------------------------------------
+PULSE_CACHE_TTL_SEC = 5.0
+
+
+class _FeedSnapshot:
+    """Everything derived from one project list (one content version). Treat the lists it hands out as read-only."""
+
+    def __init__(self, database, version: int, raw: list):
+        self.database = database          # strong reference: the key compares identity, so an id can never be reused
+        self.version = version
+        self.raw_len = len(raw)
+        self.raw = raw                    # unfiltered, for /api/market-data
+        self.projects = [p for p in raw if not is_bogus_or_synthetic_asset(p)]
+        try:
+            self.counts = _filter_counts(self.projects)
+        except Exception as e:             # same outcome as compute_global_overview_stats: the stats fall back
+            print(f"[⚠️ Overview Stats Fallback Error] {e}", flush=True)
+            self.counts = None
+        self._lock = threading.Lock()
+        self._by_filter: Dict[str, list] = {}
+        self._int_blocks = None           # (-block for each project) when the list is block-descending, else False
+        self._pulse = None
+        self._pulse_at = 0.0
+        self._market_body = None
+
+    def matches(self, database, version: int, raw_len: int) -> bool:
+        # raw_len is a cheap guard for callers (tests, stubs) that swap the list without bumping the version
+        return self.database is database and self.version == version and self.raw_len == raw_len
+
+    def filtered(self, name):
+        """Projects for `?filter=name`, built on first use; the unfiltered list for no / an unknown filter."""
+        predicate = FEED_FILTERS.get(name)
+        if not predicate:
+            return self.projects
+        with self._lock:
+            out = self._by_filter.get(name)
+            if out is None:
+                out = [d for d in self.projects if predicate(d)]
+                if name == "secondary":
+                    out.sort(key=lambda x: get_sanitized_mcap(x) or 0.0, reverse=True)
+                self._by_filter[name] = out
+            return out
+
+    def newer_than(self, since_block: int) -> list:
+        """Projects with int(block) > since_block, in list order."""
+        with self._lock:
+            if self._int_blocks is None:
+                blocks = [-int(p.get("block") or 0) for p in self.projects]
+                ascending = all(blocks[i] <= blocks[i + 1] for i in range(len(blocks) - 1))
+                self._int_blocks = blocks if ascending else False
+            neg_blocks = self._int_blocks
+        if neg_blocks is False:           # not sorted by block (should not happen): the plain scan
+            return [p for p in self.projects if int(p.get("block") or 0) > since_block]
+        return self.projects[:bisect.bisect_left(neg_blocks, -since_block)]
+
+    def pulse(self):
+        with self._lock:
+            now = time.monotonic()
+            if self._pulse is None or now - self._pulse_at >= PULSE_CACHE_TTL_SEC:
+                self._pulse = compute_pulse_24h(self.projects)
+                self._pulse_at = now
+            return self._pulse
+
+    def stats(self) -> dict:
+        """Same dict compute_global_overview_stats builds, from the cached counts; a new dict on every call."""
+        try:
+            return _overview_stats(self.projects, self.counts, self.pulse())
+        except Exception as e:
+            print(f"[⚠️ Overview Stats Fallback Error] {e}", flush=True)
+            return _overview_stats_fallback(self.projects)
+
+    def market_body(self) -> bytes:
+        """Encoded /api/market-data body (identical to what SafeJSONResponse renders)."""
+        with self._lock:
+            if self._market_body is None:
+                out = {}
+                for p in self.raw:
+                    c = (p.get("contract") or "").lower()
+                    if c and (p.get("token_price_usd") or p.get("lp_usd") or p.get("market_stale")):
+                        out[c] = {k: p.get(k) for k in MARKET_FIELDS + MARKET_FRESHNESS_FIELDS}
+                self._market_body = SafeJSONResponse(content=out).body
+            return self._market_body
+
+
+_snapshot_lock = threading.Lock()
+_current_snapshot: Optional[_FeedSnapshot] = None
+
+
+def _load_snapshot():
+    """(snapshot, content_version) for the project list the database serves right now.
+
+    The version is read before and after get_all_projects(): if it moved in between (the call refreshed the cache,
+    or a write landed), the list may belong to either version, so the snapshot is built for this request only and
+    not kept. The next request then caches normally."""
+    global _current_snapshot
+    database = db
+    v_before = database.content_version()
+    raw = database.get_all_projects()
+    version = database.content_version()   # read after the (possibly refreshing) load: the ETag follows the data served
+    with _snapshot_lock:
+        snap = _current_snapshot
+        if snap is not None and snap.matches(database, version, len(raw)):
+            return snap, version
+        snap = _FeedSnapshot(database, version, raw)
+        if v_before == version:
+            _current_snapshot = snap
+        return snap, version
 
 
 # Main route: /api/stats. /api/overview and /api/summary are aliases kept for external clients.
@@ -388,10 +523,11 @@ def compute_global_overview_stats(all_projs=None) -> dict:
 @app.get("/api/summary")
 def get_overview_stats(request: Request):
     """Summary counts for the overview header, with ETag/304 support."""
-    stats = compute_global_overview_stats()
+    snapshot, content_version = _load_snapshot()
+    stats = snapshot.stats()
     pulse = stats.get("pulse_24h") or {}
     pulse_tag = f'{pulse.get("new_drops")}.{pulse.get("graduated")}.{round(pulse.get("dex_volume_usd") or 0)}.{pulse.get("smart_inflows")}.{pulse.get("threats_blocked")}'
-    stats_etag = f'"v{db.content_version()}-{stats["total"]}-{stats["agent_wallets"]}-{stats.get("agent_wallets_block")}-{stats.get("latest_block")}-{pulse_tag}"'
+    stats_etag = f'"v{content_version}-{stats["total"]}-{stats["agent_wallets"]}-{stats.get("agent_wallets_block")}-{stats.get("latest_block")}-{pulse_tag}"'
     client_etag = request.headers.get("if-none-match")
     if _etag_matches(client_etag, stats_etag):
         return Response(status_code=304, headers={"ETag": stats_etag, "Cache-Control": "public, max-age=5"})
@@ -435,12 +571,9 @@ def get_market_data():
     Not filtered by the feed's exclusion lists on purpose: the frontend uses this to refresh the static
     seeded files (seeded_smart_drops.json), which contain drops that /api/feed never returns. Stale
     contracts are included so a seeded drop does not keep its frozen numbers once the live record is cleared."""
-    out = {}
-    for p in db.get_all_projects():
-        c = (p.get("contract") or "").lower()
-        if c and (p.get("token_price_usd") or p.get("lp_usd") or p.get("market_stale")):
-            out[c] = {k: p.get(k) for k in MARKET_FIELDS + MARKET_FRESHNESS_FIELDS}
-    return SafeJSONResponse(content=out, headers={"Cache-Control": "public, max-age=60"})
+    snapshot, _ = _load_snapshot()
+    return Response(content=snapshot.market_body(), media_type="application/json",
+                    headers={"Cache-Control": "public, max-age=60"})
 
 
 @app.get("/agent_id_stats.json")
@@ -468,21 +601,20 @@ def get_feed(
 
     Returns 304 / empty payloads when the client is up to date, to save bandwidth.
     """
-    raw_projs = db.get_all_projects()
-    content_version = db.content_version()   # read after the (possibly refreshing) load: the ETag follows the data served
-    all_projs = [p for p in raw_projs if not is_bogus_or_synthetic_asset(p)]
+    snapshot, content_version = _load_snapshot()
+    all_projs = snapshot.projects
     total = len(all_projs)
     latest_block = all_projs[0].get("block") if all_projs else None
 
-    # Filter counts are computed here so the frontend doesn't need every drop just to show them.
-    stats = compute_global_overview_stats(all_projs)
+    # Filter counts are computed once per content version so the frontend doesn't need every drop just to show them.
+    stats = snapshot.stats()
     total_agent_wallets = stats["agent_wallets"]
     agent_wallets_block = stats.get("agent_wallets_block", 0)
 
     client_etag = request.headers.get("if-none-match")
 
     if since_block is not None:
-        delta = [p for p in all_projs if int(p.get("block") or 0) > since_block]
+        delta = snapshot.newer_than(since_block)
 
         if not delta:
             delta_etag = f'"v{content_version}-{total}-{total_agent_wallets}-delta-{since_block}"'
@@ -521,12 +653,7 @@ def get_feed(
             }
         )
 
-    target_list = all_projs
-    predicate = FEED_FILTERS.get(filter)
-    if predicate:
-        target_list = [d for d in all_projs if predicate(d)]
-        if filter == "secondary":
-            target_list.sort(key=lambda x: get_sanitized_mcap(x) or 0.0, reverse=True)
+    target_list = snapshot.filtered(filter)
 
     target_total = len(target_list)
     paginated = target_list[offset : offset + limit]
