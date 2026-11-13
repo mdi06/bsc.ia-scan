@@ -212,3 +212,53 @@ def test_agent_id_stats_persistence_and_etag(tmp_path):
 
 
 
+
+
+def _delta_history():
+    return [
+        {"contract": "0x1111111111111111111111111111111111111111", "name": "Delta Test 1", "block": 100},
+        {"contract": "0x2222222222222222222222222222222222222222", "name": "Delta Test 2", "block": 101},
+    ]
+
+
+class _FakeDb:
+    def __init__(self):
+        self.upserts = []
+
+    def upsert_projects(self, projects):
+        self.upserts.append(list(projects))
+        return len(projects)
+
+
+def test_save_history_delta_does_not_write_history_file_by_default(tmp_path, monkeypatch):
+    import monitor
+    import db as db_module
+    hist_file = tmp_path / "test_history.json"
+    fake = _FakeDb()
+    monkeypatch.setattr(monitor, "HISTORY_FILE", str(hist_file))
+    monkeypatch.setattr(db_module, "db", fake)
+    monkeypatch.delenv("WRITE_HISTORY_FILE", raising=False)
+
+    hist = _delta_history()
+    monitor.save_history(hist, delta=hist[0])
+
+    assert not hist_file.exists()
+    assert not (tmp_path / "test_history.json.tmp").exists()
+    assert fake.upserts == [[hist[0]]]  # the database upsert path is unchanged: only the delta is sent
+
+
+def test_save_history_writes_history_file_when_enabled(tmp_path, monkeypatch):
+    import json
+    import monitor
+    import db as db_module
+    hist_file = tmp_path / "test_history.json"
+    fake = _FakeDb()
+    monkeypatch.setattr(monitor, "HISTORY_FILE", str(hist_file))
+    monkeypatch.setattr(db_module, "db", fake)
+    monkeypatch.setenv("WRITE_HISTORY_FILE", "1")
+
+    hist = _delta_history()
+    monitor.save_history(hist, delta=hist[0])
+
+    assert [x["contract"] for x in json.loads(hist_file.read_text())] == [x["contract"] for x in hist]
+    assert fake.upserts == [[hist[0]]]

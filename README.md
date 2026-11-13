@@ -36,10 +36,10 @@ pip install -r requirements.txt
 Launches an interactive TUI dashboard. Navigate through detected drops, view full on-chain metrics, and trigger instant snipes:
 ```bash
 # Explore and navigate existing tracked projects:
-python3 monitor.py explore
+python3 tui.py explore
 
 # Or run the live block-by-block listener with interactive dashboard:
-python3 monitor.py live
+python3 tui.py live
 ```
 
 #### ⌨️ Interactive Controls:
@@ -75,13 +75,13 @@ In the Web UI, you can fully rearrange the filter tabs/pills (`ALL`, `LAUNCHPAD`
 Scans recent blocks on BSC across ~5,000 verified smart agent wallets (curated by @OGlamozda) to detect early mints, insider accumulation, and alpha trends before they hit secondary markets:
 ```bash
 # Scan recent 200 blocks (~10 minutes of BSC history):
-python3 monitor.py scan-wallets
+python3 tui.py scan-wallets
 
 # Scan custom block depth (e.g. last 500 blocks / ~25 minutes):
-python3 monitor.py scan-wallets --blocks 500
+python3 tui.py scan-wallets --blocks 500
 
 # Sync / refresh tracked wallet registry from Google Sheets:
-python3 monitor.py sync-wallets
+python3 tui.py sync-wallets
 ```
 
 #### What It Detects:
@@ -93,27 +93,27 @@ python3 monitor.py sync-wallets
 ### 3. View Wallet Portfolio & Holdings
 Check your wallet's NFT & token balances across all tracked contracts directly via CLI:
 ```bash
-python3 monitor.py holdings
+python3 tui.py holdings
 # or alias:
-python3 monitor.py my-nfts
+python3 tui.py my-nfts
 ```
 
 ### 4. Refresh Metrics via CLI
 Updates on-chain state for all tracked projects directly from the terminal:
 ```bash
-python3 monitor.py refresh
+python3 tui.py refresh
 ```
 
 ### 5. View Snapshot Table
 Prints the current table of tracked projects without launching the live block listener:
 ```bash
-python3 monitor.py list
+python3 tui.py list
 ```
 
 ### 6. Deep-Inspect Any Contract Address
 Reverse-engineers any contract, calculating DEX liquidity, implied token price, mint velocity, and interest score:
 ```bash
-python3 monitor.py inspect <contract_address>
+python3 tui.py inspect <contract_address>
 ```
 
 ### 7. 👛 Web3 "Connect Wallet" & Live Portfolio Sync (Web Application)
