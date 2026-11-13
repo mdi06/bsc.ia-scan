@@ -60,6 +60,38 @@ def test_record_without_market_data_is_not_flagged():
     assert "market_stale" not in item
 
 
+def _fresh_discovery_drop(standard):
+    """The shape _process_smart_money_candidate / _process_registry_candidate give a just-found drop."""
+    return {"contract": "0x" + "ab" * 20, "standard": standard, "total_minted": 12, "score": 10,
+            "lp_usd": 0, "lp_wbnb": 0, "token_price_usd": 0, "holders": 1, "buys_24h": 1, "buys_1h": 1,
+            "sells_24h": 0, "volume_24h": 0.0, "mint_price_str": "FREE"}
+
+
+def test_fresh_discovered_nft_is_not_flagged_stale_on_first_sweep():
+    """Regression: discovery's placeholder counts (buys_24h = buys_1h = 1) and no market_updated_at made every
+    new pre-market drop expire on its first sweep, so the table showed "⚠ stale" and "—" instead of "Fair Mint"."""
+    item = _fresh_discovery_drop("ERC-721 NFT")
+    assert worker._expire_stale_market(item, time.time()) is False
+    assert "market_stale" not in item
+    assert item["buys_24h"] == 1 and item["buys_1h"] == 1
+
+
+def test_fresh_discovered_token_is_not_flagged_stale_through_a_sweep(monkeypatch):
+    item = _fresh_discovery_drop("BEP-20 Token (18 decimals)")
+    changed, _, no_pair, _ = worker._apply_market_sweep([item], {}, time.time())
+    assert no_pair == [item]
+    assert worker._expire_stale_market(item, time.time()) is False
+    assert not item.get("market_stale")
+
+
+def test_counts_written_by_a_market_source_still_expire():
+    """Counts alone count as market data once a market source wrote them."""
+    item = {"contract": "0x" + "cd" * 20, "lp_usd": 0, "token_price_usd": None, "buys_24h": 7, "sells_24h": 2,
+            "market_source": "dexscreener", "market_updated_at": time.time() - 7 * HOUR}
+    assert worker._expire_stale_market(item, time.time(), max_age=6 * HOUR) is True
+    assert item["buys_24h"] is None and item["market_stale"] is True
+
+
 def test_sweep_with_empty_dexscreener_answer_ends_with_lp_none(monkeypatch):
     """AVESAKE: DexScreener answers {"pairs": null}; after the age limit the record is cleared, rescored, saved."""
     item = _stale_avesake(age_h=7)

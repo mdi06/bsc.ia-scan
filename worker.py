@@ -694,8 +694,18 @@ def _next_stale_slice(stale_items: List[Dict[str, Any]]) -> List[Dict[str, Any]]
     return doubled[start:start + n]
 
 
+STALE_COUNT_FIELDS = ("buys_24h", "sells_24h", "buys_1h")
+# Fields only a market source (DexScreener / the Pancake pool) can have set.
+MARKET_VALUE_FIELDS = tuple(f for f in STALE_CLEARED_FIELDS if f not in STALE_COUNT_FIELDS)
+
+
 def _has_market_data(item: Dict[str, Any]) -> bool:
-    return any(item.get(f) for f in STALE_CLEARED_FIELDS)
+    """True if the record shows numbers that came from a market source. Counts alone do not count unless a
+    market source wrote them: discovery seeds a fresh drop with holders/buys_24h/buys_1h = 1 and no
+    market_updated_at, which must not make a just-found, pre-market drop look stale on its first sweep."""
+    if any(item.get(f) for f in MARKET_VALUE_FIELDS):
+        return True
+    return bool(item.get("market_source")) and any(item.get(f) for f in STALE_COUNT_FIELDS)
 
 
 def _mark_market_fresh(item: Dict[str, Any], source: str, now: Optional[float] = None) -> None:
