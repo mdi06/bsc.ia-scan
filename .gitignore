@@ -9,10 +9,7 @@ __pycache__/
 .vercel
 node_modules/
 *.mp4
-video_assets/*.wav
-video_assets/*.mp4
-video_assets/*.jpg
-video_assets/*.png
+video_assets/
 
 data/
 *.db
