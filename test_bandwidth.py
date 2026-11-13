@@ -48,7 +48,7 @@ class FakePostgrest:
             cur.update(copy.deepcopy(r))   # merge-duplicates: columns not sent are left as they are
         return Resp(201)
 
-    def get(self, path, headers=None):
+    def get(self, path, headers=None, timeout=None):
         self.gets.append(path)
         rows = list(self.rows.values())
         if "select=updated_at&order=updated_at.desc&limit=1" in path:
