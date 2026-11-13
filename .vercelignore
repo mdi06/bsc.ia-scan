@@ -6,6 +6,7 @@ data/*.db*
 video_assets/
 render.yaml
 requirements.txt
+requirements-cli.txt
 scratch/
 test_*.py
 test_*.js
