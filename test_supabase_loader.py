@@ -26,6 +26,8 @@ class FakeSupabase:
         self.cap = cap
         self.requests = []
         self.down = False
+        self.timeouts = []
+        self.raise_n = 0                       # the next N requests time out
         self.fail_range_start_from = None      # fail any page starting at or after this offset
         self.rows = {}
         for i in range(n):
@@ -38,8 +40,12 @@ class FakeSupabase:
         self.rows[c]["data"].update(fields)
         self.rows[c]["updated_at"] = max(r["updated_at"] for r in self.rows.values()) + 1
 
-    def get(self, path, headers=None):
+    def get(self, path, headers=None, timeout=None):
         headers = headers or {}
+        self.timeouts.append(timeout)
+        if self.raise_n > 0:
+            self.raise_n -= 1
+            raise TimeoutError("The read operation timed out")
         self.requests.append((path, dict(headers)))
         if self.down:
             return Resp(500, [])
@@ -55,6 +61,8 @@ class FakeSupabase:
             rows.sort(key=lambda r: (r["updated_at"], r["contract"]))
         elif order.startswith("block.desc"):
             rows.sort(key=lambda r: (-r["block"], r["contract"]))
+        elif order.startswith("contract.asc"):
+            rows.sort(key=lambda r: r["contract"])
         total = len(rows)
         start, end = 0, total - 1
         if headers.get("Range"):
@@ -94,6 +102,7 @@ def make(tmp_path, monkeypatch):
         monkeypatch.setenv("SUPABASE_KEY", "k")
         m = DatabaseManager(db_path=str(tmp_path / "t.db"))
         assert m.mode == "supabase"
+        m._page_retry_sleep = lambda s: None
         fake = FakeSupabase(n, cap)
         m._client_instance, m._client_pid = fake, os.getpid()
         return m, fake
@@ -110,7 +119,7 @@ def test_full_load_reads_past_the_server_row_cap(make):
     items = m.get_all_projects()
     assert len(items) == 2500                                   # was 1000: the rest of the table was invisible
     ranges = [h["Range"] for _, h in fake.requests if "Range" in h]
-    assert ranges == ["0-999", "1000-1999", "2000-2999"]
+    assert ranges == ["0-499", "500-999", "1000-1499", "1500-1999", "2000-2499"]
 
 
 def test_a_server_cap_below_the_page_size_is_still_read_to_the_end(make):
@@ -171,6 +180,7 @@ def test_cold_start_outage_serves_the_snapshot_then_recovers_with_a_full_load(ma
     first = m.get_all_projects()
     assert len(first) == 3 and m._cache_initialized is False     # served, but not trusted as a loaded cache
     fake.down = False
+    m._load_failed_until = 0.0                                   # cooldown over
     got = by_contract(m.get_all_projects())
     assert got[f"0x{1:040x}"]["market_cap"] == 1001.0 and m._cache_initialized is True
 
@@ -217,3 +227,51 @@ def test_cleanup_scripts_abort_instead_of_reporting_zero_records(script, monkeyp
     assert mod.main([]) == 2
     out = capsys.readouterr().out
     assert "ABORT" in out and "8233" in out and "record(s)" not in out
+
+
+# ------------------------------------------------------------------------------------------------ timeouts / retries
+def test_a_page_that_times_out_is_retried_and_the_load_completes(make):
+    m, fake = make(n=1200)
+    fake.raise_n = 2                                            # the first page times out twice, then answers
+    assert len(m.get_all_projects()) == 1200
+    assert m._cache_initialized is True
+
+
+def test_reads_use_a_longer_timeout_than_the_shared_clients_default(make):
+    m, fake = make(n=600)
+    m.get_all_projects()
+    assert fake.timeouts and all(t is not None and t >= 30 for t in fake.timeouts)
+
+
+def test_the_full_load_is_ordered_by_the_primary_key(make):
+    m, fake = make(n=10)
+    m.get_all_projects()
+    assert any("order=contract.asc" in path for path, _ in fake.requests)
+
+
+def test_a_failed_full_load_is_not_retried_by_every_request(make):
+    snap = [{"contract": f"0x{i:040x}", "name": f"S{i}", "block": 1000 + i} for i in range(3)]
+    m, fake = make(n=3000, history=snap)
+    fake.raise_n = 10_000                                       # the database times out on everything
+    for _ in range(5):
+        assert len(m.get_all_projects()) == 3                   # the snapshot is served...
+    assert len(fake.timeouts) == m.SUPABASE_PAGE_ATTEMPTS     # ...after ONE load attempt, not five
+    fake.raise_n = 0
+    m._load_failed_until = 0.0
+    assert len(m.get_all_projects()) == 3000                    # and it recovers once the cooldown is over
+
+
+def test_concurrent_requests_share_one_full_load(make):
+    import threading, time as _t
+    m, fake = make(n=1500)
+    orig = fake.get
+    def slow(path, headers=None, timeout=None):
+        _t.sleep(0.05)
+        return orig(path, headers, timeout)
+    fake.get = slow
+    out = []
+    ts = [threading.Thread(target=lambda: out.append(len(m.get_all_projects()))) for _ in range(6)]
+    [t.start() for t in ts]; [t.join() for t in ts]
+    assert out == [1500] * 6
+    full_loads = [h for _, h in fake.requests if h.get("Range", "").startswith("0-")]
+    assert len(full_loads) == 1
