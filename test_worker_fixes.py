@@ -375,6 +375,20 @@ def test_market_updater_saves_dexscreener_results_before_the_slow_pancake_pass(m
     assert len(worker._pancake_checked_at) == worker.PANCAKE_FALLBACK_PER_SWEEP  # cooldown recorded
 
 
+def test_sniper_alerts_are_one_line_each_and_capped(capsys):
+    items = [{"name": f"N{i}", "contract": f"0x{i:040x}", "total_minted": 874, "max_supply": 1261,
+              "sniper_badge": "🎯 Snipe Ready", "rating": "⚡ MODERATE"} for i in range(8)]
+    worker._print_sniper_alerts(items)
+    lines = capsys.readouterr().out.strip().split("\n")
+    assert len(lines) == worker.MAX_SNIPER_ALERT_LINES + 1          # 5 alerts + 1 summary, no blank lines
+    assert lines[0] == ("[🎯 HIGH-PRIORITY SNIPER ALERT] N0 (0x" + "0" * 40 + ") | Progress: 874/1261 | "
+                        "Status: 🎯 Snipe Ready | Rating: ⚡ MODERATE")
+    assert "+3 more" in lines[-1]
+
+    worker._print_sniper_alerts(items[:2])
+    assert len(capsys.readouterr().out.strip().split("\n")) == 2    # under the cap: just the alerts
+
+
 def _http_429(retry_after=None):
     import urllib.error
     from email.message import Message
