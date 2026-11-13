@@ -10,3 +10,9 @@ scratch/
 test_*.py
 test_*.js
 .env*
+
+# Backend-only data: never needed by the browser. history.json alone is 14 MB (1.1 MB brotli) and was publicly downloadable.
+history.json
+smart_wallets.json
+user_favorites.json
+*.mp4

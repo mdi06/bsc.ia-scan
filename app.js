@@ -8584,14 +8584,13 @@ async function fetchDrops() {
     // Initialize 4-second real-time delta polling for instant updates
     startDeltaPolling();
 
-    // Preload all historical smart drops in the background so followed & activity views are instant
-    setTimeout(() => {
-      loadSmartDrops().then(() => {
-        if (activeFilter === 'FOLLOWED' || searchQuery.trim() || activeTab === 'SMART') {
-          renderTable();
-        }
-      });
-    }, 100);
+    // Historical smart drops (seeded_smart_drops.json, ~220 KB compressed) are NOT preloaded: every entry point that
+    // needs them (Smart tab, Followed / More Filters, search, wallet activity, ?filter=followed) awaits
+    // loadSmartDrops() itself. Only visitors who open those views pay for the download, unless the URL deep-links
+    // straight into one of them.
+    if (activeFilter === 'FOLLOWED' || activeFilter === 'SMART' || activeTab === 'SMART' || searchQuery.trim()) {
+      loadSmartDrops().then(() => renderTable());
+    }
 
     // Preload all historical secondary market runners across entire database
     setTimeout(() => {

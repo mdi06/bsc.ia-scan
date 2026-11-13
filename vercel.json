@@ -7,6 +7,26 @@
       "destination": "/$1"
     }
   ],
+  "headers": [
+    {
+      "source": "/seeded_(.*)\\.json",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=3600, stale-while-revalidate=86400" }
+      ]
+    },
+    {
+      "source": "/feed_snapshot.json",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=300, stale-while-revalidate=3600" }
+      ]
+    },
+    {
+      "source": "/(.*)\\.(png|jpg|jpeg|svg|ico|webp)",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=86400, stale-while-revalidate=604800" }
+      ]
+    }
+  ],
   "builds": [
     {
       "src": "*",
