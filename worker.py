@@ -1214,6 +1214,10 @@ ELEMENT_SURGE_FIELDS = (
 )
 
 
+# Element fills already read, kept between sweeps so each one only fetches the new blocks (see monitor._element_fills).
+_element_fill_cache: Dict[str, Any] = {}
+
+
 def _sweep_element_nft_once(rpc, history) -> List[Dict[str, Any]]:
     """Updates NFT drops in `history` with Element secondary-market stats (sales, volume, floor, surge flag)
     read from on-chain Element fills. Returns the items that changed.
@@ -1232,7 +1236,7 @@ def _sweep_element_nft_once(rpc, history) -> List[Dict[str, Any]]:
         return []
 
     work = [dict(x) for x in nft_contracts]
-    results = monitor.scan_element_nft_volume(rpc, work)
+    results = monitor.scan_element_nft_volume(rpc, work, fill_cache=_element_fill_cache)
 
     changed_items = []
     with history_lock:
@@ -1257,7 +1261,7 @@ def _sweep_element_nft_once(rpc, history) -> List[Dict[str, Any]]:
 
 
 def run_element_nft_volume_sweeper_loop():
-    """Every 60s, refreshes Element Market secondary stats (sales, volume, floor, surge) for NFT drops."""
+    """Every 60s, refreshes Element Market secondary stats (24h sales, volume, floor, surge) for NFT drops."""
     print("[💎 Element NFT Sweeper] Initializing 24/7 Element Market Sweeper...", flush=True)
     time.sleep(7)
     rpc = monitor.BscRpcClient(monitor.RPC_ENDPOINTS)
