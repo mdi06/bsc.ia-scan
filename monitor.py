@@ -3909,11 +3909,14 @@ def save_history(history: List[Dict[str, Any]], delta: Optional[Any] = None):
         except Exception as exc:
             _log.debug("database upsert failed: %s", exc)
 
-        # 2. Maintain history.json for backwards compatibility / local file inspection (compact minified)
-        tmp_file = HISTORY_FILE + ".tmp"
-        with open(tmp_file, "w", encoding="utf-8") as f:
-            json.dump(final_list, f, separators=(',', ':'))
-        os.replace(tmp_file, HISTORY_FILE)
+        # 2. Optional: write the whole list to history.json (compact minified) for local inspection and the terminal
+        # tool. Opt-in, because it serialises ~14 MB on every save; the database is the source of truth. Read at call
+        # time so it can be switched on without a restart (and by tests).
+        if os.environ.get("WRITE_HISTORY_FILE", "").strip() == "1":
+            tmp_file = HISTORY_FILE + ".tmp"
+            with open(tmp_file, "w", encoding="utf-8") as f:
+                json.dump(final_list, f, separators=(',', ':'))
+            os.replace(tmp_file, HISTORY_FILE)
     except Exception as exc:
         _log.debug("could not save history: %s", exc)
 
