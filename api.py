@@ -1073,14 +1073,40 @@ def root_handler(request: Request):
     workspace_dir = os.path.dirname(os.path.abspath(__file__))
     index_path = os.path.join(workspace_dir, "index.html")
     if os.path.exists(index_path):
-        return FileResponse(index_path)
+        # no-cache, like the assets next to it: without it a browser reuses an old copy of the page for hours
+        return FileResponse(index_path, headers={"Cache-Control": "no-cache"})
     return {"status": "ok", "service": "agent-id-backend"}
 
 
 # Local development only: serve the frontend files from this directory.
 workspace_dir = os.path.dirname(os.path.abspath(__file__))
+
+# The frontend files index.html asks for by relative URL (<script src="app.js">, fetch('seeded_smart_drops.json'), ...).
+# "/" serves index.html here, so these must also answer at the root, the way Vercel serves them. An explicit list, not
+# a mount of the whole directory: nothing else in the workspace (source, databases, history.json) is exposed by it.
+LOCAL_FRONTEND_FILES = (
+    "app.js", "style.css", "icon.svg", "og-preview.png", "thumbnail-square.png", "feed_snapshot.json",
+    "seeded_smart_drops.json", "seeded_smart_hunters.json", "seeded_top_gainers.json",
+)
+
+
+def _local_frontend_route(filename: str):
+    path = os.path.join(workspace_dir, filename)
+
+    def serve():
+        if not os.path.isfile(path):
+            return JSONResponse({"detail": "Not Found"}, status_code=404)
+        # no-cache: always revalidate, so edits show up on reload during development
+        return FileResponse(path, headers={"Cache-Control": "no-cache"})
+
+    serve.__name__ = "local_frontend_" + filename.replace(".", "_").replace("-", "_")
+    return serve
+
+
 if not os.environ.get("RENDER") and os.path.exists(os.path.join(workspace_dir, "index.html")):
     app.mount("/static", StaticFiles(directory=workspace_dir, html=False), name="static")
+    for _name in LOCAL_FRONTEND_FILES:
+        app.add_api_route("/" + _name, _local_frontend_route(_name), methods=["GET"], include_in_schema=False)
 
 
 def start_api(port=8080):
