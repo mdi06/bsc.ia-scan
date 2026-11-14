@@ -31,10 +31,20 @@
   <meta name="twitter:description" content="Autonomous on-chain radar detecting 175,842+ Binance agentic wallets, stealth Block 0 fair-mints, and secondary DEX breakout multipliers.">
   <meta name="twitter:image" content="https://agent-id-monitor.vercel.app/og-preview.png?v=4">
 
-  <!-- Fonts: Inter & JetBrains Mono with Asian Glyphs -->
+  <!-- Fonts. Inter and JetBrains Mono: every weight requested here is used (style.css, index.html, app.js markup).
+       Noto Sans SC only supplies Chinese glyphs in token names, so it loads without blocking render (media="print"
+       swapped to "all" on load); until it arrives CJK text uses the system fallback in --font-sans. 500 and 700 cover
+       the weights names render at (400-800) through normal font matching. -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link
-    href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700;800&family=Noto+Sans+SC:wght@500;700;900&display=swap"
+    href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700;800&display=swap"
     rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@500;700&display=swap" rel="stylesheet"
+    media="print" onload="this.media='all'">
+  <noscript>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@500;700&display=swap" rel="stylesheet">
+  </noscript>
 
   <link rel="stylesheet" href="style.css">
   <link rel="icon" type="image/svg+xml" href="icon.svg">
