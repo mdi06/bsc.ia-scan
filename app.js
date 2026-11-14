@@ -112,23 +112,11 @@ const BACKEND_URL = (typeof window !== 'undefined' && (window.location.hostname 
   ? ''
   : 'https://bsc-ia-scan.onrender.com';
 
-// Tries the configured backend first, then the same origin. Returns the first ok response, else the
-// last response received; throws only if every attempt failed at the network level.
+// Calls the backend (BACKEND_URL is '' on localhost, so that is the local API there). No same-origin retry: in
+// production the page is served by Vercel, which has no /api, so a second attempt could only 404 and add console noise.
+// Callers all handle a non-ok response and a thrown network error.
 async function apiFetch(path, options) {
-  const bases = BACKEND_URL ? [BACKEND_URL, ''] : [''];
-  let lastRes = null;
-  let lastErr = null;
-  for (const base of bases) {
-    try {
-      const res = await fetch(base + path, options);
-      if (res.ok) return res;
-      lastRes = res;
-    } catch (e) {
-      lastErr = e;
-    }
-  }
-  if (lastRes) return lastRes;
-  throw lastErr;
+  return fetch(BACKEND_URL + path, options);
 }
 
 // Live BNB/USD from the backend. Keeps the previous value if the lookup fails, and redraws the table when the
@@ -2303,11 +2291,11 @@ async function fetchOverviewStats(isRetry = false) {
   if (isFetchingOverviewStats && !isRetry) return false;
   isFetchingOverviewStats = true;
 
+  // Backend first (BACKEND_URL is '' on localhost, i.e. the local API), then the bundled stats files. No same-origin
+  // /api/* attempts: on Vercel those can only 404.
   const candidateEndpoints = [
     `${BACKEND_URL}/api/stats`,
     `${BACKEND_URL}/api/overview`,
-    `/api/stats`,
-    `/api/overview`,
     `agent_id_stats.json`,
     `data/agent_id_stats.json`
   ];
