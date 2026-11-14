@@ -4465,11 +4465,17 @@ const remoteSearchCache = new Map(); // lowercased query -> array of projects ([
 let remoteSearchTimer = null;
 let remoteSearchInFlight = null;
 
+// A lookup is worth making (and the dropdown shows a "searching" state) for queries of 4+ characters that have not
+// been looked up yet, in a browser that can fetch.
+function isRemoteSearchPending(q) {
+  const key = String(q || '').trim().toLowerCase();
+  return typeof fetch !== 'undefined' && key.length >= 4 && !remoteSearchCache.has(key);
+}
+
 function scheduleRemoteSearch(q) {
   const key = String(q || '').trim().toLowerCase();
   clearTimeout(remoteSearchTimer);
-  if (key.length < 4 || remoteSearchCache.has(key) || remoteSearchInFlight === key) return;
-  if (typeof fetch === 'undefined') return;
+  if (!isRemoteSearchPending(key) || remoteSearchInFlight === key) return;
   remoteSearchTimer = setTimeout(async () => {
     remoteSearchInFlight = key;
     try {
@@ -4482,9 +4488,17 @@ function scheduleRemoteSearch(q) {
     } finally {
       remoteSearchInFlight = null;
     }
+    // Measures how often the fallback rescues a search the loaded feed could not answer.
+    trackAnalytics('token_search_remote', {
+      query: key,
+      result_count: remoteSearchCache.get(key).length,
+      is_address: /^0x[0-9a-f]{4,}$/i.test(key)
+    });
+    // Re-render for the query that is still on screen, with results or, if there are none, the empty state
+    // (replacing the "searching" state either way).
     const input = document.getElementById('searchInput');
     const current = input ? String(input.value || '').trim().toLowerCase() : '';
-    if (current === key && remoteSearchCache.get(key).length > 0 && isSearchDropdownOpen()) renderSearchDropdown(input.value);
+    if (current === key && isSearchDropdownOpen()) renderSearchDropdown(input.value);
   }, 400);
 }
 
@@ -4590,6 +4604,19 @@ function renderSearchDropdown(query) {
     } else {
       scheduleRemoteSearch(q);
     }
+  }
+
+  // Nothing loaded matches and the backend lookup is still to come: say so instead of showing a dead-end.
+  if (searchDropdownResults.length === 0 && isRemoteSearchPending(q)) {
+    dropdown.innerHTML = `
+      <div class="search-dropdown-empty search-dropdown-searching" role="status" aria-live="polite">
+        <div class="search-empty-icon">⏳</div>
+        <div class="search-empty-title">Searching all drops for "<strong>${escapeHtml(q)}</strong>"…</div>
+        <div class="search-empty-desc">Not in the loaded feed yet. Checking the full database.</div>
+      </div>
+    `;
+    dropdown.style.display = 'block';
+    return;
   }
 
   if (searchDropdownResults.length === 0) {
@@ -6251,6 +6278,44 @@ async function loadFullMintCalldata(item) {
   }
 }
 
+// Pinned "Mint / Snipe" shortcut at the bottom of the token modal. Replay analysis: only ~17% of sessions that opened a
+// token reached the Mint action / Sniper CLI sections far down the modal. The bar jumps straight there (and is tracked),
+// then hides itself while either target section is on screen.
+let _modalShortcutObserver = null;
+
+function jumpToModalSection(name, sym, isFree, isDexTraded, soldOut) {
+  trackAnalytics('modal_shortcut_clicked', {
+    target: name,
+    token_symbol: sym,
+    is_free: Boolean(isFree),
+    is_dex_traded: Boolean(isDexTraded),
+    sold_out: Boolean(soldOut)
+  });
+  const content = document.getElementById('modalContent');
+  const el = content && typeof content.querySelector === 'function' && content.querySelector(`[data-modal-section="${name}"]`);
+  if (!el || typeof el.scrollIntoView !== 'function') return;
+  const reduceMotion = typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  el.scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'start' });
+}
+
+function setupModalShortcut() {
+  if (_modalShortcutObserver) {
+    _modalShortcutObserver.disconnect();
+    _modalShortcutObserver = null;
+  }
+  const content = document.getElementById('modalContent');
+  if (!content || typeof content.querySelector !== 'function' || typeof IntersectionObserver === 'undefined') return;
+  const bar = content.querySelector('#modalShortcutBar');
+  if (!bar) return;
+  const targets = content.querySelectorAll('[data-modal-section="mint_action"], [data-modal-section="sniper_cli"]');
+  const onScreen = new Set();
+  _modalShortcutObserver = new IntersectionObserver(entries => {
+    entries.forEach(e => { if (e.isIntersecting) onScreen.add(e.target); else onScreen.delete(e.target); });
+    bar.classList.toggle('is-hidden', onScreen.size > 0);
+  }, { root: content, threshold: 0.15 });
+  targets.forEach(t => _modalShortcutObserver.observe(t));
+}
+
 function openModal(item, source = 'direct') {
   const modal = document.getElementById('inspectModal');
   const content = document.getElementById('modalContent');
@@ -6831,9 +6896,17 @@ function openModal(item, source = 'direct') {
         <button class="copy-btn" onclick="copyDonationAddress(this, 'inspect_modal')">Copy Address</button>
       </div>
     </div>
+
+    <div class="modal-shortcut-bar" id="modalShortcutBar">
+      <button type="button" class="modal-shortcut-btn"
+        onclick="jumpToModalSection('${(!isSoldOut && !isDexTraded) ? 'mint_action' : 'sniper_cli'}', '${escapeHtml(sym)}', ${isFree}, ${isDexTraded}, ${isSoldOut})">
+        ${(!isSoldOut && !isDexTraded) ? (isFree ? '⚡ Free Mint / Snipe' : '⚡ Mint / Snipe') : '⚡ Sniper CLI'} <span aria-hidden="true">↓</span>
+      </button>
+    </div>
   `;
 
   content.scrollTop = 0;
+  setupModalShortcut();
   if (typeof modal.showModal === 'function') modal.showModal();
   else modal.setAttribute('open', '');
 }
