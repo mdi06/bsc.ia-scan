@@ -169,3 +169,9 @@ The web app paints `feed_snapshot.json` first and falls back to it while the Ren
 python3 scripts/refresh_snapshot.py
 ```
 It fetches `/api/feed?limit=150` from the production backend (`--base http://localhost:8080` for a local one) and writes the `projects` array to `feed_snapshot.json`. Commit the updated file with the deploy.
+
+### Frontend build and caching
+Vercel runs `npm run build` (`scripts/build.js`) and serves `dist/`: `app.js` and `style.css` are minified with esbuild and written as content-hashed `assets/app.<hash>.js` / `assets/style.<hash>.css`, which `dist/index.html` loads. `vercel.json` caches `/assets/*` for a year (`immutable`) and keeps `index.html` revalidating, so each deploy is picked up on the next page load. `package.json` pins Node 24 for that build. Local development (`start_local.sh` / `server.py`) serves the unminified root files and needs no build. To check a build locally:
+```bash
+npm run build && npm run check:minified
+```
