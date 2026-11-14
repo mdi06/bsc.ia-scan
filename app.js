@@ -4514,6 +4514,36 @@ if (typeof window !== 'undefined') {
 let searchDropdownResults = [];
 let searchDropdownSelectedIndex = -1;
 
+// Server-side fallback for the dropdown. The in-memory feed is only a subset of all drops, and replay analysis showed
+// visitors pasting contract addresses / tickers that were not loaded and hitting a dead-end "No agentic projects" state.
+// One lookup per distinct query (cached), debounced, and ignored if the user has typed on since.
+const remoteSearchCache = new Map(); // lowercased query -> array of projects ([] = looked up, nothing found)
+let remoteSearchTimer = null;
+let remoteSearchInFlight = null;
+
+function scheduleRemoteSearch(q) {
+  const key = String(q || '').trim().toLowerCase();
+  clearTimeout(remoteSearchTimer);
+  if (key.length < 4 || remoteSearchCache.has(key) || remoteSearchInFlight === key) return;
+  if (typeof fetch === 'undefined') return;
+  remoteSearchTimer = setTimeout(async () => {
+    remoteSearchInFlight = key;
+    try {
+      const url = (typeof BACKEND_URL !== 'undefined' ? BACKEND_URL : '') + `/api/projects?limit=7&search=${encodeURIComponent(key)}`;
+      const res = await fetch(url);
+      const data = res.ok ? await res.json() : null;
+      remoteSearchCache.set(key, data && Array.isArray(data.projects) ? data.projects.slice(0, 7) : []);
+    } catch (_) {
+      remoteSearchCache.set(key, []);
+    } finally {
+      remoteSearchInFlight = null;
+    }
+    const input = document.getElementById('searchInput');
+    const current = input ? String(input.value || '').trim().toLowerCase() : '';
+    if (current === key && remoteSearchCache.get(key).length > 0 && isSearchDropdownOpen()) renderSearchDropdown(input.value);
+  }, 400);
+}
+
 function highlightSearchMatch(text, query) {
   if (!text) return '';
   const escapedText = escapeHtml(String(text));
@@ -4608,6 +4638,15 @@ function renderSearchDropdown(query) {
 
   searchDropdownResults = getMatchingDrops(q, 7);
   searchDropdownSelectedIndex = -1;
+
+  if (searchDropdownResults.length === 0) {
+    const remote = remoteSearchCache.get(q.toLowerCase());
+    if (remote && remote.length > 0) {
+      searchDropdownResults = remote;
+    } else {
+      scheduleRemoteSearch(q);
+    }
+  }
 
   if (searchDropdownResults.length === 0) {
     dropdown.innerHTML = `
@@ -9539,10 +9578,15 @@ async function init() {
         const qClean = String(searchQuery || '').trim();
         if (qClean.length >= 2) {
           searchDebounceTimer = setTimeout(() => {
+            // result_count / is_address make failed searches (esp. pasted contract addresses) measurable.
+            let resultCount = null;
+            try { resultCount = getFilteredDrops().length; } catch (_) { /* analytics must never throw */ }
             trackAnalytics('token_searched', {
               query: qClean,
               active_filter: activeFilter,
-              active_tab: activeTab
+              active_tab: activeTab,
+              result_count: resultCount,
+              is_address: /^0x[0-9a-f]{4,}$/i.test(qClean)
             });
           }, 650);
         }
