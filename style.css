@@ -2545,12 +2545,71 @@ a.inspect-btn:hover {
 }
 
 .modal-content {
-  padding: 20px 24px;
+  --modal-pad-y: 20px;
+  --modal-pad-x: 24px;
+  padding: var(--modal-pad-y) var(--modal-pad-x);
   max-height: 85vh;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: 16px;
+}
+
+/* Pinned "Mint / Snipe" shortcut at the bottom edge of the token modal (see jumpToModalSection in app.js).
+   Sticky at the bottom of the scrolling .modal-content; the negative margins/offset cancel the content padding so the
+   bar sits flush with the edge. It hides (without changing layout) while the Mint / Sniper CLI section is on screen. */
+.modal-shortcut-bar {
+  position: sticky;
+  bottom: calc(var(--modal-pad-y) * -1);
+  z-index: 5;
+  margin: 0 calc(var(--modal-pad-x) * -1) calc(var(--modal-pad-y) * -1);
+  padding: 22px var(--modal-pad-x) 12px;
+  display: flex;
+  justify-content: center;
+  background: linear-gradient(to top, #0a0c14 55%, rgba(10, 12, 20, 0));
+  pointer-events: none;
+  transition: opacity 0.15s ease, transform 0.15s ease;
+}
+
+.modal-shortcut-bar.is-hidden {
+  opacity: 0;
+  transform: translateY(8px);
+  visibility: hidden;
+}
+
+.modal-shortcut-btn {
+  pointer-events: auto;
+  background: var(--color-cyan);
+  border: 1px solid var(--color-cyan);
+  color: #000;
+  padding: 10px 18px;
+  min-height: 40px;
+  border-radius: 999px;
+  font-family: var(--font-sans);
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.3px;
+  cursor: pointer;
+  box-shadow: 0 4px 18px rgba(0, 240, 255, 0.35), 0 0 0 1px rgba(0, 0, 0, 0.4);
+  touch-action: manipulation;
+  transition: box-shadow 0.15s ease, transform 0.15s ease;
+}
+
+.modal-shortcut-btn:hover {
+  box-shadow: 0 6px 22px rgba(0, 240, 255, 0.5), 0 0 0 1px rgba(0, 0, 0, 0.4);
+  transform: translateY(-1px);
+}
+
+.modal-shortcut-btn:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .modal-shortcut-bar,
+  .modal-shortcut-btn {
+    transition: none;
+  }
 }
 
 .modal-header {
@@ -4334,7 +4393,9 @@ a.inspect-btn:hover {
   }
 
   .modal-content {
-    padding: 14px 14px;
+    --modal-pad-y: 14px;
+    --modal-pad-x: 14px;
+    padding: var(--modal-pad-y) var(--modal-pad-x);
     gap: 12px;
     max-height: 85vh;
   }
