@@ -39,17 +39,43 @@
   <link rel="stylesheet" href="style.css">
   <link rel="icon" type="image/svg+xml" href="icon.svg">
   <link rel="apple-touch-icon" href="/thumbnail-square.png">
-  <!-- Google Web Analytics & Speed Insights -->
-  <script async src="https://www.googletagmanager.com/gtm.js?id=GTM-WK4N2DD6"></script>
+  <!-- Third-party analytics load after the page is interactive (window load, then an idle callback), so they do not
+       compete with first paint. Everything queued before that (dataLayer pushes, posthog.* calls, window.va events)
+       is replayed once the libraries load. -->
+  <script>
+    window.loadWhenIdle = function (fn) {
+      var run = function () {
+        if ('requestIdleCallback' in window) window.requestIdleCallback(fn, { timeout: 3000 });
+        else setTimeout(fn, 1);
+      };
+      if (document.readyState === 'complete') run();
+      else window.addEventListener('load', run, { once: true });
+    };
+    window.loadScriptWhenIdle = function (src) {
+      window.loadWhenIdle(function () {
+        var s = document.createElement('script');
+        s.async = true;
+        s.src = src;
+        document.head.appendChild(s);
+      });
+    };
+  </script>
+
+  <!-- Google Tag Manager: dataLayer is queued now, gtm.js loads when idle -->
   <script>
     window.dataLayer = window.dataLayer || [];
     function gtag() { dataLayer.push(arguments); }
     gtag('js', new Date());
+    window.loadScriptWhenIdle('https://www.googletagmanager.com/gtm.js?id=GTM-WK4N2DD6');
   </script>
 
-  <!-- PostHog Analytics & Session Replay -->
+  <!-- PostHog Analytics & Session Replay. The stub below defines posthog.capture/identify/... immediately and queues
+       the calls; the library (array.js) is appended when idle and replays the queue. -->
   <script>
-    !function(t,e){var o,n,p,r;e.__SV||(window.posthog=e,e._i=[],e.init=function(i,s,a){function g(t,e){var o=e.split(".");2==o.length&&(t=t[o[0]],e=o[1]),t[e]=function(){t.push([e].concat(Array.prototype.slice.call(arguments,0)))}}(p=t.createElement("script")).type="text/javascript",p.async=!0,p.src=s.api_host+"/static/array.js",(r=t.getElementsByTagName("script")[0]).parentNode.insertBefore(p,r);var u=e;for(void 0!==a?u=e[a]=[]:a="posthog",u.people=u.people||[],u.toString=function(t){var e="posthog";return"posthog"!==a&&(e+="."+a),t||(e+=" (stub)"),e},u.people.toString=function(){return u.toString(1)+".people (stub)"},o="capture identify alias people.set people.set_once set_config register register_once unregister opt_out_capturing has_opted_out_capturing opt_in_capturing reset isFeatureEnabled onFeatureFlags getFeatureFlag getFeatureFlagPayload reloadFeatureFlags group updateEarlyAccessFeatureEnrollment getEarlyAccessFeatures getActiveMatchingSurveys getSurveys onSessionId".split(" "),n=0;n<o.length;n++)g(u,o[n]);e._i.push([i,s,a])},e.__SV=1)}(document,window.posthog||[]);
+    // Share of (non-developer) browser sessions that get session replay. The roll happens once per browser session
+    // (sessionStorage), so reloads and page changes within a session keep the same decision.
+    var POSTHOG_REPLAY_SAMPLE_RATE = 0.10;
+    !function(t,e){var o,n,p,r;e.__SV||(window.posthog=e,e._i=[],e.init=function(i,s,a){function g(t,e){var o=e.split(".");2==o.length&&(t=t[o[0]],e=o[1]),t[e]=function(){t.push([e].concat(Array.prototype.slice.call(arguments,0)))}}(p=t.createElement("script")).type="text/javascript",p.async=!0,p.src=s.api_host+"/static/array.js",window.loadWhenIdle(function(){document.head.appendChild(p)});var u=e;for(void 0!==a?u=e[a]=[]:a="posthog",u.people=u.people||[],u.toString=function(t){var e="posthog";return"posthog"!==a&&(e+="."+a),t||(e+=" (stub)"),e},u.people.toString=function(){return u.toString(1)+".people (stub)"},o="capture identify alias people.set people.set_once set_config register register_once unregister opt_out_capturing has_opted_out_capturing opt_in_capturing reset isFeatureEnabled onFeatureFlags getFeatureFlag getFeatureFlagPayload reloadFeatureFlags group updateEarlyAccessFeatureEnrollment getEarlyAccessFeatures getActiveMatchingSurveys getSurveys onSessionId".split(" "),n=0;n<o.length;n++)g(u,o[n]);e._i.push([i,s,a])},e.__SV=1)}(document,window.posthog||[]);
 
     // 🛡️ Automatic Developer & Internal Traffic Exclusion
     var isLocalDev = Boolean(
@@ -75,12 +101,24 @@
     }
     window.isDevOptedOut = isDevOptedOut;
 
+    var isReplaySampled = false;
+    try {
+      var replayRoll = sessionStorage.getItem('posthog_replay_sampled');
+      if (replayRoll !== '1' && replayRoll !== '0') {
+        replayRoll = Math.random() < POSTHOG_REPLAY_SAMPLE_RATE ? '1' : '0';
+        sessionStorage.setItem('posthog_replay_sampled', replayRoll);
+      }
+      isReplaySampled = replayRoll === '1';
+    } catch (_) {
+      isReplaySampled = Math.random() < POSTHOG_REPLAY_SAMPLE_RATE;
+    }
+
     posthog.init('phc_BzxueVZ45SH7ZUEnNNHoyRS9NrsFhUapvGtQ2PoWGdmH', {
       api_host: 'https://eu.i.posthog.com',
       person_profiles: 'identified_only',
       capture_pageview: !isDevOptedOut,
       capture_pageleave: !isDevOptedOut,
-      disable_session_recording: isDevOptedOut,
+      disable_session_recording: isDevOptedOut || !isReplaySampled,
       loaded: function(ph) {
         if (isDevOptedOut) {
           ph.opt_out_capturing();
