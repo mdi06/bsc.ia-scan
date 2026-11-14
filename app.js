@@ -8286,7 +8286,25 @@ if (typeof window !== 'undefined') {
 }
 
 // Fetch Latest BSC Block via Public RPC (with fallback)
+// Latest-block poll (public BSC RPCs + syncLiveAgentWalletsOnChain). Like the delta feed poll it skips hidden
+// tabs: the interval is stopped on visibilitychange -> hidden and restarted (after one immediate poll) on return.
+const BLOCK_POLL_INTERVAL_MS = 10000;
+let blockPollTimer = null;
+function startBlockPolling() {
+  if (blockPollTimer) clearInterval(blockPollTimer);
+  blockPollTimer = null;
+  if (typeof document !== 'undefined' && document.hidden) return;
+  blockPollTimer = setInterval(pollLatestBlock, BLOCK_POLL_INTERVAL_MS);
+}
+function stopBlockPolling() {
+  if (blockPollTimer) {
+    clearInterval(blockPollTimer);
+    blockPollTimer = null;
+  }
+}
+
 async function pollLatestBlock() {
+  if (typeof document !== 'undefined' && document.hidden) return;
   for (const endpoint of BSC_PUBLIC_RPCS) {
     try {
       const res = await fetch(endpoint, {
@@ -8450,11 +8468,14 @@ if (typeof document !== 'undefined') {
         clearInterval(deltaPollTimer);
         deltaPollTimer = null;
       }
+      stopBlockPolling();
       if (ticker) ticker.style.animationPlayState = 'paused';
     } else {
       if (ticker) ticker.style.animationPlayState = 'running';
       pollDeltaFeed();
       startDeltaPolling();
+      pollLatestBlock();
+      startBlockPolling();
     }
   });
 }
@@ -9767,7 +9788,7 @@ async function init() {
 
     // Poll latest block
     pollLatestBlock();
-    setInterval(pollLatestBlock, 10000);
+    startBlockPolling();
 
     refreshBnbPrice();
     setInterval(refreshBnbPrice, 60000);
