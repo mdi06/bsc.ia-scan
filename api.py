@@ -432,6 +432,7 @@ class _FeedSnapshot:
         self._pulse = None
         self._pulse_at = 0.0
         self._market_body = None
+        self._top_gainers = None          # (bnb price it was computed with, rows)
 
     def matches(self, database, version: int, raw_len: int) -> bool:
         # raw_len is a cheap guard for callers (tests, stubs) that swap the list without bumping the version
@@ -478,6 +479,18 @@ class _FeedSnapshot:
         except Exception as e:
             print(f"[⚠️ Overview Stats Fallback Error] {e}", flush=True)
             return _overview_stats_fallback(self.projects)
+
+    def top_gainers(self, bnb_price_usd: float) -> list:
+        """compute_live_top_gainers(raw) for this content version, recomputed only when the BNB/USD price it
+        depends on has changed (the price itself refreshes at most once per monitor.BNB_PRICE_TTL_SEC)."""
+        with self._lock:
+            cached = self._top_gainers
+        if cached is not None and cached[0] == bnb_price_usd:
+            return cached[1]
+        rows = compute_live_top_gainers(self.raw)   # ~30 ms on ~3k records: done outside the lock
+        with self._lock:
+            self._top_gainers = (bnb_price_usd, rows)
+        return rows
 
     def market_body(self) -> bytes:
         """Encoded /api/market-data body (identical to what SafeJSONResponse renders)."""
@@ -826,12 +839,53 @@ def _seed_as_of(path: str):
         return None
 
 
+# Parsed seed files and their encoded responses, cached by (mtime_ns, size): seeded_smart_drops.json alone is
+# 2.4 MB and was re-read and re-parsed on every request (~120 ms for /api/smart-drops). Replacing the file on
+# disk changes its mtime/size, so the next request picks it up.
+_seed_cache: Dict[str, tuple] = {}         # name -> (stat key, data, as_of)
+_seed_body_cache: Dict[tuple, tuple] = {}  # (name, variant) -> (stat key, encoded body)
+_seed_cache_lock = threading.Lock()
+
+
+def _seed_stat_key(path: str):
+    try:
+        st = os.stat(path)
+    except OSError:
+        return None
+    return (st.st_mtime_ns, st.st_size)
+
+
 def _load_seed(name: str):
+    """(parsed JSON, as_of) for a seed file, or (None, None) if it does not exist. Treat the data as read-only."""
     path = _seed_file(name)
-    if not os.path.exists(path):
+    key = _seed_stat_key(path)
+    if key is None:
         return None, None
+    with _seed_cache_lock:
+        hit = _seed_cache.get(name)
+    if hit is not None and hit[0] == key:
+        return hit[1], hit[2]
     with open(path, "r") as f:
-        return json.load(f), _seed_as_of(path)
+        data = json.load(f)
+    as_of = _seed_as_of(path)
+    with _seed_cache_lock:
+        _seed_cache[name] = (key, data, as_of)
+    return data, as_of
+
+
+def _seed_body(name: str, variant: str, build) -> bytes:
+    """Encoded JSON body of build(data, as_of) for a seed file, cached until the file changes."""
+    key = _seed_stat_key(_seed_file(name))
+    with _seed_cache_lock:
+        hit = _seed_body_cache.get((name, variant))
+    if key is not None and hit is not None and hit[0] == key:
+        return hit[1]
+    data, as_of = _load_seed(name)
+    body = SafeJSONResponse(content=build(data or [], as_of)).body
+    if key is not None:
+        with _seed_cache_lock:
+            _seed_body_cache[(name, variant)] = (key, body)
+    return body
 
 
 @app.get("/api/top-gainers")
@@ -841,8 +895,9 @@ def get_top_gainers():
     Falls back to seeded_top_gainers.json only when no record qualifies yet; that response says so
     (`seeded: true`, `as_of` = the file's date) so the UI can label it."""
     try:
-        monitor.refresh_bnb_price()
-        live = compute_live_top_gainers(db.get_all_projects())
+        price = monitor.refresh_bnb_price()   # rate-limited: at most one RPC lookup per BNB_PRICE_TTL_SEC
+        snapshot, _ = _load_snapshot()
+        live = snapshot.top_gainers(price)    # cached per content version and BNB price
     except Exception as e:
         print(f"[⚠️ Top Gainers] live computation failed: {e}", flush=True)
         live = []
@@ -862,11 +917,11 @@ def get_smart_hunters():
     """Smart-wallet hunters and win rates. Not computed live yet: served from seeded_smart_hunters.json and
     labelled as a seed (`seeded: true`, `as_of`). `items` and the older `hunters` key carry the same list."""
     try:
-        data, as_of = _load_seed("seeded_smart_hunters.json")
+        body = _seed_body("seeded_smart_hunters.json", "wrapped", lambda data, as_of: {
+            "success": True, "count": len(data), "seeded": True, "as_of": as_of, "items": data, "hunters": data})
     except Exception as e:
         return {"success": False, "error": str(e), "hunters": [], "items": [], "seeded": True, "as_of": None}
-    data = data or []
-    return {"success": True, "count": len(data), "seeded": True, "as_of": as_of, "items": data, "hunters": data}
+    return Response(content=body, media_type="application/json")
 
 
 @app.get("/api/smart-drops")
@@ -874,16 +929,14 @@ def get_smart_drops(shape: Optional[str] = Query(None)):
     """Historical smart-money drops. Not computed live yet: served from seeded_smart_drops.json, wrapped as
     {seeded: true, as_of, items}. `?shape=array` returns the old bare JSON array (compatibility path)."""
     try:
-        data, as_of = _load_seed("seeded_smart_drops.json")
+        if shape == "array":
+            body = _seed_body("seeded_smart_drops.json", "array", lambda data, as_of: data)
+        else:
+            body = _seed_body("seeded_smart_drops.json", "wrapped", lambda data, as_of: {
+                "success": True, "count": len(data), "seeded": True, "as_of": as_of, "items": data, "drops": data})
     except Exception as e:
         return SafeJSONResponse({"success": False, "error": str(e), "items": [], "drops": [], "seeded": True}, status_code=500)
-    data = data or []
-    if shape == "array":
-        return SafeJSONResponse(content=data, headers={"Cache-Control": "public, max-age=300"})
-    return SafeJSONResponse(
-        content={"success": True, "count": len(data), "seeded": True, "as_of": as_of, "items": data, "drops": data},
-        headers={"Cache-Control": "public, max-age=300"},
-    )
+    return Response(content=body, media_type="application/json", headers={"Cache-Control": "public, max-age=300"})
 
 
 # ----------------------------------------------------------------------------------------- /api/projects
@@ -1073,14 +1126,40 @@ def root_handler(request: Request):
     workspace_dir = os.path.dirname(os.path.abspath(__file__))
     index_path = os.path.join(workspace_dir, "index.html")
     if os.path.exists(index_path):
-        return FileResponse(index_path)
+        # no-cache, like the assets next to it: without it a browser reuses an old copy of the page for hours
+        return FileResponse(index_path, headers={"Cache-Control": "no-cache"})
     return {"status": "ok", "service": "agent-id-backend"}
 
 
 # Local development only: serve the frontend files from this directory.
 workspace_dir = os.path.dirname(os.path.abspath(__file__))
+
+# The frontend files index.html asks for by relative URL (<script src="app.js">, fetch('seeded_smart_drops.json'), ...).
+# "/" serves index.html here, so these must also answer at the root, the way Vercel serves them. An explicit list, not
+# a mount of the whole directory: nothing else in the workspace (source, databases, history.json) is exposed by it.
+LOCAL_FRONTEND_FILES = (
+    "app.js", "style.css", "icon.svg", "og-preview.png", "thumbnail-square.png", "feed_snapshot.json",
+    "seeded_smart_drops.json", "seeded_smart_hunters.json", "seeded_top_gainers.json",
+)
+
+
+def _local_frontend_route(filename: str):
+    path = os.path.join(workspace_dir, filename)
+
+    def serve():
+        if not os.path.isfile(path):
+            return JSONResponse({"detail": "Not Found"}, status_code=404)
+        # no-cache: always revalidate, so edits show up on reload during development
+        return FileResponse(path, headers={"Cache-Control": "no-cache"})
+
+    serve.__name__ = "local_frontend_" + filename.replace(".", "_").replace("-", "_")
+    return serve
+
+
 if not os.environ.get("RENDER") and os.path.exists(os.path.join(workspace_dir, "index.html")):
     app.mount("/static", StaticFiles(directory=workspace_dir, html=False), name="static")
+    for _name in LOCAL_FRONTEND_FILES:
+        app.add_api_route("/" + _name, _local_frontend_route(_name), methods=["GET"], include_in_schema=False)
 
 
 def start_api(port=8080):

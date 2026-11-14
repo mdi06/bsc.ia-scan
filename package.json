@@ -6,6 +6,9 @@
     "build": "node scripts/build.js",
     "check:minified": "node scripts/check_minified.js"
   },
+  "engines": {
+    "node": "24.x"
+  },
   "private": true,
   "name": "agent-id-monitor-frontend"
 }

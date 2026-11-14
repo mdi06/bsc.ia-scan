@@ -7,6 +7,14 @@
 // strings built inside app.js rely on (inline onclick="..." handlers). Every other file the site
 // serves is copied unchanged. The source files are only ever read, never written.
 //
+// Cache busting: the minified app.js and style.css are also written as assets/app.<hash>.js and
+// assets/style.<hash>.css (hash = first 10 hex chars of the SHA-256 of the minified content), and
+// dist/index.html is rewritten to load those. vercel.json gives /assets/* a one-year immutable cache,
+// while index.html keeps revalidating, so a deploy is picked up on the next page load and unchanged
+// assets are never downloaded again. dist/app.js and dist/style.css stay as unhashed copies (for
+// scripts/check_minified.js and for any index.html cached before a deploy). The repository's own
+// index.html keeps loading the plain app.js / style.css, so local development needs no build.
+//
 // The copy list is derived from what is served today: .vercelignore removes the Python/backend files,
 // and of what is left, index.html, app.js and style.css reference only the files listed below
 // (index.html: style.css, app.js, icon.svg, /thumbnail-square.png, og-preview.png via the og:image tags;
@@ -15,6 +23,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const esbuild = require('esbuild');
 
 const ROOT = path.resolve(__dirname, '..');
@@ -41,6 +50,20 @@ const COPY = [
 // copy it only when it exists locally.
 const COPY_OPTIONAL = ['data/agent_id_stats.json'];
 
+const ASSETS_DIR = 'assets';
+
+function contentHash(buf) {
+  return crypto.createHash('sha256').update(buf).digest('hex').slice(0, 10);
+}
+
+// Replace exactly one occurrence of `from` in `html`; fail the build if it is missing or ambiguous so
+// a changed index.html can never silently ship pointing at the unversioned files.
+function replaceOnce(html, from, to) {
+  const n = html.split(from).length - 1;
+  if (n !== 1) throw new Error(`index.html: expected exactly one ${from}, found ${n}`);
+  return html.replace(from, to);
+}
+
 function main() {
   fs.rmSync(DIST, { recursive: true, force: true });
   fs.mkdirSync(DIST, { recursive: true });
@@ -61,6 +84,22 @@ function main() {
   for (const name of COPY) {
     fs.copyFileSync(path.join(ROOT, name), path.join(DIST, name));
   }
+
+  // Content-hashed copies of the minified files, referenced from dist/index.html.
+  fs.mkdirSync(path.join(DIST, ASSETS_DIR), { recursive: true });
+  const hashed = {};
+  for (const name of MINIFY) {
+    const buf = fs.readFileSync(path.join(DIST, name));
+    const ext = path.extname(name);
+    const out = `${ASSETS_DIR}/${path.basename(name, ext)}.${contentHash(buf)}${ext}`;
+    fs.writeFileSync(path.join(DIST, out), buf);
+    hashed[name] = out;
+  }
+  let html = fs.readFileSync(path.join(DIST, 'index.html'), 'utf8');
+  html = replaceOnce(html, '<link rel="stylesheet" href="style.css">', `<link rel="stylesheet" href="/${hashed['style.css']}">`);
+  html = replaceOnce(html, '<script src="app.js"></script>', `<script src="/${hashed['app.js']}"></script>`);
+  fs.writeFileSync(path.join(DIST, 'index.html'), html);
+  console.log(`index.html -> /${hashed['style.css']}, /${hashed['app.js']}`);
   for (const name of COPY_OPTIONAL) {
     const src = path.join(ROOT, name);
     if (fs.existsSync(src)) {
