@@ -5,7 +5,8 @@ Entry point: runs the ingestion worker (worker.py) and the web API (api.py) as s
 - worker.py scans the chain, enriches drops and writes them through db.py.
 - api.py serves reads from the db.py cache.
 - This module starts the worker as a child process, restarts it if it exits, and runs the API in the main process.
-  Use --worker-only or --api-only to run just one of them.
+  Use --worker-only or --api-only (or RUN_WORKER=0) to run just one of them. Production runs the API alone on
+  Render and the worker on a separate host: see DEPLOY_WORKER.md.
 """
 
 import os
@@ -30,6 +31,12 @@ run_element_nft_volume_sweeper_loop = worker.run_element_nft_volume_sweeper_loop
 fast_sweep_contract = worker.fast_sweep_contract
 
 history_lock = worker.history_lock
+
+
+def api_only_from_env() -> bool:
+    """RUN_WORKER=0 runs the API alone. The worker then runs on another host (`python server.py --worker-only`):
+    its block scanning downloads every BSC block, far more than Render's 5 GB/month free bandwidth allows."""
+    return os.environ.get("RUN_WORKER", "1").strip().lower() in ("0", "false", "no", "off")
 
 
 def run_decoupled_system(port=8080):
@@ -87,7 +94,7 @@ if __name__ == "__main__":
 
     if "--worker-only" in sys.argv:
         worker.start_worker()
-    elif "--api-only" in sys.argv:
+    elif "--api-only" in sys.argv or api_only_from_env():
         api.start_api(port=port)
     else:
         run_decoupled_system(port=port)

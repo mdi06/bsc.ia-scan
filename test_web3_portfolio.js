@@ -273,17 +273,18 @@ openInspectModalByContract('0x2222222222222222222222222222222222222222');
 assert(mockInspectContent.innerHTML.includes('0x2222222222222222222222222222222222222222'), 'Must populate modal content for matching contract');
 
 // Test 24H Pulse Item Inspection (Item NOT in allDrops)
-const { renderPulseAthRow, pulseItemsMap } = require('./app');
+const { renderPulseLaunchRow, pulseItemsMap } = require('./app');
 const athMockItem = {
   name: 'Semicon Bull',
   symbol: 'SOXLB',
   contract: '0x9999999999999999999999999999999999999999',
-  athPrice: 44.87,
-  mintUsd: 0,
-  isFree: true,
+  token_price_usd: 44.87,
+  volume_24h: 125000,
+  lp_usd: 40000,
+  price_change_24h: 8.2,
   standard: 'BEP-20'
 };
-renderPulseAthRow(athMockItem, 2);
+renderPulseLaunchRow(athMockItem, 2);
 assert(pulseItemsMap.has('0x9999999999999999999999999999999999999999'), 'Must register pulse item in pulseItemsMap');
 
 // Ensure openInspectModalByContract resolves the item even when allDrops is completely empty
@@ -1285,7 +1286,7 @@ global.document.getElementById = savedGetElem2;
 // Test 24H Market Pulse & Alpha Briefing Card (Option A)
 // ==========================================
 console.log('Testing 24H Market Pulse & Alpha Briefing Card (Option A)...');
-const { compute24hPulseMetrics, updateDailyPulseUI, toggleDailyPulseHero, isExcludedMajorAsset, renderPulseNftRow, formatCryptoPrice } = app;
+const { compute24hPulseMetrics, updateDailyPulseUI, toggleDailyPulseHero, isExcludedMajorAsset, renderPulseNftMintRow, formatCryptoPrice } = app;
 
 // Test Major Pegs & Platform Asset Exclusions
 const cakeDrop = {
@@ -1352,7 +1353,7 @@ const nftDrop = {
   contract: '0x5555555555555555555555555555555555555555',
   name: 'Real NFT', symbol: 'RNFT', standard: 'ERC-721 (NFT Collection)',
   mint_price_str: '0.0100 BNB', mint_price_bnb: 0.01, mint_value_wei: '10000000000000000',
-  floor_price_usd: 35.25, volume_24h: 300, holders: 400,
+  floor_price_usd: 35.25, volume_24h: 300, holders: 400, total_minted: 400, max_supply: 1000,
   market_url: 'https://element.market/collections/real-nft', detected_at: '2026-11-12 10:00:00'
 };
 const athDrop = {
@@ -1382,21 +1383,28 @@ assert.strictEqual(pulseWithRunner.topRunner.symbol, 'SNOWBALL', 'Top runner sho
 assert.strictEqual(Array.isArray(pulseWithRunner.topRunners), true, 'topRunners must be an array');
 assert(pulseWithRunner.topRunners.length >= 1, 'topRunners array must not be empty');
 assert.strictEqual(Array.isArray(pulseWithRunner.topSmartMints), true, 'topSmartMints must be an array');
-assert.strictEqual(Array.isArray(pulseWithRunner.topAthMints), true, 'topAthMints must be an array');
-assert.deepStrictEqual(pulseWithRunner.topAthMints.map(a => a.name), ['Paid Token'], 'Only records with a known mint cost have an ATH-from-mint row (SnowBall has none)');
-assert(pulseWithRunner.topAthMints.every(a => a.mintUsd !== null && a.profit > 0), 'ATH rows need a known cost and a real profit');
-assert.strictEqual(Array.isArray(pulseWithRunner.topNftSurges), true, 'topNftSurges must be an array');
-assert.deepStrictEqual(pulseWithRunner.topNftSurges.map(n => n.name), ['Real NFT'], 'Only the real NFT: fewer than 3 candidates means fewer cards, not invented ones');
+// Card 2: new launches (live, liquid, traded tokens), never one card 1 already shows; Card 4: NFT collections by mints
+assert.strictEqual(Array.isArray(pulseWithRunner.topLaunches), true, 'topLaunches must be an array');
+const runnerSet = new Set(pulseWithRunner.topRunners.map(r => String(r.contract).toLowerCase()));
+assert(pulseWithRunner.topLaunches.every(r => !runnerSet.has(String(r.contract).toLowerCase())), 'A launch is never also a runner');
+assert(pulseWithRunner.topLaunches.every(r => r.lp_usd >= 1000 && r.volume_24h >= 1000 && r.token_price_usd > 0), 'Launches need liquidity, volume and a price');
+assert.strictEqual(Array.isArray(pulseWithRunner.topNftMints), true, 'topNftMints must be an array');
+assert.deepStrictEqual(pulseWithRunner.topNftMints.map(n => n.name), ['Real NFT'], 'Only the real NFT: fewer than 3 candidates means fewer cards, not invented ones');
+assert.strictEqual(pulseWithRunner.topNftMints[0].fill_pct, 40, 'Fill share is minted / max supply');
 ['FishingAi Rod', 'Agent Cards', 'Oathbots'].forEach(fake => {
-  assert(!pulseWithRunner.topNftSurges.some(n => n.name === fake), `No hard-coded ${fake} card`);
+  assert(!pulseWithRunner.topNftMints.some(n => n.name === fake), `No hard-coded ${fake} card`);
 });
-assert.strictEqual(compute24hPulseMetrics([], [], 0).topNftSurges.length, 0, 'No NFT data: an empty list, not fake cards');
-assert.strictEqual(compute24hPulseMetrics([], [], 0).topAthMints.length, 0, 'No ATH data: an empty list, not baseline winners');
-pulseWithRunner.topNftSurges.forEach((nft, idx) => {
-  assert(nft.gainPct > 0, `NFT surge at index ${idx} must have positive post-mint gain (got ${nft.gainPct})`);
-  const rowHtml = renderPulseNftRow(nft, idx);
-  assert(!rowHtml.includes('badge-red'), `NFT surge row for ${nft.name} must not have badge-red`);
-});
+assert.strictEqual(compute24hPulseMetrics([], [], 0).topNftMints.length, 0, 'No NFT data: an empty list, not fake cards');
+assert.strictEqual(compute24hPulseMetrics([], [], 0).topLaunches.length, 0, 'No launch data: an empty list');
+// The server lists (full dataset) are preferred over the loaded page, and a runner is still skipped
+const serverLaunchRow = (c, name) => ({ contract: c, name, symbol: name.slice(0, 4).toUpperCase(), token_price_usd: 0.01, volume_24h: 90000, lp_usd: 30000, price_change_24h: 5 });
+const withServer = compute24hPulseMetrics([...samplePulseDrops, snowballDrop], [], 0, { since: null,
+  top_launches: [serverLaunchRow(snowballDrop.contract, 'SnowBall'), serverLaunchRow('0x' + '7'.repeat(40), 'Fresh Launch')],
+  top_nft_mints: [{ contract: '0x' + '8'.repeat(40), name: 'Server NFT', total_minted: 777, max_supply: null, fill_pct: null, smart_count: 2 }] });
+assert.deepStrictEqual(withServer.topLaunches.map(r => r.name), ['Fresh Launch'], 'Server launches are used; the runner SnowBall is skipped');
+assert.deepStrictEqual(withServer.topNftMints.map(n => n.name), ['Server NFT'], 'Server NFT mints are used');
+const nftRowHtml = renderPulseNftMintRow(pulseWithRunner.topNftMints[0], 0);
+assert(nftRowHtml.includes('400 / 1.0K minted') && nftRowHtml.includes('40% filled'), 'NFT row shows minted / max and the fill share');
 assert(pulseWithRunner.macroHeadline.includes('SnowBall'), 'Macro headline should highlight positive runner');
 console.log('✔ compute24hPulseMetrics calculation & macro synthesis: PASS');
 
@@ -1418,7 +1426,9 @@ updateDailyPulseUI();
 assert.strictEqual(getMock('pulseGradCount').textContent, '—', 'Without the server aggregates the Pulse shows "—", not a partial local sum');
 assert.strictEqual(getMock('pulse24hVol').textContent, '—', 'DEX volume is "—" until the server numbers arrive');
 app.setPulse24hServer({ since: null, graduated: 4, dex_volume_usd: 1234567, smart_inflows: 9, smart_clusters: 1,
-  top_hunter: 'adadcarry.ai', top_hunter_count: 2, clean_mints: 3, refunds: 1, threats_blocked: 1, new_drops: 5 });
+  top_hunter: 'adadcarry.ai', top_hunter_count: 2, clean_mints: 3, refunds: 1, threats_blocked: 1, new_drops: 5,
+  top_launches: [serverLaunchRow('0x' + '7'.repeat(40), 'Fresh Launch')],
+  top_nft_mints: [{ contract: '0x' + '8'.repeat(40), name: 'Server NFT', total_minted: 777, max_supply: null, fill_pct: null, smart_count: 2 }] });
 updateDailyPulseUI();
 
 const runnerNameEl = getMock('pulseRunnerName');
@@ -1428,8 +1438,8 @@ assert(runnersListEl.innerHTML.includes('#1'), 'pulseRunnersList must render #1 
 assert(runnersListEl.innerHTML.includes('AntFun'), 'pulseRunnersList must render AntFun');
 
 const athListEl = getMock('pulseAthList');
-assert(athListEl.innerHTML.includes('#1'), 'pulseAthList must render #1 ATH row');
-assert(athListEl.innerHTML.includes('Peak') || athListEl.innerHTML.includes('ATH'), 'pulseAthList must display ATH/Peak badge');
+assert(athListEl.innerHTML.includes('#1'), 'pulseAthList must render the #1 new launch');
+assert(athListEl.innerHTML.includes('Fresh Launch') && athListEl.innerHTML.includes('Vol: $90.0K'), 'the launch row shows the token and its 24h volume');
 
 const smartMintsListEl = getMock('pulseSmartMintsList');
 assert(smartMintsListEl.innerHTML.includes('#1'), 'pulseSmartMintsList must render #1 smart mint row');
@@ -1437,9 +1447,9 @@ assert(smartMintsListEl.innerHTML.includes('SafeDrop'), 'pulseSmartMintsList mus
 assert(smartMintsListEl.innerHTML.includes('3 Wallets'), 'pulseSmartMintsList must display smart wallet count');
 
 const nftSurgesListEl = getMock('pulseNftSurgesList');
-assert(nftSurgesListEl.innerHTML.includes('#1'), 'pulseNftSurgesList must render #1 NFT surge row');
-assert(nftSurgesListEl.innerHTML.includes('Element'), 'pulseNftSurgesList must render Element Market link');
-assert(nftSurgesListEl.innerHTML.includes('%') || nftSurgesListEl.innerHTML.includes('x'), 'pulseNftSurgesList must render % gain or multiplier from mint');
+assert(nftSurgesListEl.innerHTML.includes('#1'), 'pulseNftSurgesList must render the #1 NFT mint');
+assert(nftSurgesListEl.innerHTML.includes('Element'), 'pulseNftSurgesList must render the Element Market link');
+assert(nftSurgesListEl.innerHTML.includes('Server NFT') && nftSurgesListEl.innerHTML.includes('777 minted'), 'the NFT row shows the collection and its mints');
 
 const gradCountEl = getMock('pulseGradCount');
 assert.strictEqual(String(gradCountEl.textContent), '4', 'pulseGradCount renders the SERVER number');

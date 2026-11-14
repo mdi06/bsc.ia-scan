@@ -360,6 +360,11 @@ def test_element_token_id_is_word_8_not_the_fees_offset():
     assert parsed["price_bnb"] == pytest.approx(0.00999) and parsed["is_bnb"] is True
 
 
+@pytest.fixture(autouse=True)
+def _no_element_retry_wait(monkeypatch):
+    monkeypatch.setattr(monitor, "ELEMENT_LOG_RETRY_SEC", 0.0)
+
+
 class ElementRpc:
     def __init__(self, logs_by_chunk, fail_chunk=None):
         self.logs_by_chunk, self.fail_chunk = logs_by_chunk, fail_chunk
@@ -372,7 +377,7 @@ class ElementRpc:
         if params["address"] == monitor.ELEMENT_EX:
             i = self.calls
             self.calls += 1
-            if i == self.fail_chunk:
+            if self.fail_chunk is not None and i >= self.fail_chunk:     # stays down through the retries
                 raise OSError("rpc down")
             return self.logs_by_chunk[i] if i < len(self.logs_by_chunk) else []
         return []
@@ -425,3 +430,138 @@ def test_element_failed_log_chunk_writes_no_partial_totals():
     res = monitor.scan_element_nft_volume(ElementRpc([ok_chunk], fail_chunk=1), [item], lookback_blocks=15000)
     assert res == {}
     assert item["secondary_sales_count"] == 4 and item["secondary_vol_bnb"] == 1.2 and item["floor_price_bnb"] == 0.3
+
+
+def test_element_counts_accepted_offers_and_swaps_maker_and_taker():
+    sell = _fill(COL, 2 * 10**16)
+    buy = dict(_fill(COL, 3 * 10**16, pay=monitor.WBNB_ADDRESS[2:].lower()), topics=[monitor.T_721_BUY_FILLED])
+    item = _nft()
+    monitor.scan_element_nft_volume(ElementRpc([[sell, buy]]), [item], lookback_blocks=5000)
+    assert item["secondary_sales_count"] == 2
+    assert item["secondary_vol_bnb"] == pytest.approx(0.05)
+    s, b = monitor.parse_element_trade_log(sell), monitor.parse_element_trade_log(buy)
+    assert (b["seller"], b["buyer"]) == (s["buyer"], s["seller"])     # the maker of a buy order is the buyer
+
+
+def test_get_logs_strict_raises_when_no_endpoint_answers(monkeypatch):
+    rpc = monitor.BscRpcClient(["http://unused.invalid"])
+    monkeypatch.setattr(rpc, "call", lambda method, params: None)
+    assert rpc.get_logs({}) == []                                     # indistinguishable from "no logs"
+    with pytest.raises(RuntimeError):
+        rpc.get_logs_strict({})
+    monkeypatch.setattr(rpc, "call", lambda method, params: [])
+    assert rpc.get_logs_strict({}) == []
+
+
+def test_element_scan_treats_an_unanswered_log_query_as_a_failure_not_as_no_sales():
+    class DownRpc(ElementRpc):
+        def get_logs_strict(self, params):
+            raise RuntimeError("eth_getLogs failed on every RPC endpoint")
+    item = _nft(secondary_sales_count=4, secondary_vol_bnb=1.2, floor_price_bnb=0.3, is_nft_surge=True)
+    assert monitor.scan_element_nft_volume(DownRpc([[]]), [item], lookback_blocks=5000) == {}
+    assert item["secondary_sales_count"] == 4 and item["secondary_vol_bnb"] == 1.2 and item["is_nft_surge"] is True
+
+
+class ClockRpc(ElementRpc):
+    """Blocks `spb` seconds apart; records every Element log query."""
+    def __init__(self, head, spb, logs=()):
+        super().__init__([])
+        self.head, self.spb, self.logs, self.queries = head, spb, list(logs), []
+
+    def get_block_number(self):
+        return self.head
+
+    def get_block(self, n, full_tx=True):
+        return {"timestamp": hex(int(1_700_000_000 + n * self.spb))}
+
+    def get_logs(self, params):
+        if params["address"] != monitor.ELEMENT_EX:
+            return []
+        lo, hi = int(params["fromBlock"], 16), int(params["toBlock"], 16)
+        self.queries.append((lo, hi))
+        return [l for l in self.logs if lo <= int(l["blockNumber"], 16) <= hi]
+
+
+def _fill_at(block, price_wei):
+    return dict(_fill(COL, price_wei), blockNumber=hex(block))
+
+
+def test_element_window_is_24_hours_whatever_the_block_time():
+    assert monitor.element_lookback_blocks(ClockRpc(1_000_000, 0.45), 1_000_000) == 192_000
+    assert monitor.element_lookback_blocks(ClockRpc(1_000_000, 3.0), 1_000_000) == 28_800
+    # block time unavailable (ElementRpc has no get_block): the fallback pace, not a crash
+    assert monitor.element_lookback_blocks(ElementRpc([]), 1_000_000) == int(24 * 3600 / monitor.BSC_BLOCK_TIME_FALLBACK_SEC)
+
+    head = 1_000_000
+    rpc = ClockRpc(head, 0.45, [_fill_at(head - 100_000, 10**16), _fill_at(head - 250_000, 10**16)])
+    item = _nft()
+    monitor.scan_element_nft_volume(rpc, [item])
+    assert item["secondary_sales_count"] == 1                          # ~12.5h old: inside; ~31h old: outside
+    assert rpc.queries[0][0] == head - 192_000 and rpc.queries[-1][1] == head
+
+
+def test_element_fill_cache_reads_only_new_blocks_and_ages_fills_out():
+    head = 1_000_000
+    rpc = ClockRpc(head, 0.45, [_fill_at(head - 150_000, 10**16), _fill_at(head - 10, 2 * 10**16)])
+    cache, item = {}, _nft()
+    monitor.scan_element_nft_volume(rpc, [item], fill_cache=cache)
+    assert item["secondary_sales_count"] == 2 and len(rpc.queries) == 20
+
+    rpc.queries.clear()
+    rpc.head = head + 130                                              # about a minute later
+    rpc.logs.append(_fill_at(head + 100, 3 * 10**16))
+    monitor.scan_element_nft_volume(rpc, [item], fill_cache=cache)
+    assert rpc.queries == [(head - monitor.ELEMENT_REORG_BLOCKS + 1, head + 130)]   # only the unsettled tail + new blocks
+    assert item["secondary_sales_count"] == 3                          # nothing counted twice
+    assert item["secondary_vol_bnb"] == pytest.approx(0.06)
+
+    rpc.head = head + 50_000                                           # the oldest fill is now over 24h old
+    monitor.scan_element_nft_volume(rpc, [item], fill_cache=cache)
+    assert item["secondary_sales_count"] == 2 and item["floor_price_bnb"] == pytest.approx(0.02)
+
+    # a failed read leaves the item alone and the cache no further along than it was
+    read_to, cached = cache["to_block"], list(cache["fills"])
+    rpc.head += 500
+    rpc.get_logs = lambda params: (_ for _ in ()).throw(OSError("rpc down"))
+    assert monitor.scan_element_nft_volume(rpc, [item], fill_cache=cache) == {}
+    assert item["secondary_sales_count"] == 2
+    assert cache["to_block"] == read_to and cache["fills"] == cached
+
+
+def test_element_log_chunk_is_retried_and_progress_survives_a_failed_scan():
+    head = 1_000_000
+
+    class FlakyRpc(ClockRpc):
+        fail_from = None            # (lo block, how many more times that chunk fails)
+
+        def get_logs(self, params):
+            if params["address"] == monitor.ELEMENT_EX and self.fail_from:
+                lo, left = self.fail_from
+                if int(params["fromBlock"], 16) == lo and left > 0:
+                    self.fail_from = (lo, left - 1)
+                    self.queries.append("fail")
+                    raise OSError("timeout")
+            return super().get_logs(params)
+
+    first_chunk = head - 192_000
+    rpc = FlakyRpc(head, 0.45, [_fill_at(head - 190_000, 10**16), _fill_at(head - 50, 2 * 10**16)])
+    item = _nft()
+
+    # one timeout on a chunk: retried, the scan succeeds
+    rpc.fail_from = (first_chunk + 10_000, 1)
+    monitor.scan_element_nft_volume(rpc, [item], fill_cache={})
+    assert item["secondary_sales_count"] == 2 and rpc.queries.count("fail") == 1
+
+    # the chunk keeps failing: nothing written, but the chunk before it is remembered
+    cache, item = {}, _nft(secondary_sales_count=7)
+    rpc.queries.clear()
+    rpc.fail_from = (first_chunk + 10_000, monitor.ELEMENT_LOG_ATTEMPTS)
+    assert monitor.scan_element_nft_volume(rpc, [item], fill_cache=cache) == {}
+    assert item["secondary_sales_count"] == 7
+    assert cache["to_block"] == first_chunk + 9_999 and len(cache["fills"]) == 1
+
+    # next sweep resumes after the remembered chunk and completes
+    rpc.queries.clear()
+    monitor.scan_element_nft_volume(rpc, [item], fill_cache=cache)
+    assert rpc.queries[0][0] == first_chunk + 10_000
+    assert item["secondary_sales_count"] == 2

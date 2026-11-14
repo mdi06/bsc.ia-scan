@@ -276,12 +276,12 @@ console.log('✔ BNB price: null until known, "—" without it, "≈" when stale
   const seedEntry = { name: 'Old Winner', symbol: 'OLD', contract: '0x' + '5'.repeat(40), athPrice: 6.75, athProfit: 6.75, profit: 6.75, secUsd: 6.75, isFree: true,
     item: { name: 'Old Winner', contract: '0x' + '5'.repeat(40), standard: 'BEP-20 Token (18 decimals)', mint_price_str: 'FREE', has_free_mint: true,
             token_price_usd: 6.75, lp_usd: 20000, detected_at: '2026-11-01 09:00:00' } };
-  assert.strictEqual(app.compute24hPulseMetrics([], [seedEntry], 0, null).topAthMints.length, 0, 'no known 24h window: a saved/seed winner is not a 24h mint');
+  // Card 2 (new launches) ranks live records only: a saved / seed winner never shows up there, whatever its date
+  assert.strictEqual(app.compute24hPulseMetrics([], [seedEntry], 0, null).topLaunches.length, 0, 'no window: a seed is not a launch');
   const win = { since: '2026-11-11 12:00:00', graduated: 0, dex_volume_usd: 0 };
-  assert.strictEqual(app.compute24hPulseMetrics([], [seedEntry], 0, win).topAthMints.length, 0, 'older than the window: not a 24h mint');
   seedEntry.item.detected_at = '2026-11-12 09:00:00';
-  assert.deepStrictEqual(app.compute24hPulseMetrics([], [seedEntry], 0, win).topAthMints.map(a => a.name), ['Old Winner'], 'inside the window: counted');
-  console.log('✔ Pulse ATH card: historical winners only count inside the server window: PASS');
+  assert.strictEqual(app.compute24hPulseMetrics([], [seedEntry], 0, win).topLaunches.length, 0, 'inside the window: still not a launch');
+  console.log('✔ Pulse launches card: saved / seed winners never stand in for live launches: PASS');
 
   // ---------------------------------------------------------------------------------------- table: stale / DEX-traded record (preview run)
   // SPACEDOG after the market data was cleared as stale showed "Fair Mint" in the price column and no stale marker

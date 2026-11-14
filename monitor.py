@@ -83,6 +83,17 @@ USDC_ADDRESS = "0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d"
 # Element Market BSC Router & Event Signatures (Option D: nftVolWatch)
 ELEMENT_EX = "0xb3e3dfcb2d9f3dde16d78b9e6eb3538eb32b5ae1"
 T_721_FILLED = "0x9c248aa1a265aa616f707b979d57f4529bb63a4fc34dc7fc61fdddc18410f74e"
+# ERC721BuyOrderFilled: an accepted offer. Same data layout as the sell fill, but the maker is the buyer.
+T_721_BUY_FILLED = "0xd90a5c60975c6ff8eafcf02088e7b50ae5d9e156a79206ba553df1c4fb4594c2"
+# Element stats cover the last 24 hours. The window is set in hours because BSC's block time has changed
+# (3s -> 0.45s): the old fixed 15,000-block window had shrunk to under two hours and was nearly always empty.
+ELEMENT_LOOKBACK_HOURS = 24.0
+NFT_ACTIVE_MIN_SALES = 1             # sales in that window that mark a collection active (is_nft_surge)
+BSC_BLOCK_TIME_FALLBACK_SEC = 0.45   # used only when the block time cannot be measured
+ELEMENT_LOG_CHUNK_BLOCKS = 10000
+ELEMENT_REORG_BLOCKS = 20            # the newest blocks are re-read every scan, never served from the cache
+ELEMENT_LOG_ATTEMPTS = 3             # tries per log chunk: public endpoints time out now and then
+ELEMENT_LOG_RETRY_SEC = 1.0
 T_TRANSFER = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
 
 # Stealth Factory & EIP-1167 / EIP-1967 Proxy Signatures (Option E)
@@ -319,6 +330,14 @@ class BscRpcClient:
 
     def get_logs(self, params: Dict[str, Any]) -> List[Dict[str, Any]]:
         return self.call("eth_getLogs", [params]) or []
+
+    def get_logs_strict(self, params: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Like get_logs, but raises when no endpoint answered. get_logs returns [] in that case, which a
+        caller cannot tell apart from "no logs" (several public endpoints reject eth_getLogs outright)."""
+        res = self.call("eth_getLogs", [params])
+        if res is None:
+            raise RuntimeError("eth_getLogs failed on every RPC endpoint")
+        return res
 
     def get_storage_at(self, address: str, position: str) -> Optional[str]:
         return self.call("eth_getStorageAt", [address, position, "latest"])
@@ -2803,7 +2822,8 @@ KNOWN_PROJECTS = [
 
 def parse_element_trade_log(log: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """
-    Decodes an ERC721SellOrderFilled event log from Element Exchanger router:
+    Decodes an ERC721SellOrderFilled or ERC721BuyOrderFilled event log from Element Exchanger router
+    (same layout; w[1]/w[2] are maker/taker, so seller and buyer are swapped for a buy order):
     Contract: 0xb3e3dfcb2d9f3dde16d78b9e6eb3538eb32b5ae1
     Topic: 0x9c248aa1a265aa616f707b979d57f4529bb63a4fc34dc7fc61fdddc18410f74e
     Data words (checked against a real on-chain event; the event has a dynamic `fees` array):
@@ -2840,8 +2860,11 @@ def parse_element_trade_log(log: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         price_wei = int(words[5], 16)
         price_bnb = price_wei / 1e18 if is_bnb else 0.0
         token_id = int(words[8], 16) if len(words) >= 9 else int(words[6], 16)
-        seller = "0x" + words[1][24:].lower()
-        buyer = "0x" + words[2][24:].lower()
+        maker = "0x" + words[1][24:].lower()
+        taker = "0x" + words[2][24:].lower()
+        topics = log.get("topics") or []
+        is_buy_order = bool(topics) and str(topics[0]).lower() == T_721_BUY_FILLED
+        seller, buyer = (taker, maker) if is_buy_order else (maker, taker)
         tx_hash = log.get("transactionHash", "")
         block_num = int(log.get("blockNumber", "0"), 16) if isinstance(log.get("blockNumber"), str) else int(log.get("blockNumber") or 0)
         return {
@@ -2872,9 +2895,9 @@ def evaluate_nft_surge(
     - Calculates sales count, total volume in BNB, floor price, and high price from Element trades.
     - Considers real paid trades.
     - Checks secondary transfers (from != 0x0...0).
-    - Detects volume spike:
-      * Held in wallet (user_held > 0): sales >= 3 AND vol > 0 (or 2x spike vs previous check).
-      * Monitored collections: sales >= 5 OR vol >= 0.5 BNB (or 2x spike with >= 5 sales).
+    - Flags the collection (is_nft_surge) when it had at least one BNB sale in the window: the BSC NFT market
+      is thin enough that any trading at all marks an active collection. (The rule used to need 5 sales or
+      0.5 BNB, 3 sales for a held collection.) user_held and prev_stats no longer change the result.
     - Returns standardized evaluation dictionary.
     """
     std = str(item.get("standard") or "")
@@ -2899,13 +2922,7 @@ def evaluate_nft_surge(
             "summary": "Non-NFT Asset"
         }
 
-    prev_f = int(prev_stats.get("sales_count", 0)) if prev_stats else int(item.get("secondary_sales_count", 0) or 0)
-    
-    is_hot = False
-    if user_held > 0:
-        is_hot = (sales_cnt >= 3 and vol_bnb > 0) or (prev_f > 0 and sales_cnt >= 2 * prev_f)
-    else:
-        is_hot = (sales_cnt >= 5) or (vol_bnb >= 0.5) or (prev_f > 0 and sales_cnt >= 5 and sales_cnt >= 2 * prev_f)
+    is_hot = sales_cnt >= NFT_ACTIVE_MIN_SALES
 
     badge = f"[bold magenta]🦋 SURGE ({sales_cnt} sales)[/bold magenta]" if is_hot else ""
     badge_plain = f"🦋 SURGE ({sales_cnt} sales)" if is_hot else ""
@@ -2924,18 +2941,87 @@ def evaluate_nft_surge(
     }
 
 
+def element_lookback_blocks(rpc: "BscRpcClient", head: int, hours: float = ELEMENT_LOOKBACK_HOURS) -> int:
+    """How many blocks `hours` covers at the chain's current pace, measured over the last 20,000 blocks."""
+    sec_per_block = BSC_BLOCK_TIME_FALLBACK_SEC
+    try:
+        span = min(20000, head - 1)
+        newest = int(rpc.get_block(head, False)["timestamp"], 16)
+        oldest = int(rpc.get_block(head - span, False)["timestamp"], 16)
+        if span > 0 and newest > oldest:
+            sec_per_block = (newest - oldest) / span
+    except Exception as exc:
+        _log.debug("block time lookup failed, assuming %.2fs: %s", sec_per_block, exc)
+    return max(1, int(hours * 3600 / sec_per_block))
+
+
+def _element_fills(rpc, from_b: int, head: int, cache: Optional[Dict[str, Any]] = None) -> Optional[List[Dict[str, Any]]]:
+    """Element ERC-721 fills (sell and buy orders) paid in BNB/WBNB for blocks from_b..head, or None when any
+    log query failed (partial totals would understate sales and volume).
+
+    `cache` (a dict the caller keeps between scans) holds the fills already read, so a repeat scan only asks
+    for the blocks added since: a 24h window is ~20 log queries cold, one after that."""
+    fetch = getattr(rpc, "get_logs_strict", None) or rpc.get_logs
+    fills: List[Dict[str, Any]] = []
+    start = from_b
+    if cache and cache.get("to_block") is not None and cache.get("from_block", head + 1) <= from_b <= cache["to_block"] + 1:
+        fills = [f for f in cache["fills"] if f["block"] >= from_b]
+        start = cache["to_block"] + 1
+
+    def _remember(read_to: int) -> None:
+        """Caches what was read up to block `read_to`, minus the newest blocks (still open to a reorg)."""
+        settled = min(read_to, head - ELEMENT_REORG_BLOCKS)
+        if cache is not None and settled >= from_b:
+            cache.update(from_block=from_b, to_block=settled, fills=[f for f in fills if f["block"] <= settled])
+
+    last_exc: Optional[Exception] = None
+    for b in range(start, head + 1, ELEMENT_LOG_CHUNK_BLOCKS):
+        to_b = min(b + ELEMENT_LOG_CHUNK_BLOCKS - 1, head)
+        params = {
+            "address": ELEMENT_EX,
+            "topics": [[T_721_FILLED, T_721_BUY_FILLED]],
+            "fromBlock": hex(b),
+            "toBlock": hex(to_b)
+        }
+        logs = None
+        for attempt in range(ELEMENT_LOG_ATTEMPTS):
+            try:
+                logs = fetch(params)
+                break
+            except Exception as exc:
+                last_exc = exc
+                if attempt + 1 < ELEMENT_LOG_ATTEMPTS:
+                    time.sleep(ELEMENT_LOG_RETRY_SEC)
+        if logs is None:
+            _log.warning("Element fill logs failed for blocks %s-%s (%s); keeping the previous secondary-market stats",
+                         b, to_b, last_exc)
+            _remember(b - 1)      # the chunks that did answer are kept, so the next scan resumes from here
+            return None
+        for l in logs:
+            parsed = parse_element_trade_log(l)
+            if parsed and parsed["is_bnb"]:  # fills paid in another token have no BNB price: not a BNB sale
+                fills.append(parsed)
+
+    _remember(head)
+    return fills
+
+
 def scan_element_nft_volume(
     rpc: BscRpcClient,
     nft_items: List[Dict[str, Any]],
-    lookback_blocks: int = 15000,
-    wallet_addr: Optional[str] = None
+    lookback_blocks: Optional[int] = None,
+    wallet_addr: Optional[str] = None,
+    lookback_hours: float = ELEMENT_LOOKBACK_HOURS,
+    fill_cache: Optional[Dict[str, Any]] = None
 ) -> Dict[str, Dict[str, Any]]:
     """
-    Scans Element Exchanger contract for ERC721SellOrderFilled events over the recent block window.
-    Correlates fills with tracked collections and evaluates volume surge signals.
+    Scans the Element exchange for ERC-721 fills (sell orders and accepted offers) over the last
+    `lookback_hours` (or exactly `lookback_blocks` when given), correlates them with tracked collections and
+    evaluates volume surge signals.
     Updates items in-place with secondary_sales_count, secondary_vol_bnb, floor_price_bnb,
     high_price_bnb, secondary_transfers, is_nft_surge, and nft_surge_badge.
-    Returns mapping: {collection_address_lower: eval_dict}.
+    Returns mapping: {collection_address_lower: eval_dict}; {} (nothing written) when the logs could not be read.
+    Pass the same `fill_cache` dict on every call to read only the new blocks each time.
     """
     wallet = wallet_addr or DEFAULT_WALLET
     target_map = {x.get("contract", "").lower(): x for x in nft_items if x.get("contract")}
@@ -2944,39 +3030,19 @@ def scan_element_nft_volume(
         head = rpc.get_block_number()
     except Exception:
         return {}
-
-    from_b = max(0, head - lookback_blocks)
-    fills: Dict[str, List[float]] = {}
-    trade_logs: List[Dict[str, Any]] = []
-    failed_chunks = 0
-
-    # Pull Element logs in chunks of up to 10,000 blocks
-    for b in range(from_b, head + 1, 10000):
-        to_b = min(b + 9999, head)
-        params = {
-            "address": ELEMENT_EX,
-            "topics": [T_721_FILLED],
-            "fromBlock": hex(b),
-            "toBlock": hex(to_b)
-        }
-        try:
-            logs = rpc.get_logs(params)
-            for l in logs:
-                parsed = parse_element_trade_log(l)
-                if parsed and parsed["is_bnb"]:  # fills paid in another token have no BNB price: not a BNB sale
-                    c = parsed["collection"]
-                    if c not in fills:
-                        fills[c] = []
-                    fills[c].append(parsed["price_bnb"])
-                    trade_logs.append(parsed)
-        except Exception as exc:
-            failed_chunks += 1
-            _log.debug("Element fill logs failed for blocks %s-%s: %s", b, to_b, exc)
-
-    if failed_chunks:
-        # Totals from the chunks that did answer would understate sales and volume: write nothing this round.
-        _log.warning("Element scan: %d log chunk(s) failed; keeping the previous secondary-market stats", failed_chunks)
+    if not head:
         return {}
+
+    if lookback_blocks is None:
+        lookback_blocks = element_lookback_blocks(rpc, head, lookback_hours)
+    from_b = max(0, head - lookback_blocks)
+
+    trade_logs = _element_fills(rpc, from_b, head, fill_cache)
+    if trade_logs is None:
+        return {}
+    fills: Dict[str, List[float]] = {}
+    for parsed in trade_logs:
+        fills.setdefault(parsed["collection"], []).append(parsed["price_bnb"])
 
     results: Dict[str, Dict[str, Any]] = {}
 

@@ -535,16 +535,16 @@
             </div>
           </div>
 
-          <!-- Card 2: Top 24h ATH Prices from Mint (Top 3) -->
+          <!-- Card 2: Top 24h New Launches (Top 3): tokens first seen in the past 24h that already trade, by 24h volume -->
           <div class="pulse-card pulse-card-ath">
             <div class="pulse-card-header">
-              <span class="pulse-card-icon">💎</span>
-              <span class="pulse-card-title">TOP 24H ATH FROM MINT</span>
+              <span class="pulse-card-icon">🚀</span>
+              <span class="pulse-card-title">TOP 24H NEW LAUNCHES</span>
               <span class="badge badge-cyan pulse-card-badge" id="pulseAthBadge">Past 24h</span>
             </div>
             <div class="pulse-card-main">
               <div class="pulse-mini-list" id="pulseAthList">
-                <!-- Dynamically populated with Top 3 Peak ATH gainers from fair-mint within 24h -->
+                <!-- Dynamically populated with the Top 3 new tokens by 24h volume (pulse_24h.top_launches) -->
               </div>
               <span id="pulseGradCount" style="display:none;">0</span>
               <span id="pulse24hVol" style="display:none;">$0</span>
@@ -553,7 +553,7 @@
             <div class="pulse-card-footer">
               <span class="pulse-smart-link" onclick="openHallOfFameModal('ALL')" role="button" tabindex="0"
                 title="Open All-Time Post-Mint Profit Leaderboard">
-                <span>🏆 24h ATH • View All-Time ↗</span>
+                <span>🏆 All-Time Mint Gainers ↗</span>
               </span>
             </div>
           </div>
@@ -578,16 +578,16 @@
             </div>
           </div>
 
-          <!-- Card 4: Top 24h NFT Agent ID Surges (Top 3) -->
+          <!-- Card 4: Top 24h NFT Mints (Top 3): collections first seen in the past 24h, by number minted -->
           <div class="pulse-card pulse-card-nft">
             <div class="pulse-card-header">
               <span class="pulse-card-icon">🎨</span>
-              <span class="pulse-card-title">TOP 24H NFT SURGES</span>
+              <span class="pulse-card-title">TOP 24H NFT MINTS</span>
               <span class="badge badge-magenta pulse-card-badge" id="pulseNftBadge">Past 24h</span>
             </div>
             <div class="pulse-card-main">
               <div class="pulse-mini-list" id="pulseNftSurgesList">
-                <!-- Dynamically populated with Top 3 NFT collections on Element within 24h -->
+                <!-- Dynamically populated with the Top 3 new NFT collections by mints (pulse_24h.top_nft_mints) -->
               </div>
               <span id="pulseCleanMints" style="display:none;">0</span>
               <span id="pulseRefundCount" style="display:none;">0</span>
@@ -595,7 +595,7 @@
               <span id="pulseSecurityBadge" style="display:none;"></span>
             </div>
             <div class="pulse-card-footer">
-              <span class="pulse-footer-note">⚡ Verified Agent ID collections on Element</span>
+              <span class="pulse-footer-note">⚡ New collections ranked by mints, on-chain</span>
             </div>
           </div>
         </div>
@@ -609,15 +609,15 @@
               <span class="pulse-pill-label">1. Runners</span>
             </button>
             <button type="button" class="pulse-carousel-pill" data-index="1"
-              aria-label="Slide 2: Top 24h ATH from Mint">
+              aria-label="Slide 2: Top 24h New Launches">
               <span class="pulse-pill-pip"></span>
-              <span class="pulse-pill-label">2. ATH</span>
+              <span class="pulse-pill-label">2. Launches</span>
             </button>
             <button type="button" class="pulse-carousel-pill" data-index="2" aria-label="Slide 3: Top 24h Smart Mints">
               <span class="pulse-pill-pip"></span>
               <span class="pulse-pill-label">3. Smart</span>
             </button>
-            <button type="button" class="pulse-carousel-pill" data-index="3" aria-label="Slide 4: Top 24h NFT Surges">
+            <button type="button" class="pulse-carousel-pill" data-index="3" aria-label="Slide 4: Top 24h NFT Mints">
               <span class="pulse-pill-pip"></span>
               <span class="pulse-pill-label">4. NFT</span>
             </button>

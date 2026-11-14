@@ -2783,16 +2783,8 @@ function evaluateNftSurge(item, fillPrices = [], secondaryMoves = 0, userHeld = 
   const floorBnb = px.length ? Math.min(...px) : Number(item.floor_price_bnb || 0);
   const highBnb = px.length ? Math.max(...px) : Number(item.high_price_bnb || 0);
   const moves = secondaryMoves || Number(item.secondary_transfers || 0);
-  const held = userHeld || Number(item.user_balance || 0);
-
-  const prevF = prevStats ? Number(prevStats.sales_count || 0) : Number(item.prev_sales_count || 0);
-
-  let isHot = false;
-  if (held > 0) {
-    isHot = (salesCnt >= 3 && volBnb > 0) || (prevF > 0 && salesCnt >= 2 * prevF);
-  } else {
-    isHot = (salesCnt >= 5) || (volBnb >= 0.5) || (prevF > 0 && salesCnt >= 5 && salesCnt >= 2 * prevF);
-  }
+  // Any sale in the 24h window marks an active collection (same rule as evaluate_nft_surge in monitor.py).
+  const isHot = salesCnt >= 1;
 
   return {
     is_nft_surge: isHot,
@@ -3081,39 +3073,79 @@ function renderPulseSmartMintRow(sm, idx) {
   </div>`;
 }
 
-function renderPulseAthRow(item, idx) {
-  if (!item) return '';
-  const rankClass = idx === 0 ? 'rank-1' : (idx === 1 ? 'rank-2' : 'rank-3');
-  const rankLabel = '#' + (idx + 1);
-  const name = escapeHtml(item.name || 'Unknown');
-  const sym = escapeHtml(item.symbol || '');
-  const cAddr = escapeHtml(item.contract || (item.item && item.item.contract) || '');
-  const athPrice = Number(item.athPrice || item.ath_price_usd || item.token_price_usd || item.secUsd || 0);
-  const athStr = athPrice > 0 ? formatCryptoPrice(athPrice) : '—';
-  // mintUsd is null / undefined when the mint cost is unknown (TBD, DEX Traded): that is "TBD", never "Free"
-  const rawMint = item.mintUsd !== undefined ? item.mintUsd : item.mint_cost_usd;
-  const mintCost = (rawMint === null || rawMint === undefined) ? null : Number(rawMint);
-  const isFree = Boolean(item.isFree || item.has_free_mint || (item.mint_price_str && String(item.mint_price_str).toUpperCase().includes('FREE')));
-  const mintStr = isFree ? 'Mint: Free' : (mintCost > 0 ? ('Mint: ' + formatCryptoPrice(mintCost)) : 'Mint: TBD');
+// Pulse card 2: a NEW token (first seen in the 24h window) that already trades, ranked by 24h volume.
+// Same rule as api.pulse_launch_row (the server list is preferred; this is the fallback before /api/stats loads).
+const PULSE_LAUNCH_MIN_LP_USD = 1000;
+const PULSE_LAUNCH_MIN_VOLUME_USD = 1000;
+const PULSE_UNCAPPED_SUPPLY = 1e20;
 
-  // The gain is only what the known mint cost supports; no assumed base price. A free mint shows the profit per token.
-  let gainText = '—';
-  let isUp = true;
-  if (mintCost > 0 && athPrice > 0) {
-    const gainPct = ((athPrice - mintCost) / mintCost) * 100;
-    isUp = gainPct >= 0;
-    gainText = (isUp ? '+' : '') + (gainPct >= 1000 ? Math.round(gainPct).toLocaleString() : gainPct.toFixed(1)) + '%';
-  } else if (isFree && athPrice > 0) {
-    gainText = '+' + formatCryptoPrice(athPrice);
-  }
-  const gainBadgeClass = gainText === '—' ? 'badge-dim' : (isUp ? 'badge-green' : 'badge-red');
-  const dexUrl = getDexScreenerUrl(item) || item.pair_url || item.market_url || ('https://pancakeswap.finance/swap?outputCurrency=' + (item.contract || ''));
+function isPulseNftRecord(d) {
+  const std = String((d && d.standard) || '');
+  return /721|1155|NFT/.test(std) || String((d && d.market_url) || '').includes('element.market');
+}
 
-  if (cAddr) {
-    registerPulseItem(cAddr, item.item || item);
-  }
+function isPulseFlaggedRisky(d) {
+  const level = String((d && d.risk_level) || '').toUpperCase();
+  const badge = String((d && d.risk_badge) || '').toUpperCase();
+  return level === 'RUG' || badge.includes('HONEYPOT');
+}
 
-  return `<div class="pulse-list-row pulse-ath-row" onclick="openInspectModalByContract('${cAddr}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openInspectModalByContract('${cAddr}');}" role="button" tabindex="0" title="Click to inspect ${name} (ATH: ${athStr}, Profit: ${gainText})">
+function pulseSmartCount(d) {
+  const w = (d && (d.smart_wallets && d.smart_wallets.length ? d.smart_wallets : d.smart_minters)) || [];
+  return Array.isArray(w) ? w.length : 0;
+}
+
+function pulseLaunchRow(d) {
+  if (!d || isPulseNftRecord(d) || d.market_stale || isPulseFlaggedRisky(d)) return null;
+  const lp = Number(d.lp_usd || 0);
+  const vol = Number(d.volume_24h || 0);
+  const px = Number(d.token_price_usd || 0);
+  if (!(lp >= PULSE_LAUNCH_MIN_LP_USD) || !(vol >= PULSE_LAUNCH_MIN_VOLUME_USD) || !(px > 0)) return null;
+  const chg = d.price_change_24h;
+  return {
+    contract: d.contract, name: d.name || 'Unknown', symbol: d.symbol || '', standard: d.standard || '',
+    token_price_usd: px, volume_24h: vol, lp_usd: lp,
+    price_change_24h: (chg === null || chg === undefined) ? null : Number(chg),
+    market_cap: getSanitizedMcap(d), smart_count: pulseSmartCount(d),
+    pair_url: d.pair_url || '', detected_at: d.detected_at
+  };
+}
+
+// Pulse card 4: a NEW NFT collection, ranked by how many were minted. Same rule as api.pulse_nft_mint_row.
+function pulseNftMintRow(d) {
+  if (!d || !isPulseNftRecord(d) || isPulseFlaggedRisky(d)) return null;
+  const minted = Number(d.total_minted || 0);
+  if (!(minted >= 1)) return null;
+  const capRaw = Number(d.max_supply || 0);
+  const cap = (capRaw > 0 && capRaw < PULSE_UNCAPPED_SUPPLY) ? capRaw : null;
+  return {
+    contract: d.contract, name: d.name || 'NFT Collection', symbol: d.symbol || '', standard: d.standard || '',
+    total_minted: Math.floor(minted), max_supply: cap ? Math.floor(cap) : null,
+    fill_pct: cap ? Math.round(Math.min(100, minted / cap * 100) * 10) / 10 : null,
+    mint_price_str: d.mint_price_str || '', smart_count: pulseSmartCount(d),
+    market_url: d.market_url || '', detected_at: d.detected_at
+  };
+}
+
+function pulseRankParts(idx) {
+  return { rankClass: idx === 0 ? 'rank-1' : (idx === 1 ? 'rank-2' : 'rank-3'), rankLabel: '#' + (idx + 1) };
+}
+
+function renderPulseLaunchRow(r, idx) {
+  if (!r) return '';
+  const { rankClass, rankLabel } = pulseRankParts(idx);
+  const name = escapeHtml(r.name || 'Unknown');
+  const sym = escapeHtml(r.symbol || '');
+  const cAddr = escapeHtml(r.contract || '');
+  const priceStr = formatCryptoPrice(Number(r.token_price_usd || 0));
+  const volStr = 'Vol: $' + formatCount(Number(r.volume_24h || 0));
+  const chg = r.price_change_24h;
+  const hasChg = chg !== null && chg !== undefined && isFinite(Number(chg));
+  const chgText = hasChg ? ((Number(chg) >= 0 ? '+' : '') + Number(chg).toFixed(1) + '%') : ('LP $' + formatCount(Number(r.lp_usd || 0)));
+  const chgBadge = hasChg ? (Number(chg) >= 0 ? 'badge-green' : 'badge-red') : 'badge-dim';
+  const dexUrl = getDexScreenerUrl(r) || r.pair_url || ('https://pancakeswap.finance/swap?outputCurrency=' + (r.contract || ''));
+  if (r.contract) registerPulseItem(r.contract, r);
+  return `<div class="pulse-list-row pulse-ath-row" onclick="openInspectModalByContract('${cAddr}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openInspectModalByContract('${cAddr}');}" role="button" tabindex="0" title="Click to inspect ${name} (${volStr}, liquidity $${formatCount(Number(r.lp_usd || 0))})">
     <div class="pulse-row-left">
       <span class="pulse-rank-tag ${rankClass}">${rankLabel}</span>
       <div class="pulse-row-identity">
@@ -3122,54 +3154,34 @@ function renderPulseAthRow(item, idx) {
       </div>
     </div>
     <div class="pulse-row-mid">
-      <span class="pulse-row-price" style="color: var(--color-gold); font-weight: 800;">${athStr}</span>
-      <span class="pulse-row-mcap">${mintStr}</span>
+      <span class="pulse-row-price">${priceStr}</span>
+      <span class="pulse-row-mcap">${volStr}</span>
     </div>
     <div class="pulse-row-right">
-      <span class="badge ${gainBadgeClass} pulse-row-badge">${gainText}</span>
-      <a href="${dexUrl}" target="_blank" rel="noopener" class="pulse-mini-dex-btn" title="Live Chart / Market" onclick="event.stopPropagation()">📈</a>
+      <span class="badge ${chgBadge} pulse-row-badge" title="24h price change">${chgText}</span>
+      <a href="${dexUrl}" target="_blank" rel="noopener" class="pulse-mini-dex-btn" title="DexScreener Live Chart" onclick="event.stopPropagation()">📈</a>
     </div>
   </div>`;
 }
 
-function renderPulseNftRow(nft, idx) {
-  if (!nft) return '';
-  const rankClass = idx === 0 ? 'rank-1' : (idx === 1 ? 'rank-2' : 'rank-3');
-  const rankLabel = '#' + (idx + 1);
-  const name = escapeHtml(nft.name || 'Unknown');
-  const sym = escapeHtml(nft.symbol || '');
-  const cAddr = escapeHtml(nft.contract || (nft.item && nft.item.contract) || '');
-  const flUsd = Number(nft.flUsd || nft.floor_price_usd || nft.token_price_usd || nft.secUsd || 0);
-  const flBnb = Number(nft.flBnb || nft.floor_price_bnb || 0);
-  const floorStr = flUsd > 0 ? ('Floor: ' + formatCryptoPrice(flUsd)) : (flBnb > 0 ? ('Floor: ' + formatBnb(flBnb) + ' BNB') : (nft.holders ? (formatCount(nft.holders) + ' Holders') : 'ERC-721'));
-
-  // % from the KNOWN mint cost; a free or unknown mint has none. Never an assumed base price.
-  const rawMint = nft.mint_cost_usd !== undefined ? nft.mint_cost_usd : nft.mintUsd;
-  const mintCost = (rawMint === null || rawMint === undefined) ? null : Number(rawMint);
-  const isFree = Boolean(nft.isFree || nft.has_free_mint || (nft.mint_price_str && String(nft.mint_price_str).toUpperCase().includes('FREE')));
-  const mintStr = isFree ? 'Mint: Free' : (mintCost > 0 ? ('Mint: ' + formatCryptoPrice(mintCost)) : 'Mint: TBD');
-
-  let gainPctStr = '—';
-  let gainBadgeClass = 'badge-dim';
-  if (flUsd > 0) {
-    if (mintCost > 0) {
-      const pct = ((flUsd - mintCost) / mintCost) * 100;
-      gainPctStr = (pct >= 0 ? '+' : '') + (pct > 9999 ? Math.round(pct).toLocaleString() : pct.toFixed(1)) + '%';
-      gainBadgeClass = pct >= 0 ? 'badge-green' : 'badge-red';
-    } else if (nft.price_change_24h !== undefined && nft.price_change_24h !== null) {
-      const chg = Number(nft.price_change_24h);
-      gainPctStr = (chg >= 0 ? '+' : '') + chg.toFixed(1) + '% 24h';
-      gainBadgeClass = chg >= 0 ? 'badge-green' : 'badge-red';
-    }
-  }
-
-  const elementUrl = nft.market_url || ('https://element.market/collections/' + (nft.contract || ''));
-
-  if (cAddr) {
-    registerPulseItem(cAddr, nft.item || nft);
-  }
-
-  return `<div class="pulse-list-row pulse-nft-row" onclick="openInspectModalByContract('${cAddr}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openInspectModalByContract('${cAddr}');}" role="button" tabindex="0" title="Click to inspect ${name} (${floorStr}, ${gainPctStr})">
+function renderPulseNftMintRow(n, idx) {
+  if (!n) return '';
+  const { rankClass, rankLabel } = pulseRankParts(idx);
+  const name = escapeHtml(n.name || 'NFT Collection');
+  const sym = escapeHtml(n.symbol || '');
+  const cAddr = escapeHtml(n.contract || '');
+  const minted = Number(n.total_minted || 0);
+  const mintedStr = n.max_supply ? `${formatCount(minted)} / ${formatCount(Number(n.max_supply))} minted` : `${formatCount(minted)} minted`;
+  const priceLabel = escapeHtml(n.mint_price_str ? String(n.mint_price_str).replace(/^⭐\s*/, '') : 'Mint: TBD');
+  const fill = n.fill_pct;
+  const hasFill = fill !== null && fill !== undefined;
+  const badgeText = hasFill ? (fill >= 100 ? 'Sold out' : `${Number(fill).toFixed(fill >= 10 ? 0 : 1)}% filled`) : `${formatCount(minted)} mints`;
+  const badgeClass = hasFill && fill >= 100 ? 'badge-yellow' : 'badge-magenta';
+  const smart = Number(n.smart_count || 0);
+  const smartStr = smart > 0 ? ` · 🧠 ${smart}` : '';
+  const elementUrl = n.market_url || ('https://element.market/collections/' + (n.contract || ''));
+  if (n.contract) registerPulseItem(n.contract, n);
+  return `<div class="pulse-list-row pulse-nft-row" onclick="openInspectModalByContract('${cAddr}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openInspectModalByContract('${cAddr}');}" role="button" tabindex="0" title="Click to inspect ${name} (${mintedStr})">
     <div class="pulse-row-left">
       <span class="pulse-rank-tag ${rankClass}">${rankLabel}</span>
       <div class="pulse-row-identity">
@@ -3178,11 +3190,11 @@ function renderPulseNftRow(nft, idx) {
       </div>
     </div>
     <div class="pulse-row-mid">
-      <span class="pulse-row-price" style="color: #f472b6;">${floorStr}</span>
-      <span class="pulse-row-mcap">${mintStr}</span>
+      <span class="pulse-row-price" style="color: #f472b6;">${mintedStr}</span>
+      <span class="pulse-row-mcap">${priceLabel}${smartStr}</span>
     </div>
     <div class="pulse-row-right">
-      <span class="badge ${gainBadgeClass} pulse-row-badge" title="% gain from fair-mint">${gainPctStr}</span>
+      <span class="badge ${badgeClass} pulse-row-badge" title="Share of the supply minted">${badgeText}</span>
       <a href="${elementUrl}" target="_blank" rel="noopener" class="pulse-mini-dex-btn" title="View Collection on Element Market" onclick="event.stopPropagation()">🎨</a>
     </div>
   </div>`;
@@ -3257,7 +3269,6 @@ function compute24hPulseMetrics(drops = allDrops, topGainersList = savedTopGaine
   // 24h window: records detected since the server's cutoff ("YYYY-MM-DD HH:MM:SS", same clock as detected_at)
   const since = serverPulse && serverPulse.since ? String(serverPulse.since) : null;
   const inWindow = (d) => !since || String((d && d.detected_at) || '') >= since;
-  const bnbPx = hasUsableBnbPrice() ? bnbPrice : 0;
 
   // Card 3: Top 3 Mints with the biggest amount of smart wallets involved (Past 24h Window)
   const smartMintCandidates = [];
@@ -3304,138 +3315,21 @@ function compute24hPulseMetrics(drops = allDrops, topGainersList = savedTopGaine
     });
   }
 
-  // Card 2: Top 3 ATH prices after mint. Only records with a KNOWN mint cost qualify (a verified free mint or a
-  // paid one): "DEX Traded" and TBD records have no mint position, so no gain is shown for them.
-  const athCandidates = [];
-  const seenAthContracts = new Set();
-  const allAthItems = [
-    ...topList,
-    ...uniquePool.filter(d => (Number(d.ath_price_usd || 0) > 0 || Number(d.token_price_usd || 0) > 0 || Number(d.secondary_price_usd || 0) > 0))
-  ];
-  // persisted winners / seed entries (and their items, which also enter uniquePool): "24h" only with a known window
-  const historyEntries = new Set([...topList, ...topList.map(g => (g && g.item) ? g.item : g)]);
-  // Pass 1: strict 24h window. Pass 2 (below): fewer than 3 -> drops with active 24h trading.
-  const pushAth = (entry, strictWindow) => {
-    const item = (entry && entry.item) ? entry.item : entry;
-    if (!item || !isValidTopMarketItem(item) || isExcludedMajorAsset(item)) return;
-    const c = String(item.contract || '').toLowerCase();
-    if (!c || seenAthContracts.has(c)) return;
-    // A historical winner (saved list / frozen seed) is a 24h mint only when the server window is known and it is inside it
-    if ((historyEntries.has(entry) || historyEntries.has(item)) && !(since && inWindow(item))) return;
-    if (strictWindow) {
-      if (!inWindow(item)) return;
-    } else {
-      const vol = Number(item.volume_24h || entry.volume_24h || 0);
-      const chg = item.price_change_24h || entry.price_change_24h;
-      if (vol <= 0 && (chg === undefined || chg === 0)) return;
-    }
-    const pInfo = computeItemProfit(item, bnbPrice);
-    if (pInfo.mintUsd === null || !(pInfo.athProfit > 0) || !(pInfo.athPrice > 0)) return;  // unknown cost / no gain
-    seenAthContracts.add(c);
-    athCandidates.push({
-      item,
-      contract: item.contract,
-      name: item.name || 'Unknown',
-      symbol: item.symbol || '',
-      athPrice: pInfo.athPrice,
-      profit: pInfo.athProfit,
-      multiplier: pInfo.multiplier,          // ATH multiplier; null for a free mint
-      block: Number(item.block || entry.block || 0),
-      mintUsd: pInfo.mintUsd,
-      isFree: pInfo.isFree,
-      standard: item.standard || entry.standard || '',
-      pair_url: item.pair_url || entry.pair_url,
-      market_url: item.market_url || entry.market_url
-    });
-  };
-  allAthItems.forEach(entry => pushAth(entry, true));
-  if (athCandidates.length < 3) allAthItems.forEach(entry => pushAth(entry, false));
+  // Card 2: Top 3 NEW tokens (first seen in the 24h window) that already trade, by 24h volume. The server list covers
+  // the full dataset; before /api/stats loads, the loaded records are ranked with the same rule. A token card 1
+  // already shows is skipped, so the two cards never repeat each other.
+  const lowerC = (d) => String((d && d.contract) || '').toLowerCase();
+  const runnerContracts = new Set(topRunners.map(lowerC));
+  const serverLaunches = serverPulse && Array.isArray(serverPulse.top_launches) ? serverPulse.top_launches : null;
+  const launchPool = serverLaunches || list.filter(inWindow).map(pulseLaunchRow).filter(Boolean)
+    .sort((a, b) => b.volume_24h - a.volume_24h);
+  const topLaunches = launchPool.filter(r => r && !runnerContracts.has(lowerC(r)) && !isExcludedMajorAsset(r)).slice(0, 3);
 
-  athCandidates.sort((a, b) => {
-    if (b.athPrice !== a.athPrice) return b.athPrice - a.athPrice;
-    return b.profit - a.profit;
-  });
-
-  const topAthMints = athCandidates.slice(0, 3);
-
-  // Card 4: Top 3 NFT Agent ID Surges (Past 24h Window)
-  const nftMap = new Map();
-  uniquePool.forEach(d => {
-    if (isExcludedMajorAsset(d)) return;
-    const std = String(d.standard || '');
-    const mUrl = String(d.market_url || '');
-    const isNft = std.includes('721') || std.includes('NFT') || std.includes('1155') || mUrl.includes('element.market');
-    if (!isNft) return;
-
-    const normName = String(d.name || '').trim().toLowerCase();
-    if (!normName) return;
-
-    const is24hMint = inWindow(d);
-    const vol = Number(d.volume_24h || 0);
-    const has24hTrade = vol > 0 || (d.price_change_24h !== undefined && d.price_change_24h !== 0);
-
-    // Require 24h mint or active 24h secondary trading
-    if (!is24hMint && !has24hTrade) return;
-
-    const flBnb = Number(d.floor_price_bnb || 0);
-    const flUsd = Number(d.floor_price_usd || d.token_price_usd || d.market_price_usd || d.secUsd || 0);
-    const effectiveUsd = flUsd > 0 ? flUsd : (flBnb > 0 && bnbPx > 0 ? flBnb * bnbPx : 0);
-    if (effectiveUsd <= 0) return;
-
-    // Gain from the KNOWN mint cost only (computeItemProfit: null cost = unknown). A free mint has no cost to
-    // divide by, so its gain is the 24h price change when there is one; otherwise there is no gain to show.
-    const nftProfit = computeItemProfit(d, bnbPrice);
-    const mintCost = nftProfit.mintUsd;       // number, or null when unknown
-    const isFree = nftProfit.isFree;
-    let gainPct = null;
-    let multiplier = null;
-    if (mintCost !== null && mintCost > 0) {
-      gainPct = ((effectiveUsd - mintCost) / mintCost) * 100;
-      multiplier = effectiveUsd / mintCost;
-    } else if (d.price_change_24h !== undefined && d.price_change_24h !== null) {
-      gainPct = Number(d.price_change_24h);
-      multiplier = (100 + gainPct) / 100;
-    }
-
-    // Card 4 is for positive surges only: unknown gains and collections below mint cost / in drawdown are out
-    if (gainPct === null || gainPct <= 0 || multiplier < 1.0) return;
-
-    const sm = Number(d.smart_wallets_count || (d.smart_wallets ? d.smart_wallets.length : 0) || 0);
-    const holders = Number(d.holders || 0);
-    // Surge score prioritizes the post-mint gain multiplier, balanced by secondary volume & smart money
-    const score = (gainPct * 10) + Math.min(vol, 10000) + (sm * 50) + (Math.log10(holders + 1) * 20);
-
-    const cand = {
-      contract: d.contract,
-      name: d.name || 'NFT Collection',
-      symbol: d.symbol || '',
-      standard: d.standard || 'ERC-721',
-      mint_price_str: d.mint_price_str,
-      mint_price_bnb: d.mint_price_bnb,
-      mint_cost_usd: mintCost,
-      has_free_mint: isFree,
-      isFree,
-      gainBasis: (mintCost !== null && mintCost > 0) ? 'mint' : '24h',
-      price_change_24h: d.price_change_24h,
-      flUsd: effectiveUsd,
-      flBnb,
-      vol,
-      sm,
-      holders,
-      gainPct,
-      multiplier,
-      score,
-      market_url: d.market_url || ('https://element.market/collections/' + (d.contract || ''))
-    };
-
-    const existing = nftMap.get(normName);
-    if (!existing || score > existing.score) {
-      nftMap.set(normName, cand);
-    }
-  });
-
-  // Fewer than 3 real candidates is shown as fewer cards (or the empty state): nothing is invented to fill the row.
-  const topNftSurges = Array.from(nftMap.values()).sort((a, b) => b.score - a.score).slice(0, 3);
+  // Card 4: Top 3 NEW NFT collections by mints (server list over the full dataset, same fallback rule).
+  const serverNftMints = serverPulse && Array.isArray(serverPulse.top_nft_mints) ? serverPulse.top_nft_mints : null;
+  const topNftMints = (serverNftMints || list.filter(inWindow).map(pulseNftMintRow).filter(Boolean)
+    .sort((a, b) => (b.total_minted - a.total_minted) || (b.smart_count - a.smart_count)))
+    .filter(n => n && !isExcludedMajorAsset(n)).slice(0, 3);
 
   // Graduations & Volume
   let gradCount = 0;
@@ -3521,18 +3415,16 @@ function compute24hPulseMetrics(drops = allDrops, topGainersList = savedTopGaine
     }
   }
 
-  if (topAthMints && topAthMints.length > 0) {
-    headlineParts.push(`${topAthMints[0].name} leads 24h post-mint ATH (${formatCryptoPrice(topAthMints[0].athPrice)})`);
+  if (topLaunches.length > 0) {
+    headlineParts.push(`${topLaunches[0].name} leads new launches ($${formatCount(topLaunches[0].volume_24h)} 24h volume)`);
   }
 
   if (topSmartMints && topSmartMints.length > 0) {
     headlineParts.push(`${topSmartMints[0].drop.name || topSmartMints[0].drop.symbol} leads smart alpha (${topSmartMints[0].count} wallets)`);
   }
 
-  if (topNftSurges && topNftSurges.length > 0) {
-    const topNft = topNftSurges[0];
-    const nftStat = topNft.flUsd > 0 ? `${formatCryptoPrice(topNft.flUsd)} floor` : (topNft.vol > 0 ? `$${formatCount(topNft.vol)} vol` : `${formatCount(topNft.holders)} holders`);
-    headlineParts.push(`${topNft.name} leads Element NFT (${nftStat})`);
+  if (topNftMints.length > 0) {
+    headlineParts.push(`${topNftMints[0].name} leads NFT mints (${formatCount(topNftMints[0].total_minted)} minted)`);
   }
 
   if (headlineParts.length > 0) {
@@ -3555,9 +3447,9 @@ function compute24hPulseMetrics(drops = allDrops, topGainersList = savedTopGaine
   return {
     topRunner,
     topRunners,
-    topAthMints,
+    topLaunches,
     topSmartMints,
-    topNftSurges,
+    topNftMints,
     anchorAsset,
     launchpadCount,
     ...agg,
@@ -3627,13 +3519,13 @@ function updateDailyPulseUI() {
     }
   }
 
-  // 2. Top ATH Prices from Mint Card (Top 3)
+  // 2. Top 24h New Launches (Top 3)
   const athListEl = document.getElementById('pulseAthList');
   if (athListEl) {
-    if (metrics.topAthMints && metrics.topAthMints.length > 0) {
-      athListEl.innerHTML = metrics.topAthMints.map((a, i) => renderPulseAthRow(a, i)).join('');
+    if (metrics.topLaunches && metrics.topLaunches.length > 0) {
+      athListEl.innerHTML = metrics.topLaunches.map((r, i) => renderPulseLaunchRow(r, i)).join('');
     } else {
-      athListEl.innerHTML = '<div class="pulse-empty-note">No verified post-mint ATH data</div>';
+      athListEl.innerHTML = '<div class="pulse-empty-note">No new token is trading yet in the past 24h</div>';
     }
   }
 
@@ -3668,13 +3560,13 @@ function updateDailyPulseUI() {
   }
   if (clustersEl) clustersEl.textContent = aggText(metrics.clustersCount);
 
-  // 4. Top NFT Agent ID Surges (Element Market Floor Leaders)
+  // 4. Top 24h NFT Mints (Top 3)
   const nftListEl = document.getElementById('pulseNftSurgesList');
   if (nftListEl) {
-    if (metrics.topNftSurges && metrics.topNftSurges.length > 0) {
-      nftListEl.innerHTML = metrics.topNftSurges.map((n, i) => renderPulseNftRow(n, i)).join('');
+    if (metrics.topNftMints && metrics.topNftMints.length > 0) {
+      nftListEl.innerHTML = metrics.topNftMints.map((n, i) => renderPulseNftMintRow(n, i)).join('');
     } else {
-      nftListEl.innerHTML = '<div class="pulse-empty-note">No NFT collections detected</div>';
+      nftListEl.innerHTML = '<div class="pulse-empty-note">No NFT collection minted in the past 24h</div>';
     }
   }
 
@@ -3885,8 +3777,8 @@ if (typeof window !== 'undefined') {
   window.getSanitizedMcap = getSanitizedMcap;
   window.renderPulseRunnerRow = renderPulseRunnerRow;
   window.renderPulseSmartMintRow = renderPulseSmartMintRow;
-  window.renderPulseAthRow = renderPulseAthRow;
-  window.renderPulseNftRow = renderPulseNftRow;
+  window.renderPulseLaunchRow = renderPulseLaunchRow;
+  window.renderPulseNftMintRow = renderPulseNftMintRow;
   window.setupPulseCarousel = setupPulseCarousel;
   window.scrollPulseCarousel = scrollPulseCarousel;
   window.updateActivePulseDot = updateActivePulseDot;
@@ -10064,8 +9956,10 @@ if (typeof module !== 'undefined' && module.exports) {
     initDailyPulseHero,
     renderPulseRunnerRow,
     renderPulseSmartMintRow,
-    renderPulseAthRow,
-    renderPulseNftRow,
+    renderPulseLaunchRow,
+    renderPulseNftMintRow,
+    pulseLaunchRow,
+    pulseNftMintRow,
     setupPulseCarousel,
     scrollPulseCarousel,
     updateActivePulseDot,
