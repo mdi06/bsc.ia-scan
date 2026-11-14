@@ -82,3 +82,45 @@ def test_display_tests_in_node():
     res = subprocess.run(["node", "test_display_prompt5.js"], capture_output=True, text=True)
     assert res.returncode == 0, res.stdout[-1500:] + res.stderr[-1500:]
     assert "Prompt 5 display tests passed" in res.stdout
+
+
+# ------------------------------------------------------------------ cards 2 and 4: new launches, NFT mints
+
+def nft(i, ago, minted, cap=None, **kw):
+    return drop(i, ago, standard="ERC-721 (NFT Collection)", total_minted=minted, max_supply=cap,
+                volume_24h=0, **kw)
+
+
+def test_new_launches_are_new_trading_tokens_ranked_by_volume():
+    rows = [
+        drop(1, 600, token_price_usd=0.01, lp_usd=20000, volume_24h=50000, price_change_24h=12.5),
+        drop(2, 600, token_price_usd=0.02, lp_usd=9000, volume_24h=900000),
+        drop(3, 600, token_price_usd=0.03, lp_usd=500, volume_24h=10**6),          # too little liquidity
+        drop(4, 600, token_price_usd=0.04, lp_usd=50000, volume_24h=500),           # too little volume
+        drop(5, 600, token_price_usd=0, lp_usd=50000, volume_24h=10**6),            # no price
+        drop(6, 600, token_price_usd=0.06, lp_usd=50000, volume_24h=10**6, market_stale=True),
+        drop(7, 600, token_price_usd=0.07, lp_usd=50000, volume_24h=10**6, risk_level="RUG"),
+        drop(8, 90000, token_price_usd=0.08, lp_usd=50000, volume_24h=10**7),        # older than 24 h: not new
+        nft(9, 600, 100),                                                             # an NFT is not a launch
+    ]
+    launches = api.compute_pulse_24h(rows, now=NOW)["top_launches"]
+    assert [r["name"] for r in launches] == ["D2", "D1"]
+    assert launches[1]["price_change_24h"] == 12.5 and launches[1]["lp_usd"] == 20000
+
+
+def test_nft_mints_rank_new_collections_by_mints_with_fill_share():
+    rows = [
+        nft(1, 600, 2405, 10000, smart_wallets=["a"] * 104),
+        nft(2, 600, 10000, 10000),
+        nft(3, 600, 1045, 2222),
+        nft(4, 600, 50, None),                      # uncapped: no fill share
+        nft(5, 600, 9000, 1e77),                    # "uncapped" sentinel: no fill share
+        nft(6, 600, 0, 100),                        # nothing minted yet
+        nft(7, 90000, 99999, 100000),               # older than 24 h
+        nft(8, 600, 5000, 5000, risk_badge="🚨 HONEYPOT"),
+    ]
+    mints = api.compute_pulse_24h(rows, now=NOW)["top_nft_mints"]
+    assert [m["name"] for m in mints] == ["D2", "D5", "D1"]
+    assert mints[0]["fill_pct"] == 100.0 and mints[1]["fill_pct"] is None and mints[1]["max_supply"] is None
+    assert mints[2]["fill_pct"] == 24.1 and mints[2]["smart_count"] == 104
+    assert api.compute_pulse_24h([nft(4, 600, 50)], now=NOW)["top_nft_mints"][0]["total_minted"] == 50

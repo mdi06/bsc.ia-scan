@@ -252,6 +252,69 @@ FEED_FILTERS = {
 
 PULSE_WINDOW_SEC = 24 * 3600
 
+# Pulse cards 2 and 4 (top lists). Card 2 ranks NEW tokens (first seen in the window) by 24h volume: card 1
+# ("Top 24h Runners") already ranks every live token by % change, so this one shows where new trading is. Card 4
+# ranks new NFT collections by how many were minted. Both use data the worker has for nearly every record; the
+# old "ATH from mint" / "NFT surge" cards needed a mint cost AND a market price, which almost no record has.
+PULSE_LAUNCH_MIN_LP_USD = 1000.0
+PULSE_LAUNCH_MIN_VOLUME_USD = 1000.0
+PULSE_TOP_LAUNCHES = 6        # the browser shows 3, skipping any that card 1 already shows
+PULSE_TOP_NFT_MINTS = 3
+UNCAPPED_SUPPLY = 1e20        # max_supply at or above this means "no cap" (same sentinel as app.js)
+
+
+def _is_nft_record(d: dict) -> bool:
+    std = str(d.get("standard") or "")
+    return any(k in std for k in ("721", "1155", "NFT")) or "element.market" in str(d.get("market_url") or "")
+
+
+def _is_flagged_risky(d: dict) -> bool:
+    level = str(d.get("risk_level") or "").upper()
+    badge = str(d.get("risk_badge") or "").upper()
+    return level == "RUG" or "HONEYPOT" in badge
+
+
+def _smart_count(d: dict) -> int:
+    return len(d.get("smart_wallets") or d.get("smart_minters") or [])
+
+
+def pulse_launch_row(d: dict) -> Optional[dict]:
+    """A new token for card 2, or None if it does not qualify: live (not cleared as stale), real liquidity and
+    volume, a price, not flagged as a rug / honeypot."""
+    if _is_nft_record(d) or d.get("market_stale") or _is_flagged_risky(d):
+        return None
+    lp = filters._num(d.get("lp_usd"))
+    vol = filters._num(d.get("volume_24h"))
+    px = filters._num(d.get("token_price_usd"))
+    if lp < PULSE_LAUNCH_MIN_LP_USD or vol < PULSE_LAUNCH_MIN_VOLUME_USD or px <= 0:
+        return None
+    chg = d.get("price_change_24h")
+    return {
+        "contract": d.get("contract"), "name": d.get("name") or "Unknown", "symbol": d.get("symbol") or "",
+        "standard": d.get("standard") or "", "token_price_usd": px, "volume_24h": vol, "lp_usd": lp,
+        "price_change_24h": None if chg is None else filters._num(chg),
+        "market_cap": get_sanitized_mcap(d), "smart_count": _smart_count(d),
+        "pair_url": d.get("pair_url") or "", "detected_at": d.get("detected_at"),
+    }
+
+
+def pulse_nft_mint_row(d: dict) -> Optional[dict]:
+    """A new NFT collection for card 4, or None: an NFT with at least one mint, not flagged as risky."""
+    if not _is_nft_record(d) or _is_flagged_risky(d):
+        return None
+    minted = filters._num(d.get("total_minted"))
+    if minted < 1:
+        return None
+    cap = filters._num(d.get("max_supply"))
+    cap = cap if 0 < cap < UNCAPPED_SUPPLY else None
+    return {
+        "contract": d.get("contract"), "name": d.get("name") or "NFT Collection", "symbol": d.get("symbol") or "",
+        "standard": d.get("standard") or "", "total_minted": int(minted), "max_supply": int(cap) if cap else None,
+        "fill_pct": round(min(100.0, minted / cap * 100.0), 1) if cap else None,
+        "mint_price_str": d.get("mint_price_str") or "", "smart_count": _smart_count(d),
+        "market_url": d.get("market_url") or "", "detected_at": d.get("detected_at"),
+    }
+
 
 def compute_pulse_24h(projects, now=None) -> dict:
     """24h Pulse aggregates over the FULL dataset (not whatever page the browser has loaded).
@@ -264,12 +327,19 @@ def compute_pulse_24h(projects, now=None) -> dict:
     new_drops = graduated = smart_inflows = clusters = clean = refunds = threats = 0
     dex_volume = 0.0
     hunters: Dict[str, int] = {}
+    launches, nft_mints = [], []
     for d in projects:
         if not isinstance(d, dict) or is_bogus_or_synthetic_asset(d):
             continue
         if str(d.get("detected_at") or "") < since:
             continue
         new_drops += 1
+        row = pulse_launch_row(d)
+        if row:
+            launches.append(row)
+        row = pulse_nft_mint_row(d)
+        if row:
+            nft_mints.append(row)
         if is_secondary_market_asset(d) or d.get("is_graduated"):
             graduated += 1
         dex_volume += filters._num(d.get("volume_24h"))
@@ -310,6 +380,9 @@ def compute_pulse_24h(projects, now=None) -> dict:
         "clean_mints": clean,
         "refunds": refunds,
         "threats_blocked": threats,
+        "top_launches": sorted(launches, key=lambda r: r["volume_24h"], reverse=True)[:PULSE_TOP_LAUNCHES],
+        "top_nft_mints": sorted(nft_mints, key=lambda r: (r["total_minted"], r["smart_count"]),
+                                reverse=True)[:PULSE_TOP_NFT_MINTS],
     }
 
 
