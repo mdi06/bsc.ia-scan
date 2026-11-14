@@ -71,6 +71,47 @@
     };
   </script>
 
+  <!-- Remove utm_* parameters from the address bar once the visit has been recorded, so a link copied from the page
+       does not carry (and miscredit) the original campaign tag. It waits for both PostHog's $pageview (seen in its
+       before_send hook) and GA4's page_view request (seen in resource timing); if either never comes (blocked,
+       developer opt-out), it strips UTM_STRIP_FALLBACK_MS after load anyway. Vercel Analytics records its page view
+       at startup and does not count replaceState as a new page. Other query parameters and the #hash are kept. -->
+  <script>
+    (function () {
+      var UTM_STRIP_FALLBACK_MS = 20000;
+      if (!window.URLSearchParams || !window.history || !history.replaceState) return;
+      var params = new URLSearchParams(window.location.search);
+      var utmKeys = [];
+      params.forEach(function (_, key) { if (/^utm_/i.test(key) && utmKeys.indexOf(key) < 0) utmKeys.push(key); });
+      if (!utmKeys.length) return;
+      var recorded = { posthog: false, ga4: false };
+      var stripped = false;
+      function strip() {
+        if (stripped) return;
+        stripped = true;
+        var current = new URLSearchParams(window.location.search);
+        utmKeys.forEach(function (key) { current.delete(key); });
+        var qs = current.toString();
+        history.replaceState(history.state, '', window.location.pathname + (qs ? '?' + qs : '') + window.location.hash);
+      }
+      window.markVisitRecorded = function (tracker) {
+        if (stripped || recorded[tracker] !== false) return;
+        recorded[tracker] = true;
+        if (recorded.posthog && recorded.ga4) setTimeout(strip, 250);
+      };
+      if (window.PerformanceObserver) {
+        try {
+          new PerformanceObserver(function (list) {
+            list.getEntries().forEach(function (e) {
+              if (/google-analytics\.com\/g\/collect/.test(e.name) && /[?&]en=page_view(&|$)/.test(e.name)) window.markVisitRecorded('ga4');
+            });
+          }).observe({ type: 'resource', buffered: true });
+        } catch (_) {}
+      }
+      window.addEventListener('load', function () { setTimeout(strip, UTM_STRIP_FALLBACK_MS); }, { once: true });
+    })();
+  </script>
+
   <!-- Google Tag Manager: dataLayer is queued now, gtm.js loads when idle -->
   <script>
     window.dataLayer = window.dataLayer || [];
@@ -127,6 +168,10 @@
     posthog.init('phc_BzxueVZ45SH7ZUEnNNHoyRS9NrsFhUapvGtQ2PoWGdmH', {
       api_host: 'https://eu.i.posthog.com',
       person_profiles: 'identified_only',
+      before_send: function (event) {
+        if (event && event.event === '$pageview' && window.markVisitRecorded) window.markVisitRecorded('posthog');
+        return event;
+      },
       capture_pageview: !isDevOptedOut,
       capture_pageleave: !isDevOptedOut,
       disable_session_recording: isDevOptedOut || !isReplaySampled,
