@@ -5,6 +5,11 @@ const PANCAKE_ROUTER_V2 = '0x10ED43C718714eb63d5aA57B78B54704E256024E';
 const WBNB_ADDRESS = '0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c';
 
 let allDrops = [];
+// Bumped wherever drop records change in place (merge, balances, market overlay, favourites). renderTable() uses it,
+// together with the identity/size of the other inputs, to skip the filter counts and the 24h pulse card on renders
+// that only change the filter, search, sort or page.
+let dropsDataVersion = 0;
+function markDropsDataChanged() { dropsDataVersion++; }
 let activeTab = 'RADAR';
 let activeFilter = 'ALL';
 let sortMode = 'NEWEST';
@@ -224,6 +229,7 @@ function toggleFavorite(contract, e) {
     favorites.add(c);
   }
   saveFavorites();
+  markDropsDataChanged();
   updateFavPillCount();
   renderTable();
 }
@@ -236,6 +242,7 @@ function toggleModalFav(contract) {
     favorites.add(c);
   }
   saveFavorites();
+  markDropsDataChanged();
   updateFavPillCount();
   renderTable();
   const btn = document.getElementById('modalFavBtn');
@@ -991,6 +998,7 @@ function mergeTopGainersList(externalList) {
 function updateSavedTopMarkets(incomingDrops) {
   if (!Array.isArray(incomingDrops) || incomingDrops.length === 0) return savedTopGainers;
   if (!hasUsableBnbPrice()) return savedTopGainers;  // profits need a BNB/USD price; none is invented
+  markDropsDataChanged();
 
   let changed = false;
 
@@ -1120,6 +1128,7 @@ let isLoadingSmartDrops = false;
 // Appends drops that are not already in allDrops (matched by lowercase contract). Returns how many were added.
 // Used by "Load Older Drops" so overlapping pages never produce duplicate rows.
 function appendUniqueDrops(drops) {
+  markDropsDataChanged();
   if (!Array.isArray(drops)) return 0;
   const present = new Set(allDrops.map(d => (d.contract || '').toLowerCase()));
   let added = 0;
@@ -1141,17 +1150,68 @@ function appendUniqueDrops(drops) {
 // were only refreshed by renderTable(), so a merge of more drops (smart drops, the secondary list) left them at the
 // count of whatever page was rendered last: FREE MINTS showed 109 instead of 1,290 depending on load timing.
 function refreshFilterPillCounts() {
-  if (typeof document === 'undefined') return;
-  updateSniperReadyCount();
-  updateNftSurgeCount();
-  updateProxyCount();
-  updateLaunchpadCount();
-  updateFreeMintsCount();
-  updateSecondaryTabCount();
+  updateAllFilterCounts();
 }
+
+// Every filter pill / tab count in one pass over allDrops (the individual update*Count functions each filter
+// allDrops again). Counts the server already totals (sniper ready, NFT surge, proxy) are not recomputed locally.
+function countDropsByFilter(drops = allDrops, stats = globalStats) {
+  const needSniper = !(stats && stats.sniper_ready !== undefined);
+  const needSurge = !(stats && stats.nft_surge !== undefined);
+  const needProxy = !(stats && stats.proxy !== undefined);
+  const counts = { favorites: 0, sniperReady: 0, freeMints: 0, nftSurge: 0, proxy: 0, launchpad: 0, secondary: 0 };
+  for (const d of drops) {
+    if (!d) continue;
+    if (isFavorited(d.contract, d)) counts.favorites++;
+    if (needSniper && isSniperReady(d)) counts.sniperReady++;
+    if (isFreeMintDrop(d)) counts.freeMints++;
+    if (needSurge && d.is_nft_surge) counts.nftSurge++;
+    if (needProxy && d.is_proxy_clone) counts.proxy++;
+    if (isLaunchpadDrop(d)) counts.launchpad++;
+    if (isSecondaryMarketAsset(d)) counts.secondary++;
+  }
+  if (!needSniper) counts.sniperReady = stats.sniper_ready;
+  if (!needSurge) counts.nftSurge = stats.nft_surge;
+  if (!needProxy) counts.proxy = stats.proxy;
+  if (stats && stats.secondary) counts.secondary = Math.max(counts.secondary, stats.secondary);
+  return counts;
+}
+
+function updateAllFilterCounts() {
+  if (typeof document === 'undefined') return;
+  const counts = countDropsByFilter();
+  const setText = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+  setText('favCount', counts.favorites);
+  setText('sniperReadyCount', counts.sniperReady);
+  setText('freeMintsCount', counts.freeMints);
+  setText('nftSurgeCount', counts.nftSurge);
+  setText('proxyCount', counts.proxy);
+  setText('launchpadTabCount', counts.launchpad);
+  setText('launchpadCount', counts.launchpad);
+  setText('secondaryTabCount', counts.secondary);
+  if (typeof syncMobileTabSelector === 'function') syncMobileTabSelector();
+  updateFollowedFilterCount();
+}
+
+// renderTable() refreshes the counts and the 24h pulse card only when one of their inputs changed since the last
+// time: in-place drop changes (dropsDataVersion), a reassigned or resized allDrops / top gainers list, new server
+// stats, favourites, followed wallets, wallet balances, the latest block or the BNB price.
+let lastDataDerivedInputs = null;
+function dataDerivedInputsChanged() {
+  const inputs = [
+    dropsDataVersion, allDrops, allDrops.length, savedTopGainers, savedTopGainers.length, globalStats,
+    favorites, favorites.size, followedWallets, followedWallets.size, userOwnedContracts, userOwnedContracts.size,
+    connectedWallet, latestKnownBlock, pulse24hServer, bnbPrice, bnbPriceLive,
+  ];
+  const prev = lastDataDerivedInputs;
+  lastDataDerivedInputs = inputs;
+  return !prev || inputs.some((v, i) => v !== prev[i]);
+}
+let lastRenderedTab = null;
 
 function mergeDropsIntoAllDrops(newDrops) {
   if (!Array.isArray(newDrops) || newDrops.length === 0) return 0;
+  markDropsDataChanged();
   let added = 0;
   newDrops.forEach(drop => {
     const c = (drop.contract || '').toLowerCase();
@@ -1195,6 +1255,7 @@ function mergeDropsIntoAllDrops(newDrops) {
 const MARKET_OVERLAY_FIELDS = ['token_price_usd', 'market_cap', 'fdv', 'lp_usd', 'volume_24h', 'price_change_24h', 'buys_24h', 'sells_24h', 'buys_1h'];
 
 function applyMarketOverlay(drops, market) {
+  markDropsDataChanged();
   let updated = 0;
   drops.forEach(d => {
     const m = market[(d.contract || '').toLowerCase()];
@@ -4350,7 +4411,28 @@ function clearRecentChips() {
   renderRecentChips();
 }
 
+// Search input renders (table + dropdown) are debounced so a burst of keystrokes renders once.
+const SEARCH_RENDER_DEBOUNCE_MS = 120;
+let searchRenderTimer = null;
+function cancelPendingSearchRender() {
+  if (searchRenderTimer) {
+    clearTimeout(searchRenderTimer);
+    searchRenderTimer = null;
+  }
+}
+function flushSearchRender() {
+  cancelPendingSearchRender();
+  renderTable();
+  renderSearchDropdown(searchQuery);
+}
+function isSearchDropdownOpen() {
+  if (typeof document === 'undefined') return false;
+  const dropdown = document.getElementById('searchResultsDropdown');
+  return Boolean(dropdown && dropdown.style.display && dropdown.style.display !== 'none');
+}
+
 function setSearchQuery(q, andOpenModal = false) {
+  cancelPendingSearchRender();
   searchQuery = q || '';
   const sInput = document.getElementById('searchInput');
   const sClear = document.getElementById('searchClearBtn');
@@ -4759,18 +4841,16 @@ function renderTable(keepLimit = false) {
   }
   const filtered = getFilteredDrops();
 
-  updateFavPillCount();
-  updateSniperReadyCount();
-  updateFreeMintsCount();
-  updateNftSurgeCount();
-  updateProxyCount();
-  updateLaunchpadCount();
-  updateSecondaryTabCount();
-  updateFollowedFilterCount();
-  if (activeTab === 'SECONDARY') {
+  // Counts, the secondary banner and the pulse card depend on the data, not on the filter / search / sort / page.
+  const dataChanged = dataDerivedInputsChanged();
+  if (dataChanged) {
+    updateAllFilterCounts();
+    updateDailyPulseUI();
+  }
+  if (activeTab === 'SECONDARY' && (dataChanged || lastRenderedTab !== 'SECONDARY')) {
     updateSecondaryBannerUI();
   }
-  updateDailyPulseUI();
+  lastRenderedTab = activeTab;
   const totalDisplay = globalStats ? globalStats.total : allDrops.length;
   const footerCountEl = document.getElementById('footerCount');
   if (footerCountEl) {
@@ -7444,6 +7524,7 @@ function disconnectWallet() {
 
   updateWalletButtonUI();
   loadFavoritesForActiveWallet();
+  markDropsDataChanged();
   updatePortfolioBannerUI();
   renderTable();
 
@@ -7676,6 +7757,7 @@ async function scanUserPortfolio(walletAddr, force = false) {
     if (btn) btn.classList.remove('connecting');
     if (rescanBtn) rescanBtn.classList.remove('connecting');
     updateWalletButtonUI();
+    markDropsDataChanged();
     updatePortfolioBannerUI();
     renderTable();
   }
@@ -8332,6 +8414,7 @@ async function pollDeltaFeed() {
               drop.user_balance_wei = raw;
             }
           });
+          markDropsDataChanged();
           updatePortfolioBannerUI();
         }
 
@@ -8588,11 +8671,8 @@ async function fetchDrops() {
     if (sEl) {
       sEl.textContent = globalStats ? globalStats.smart : allDrops.filter(d => (d.smart_wallets && d.smart_wallets.length > 0) || (d.smart_minters && d.smart_minters.length > 0)).length;
     }
-    updateSniperReadyCount();
-    updateNftSurgeCount();
-    updateProxyCount();
-    updateLaunchpadCount();
-    updateSecondaryTabCount();
+    markDropsDataChanged();
+    updateAllFilterCounts();
 
     // Re-hydrate user balances if wallet is connected
     if (connectedWallet && userOwnedContracts.size > 0) {
@@ -8609,6 +8689,7 @@ async function fetchDrops() {
           drop.user_balance_wei = 0n;
         }
       });
+      markDropsDataChanged();
       updatePortfolioBannerUI();
     } else {
       const pCountEl = document.getElementById('portfolioCount');
@@ -9317,6 +9398,7 @@ async function init() {
         if (secBanner) secBanner.style.display = isSec ? 'flex' : 'none';
 
         if (isPort) {
+          markDropsDataChanged();
           updatePortfolioBannerUI();
           if (connectedWallet && userOwnedContracts.size === 0 && !isScanningPortfolio) {
             scanUserPortfolio(connectedWallet);
@@ -9414,16 +9496,22 @@ async function init() {
         }
       });
 
-      searchInput.addEventListener('input', async e => {
+      searchInput.addEventListener('input', e => {
         searchQuery = e.target.value;
         if (searchClearBtn) {
           searchClearBtn.style.display = searchQuery ? 'inline-flex' : 'none';
         }
+        // The historical smart drops (a large JSON) are loaded in the background: render with what is loaded now,
+        // then once more when they arrive, if a search is still active.
         if (!hasLoadedSmartDrops && (searchQuery.includes('.ai') || searchQuery.startsWith('0x') || searchQuery.length >= 3)) {
-          await loadSmartDrops();
+          loadSmartDrops().then(() => {
+            if (!hasLoadedSmartDrops || !searchQuery.trim() || searchRenderTimer) return; // a pending render will include them
+            renderTable();
+            if (isSearchDropdownOpen()) renderSearchDropdown(searchQuery);
+          }).catch(() => {});
         }
-        renderTable();
-        renderSearchDropdown(searchQuery);
+        cancelPendingSearchRender();
+        searchRenderTimer = setTimeout(flushSearchRender, SEARCH_RENDER_DEBOUNCE_MS);
 
         // Track debounced search queries so we know what tokens users are looking for
         clearTimeout(searchDebounceTimer);
@@ -9441,7 +9529,7 @@ async function init() {
 
       searchInput.addEventListener('keydown', e => {
         const dropdown = document.getElementById('searchResultsDropdown');
-        const isDropdownOpen = dropdown && dropdown.style.display !== 'none';
+        let isDropdownOpen = dropdown && dropdown.style.display !== 'none';
 
         if (e.key === 'ArrowDown') {
           if (!isDropdownOpen && searchInput.value.trim()) {
@@ -9467,6 +9555,11 @@ async function init() {
         }
 
         if (e.key === 'Enter') {
+          if (searchRenderTimer) {
+            // Keystrokes still waiting on the debounce: render now so Enter acts on the current query.
+            flushSearchRender();
+            isDropdownOpen = isSearchDropdownOpen();
+          }
           if (isDropdownOpen && searchDropdownResults && searchDropdownResults.length > 0) {
             e.preventDefault();
             const chosen = searchDropdownSelectedIndex >= 0
@@ -9479,12 +9572,16 @@ async function init() {
 
         if (e.key === 'Escape') {
           hideSearchDropdown();
+          const hadPendingRender = Boolean(searchRenderTimer);
+          cancelPendingSearchRender();
           if (searchInput.value) {
             clearTimeout(searchDebounceTimer);
             searchInput.value = '';
             searchQuery = '';
             if (searchClearBtn) searchClearBtn.style.display = 'none';
             renderTable();
+          } else if (hadPendingRender) {
+            renderTable(); // the field was emptied by typing and that render had not run yet
           }
           searchInput.blur();
         }
@@ -9498,6 +9595,7 @@ async function init() {
           e.stopPropagation();
         }
         clearTimeout(searchDebounceTimer);
+        cancelPendingSearchRender();
         hideSearchDropdown();
         if (searchInput) {
           searchInput.value = '';
@@ -9777,6 +9875,12 @@ if (typeof module !== 'undefined' && module.exports) {
     loadSecondaryDrops,
     mergeDropsIntoAllDrops,
     refreshFilterPillCounts,
+    countDropsByFilter,
+    updateAllFilterCounts,
+    markDropsDataChanged,
+    getDropsDataVersion: () => dropsDataVersion,
+    flushSearchRender,
+    cancelPendingSearchRender,
     updateFreeMintsCount,
     appendUniqueDrops,
     getFilteredDrops,
