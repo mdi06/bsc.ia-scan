@@ -3412,6 +3412,10 @@ a.inspect-btn:hover {
 
   .suite-meta {
     order: 2;
+    /* The desktop rule fixes this row at 40px; on a narrow phone the buttons wrap to a second line, and a fixed
+       height let that line spill over the Live Radar row below. Grow with the content instead. */
+    height: auto;
+    min-height: 40px;
     display: flex;
     flex-direction: row;
     flex-wrap: wrap;
