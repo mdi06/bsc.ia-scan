@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<!-- Template for scripts/daily_card.py: __TOKENS__ are replaced with real, escaped values. 1080x1080. -->
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>BNB Agent ID Radar - 24h Pulse</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      width: 1080px; height: 1080px; background: #020408; color: #E2E8F0; position: relative; overflow: hidden;
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "PingFang SC", "Hiragino Sans", "Segoe UI", Roboto, Arial, sans-serif;
+      padding: 52px 56px; display: flex; flex-direction: column; gap: 26px;
+    }
+    .mono { font-family: "SF Mono", "Roboto Mono", Menlo, Consolas, monospace; }
+    .grid { position: absolute; inset: 0; pointer-events: none;
+      background-image: linear-gradient(rgba(240,185,11,.04) 1px, transparent 1px), linear-gradient(90deg, rgba(240,185,11,.04) 1px, transparent 1px);
+      background-size: 40px 40px; }
+    .glow-top { position: absolute; top: -260px; left: 50%; width: 900px; height: 520px; transform: translateX(-50%); pointer-events: none;
+      background: radial-gradient(ellipse, rgba(240,185,11,.20) 0%, transparent 70%); }
+    .glow-bottom { position: absolute; bottom: -300px; left: 50%; width: 900px; height: 520px; transform: translateX(-50%); pointer-events: none;
+      background: radial-gradient(ellipse, rgba(0,255,157,.12) 0%, transparent 70%); }
+    .ring { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); border-radius: 50%; pointer-events: none; }
+    .ring.a { width: 760px; height: 760px; border: 1.5px dashed rgba(240,185,11,.12); }
+    .ring.b { width: 1060px; height: 1060px; border: 1.5px solid rgba(240,185,11,.07); }
+    .top, .head, .tiles, .list, .foot { position: relative; z-index: 2; }
+
+    .top { display: flex; justify-content: space-between; align-items: center; }
+    .pill-live { display: flex; align-items: center; gap: 10px; padding: 9px 18px; border-radius: 999px; font-size: 15px; font-weight: 800; letter-spacing: 1.4px;
+      color: #00FF9D; background: rgba(0,255,157,.08); border: 1px solid rgba(0,255,157,.4); }
+    .dot { width: 9px; height: 9px; border-radius: 50%; background: #00FF9D; box-shadow: 0 0 12px #00FF9D; }
+    .date { font-size: 16px; color: #94A3B8; letter-spacing: 1.4px; font-weight: 700; }
+
+    .head { text-align: center; }
+    .kicker { font-size: 20px; font-weight: 800; letter-spacing: 5px; color: #F0B90B; text-transform: uppercase; }
+    .title { font-size: 104px; font-weight: 900; line-height: 1; letter-spacing: -2px; color: #fff; margin-top: 6px; }
+    .title span { background: linear-gradient(135deg, #FFF6C7 0%, #F0B90B 45%, #D49600 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+
+    .tiles { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; }
+    .tile { padding: 20px 22px; border-radius: 20px; box-shadow: 0 10px 28px rgba(0,0,0,.6); display: flex; flex-direction: column; gap: 4px; }
+    .tile .lbl { font-size: 13px; font-weight: 800; letter-spacing: 1.4px; color: #94A3B8; text-transform: uppercase; }
+    .tile .val { font-size: 50px; font-weight: 900; letter-spacing: -1.5px; line-height: 1.05; }
+    .tile .sub { font-size: 15px; font-weight: 600; color: #64748B; }
+    .gold  { background: linear-gradient(180deg, rgba(240,185,11,.14), rgba(12,18,30,.95)); border: 1.5px solid rgba(240,185,11,.45); } .gold .val { color: #FFDF00; }
+    .green { background: linear-gradient(180deg, rgba(0,255,157,.13), rgba(12,18,30,.95)); border: 1.5px solid rgba(0,255,157,.42); } .green .val { color: #00FF9D; }
+    .cyan  { background: linear-gradient(180deg, rgba(56,189,248,.13), rgba(12,18,30,.95)); border: 1.5px solid rgba(56,189,248,.42); } .cyan .val { color: #38BDF8; }
+    .red   { background: linear-gradient(180deg, rgba(248,113,113,.12), rgba(12,18,30,.95)); border: 1.5px solid rgba(248,113,113,.40); } .red .val { color: #F87171; }
+
+    .list { background: rgba(12,18,30,.85); border: 1.5px solid rgba(148,163,184,.18); border-radius: 20px; padding: 18px 26px 8px; }
+    .list-h { display: flex; justify-content: space-between; font-size: 14px; font-weight: 800; letter-spacing: 1.4px; color: #94A3B8; text-transform: uppercase; padding-bottom: 10px; }
+    .row { display: flex; align-items: center; gap: 16px; padding: 12px 0; border-top: 1px solid rgba(148,163,184,.12); }
+    .rank { width: 34px; font-size: 22px; font-weight: 900; color: #F0B90B; }
+    .nm { flex: 1; min-width: 0; font-size: 26px; font-weight: 800; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .nm small { font-size: 16px; font-weight: 700; color: #64748B; margin-left: 8px; }
+    .vol { width: 130px; text-align: right; font-size: 22px; font-weight: 800; color: #E2E8F0; }
+    .chg { width: 130px; text-align: right; font-size: 22px; font-weight: 900; }
+    .chg.up { color: #00FF9D; } .chg.down { color: #F87171; } .chg.na { color: #64748B; }
+    .sm { width: 76px; text-align: right; font-size: 18px; font-weight: 800; color: #38BDF8; }
+    .empty { padding: 22px 0 18px; color: #64748B; font-size: 20px; text-align: center; border-top: 1px solid rgba(148,163,184,.12); }
+
+    .foot { margin-top: auto; display: flex; justify-content: space-between; align-items: center; font-size: 15px; letter-spacing: .8px; color: #64748B; }
+    .foot span { white-space: nowrap; }
+    .foot b { color: #F0B90B; font-weight: 800; }
+  </style>
+</head>
+<body>
+  <div class="grid"></div><div class="ring a"></div><div class="ring b"></div><div class="glow-top"></div><div class="glow-bottom"></div>
+
+  <div class="top">
+    <div class="pill-live mono"><span class="dot"></span> LIVE 24/7 RADAR</div>
+    <div class="date mono">__DATE__ &middot; LAST 24H</div>
+  </div>
+
+  <div class="head">
+    <div class="kicker">BNB Chain &middot; .ai Agent ID Radar</div>
+    <div class="title"><span>24H PULSE</span></div>
+  </div>
+
+  <div class="tiles">
+    <div class="tile gold"><span class="lbl">New drops</span><span class="val mono">__DROPS__</span><span class="sub">__GRADUATED__ reached a DEX</span></div>
+    <div class="tile cyan"><span class="lbl">Total 24h volume</span><span class="val mono">__TOTALVOL__</span><span class="sub">__ACTIVE__</span></div>
+    <div class="tile cyan"><span class="lbl">New-launch volume</span><span class="val mono">__VOLUME__</span><span class="sub">tokens launched in 24h</span></div>
+    <div class="tile green"><span class="lbl">Smart-wallet inflows</span><span class="val mono">__SMART__</span><span class="sub">__CLUSTERS__ clusters of 3+</span></div>
+    <div class="tile red"><span class="lbl">Flagged as risky</span><span class="val mono">__THREATS__</span><span class="sub">__CLEAN__ clean mints</span></div>
+    <div class="tile gold"><span class="lbl">Agent wallets</span><span class="val mono">__WALLETS__</span><span class="sub">__WALLETSUB__</span></div>
+  </div>
+
+  <div class="list">
+    <div class="list-h"><span>Top launches by 24h volume</span><span>Vol &nbsp;/&nbsp; 24h &nbsp;/&nbsp; Smart</span></div>
+    __ROWS__
+  </div>
+
+  <div class="foot mono">
+    <span>__HUNTER__</span>
+    <span><b>agent-id-monitor.vercel.app</b></span>
+    <span>Not financial advice</span>
+  </div>
+</body>
+</html>
