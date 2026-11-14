@@ -4393,7 +4393,67 @@ function setupStickyHeaderScroll() {
   }, { passive: true });
 }
 
+// Mobile: only the search bar stays pinned to the top; the rest of the header scrolls away with the page.
+// `position: sticky` cannot do this (a sticky child never leaves its parent's box, and the search bar lives inside the
+// header), so the bar switches to `position: fixed` once its natural position reaches the top of the viewport and a
+// same-height spacer holds its place in the layout. Positions are re-read every frame, so late layout changes
+// (recent chips appearing, fonts loading, rotation) need no special handling.
+function setupMobileStickySearch() {
+  if (typeof window === 'undefined' || typeof document === 'undefined' || typeof window.matchMedia !== 'function') return;
+  const wrap = document.querySelector('.suite-search-wrap');
+  if (!wrap || !wrap.parentNode || wrap.dataset.mobileStickyReady) return;
+  wrap.dataset.mobileStickyReady = '1';
+
+  const mq = window.matchMedia('(max-width: 768px)');
+  const spacer = document.createElement('div');
+  spacer.className = 'search-stick-spacer';
+  spacer.setAttribute('aria-hidden', 'true');
+  spacer.style.display = 'none';
+  wrap.parentNode.insertBefore(spacer, wrap);
+
+  let stuck = false;
+  let ticking = false;
+  let marginTop = 0; // the bar's own top margin, which the spacer reproduces as part of its height
+
+  function setStuck(next) {
+    if (next === stuck) return;
+    if (next) {
+      // Measure before leaving the flow so the spacer matches the bar's natural footprint (height + margins).
+      const rect = wrap.getBoundingClientRect();
+      const cs = window.getComputedStyle(wrap);
+      marginTop = parseFloat(cs.marginTop) || 0;
+      spacer.style.height = Math.round(rect.height + marginTop + (parseFloat(cs.marginBottom) || 0)) + 'px';
+      spacer.style.display = 'block';
+      wrap.classList.add('is-stuck');
+    } else {
+      wrap.classList.remove('is-stuck');
+      spacer.style.display = 'none';
+    }
+    stuck = next;
+  }
+
+  function update() {
+    ticking = false;
+    if (!mq.matches) { setStuck(false); return; }
+    // Natural position: the bar itself while in flow, the spacer once the bar is fixed.
+    const top = stuck ? spacer.getBoundingClientRect().top + marginTop : wrap.getBoundingClientRect().top;
+    setStuck(top <= 0);
+  }
+
+  function schedule() {
+    if (ticking) return;
+    ticking = true;
+    requestAnimationFrame(update);
+  }
+
+  window.addEventListener('scroll', schedule, { passive: true });
+  window.addEventListener('resize', schedule, { passive: true });
+  window.addEventListener('orientationchange', schedule, { passive: true });
+  schedule();
+}
+
 if (typeof window !== 'undefined') {
+  window.setupMobileStickySearch = setupMobileStickySearch;
   window.addRecentInspected = addRecentInspected;
   window.clearRecentChips = clearRecentChips;
   window.handleRecentChipClick = handleRecentChipClick;
@@ -4405,6 +4465,36 @@ if (typeof window !== 'undefined') {
 // Quick Search Dropdown
 let searchDropdownResults = [];
 let searchDropdownSelectedIndex = -1;
+
+// Server-side fallback for the dropdown. The in-memory feed is only a subset of all drops, and replay analysis showed
+// visitors pasting contract addresses / tickers that were not loaded and hitting a dead-end "No agentic projects" state.
+// One lookup per distinct query (cached), debounced, and ignored if the user has typed on since.
+const remoteSearchCache = new Map(); // lowercased query -> array of projects ([] = looked up, nothing found)
+let remoteSearchTimer = null;
+let remoteSearchInFlight = null;
+
+function scheduleRemoteSearch(q) {
+  const key = String(q || '').trim().toLowerCase();
+  clearTimeout(remoteSearchTimer);
+  if (key.length < 4 || remoteSearchCache.has(key) || remoteSearchInFlight === key) return;
+  if (typeof fetch === 'undefined') return;
+  remoteSearchTimer = setTimeout(async () => {
+    remoteSearchInFlight = key;
+    try {
+      const url = (typeof BACKEND_URL !== 'undefined' ? BACKEND_URL : '') + `/api/projects?limit=7&search=${encodeURIComponent(key)}`;
+      const res = await fetch(url);
+      const data = res.ok ? await res.json() : null;
+      remoteSearchCache.set(key, data && Array.isArray(data.projects) ? data.projects.slice(0, 7) : []);
+    } catch (_) {
+      remoteSearchCache.set(key, []);
+    } finally {
+      remoteSearchInFlight = null;
+    }
+    const input = document.getElementById('searchInput');
+    const current = input ? String(input.value || '').trim().toLowerCase() : '';
+    if (current === key && remoteSearchCache.get(key).length > 0 && isSearchDropdownOpen()) renderSearchDropdown(input.value);
+  }, 400);
+}
 
 function highlightSearchMatch(text, query) {
   if (!text) return '';
@@ -4500,6 +4590,15 @@ function renderSearchDropdown(query) {
 
   searchDropdownResults = getMatchingDrops(q, 7);
   searchDropdownSelectedIndex = -1;
+
+  if (searchDropdownResults.length === 0) {
+    const remote = remoteSearchCache.get(q.toLowerCase());
+    if (remote && remote.length > 0) {
+      searchDropdownResults = remote;
+    } else {
+      scheduleRemoteSearch(q);
+    }
+  }
 
   if (searchDropdownResults.length === 0) {
     dropdown.innerHTML = `
@@ -9431,10 +9530,15 @@ async function init() {
         const qClean = String(searchQuery || '').trim();
         if (qClean.length >= 2) {
           searchDebounceTimer = setTimeout(() => {
+            // result_count / is_address make failed searches (esp. pasted contract addresses) measurable.
+            let resultCount = null;
+            try { resultCount = getFilteredDrops().length; } catch (_) { /* analytics must never throw */ }
             trackAnalytics('token_searched', {
               query: qClean,
               active_filter: activeFilter,
-              active_tab: activeTab
+              active_tab: activeTab,
+              result_count: resultCount,
+              is_address: /^0x[0-9a-f]{4,}$/i.test(qClean)
             });
           }, 650);
         }
@@ -9669,6 +9773,7 @@ async function init() {
     recentInspectedTokens = loadRecentInspected();
     renderRecentChips();
     setupStickyHeaderScroll();
+    setupMobileStickySearch();
 
     // Cache-First: Eagerly hydrate overview statistics from local cache immediately, then sync fresh in background
     hydrateCachedOverviewStats();
