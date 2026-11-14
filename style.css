@@ -3327,7 +3327,7 @@ a.inspect-btn:hover {
 
   /* Holds the search bar's place in the header's flex column while the bar itself is fixed. */
   .search-stick-spacer {
-    order: 3;
+    order: 1; /* same slot as .suite-search-wrap, directly under the brand row */
     flex: 0 0 auto;
     margin: 0;
   }
@@ -3367,7 +3367,7 @@ a.inspect-btn:hover {
     max-width: 100%;
     min-width: 0;
     margin: 6px 0 0 0;
-    order: 3;
+    order: 1; /* mobile: search sits directly under the logo/title row (brand 0, search 1, stats + buttons 2) */
     position: relative;
   }
 
@@ -3411,6 +3411,7 @@ a.inspect-btn:hover {
   }
 
   .suite-meta {
+    order: 2;
     display: flex;
     flex-direction: row;
     flex-wrap: wrap;
