@@ -6284,6 +6284,7 @@ async function loadFullMintCalldata(item) {
 let _modalShortcutObserver = null;
 
 function jumpToModalSection(name, sym, isFree, isDexTraded, soldOut) {
+  endModalOpenGuard(); // a deliberate jump must not be undone by the open-at-top guard
   trackAnalytics('modal_shortcut_clicked', {
     target: name,
     token_symbol: sym,
@@ -6316,10 +6317,44 @@ function setupModalShortcut() {
   targets.forEach(t => _modalShortcutObserver.observe(t));
 }
 
+// A token opens at the TOP of the modal. For a short window after opening, any scroll the user did not cause (wheel,
+// touch, key, click) is undone, so nothing (focus handling, late layout, a stray programmatic scroll) can leave the modal
+// opening halfway down at the Mint / Sniper / PancakeSwap sections. A deliberate scroll or the shortcut button ends it.
+let _modalOpenGuard = null;
+
+function endModalOpenGuard() {
+  if (_modalOpenGuard) {
+    _modalOpenGuard();
+    _modalOpenGuard = null;
+  }
+}
+
+function holdModalAtTop(content) {
+  endModalOpenGuard();
+  if (!content || typeof content.addEventListener !== 'function' || typeof content.removeEventListener !== 'function') return;
+  // `?scroll=down` is the screenshot helper that deliberately scrolls the modal; leave it alone.
+  try { if (new URLSearchParams(window.location.search).get('scroll') === 'down') return; } catch (_) { /* no URL API */ }
+  let userMoved = false;
+  const mark = () => { userMoved = true; };
+  const onScroll = () => { if (!userMoved && content.scrollTop > 0) content.scrollTop = 0; };
+  const userEvents = ['wheel', 'touchstart', 'pointerdown', 'keydown'];
+  userEvents.forEach(ev => content.addEventListener(ev, mark, { passive: true, capture: true }));
+  content.addEventListener('scroll', onScroll, { passive: true });
+  const timer = setTimeout(endModalOpenGuard, 1500);
+  _modalOpenGuard = () => {
+    clearTimeout(timer);
+    userEvents.forEach(ev => content.removeEventListener(ev, mark, { capture: true }));
+    content.removeEventListener('scroll', onScroll);
+  };
+}
+
 function openModal(item, source = 'direct') {
   const modal = document.getElementById('inspectModal');
   const content = document.getElementById('modalContent');
   if (!modal || !content) return;
+  // The mint-calldata redraw (source 'calldata') re-renders an already open modal about a second after it opened:
+  // keep wherever the user has scrolled to instead of snapping back to the top.
+  const keepScrollTop = source === 'calldata' ? (content.scrollTop || 0) : 0;
 
   currentInspectItem = item;
   setModalHash(item);
@@ -6899,16 +6934,21 @@ function openModal(item, source = 'direct') {
 
     <div class="modal-shortcut-bar" id="modalShortcutBar">
       <button type="button" class="modal-shortcut-btn"
-        onclick="jumpToModalSection('${(!isSoldOut && !isDexTraded) ? 'mint_action' : 'sniper_cli'}', '${escapeHtml(sym)}', ${isFree}, ${isDexTraded}, ${isSoldOut})">
-        ${(!isSoldOut && !isDexTraded) ? (isFree ? '⚡ Free Mint / Snipe' : '⚡ Mint / Snipe') : '⚡ Sniper CLI'} <span aria-hidden="true">↓</span>
+        onclick="jumpToModalSection('mint_action', '${escapeHtml(sym)}', ${isFree}, ${isDexTraded}, ${isSoldOut})">
+        ${(!isSoldOut && !isDexTraded && isFree) ? '⚡ Free Mint / Snipe' : '⚡ Mint / Snipe'} <span aria-hidden="true">↓</span>
       </button>
     </div>
   `;
 
-  content.scrollTop = 0;
+  content.scrollTop = keepScrollTop;
   setupModalShortcut();
   if (typeof modal.showModal === 'function') modal.showModal();
   else modal.setAttribute('open', '');
+  if (source === 'calldata') return;
+  // Set again once the dialog is actually open and laid out (the first assignment can be ignored while it is closed),
+  // then keep it there against any scroll the user did not ask for.
+  content.scrollTop = 0;
+  holdModalAtTop(content);
 }
 
 let currentHofFilter = 'ALL';

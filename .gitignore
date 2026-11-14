@@ -21,3 +21,22 @@ AUDIT_NOTES.md
 
 # Build output (npm run build); never commit
 dist/
+
+# Local working notes, prompts and reports (not part of the app; keep them out of "commit everything")
+FIX_PROMPTS.md
+HANDOFF_PROMPT.md
+METRICS_AUDIT_PROMPT.md
+METRICS_AUDIT_REPORT.md
+MIGRATION_GUIDE.md
+PREVIEW_VERIFICATION_REPORT.md
+REFACTOR_PROMPT.md
+
+# Local marketing screenshots / logo exports in the repo root
+binance_agent_radar_logo_transparent.png
+dappbay_*.jpg
+dappbay_*.png
+/logo.jpg
+/logo.png
+
+# Per-developer Claude Code settings (e.g. the local preview launch config)
+.claude/
