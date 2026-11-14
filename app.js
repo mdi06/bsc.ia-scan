@@ -2245,7 +2245,6 @@ async function fetchOverviewStats(isRetry = false) {
   const candidateEndpoints = [
     `${BACKEND_URL}/api/stats`,
     `${BACKEND_URL}/api/overview`,
-    `https://bsc-ia-scan.onrender.com/api/stats`,
     `/api/stats`,
     `/api/overview`,
     `agent_id_stats.json`,
@@ -2852,16 +2851,13 @@ async function loadSecondaryDrops() {
   }
   isLoadingSecondaryDrops = true;
   try {
+    // One attempt only: BACKEND_URL already is the Render host in production, so a second request to the same
+    // host would just wait out another timeout on a sleeping server.
     let res;
     try {
       res = await fetchWithTimeout(`${BACKEND_URL}/api/feed?filter=secondary&limit=300`, { cache: 'default' }, 8000);
-      if (!res.ok) throw new Error('Backend filter=secondary failed');
     } catch (e1) {
-      try {
-        res = await fetchWithTimeout(`https://bsc-ia-scan.onrender.com/api/feed?filter=secondary&limit=300`, { cache: 'default' }, 8000);
-      } catch (e2) {
-        return;
-      }
+      return;
     }
 
     if (res && res.ok) {
@@ -8392,14 +8388,7 @@ async function loadMoreDrops() {
     // Page by how many rows we already requested from the server, not allDrops.length:
     // allDrops also holds secondary/smart items, so its length drifts from the server's feed order.
     const offset = loadMoreOffset !== null ? loadMoreOffset : allDrops.length;
-    let res;
-    try {
-      res = await fetchWithTimeout(`${BACKEND_URL}/api/feed?limit=150&offset=${offset}`, { cache: 'default' }, 8000);
-      if (!res.ok) throw new Error('Render load more failed');
-    } catch (e) {
-      res = await fetchWithTimeout(`https://bsc-ia-scan.onrender.com/api/feed?limit=150&offset=${offset}`, { cache: 'default' }, 8000);
-    }
-
+    const res = await fetchWithTimeout(`${BACKEND_URL}/api/feed?limit=150&offset=${offset}`, { cache: 'default' }, 8000);
     if (!res.ok) throw new Error('Failed to load more');
     const data = await res.json();
     if (data && data.projects && data.projects.length > 0) {
@@ -8424,6 +8413,21 @@ async function loadMoreDrops() {
   }
 }
 if (typeof window !== 'undefined') window.loadMoreDrops = loadMoreDrops;
+
+// While the page shows the bundled snapshot (backend asleep / cold-starting), retry the live feed on a short
+// back-off instead of waiting for the 5-minute refresh, so the page goes live as soon as Render wakes up.
+const LIVE_FEED_RETRY_DELAYS_MS = [5000, 15000, 30000];
+let hasLoadedLiveFeed = false;
+let liveFeedRetryIndex = 0;
+let liveFeedRetryTimer = null;
+function scheduleLiveFeedRetry() {
+  if (hasLoadedLiveFeed || liveFeedRetryTimer || liveFeedRetryIndex >= LIVE_FEED_RETRY_DELAYS_MS.length) return;
+  const delay = LIVE_FEED_RETRY_DELAYS_MS[liveFeedRetryIndex++];
+  liveFeedRetryTimer = setTimeout(() => {
+    liveFeedRetryTimer = null;
+    fetchDrops().catch(() => {});
+  }, delay);
+}
 
 // Fetch drops from 24/7 Render cloud scanner using lightweight initial feed (/api/feed?limit=150)
 async function fetchDrops() {
@@ -8458,6 +8462,8 @@ async function fetchDrops() {
     let res;
     let source = 'Render Feed';
     const feedHeaders = lastFeedEtag ? { 'If-None-Match': lastFeedEtag } : {};
+    // One attempt at the backend, then straight to the bundled snapshot. BACKEND_URL already is the Render host in
+    // production, so retrying the same host only waits out a second timeout while it cold-starts (~35 s).
     try {
       res = await fetchWithTimeout(`${BACKEND_URL}/api/feed?limit=150`, { headers: feedHeaders }, 8000);
       if (res.status === 304) {
@@ -8466,16 +8472,18 @@ async function fetchDrops() {
       }
       if (!res.ok) throw new Error('Render /api/feed failed');
     } catch (e) {
-      try {
-        res = await fetchWithTimeout(`https://bsc-ia-scan.onrender.com/api/feed?limit=150`, { headers: feedHeaders }, 8000);
-        if (res.status === 304) return;
-        if (!res.ok) throw new Error('Render direct /api/feed failed');
-      } catch (e2) {
-        source = 'Local Snapshot';
-        res = await fetchWithTimeout(`feed_snapshot.json`, { cache: 'default' }, 4000);
-        // Resilient stats hydration with multi-mirror fallback and automatic retry
-        fetchOverviewStats().catch(() => {});
-      }
+      source = 'Local Snapshot';
+      res = await fetchWithTimeout(`feed_snapshot.json`, { cache: 'default' }, 4000);
+      // Resilient stats hydration with multi-mirror fallback and automatic retry
+      fetchOverviewStats().catch(() => {});
+    }
+    const isLiveSource = source !== 'Local Snapshot';
+    // New-market / sniper alerts compare against what is already on screen. Until the live feed has loaded once,
+    // that is the (possibly days-old) snapshot, so the first live load must not toast every drop since then.
+    const alertsEnabled = !isInitialLoad && hasLoadedLiveFeed;
+    if (isLiveSource) {
+      hasLoadedLiveFeed = true;
+      liveFeedRetryIndex = LIVE_FEED_RETRY_DELAYS_MS.length; // live: no more fast retries needed
     }
 
     if (res && res.headers) {
@@ -8532,14 +8540,14 @@ async function fetchDrops() {
       const c = (drop.contract || '').toLowerCase();
       if (c && !knownContracts.has(c)) {
         knownContracts.add(c);
-        if (!isInitialLoad) {
+        if (alertsEnabled) {
           newlyFound.push(drop);
           drop._isNew = true;
         }
       }
     });
 
-    if (!isInitialLoad && newlyFound.length > 0) {
+    if (alertsEnabled && newlyFound.length > 0) {
       console.log(`%c[🚨 NEW MARKET DETECTED]`, 'color: #00ff88; font-weight: bold;', newlyFound);
       playMarketAlertSound();
       newlyFound.slice(0, 3).forEach(drop => showNewMarketToast(drop));
@@ -8552,7 +8560,7 @@ async function fetchDrops() {
       const ready = isSniperReady(drop);
       if (ready && c && !knownSniperReady.has(c)) {
         knownSniperReady.add(c);
-        if (!isInitialLoad) {
+        if (alertsEnabled) {
           newlySniperReady.push(drop);
         }
       } else if (!ready && c && knownSniperReady.has(c)) {
@@ -8560,7 +8568,7 @@ async function fetchDrops() {
       }
     });
 
-    if (!isInitialLoad && newlySniperReady.length > 0) {
+    if (alertsEnabled && newlySniperReady.length > 0) {
       console.log(`%c[🎯 NEW SNIPER READY DETECTED]`, 'color: #00ff88; font-weight: bold;', newlySniperReady);
       playMarketAlertSound();
       newlySniperReady.slice(0, 2).forEach(drop => {
@@ -8571,6 +8579,7 @@ async function fetchDrops() {
       });
     }
     isInitialLoad = false;
+    if (!isLiveSource) scheduleLiveFeedRetry();
 
     // Header Counters with Global Pre-Calculated Stats
     const rEl = document.getElementById('radarCount');
@@ -8645,6 +8654,7 @@ async function fetchDrops() {
 
   } catch (err) {
     console.error('Failed to load drops:', err);
+    scheduleLiveFeedRetry();
   }
 }
 

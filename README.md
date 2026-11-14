@@ -160,3 +160,12 @@ To measure market interest and distinguish between empty hype and real commitmen
 
 
 
+
+## Web Frontend Maintenance
+
+### Refresh the bundled feed snapshot
+The web app paints `feed_snapshot.json` first and falls back to it while the Render backend is cold-starting, then keeps retrying the live feed (after 5 s, 15 s and 30 s) until it answers. Refresh the snapshot before a frontend deploy so the first paint is recent:
+```bash
+python3 scripts/refresh_snapshot.py
+```
+It fetches `/api/feed?limit=150` from the production backend (`--base http://localhost:8080` for a local one) and writes the `projects` array to `feed_snapshot.json`. Commit the updated file with the deploy.
