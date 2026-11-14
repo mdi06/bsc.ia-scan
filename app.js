@@ -4434,10 +4434,14 @@ function setupMobileStickySearch() {
 
   function update() {
     ticking = false;
-    if (!mq.matches) { setStuck(false); return; }
+    // Desktop widths, or the very top of the page: the bar is always in its normal place in the header.
+    // (scrollY <= 0 also covers iOS rubber-banding, where it goes negative.)
+    if (!mq.matches || (window.pageYOffset || 0) <= 0) { setStuck(false); return; }
     // Natural position: the bar itself while in flow, the spacer once the bar is fixed.
-    const top = stuck ? spacer.getBoundingClientRect().top + marginTop : wrap.getBoundingClientRect().top;
-    setStuck(top <= 0);
+    const rect = (stuck ? spacer : wrap).getBoundingClientRect();
+    // A zero-size rect means the header is not laid out (hidden / not rendered yet): never treat that as "at the top".
+    if (!stuck && rect.height === 0) return;
+    setStuck(rect.top + (stuck ? marginTop : 0) <= 0);
   }
 
   function schedule() {
