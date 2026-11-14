@@ -4501,7 +4501,67 @@ function setupStickyHeaderScroll() {
   }, { passive: true });
 }
 
+// Mobile: only the search bar stays pinned to the top; the rest of the header scrolls away with the page.
+// `position: sticky` cannot do this (a sticky child never leaves its parent's box, and the search bar lives inside the
+// header), so the bar switches to `position: fixed` once its natural position reaches the top of the viewport and a
+// same-height spacer holds its place in the layout. Positions are re-read every frame, so late layout changes
+// (recent chips appearing, fonts loading, rotation) need no special handling.
+function setupMobileStickySearch() {
+  if (typeof window === 'undefined' || typeof document === 'undefined' || typeof window.matchMedia !== 'function') return;
+  const wrap = document.querySelector('.suite-search-wrap');
+  if (!wrap || !wrap.parentNode || wrap.dataset.mobileStickyReady) return;
+  wrap.dataset.mobileStickyReady = '1';
+
+  const mq = window.matchMedia('(max-width: 768px)');
+  const spacer = document.createElement('div');
+  spacer.className = 'search-stick-spacer';
+  spacer.setAttribute('aria-hidden', 'true');
+  spacer.style.display = 'none';
+  wrap.parentNode.insertBefore(spacer, wrap);
+
+  let stuck = false;
+  let ticking = false;
+  let marginTop = 0; // the bar's own top margin, which the spacer reproduces as part of its height
+
+  function setStuck(next) {
+    if (next === stuck) return;
+    if (next) {
+      // Measure before leaving the flow so the spacer matches the bar's natural footprint (height + margins).
+      const rect = wrap.getBoundingClientRect();
+      const cs = window.getComputedStyle(wrap);
+      marginTop = parseFloat(cs.marginTop) || 0;
+      spacer.style.height = Math.round(rect.height + marginTop + (parseFloat(cs.marginBottom) || 0)) + 'px';
+      spacer.style.display = 'block';
+      wrap.classList.add('is-stuck');
+    } else {
+      wrap.classList.remove('is-stuck');
+      spacer.style.display = 'none';
+    }
+    stuck = next;
+  }
+
+  function update() {
+    ticking = false;
+    if (!mq.matches) { setStuck(false); return; }
+    // Natural position: the bar itself while in flow, the spacer once the bar is fixed.
+    const top = stuck ? spacer.getBoundingClientRect().top + marginTop : wrap.getBoundingClientRect().top;
+    setStuck(top <= 0);
+  }
+
+  function schedule() {
+    if (ticking) return;
+    ticking = true;
+    requestAnimationFrame(update);
+  }
+
+  window.addEventListener('scroll', schedule, { passive: true });
+  window.addEventListener('resize', schedule, { passive: true });
+  window.addEventListener('orientationchange', schedule, { passive: true });
+  schedule();
+}
+
 if (typeof window !== 'undefined') {
+  window.setupMobileStickySearch = setupMobileStickySearch;
   window.addRecentInspected = addRecentInspected;
   window.clearRecentChips = clearRecentChips;
   window.handleRecentChipClick = handleRecentChipClick;
@@ -9821,6 +9881,7 @@ async function init() {
     recentInspectedTokens = loadRecentInspected();
     renderRecentChips();
     setupStickyHeaderScroll();
+    setupMobileStickySearch();
 
     // Cache-First: Eagerly hydrate overview statistics from local cache immediately, then sync fresh in background
     hydrateCachedOverviewStats();

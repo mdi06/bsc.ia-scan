@@ -3302,6 +3302,39 @@ a.inspect-btn:hover {
     background-color: rgb(9, 13, 20);
     backdrop-filter: none;
     -webkit-backdrop-filter: none;
+    /* `contain` and `transform` make the header the containing block of fixed descendants; lift them so the pinned
+       search bar below is positioned against the viewport. */
+    contain: none;
+    transform: none;
+  }
+
+  /* Only the search bar stays pinned on mobile (see setupMobileStickySearch in app.js). */
+  .suite-search-wrap.is-stuck {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    width: auto;
+    max-width: none;
+    margin: 0;
+    padding: 8px 10px;
+    box-sizing: border-box;
+    z-index: 101;
+    background: rgb(9, 13, 20);
+    border-bottom: 1px solid var(--border-dim);
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.55);
+  }
+
+  /* Holds the search bar's place in the header's flex column while the bar itself is fixed. */
+  .search-stick-spacer {
+    order: 3;
+    flex: 0 0 auto;
+    margin: 0;
+  }
+
+  /* Keep the pinned bar slim: the recent-search chips stay with the scrolling part. */
+  .suite-search-wrap.is-stuck .recent-search-chips-wrap {
+    display: none !important;
   }
 
   .suite-header.scrolled {
