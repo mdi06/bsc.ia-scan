@@ -34,6 +34,9 @@ DEFAULT_OUT = os.path.join(ROOT, "out", "daily")
 SITE_URL = "https://agent-id-monitor.vercel.app"
 TOP_ROWS = 5
 NAME_MAX = 20
+PCT_SANITY_MAX = 10_000  # percent; beyond this the 24h change is shown as n/a instead of printed
+STABLE_SYMBOLS = {"USDT", "USDC", "USD1", "FDUSD", "BUSD", "DAI", "TUSD", "USDD", "USDE", "USDS", "PYUSD",
+                  "LISUSD", "USDF", "USDG", "USDX", "USDT0", "USDC.E"}
 
 CHROME_CANDIDATES = [
     "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
@@ -155,7 +158,7 @@ def fmt_pct(v):
     if v is None:
         return "n/a", "na"
     x = num(v, None)
-    if x is None:
+    if x is None or abs(x) > PCT_SANITY_MAX:  # a >100x move in 24h is almost always a near-zero base price
         return "n/a", "na"
     text = f"{x:+,.0f}%" if abs(x) >= 100 else f"{x:+.1f}%"
     return text, ("up" if x > 0 else "down" if x < 0 else "na")
@@ -172,8 +175,23 @@ def cashtag(sym: str) -> str:
     return f"${sym}" if sym.isascii() and sym.isalnum() else sym
 
 
+def is_not_a_launch(r: dict) -> bool:
+    """Rows that take a slot but are not launches: a stablecoin (known ticker, or pinned at ~$1 and flat) or a
+    DEX liquidity-pool token (e.g. PancakeSwap "Cake-LP", which just mirrors its pair's volume)."""
+    sym = str(r.get("symbol") or "").strip().upper()
+    name = str(r.get("name") or "").strip().upper()
+    if sym in STABLE_SYMBOLS:
+        return True
+    if sym.endswith("-LP") or sym == "LP" or "PANCAKE LP" in name or name.endswith(" LPS") or "LIQUIDITY POOL" in name:
+        return True
+    px, chg = num(r.get("token_price_usd")), r.get("price_change_24h")
+    return 0.97 <= px <= 1.03 and chg is not None and abs(num(chg)) <= 3
+
+
 def top_launches(pulse: dict) -> list:
-    rows = [r for r in (pulse.get("top_launches") or []) if isinstance(r, dict)]
+    """Top launches by volume, minus non-launch rows (stablecoins, LP tokens). The API sends at most
+    a handful of rows, so the list can come out shorter than TOP_ROWS."""
+    rows = [r for r in (pulse.get("top_launches") or []) if isinstance(r, dict) and not is_not_a_launch(r)]
     return sorted(rows, key=lambda r: num(r.get("volume_24h")), reverse=True)[:TOP_ROWS]
 
 
@@ -253,7 +271,8 @@ def caption(pulse: dict, stats=None, market=None, growth=(None, None)) -> str:
         lines += ["", "Top by volume:"]
         for r in top:
             pct, _ = fmt_pct(r.get("price_change_24h"))
-            lines.append(f"{cashtag(r.get('symbol') or r.get('name') or '?')}  {fmt_money(r.get('volume_24h'))} vol, {pct} 24h")
+            change = f", {pct} 24h" if pct != "n/a" else ""
+            lines.append(f"{cashtag(r.get('symbol') or r.get('name') or '?')}  {fmt_money(r.get('volume_24h'))} vol{change}")
     lines += ["", f"Live radar: {SITE_URL}", "", "On-chain data, not financial advice. #BNBChain #BSC #AgentID"]
     return "\n".join(lines) + "\n"
 
