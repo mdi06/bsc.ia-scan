@@ -3092,8 +3092,13 @@ function pulseSmartCount(d) {
   return Array.isArray(w) ? w.length : 0;
 }
 
+const PULSE_LAUNCH_MAX_PAIR_AGE_SEC = 3 * 86400;
+
 function pulseLaunchRow(d) {
   if (!d || isPulseNftRecord(d) || d.market_stale || isPulseFlaggedRisky(d)) return null;
+  // a DEX pair older than 3 days is not a new launch (detected_at is only when the worker first saw the token)
+  const created = Number(d.pair_created_at || 0);
+  if (created > 0 && Date.now() / 1000 - created > PULSE_LAUNCH_MAX_PAIR_AGE_SEC) return null;
   const lp = Number(d.lp_usd || 0);
   const vol = Number(d.volume_24h || 0);
   const px = Number(d.token_price_usd || 0);

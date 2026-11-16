@@ -120,6 +120,15 @@ const BIG = '0x' + 'ab'.repeat(2000);
   assert.strictEqual(withRunners.topRunner.name, 'Alpha');
   console.log('✔ Pulse runners come from the server list: PASS');
 
+  // ---- launches (page-side fallback): an old DEX pair is not a new launch
+  const nowS = Math.floor(Date.now() / 1000);
+  const launchBase = { name: 'L', symbol: 'L', standard: 'BEP-20 Token (18 decimals)', token_price_usd: 0.02, lp_usd: 9000, volume_24h: 5000 };
+  assert.ok(app.pulseLaunchRow({ ...launchBase, contract: '0x' + '1'.repeat(40), pair_created_at: nowS - 6 * 3600 }), 'a young pair is a launch');
+  assert.ok(app.pulseLaunchRow({ ...launchBase, contract: '0x' + '2'.repeat(40) }), 'an unknown pair age is allowed');
+  assert.strictEqual(app.pulseLaunchRow({ ...launchBase, contract: '0x' + '3'.repeat(40), pair_created_at: nowS - 229 * 86400 }), null,
+    'a 229-day-old pair (Tether Gold) is not a launch');
+  console.log('✔ Launch fallback: a pair older than 3 days is not a new launch: PASS');
+
   // ---- /api/market-data: stale contracts are a plain address list
   const SEEDED_STALE = '0x' + 'e'.repeat(40);
   const SEEDED_LIVE = '0x' + 'f'.repeat(40);

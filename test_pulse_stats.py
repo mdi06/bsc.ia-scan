@@ -168,3 +168,21 @@ def test_runner_rows_carry_what_the_card_and_modal_need():
                 "volume_24h", "pair_url", "market_url", "risk_level", "risk_badge"):
         assert key in row, key
     assert row["pair_url"].endswith("0xabc")
+
+
+# ------------------------------------------------------------------ launches: the age of the DEX pair
+
+def test_an_established_token_the_worker_only_just_saw_is_not_a_new_launch():
+    """Tether Gold (XAUt, pair 229 days old) and EVAA (410 days) were first SEEN by the worker today, so they passed
+    the detected_at window and topped the new-launches card. The pair's age says what detected_at cannot."""
+    young = NOW - 6 * 3600
+    rows = [
+        drop(1, 600, token_price_usd=3869.0, lp_usd=1.4e6, volume_24h=872_000.0, pair_created_at=NOW - 229 * 86400),  # XAUt
+        drop(2, 600, token_price_usd=3.1, lp_usd=257_000.0, volume_24h=9e6, pair_created_at=NOW - 410 * 86400),       # EVAA
+        drop(3, 600, token_price_usd=0.03, lp_usd=55_000.0, volume_24h=550_000.0, pair_created_at=young),             # a real launch
+        drop(4, 600, token_price_usd=0.01, lp_usd=9_000.0, volume_24h=400_000.0),                                     # age not known yet
+        drop(5, 600, token_price_usd=0.02, lp_usd=9_000.0, volume_24h=300_000.0, pair_created_at=NOW - 2 * 86400),    # within 3 days
+        drop(6, 600, token_price_usd=0.02, lp_usd=9_000.0, volume_24h=200_000.0, pair_created_at=NOW - 4 * 86400),    # older than 3 days
+    ]
+    launches = api.compute_pulse_24h(rows, now=NOW)["top_launches"]
+    assert [r["name"] for r in launches] == ["D3", "D4", "D5"]

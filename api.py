@@ -257,6 +257,7 @@ PULSE_WINDOW_SEC = 24 * 3600
 # ranks new NFT collections by how many were minted. Both use data the worker has for nearly every record; the
 # old "ATH from mint" / "NFT surge" cards needed a mint cost AND a market price, which almost no record has.
 PULSE_LAUNCH_MIN_LP_USD = 1000.0
+PULSE_LAUNCH_MAX_PAIR_AGE_SEC = 3 * 86400   # a token whose DEX pair is older than this is not a new launch
 PULSE_LAUNCH_MIN_VOLUME_USD = 1000.0
 PULSE_TOP_LAUNCHES = 6        # the browser shows 3, skipping any that card 1 already shows
 PULSE_TOP_NFT_MINTS = 3
@@ -311,10 +312,15 @@ def pulse_runner_row(d: dict) -> Optional[tuple]:
     }
 
 
-def pulse_launch_row(d: dict) -> Optional[dict]:
+def pulse_launch_row(d: dict, now: Optional[float] = None) -> Optional[dict]:
     """A new token for card 2, or None if it does not qualify: live (not cleared as stale), real liquidity and
-    volume, a price, not flagged as a rug / honeypot."""
+    volume, a price, not flagged as a rug / honeypot, and, when the worker knows it (`pair_created_at`), a DEX pair
+    created within PULSE_LAUNCH_MAX_PAIR_AGE_SEC. `detected_at` is only when the worker first saw the token: an
+    established one it just touched (Tether Gold, EVAA) looked new until the pair age was checked."""
     if _is_nft_record(d) or d.get("market_stale") or _is_flagged_risky(d):
+        return None
+    created = filters._num(d.get("pair_created_at"))
+    if created > 0 and (time.time() if now is None else now) - created > PULSE_LAUNCH_MAX_PAIR_AGE_SEC:
         return None
     lp = filters._num(d.get("lp_usd"))
     vol = filters._num(d.get("volume_24h"))
@@ -370,7 +376,7 @@ def compute_pulse_24h(projects, now=None) -> dict:
         if str(d.get("detected_at") or "") < since:
             continue
         new_drops += 1
-        row = pulse_launch_row(d)
+        row = pulse_launch_row(d, now)
         if row:
             launches.append(row)
         row = pulse_nft_mint_row(d)
