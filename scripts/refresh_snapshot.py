@@ -19,7 +19,7 @@ import tempfile
 import urllib.request
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DEFAULT_BASE = "https://bsc-ia-scan.onrender.com"
+DEFAULT_BASE = "https://bsc-ia-scan-onrender-com.onrender.com"
 DEFAULT_OUT = os.path.join(ROOT, "feed_snapshot.json")
 
 
