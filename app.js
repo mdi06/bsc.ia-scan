@@ -1245,12 +1245,16 @@ const MARKET_OVERLAY_FIELDS = ['token_price_usd', 'market_cap', 'fdv', 'lp_usd',
 function applyMarketOverlay(drops, market) {
   markDropsDataChanged();
   let updated = 0;
+  // /api/market-data lists the contracts whose live record was cleared as stale in `_stale` (a short array of addresses)
+  // and, for the others, only the fields that have a value.
+  const staleSet = new Set((Array.isArray(market._stale) ? market._stale : []).map(c => String(c).toLowerCase()));
   drops.forEach(d => {
-    const m = market[(d.contract || '').toLowerCase()];
+    const c = (d.contract || '').toLowerCase();
+    const m = market[c] || (staleSet.has(c) ? {} : null);
     if (!m) return;
     let changed = false;
     // A record the worker cleared as stale: its numbers are unknown now, so the seeded ones go too.
-    const stale = Boolean(m.market_stale);
+    const stale = Boolean(m.market_stale) || staleSet.has(c);
     MARKET_OVERLAY_FIELDS.forEach(k => {
       const v = m[k] === undefined ? null : m[k];
       if ((stale || v !== null) && d[k] !== v) {
@@ -1264,6 +1268,10 @@ function applyMarketOverlay(drops, market) {
         changed = true;
       }
     });
+    if (staleSet.has(c) && d.market_stale !== true) {   // the table shows "⚠ stale" and the age of old data
+      d.market_stale = true;
+      changed = true;
+    }
     if (changed) {
       updated++;
       delete d.server_metrics;   // computed from the numbers just replaced; the browser calculates it from now on
@@ -2514,13 +2522,8 @@ function openInspectModalByContract(contractAddress, fallbackData = null) {
 
   let target = null;
 
-  // 1. Check instant pulseItemsMap (100% guarantee for all 24H Pulse cards: Runners, ATH, Smart Mints, NFTs)
-  if (cNorm && pulseItemsMap.has(cNorm)) {
-    target = pulseItemsMap.get(cNorm);
-  }
-
-  // 2. Check allDrops
-  if (!target) {
+  // 1. A full record this page already has (allDrops) wins over the slim row a Pulse card was built from
+  {
     let list = [];
     if (typeof allDrops !== 'undefined' && Array.isArray(allDrops) && allDrops.length > 0) {
       list = allDrops;
@@ -2529,8 +2532,13 @@ function openInspectModalByContract(contractAddress, fallbackData = null) {
     } else if (typeof global !== 'undefined' && Array.isArray(global.allDrops) && global.allDrops.length > 0) {
       list = global.allDrops;
     }
-    const found = list.find(d => (d.contract || '').toLowerCase() === cNorm);
+    const found = cNorm ? list.find(d => (d.contract || '').toLowerCase() === cNorm) : null;
     if (found) target = found;
+  }
+
+  // 2. Instant pulseItemsMap (every row of the 24H Pulse cards: Runners, Launches, Smart Mints, NFT Mints)
+  if (!target && cNorm && pulseItemsMap.has(cNorm)) {
+    target = pulseItemsMap.get(cNorm);
   }
 
   // 3. Check savedTopGainers (Hall of Fame & Post-Mint winners)
@@ -2592,6 +2600,7 @@ function openInspectModalByContract(contractAddress, fallbackData = null) {
   if (target && modalFn) {
     const finalTarget = target.item ? { ...target, ...target.item } : target;
     modalFn(finalTarget);
+    if (finalTarget._slim) upgradeSlimPulseItem(finalTarget);
   }
 }
 
@@ -3083,8 +3092,13 @@ function pulseSmartCount(d) {
   return Array.isArray(w) ? w.length : 0;
 }
 
+const PULSE_LAUNCH_MAX_PAIR_AGE_SEC = 3 * 86400;
+
 function pulseLaunchRow(d) {
   if (!d || isPulseNftRecord(d) || d.market_stale || isPulseFlaggedRisky(d)) return null;
+  // a DEX pair older than 3 days is not a new launch (detected_at is only when the worker first saw the token)
+  const created = Number(d.pair_created_at || 0);
+  if (created > 0 && Date.now() / 1000 - created > PULSE_LAUNCH_MAX_PAIR_AGE_SEC) return null;
   const lp = Number(d.lp_usd || 0);
   const vol = Number(d.volume_24h || 0);
   const px = Number(d.token_price_usd || 0);
@@ -3240,7 +3254,12 @@ function compute24hPulseMetrics(drops = allDrops, topGainersList = savedTopGaine
   });
 
   runnerCandidates.sort((a, b) => b.score - a.score);
-  let topRunners = runnerCandidates.slice(0, 3).map(x => x.item);
+  // The server ranks every live token with the same rule (pulse_24h.top_runners), so the card no longer depends on
+  // which part of the dataset this page happens to have loaded (it used to need the 120 KB secondary preload).
+  const serverRunners = serverPulse && Array.isArray(serverPulse.top_runners) ? serverPulse.top_runners : null;
+  let topRunners = serverRunners
+    ? serverRunners.filter(r => r && !isExcludedMajorAsset(r)).slice(0, 3)
+    : runnerCandidates.slice(0, 3).map(x => x.item);
 
   // If fewer than 3 candidates, fill with secondary market assets by market cap
   if (topRunners.length < 3) {
@@ -6262,20 +6281,40 @@ if (typeof window !== 'undefined') {
 // Modal Inspection Dialog
 // List responses leave out oversized mint calldata (has_mint_calldata=true marks it). Loads the full record's
 // calldata into `item`; resolves true if it got one.
-async function loadFullMintCalldata(item) {
+// The complete record of a contract from the API, or null.
+async function fetchFullProject(contract) {
   try {
-    const c = String(item.contract || '').toLowerCase();
-    if (!c) return false;
+    const c = String(contract || '').toLowerCase();
+    if (!c) return null;
     const res = await apiFetch(`/api/projects?search=${encodeURIComponent(c)}&limit=5`);
-    if (!res || !res.ok) return false;
+    if (!res || !res.ok) return null;
     const data = await res.json();
-    const full = (data.projects || []).find(p => String(p.contract || '').toLowerCase() === c);
-    if (!full || !full.mint_calldata) return false;
-    item.mint_calldata = full.mint_calldata;
-    return true;
+    return (data.projects || []).find(p => String(p.contract || '').toLowerCase() === c) || null;
   } catch (e) {
-    return false;
+    return null;
   }
+}
+
+async function loadFullMintCalldata(item) {
+  const full = await fetchFullProject(item.contract);
+  if (!full || !full.mint_calldata) return false;
+  item.mint_calldata = full.mint_calldata;
+  return true;
+}
+
+// The Pulse cards (runners, launches, NFT mints) list records the server ranked over the whole dataset, and send only the
+// few fields a card shows (`_slim`). A click on one that this page has not loaded as a full record opens the modal at
+// once with that row, then replaces it with the complete record when the API answers (one request, only on a click).
+const slimPulseRequested = new Set();
+function upgradeSlimPulseItem(item) {
+  const c = String((item && item.contract) || '').toLowerCase();
+  if (!c || slimPulseRequested.has(c)) return;
+  slimPulseRequested.add(c);
+  fetchFullProject(c).then(full => {
+    if (!full) { slimPulseRequested.delete(c); return; }   // try again on the next click
+    pulseItemsMap.set(c, full);
+    if (currentInspectItem && String(currentInspectItem.contract || '').toLowerCase() === c) openModal(full, 'redraw');
+  });
 }
 
 // Pinned "Mint / Snipe" shortcut at the bottom of the token modal. Replay analysis: only ~17% of sessions that opened a
@@ -6358,14 +6397,14 @@ function openModal(item, source = 'direct') {
 
   currentInspectItem = item;
   setModalHash(item);
-  if (source !== 'calldata') {   // a redraw after the calldata arrived is not a new inspection
+  if (source !== 'redraw') {   // a redraw after the calldata arrived is not a new inspection
     addRecentInspected(item);
     setupModalTelemetry(item, source);
   }
   if (item.has_mint_calldata && !item.mint_calldata && !item._calldataRequested) {
     item._calldataRequested = true;
     loadFullMintCalldata(item).then(ok => {
-      if (ok && currentInspectItem === item) openModal(item, 'calldata');
+      if (ok && currentInspectItem === item) openModal(item, 'redraw');
     });
   }
 
@@ -8440,6 +8479,10 @@ let isPollingDelta = false;
 let deltaPollTimer = null;
 let lastDeltaEtag = '';
 let lastFeedEtag = '';
+// Full refresh of the first feed page (44 KB compressed) of a tab that stays open and visible. The server only picks up
+// new market numbers about every 10 minutes (the worker batches its Supabase writes, DB_SUPABASE_FLUSH_INTERVAL_SEC),
+// so asking more often downloads the same data again. New drops arrive through the 25 s delta poll below.
+const FEED_REFRESH_INTERVAL_MS = 10 * 60 * 1000;
 const DELTA_POLL_INTERVAL_MS = 25000; // 25s interval protects hosting bandwidth while keeping market data near real-time
 
 // Real-Time Delta Polling (auto-pauses when tab is hidden or backgrounded)
@@ -8838,17 +8881,11 @@ async function fetchDrops() {
       loadSmartDrops().then(() => renderTable());
     }
 
-    // Preload all historical secondary market runners across entire database
-    setTimeout(() => {
-      loadSecondaryDrops().then(() => {
-        updateSecondaryTabCount();
-        updateSecondaryBannerUI();
-        updateDailyPulseUI();
-        if (activeTab === 'SECONDARY') {
-          renderTable();
-        }
-      });
-    }, 200);
+    // The secondary-market list (/api/feed?filter=secondary&limit=300, ~120 KB compressed: more than the first page of
+    // the feed itself) is NOT preloaded. It was ~70% of what one visit downloaded from Render, and Render's free tier
+    // only has 5 GB of bandwidth a month. What needed it now comes from elsewhere: the Secondary tab count from
+    // /api/stats, the Pulse cards from pulse_24h (top_runners / top_launches / top_nft_mints). It loads when the
+    // Secondary tab opens, or when someone starts a search (so established tokens stay searchable).
 
   } catch (err) {
     console.error('Failed to load drops:', err);
@@ -9620,12 +9657,18 @@ async function init() {
         }
         // The historical smart drops (a large JSON) are loaded in the background: render with what is loaded now,
         // then once more when they arrive, if a search is still active.
-        if (!hasLoadedSmartDrops && (searchQuery.includes('.ai') || searchQuery.startsWith('0x') || searchQuery.length >= 3)) {
-          loadSmartDrops().then(() => {
-            if (!hasLoadedSmartDrops || !searchQuery.trim() || searchRenderTimer) return; // a pending render will include them
-            renderTable();
-            if (isSearchDropdownOpen()) renderSearchDropdown(searchQuery);
-          }).catch(() => {});
+        const needsHistory = searchQuery.includes('.ai') || searchQuery.startsWith('0x') || searchQuery.length >= 3;
+        const rerenderAfterLoad = (loaded) => {
+          if (!loaded() || !searchQuery.trim() || searchRenderTimer) return; // a pending render will include them
+          renderTable();
+          if (isSearchDropdownOpen()) renderSearchDropdown(searchQuery);
+        };
+        if (!hasLoadedSmartDrops && needsHistory) {
+          loadSmartDrops().then(() => rerenderAfterLoad(() => hasLoadedSmartDrops)).catch(() => {});
+        }
+        // established (secondary-market) tokens are searchable too: they are not part of the first feed page
+        if (!hasLoadedSecondaryDrops && needsHistory) {
+          loadSecondaryDrops().then(() => rerenderAfterLoad(() => hasLoadedSecondaryDrops)).catch(() => {});
         }
         cancelPendingSearchRender();
         searchRenderTimer = setTimeout(flushSearchRender, SEARCH_RENDER_DEBOUNCE_MS);
@@ -9886,7 +9929,7 @@ async function init() {
 
     // Start cloud feed fetch & periodic background sync (non-blocking so UI is instant)
     fetchDrops().catch(err => console.warn('Initial fetchDrops hitch:', err));
-    setInterval(fetchDrops, 300000);
+    setInterval(fetchDrops, FEED_REFRESH_INTERVAL_MS);
 
     // Poll latest block
     pollLatestBlock();

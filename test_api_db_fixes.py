@@ -69,13 +69,22 @@ def test_delete_projects_closes_connection_on_error(tmp_db, monkeypatch):
     assert closed == [True]
 
 
-def test_market_data_includes_tokens_the_feed_excludes(tmp_db):
+def seed_only(monkeypatch, contracts):
+    """Pretend seeded_smart_drops.json holds exactly these contracts (/api/market-data only lists those)."""
+    real_load_seed = api._load_seed
+    monkeypatch.setattr(api, "_load_seed", lambda name: (
+        ([{"contract": c} for c in contracts], None) if name == "seeded_smart_drops.json" else real_load_seed(name)))
+
+
+def test_market_data_lists_the_seeded_tokens_the_feed_excludes(tmp_db, monkeypatch):
     fist = "0xc9882def23bc42d53895b8361d0b1edc7570bc6a"
     tmp_db.upsert_projects([
         _proj(1, contract=fist, name="FistToken", symbol="FIST", token_price_usd=0.2636, market_cap=48450648.0, lp_usd=7114700.0, holders=5),
         _proj(2, token_price_usd=2.0, lp_usd=100.0),
         _proj(3),  # no price or liquidity: not listed
+        _proj(4, token_price_usd=3.0, lp_usd=500.0),  # priced, but not in the seed file: the page never uses it
     ])
+    seed_only(monkeypatch, [fist, f"0x{2:040x}", f"0x{3:040x}"])
     client = TestClient(api.app)
     feed_symbols = [p["symbol"] for p in client.get("/api/feed?limit=500").json()["projects"]]
     assert "FIST" not in feed_symbols                      # the feed hides it...
@@ -85,19 +94,31 @@ def test_market_data_includes_tokens_the_feed_excludes(tmp_db):
     assert data[fist]["market_cap"] == 48450648.0           # ...but its market numbers are available
     assert data[fist]["token_price_usd"] == 0.2636
     assert f"0x{3:040x}" not in data and f"0x{2:040x}" in data
-    assert set(data[fist]) == set(api.MARKET_FIELDS) | set(api.MARKET_FRESHNESS_FIELDS)
+    assert f"0x{4:040x}" not in data                        # only the seeded contracts are sent
+    assert set(data[fist]) <= set(api.MARKET_FIELDS) | set(api.MARKET_FRESHNESS_FIELDS)
+    assert data["_stale"] == []
 
 
-def test_market_data_includes_stale_records_and_is_nan_safe(tmp_db):
-    """A record the worker cleared as stale is listed (so a seeded copy of it is cleared in the browser), and a
-    non-finite value in a record does not turn the endpoint into an HTTP 500."""
+def test_market_data_lists_stale_contracts_compactly_and_is_nan_safe(tmp_db, monkeypatch):
+    """A seeded contract the worker cleared as stale is named in `_stale` (a short address list, not a row of nulls), so
+    its seeded numbers are cleared in the browser; a non-finite value does not turn the endpoint into an HTTP 500."""
     tmp_db.upsert_projects([
         _proj(1, token_price_usd=None, lp_usd=None, market_stale=True),
         _proj(2, token_price_usd=2.0, lp_usd=100.0, volume_24h=float("nan")),
+        _proj(3, token_price_usd=None, lp_usd=None, market_stale=True),   # stale but not seeded: not listed
     ])
+    seed_only(monkeypatch, [f"0x{1:040x}", f"0x{2:040x}"])
     res = TestClient(api.app).get("/api/market-data")
     assert res.status_code == 200
     data = res.json()
-    stale = data[f"0x{1:040x}"]
-    assert stale["market_stale"] is True and stale["token_price_usd"] is None
-    assert data[f"0x{2:040x}"]["volume_24h"] is None
+    assert data["_stale"] == [f"0x{1:040x}"]
+    assert f"0x{1:040x}" not in data                        # no placeholder row for it
+    assert "volume_24h" not in data[f"0x{2:040x}"]          # the non-finite value was scrubbed and is left out
+
+
+def test_market_data_without_a_seed_file_falls_back_to_every_priced_contract(tmp_db, monkeypatch):
+    tmp_db.upsert_projects([_proj(1, token_price_usd=2.0, lp_usd=100.0), _proj(2, market_stale=True)])
+    real_load_seed = api._load_seed
+    monkeypatch.setattr(api, "_load_seed", lambda name: (None, None) if name == "seeded_smart_drops.json" else real_load_seed(name))
+    data = TestClient(api.app).get("/api/market-data").json()
+    assert f"0x{1:040x}" in data and data["_stale"] == [f"0x{2:040x}"]

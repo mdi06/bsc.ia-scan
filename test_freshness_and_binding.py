@@ -378,3 +378,16 @@ def test_stale_recheck_slice_rotates_and_is_bounded():
     assert len(set(seen)) == 150          # 3 sweeps of 60 wrap around and cover every record
     assert worker._next_stale_slice([]) == []
     assert len(worker._next_stale_slice(items[:5])) == 5
+
+
+def test_market_sweep_remembers_when_the_dex_pair_was_created():
+    item = {"contract": AVESAKE, "name": "A", "token_price_usd": 1.0}
+    pair = {"baseToken": {"address": AVESAKE, "symbol": "A"}, "liquidity": {"usd": 5000}, "priceUsd": "0.5",
+            "volume": {"h24": 10}, "txns": {}, "url": "https://dexscreener.com/bsc/0xbb", "pairCreatedAt": 1775019681000}
+    worker._apply_dex_pair(item, pair)
+    assert item["pair_created_at"] == 1775019681                    # DexScreener sends milliseconds
+    worker._apply_dex_pair(item, {**pair, "pairCreatedAt": None})   # a pair without the field keeps what is known
+    assert item["pair_created_at"] == 1775019681
+    other = {"contract": "0x" + "9" * 40}
+    worker._apply_dex_pair(other, {**pair, "baseToken": {"address": other["contract"]}, "pairCreatedAt": "junk"})
+    assert "pair_created_at" not in other                           # unreadable: nothing stored

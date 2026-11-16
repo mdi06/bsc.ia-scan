@@ -907,6 +907,14 @@ def _apply_dex_pair(item: Dict[str, Any], pair: Dict[str, Any], now: Optional[fl
         item["pair_url"] = pair["url"]
 
     item["volume_24h"] = float((pair.get("volume", {}) or {}).get("h24") or 0.0)
+    # When the pair was created (unix seconds): the age of the market, which `detected_at` (when WE first saw the
+    # token) cannot tell. An established token the worker only just touched has a year-old pair (api.pulse_launch_row).
+    try:
+        created_s = int(float(pair.get("pairCreatedAt") or 0) / 1000)
+    except (TypeError, ValueError):
+        created_s = 0
+    if created_s > 0:
+        item["pair_created_at"] = created_s
 
     mcap = float(pair.get("marketCap") or 0.0)
     fdv = float(pair.get("fdv") or 0.0)
