@@ -124,3 +124,47 @@ def test_nft_mints_rank_new_collections_by_mints_with_fill_share():
     assert mints[0]["fill_pct"] == 100.0 and mints[1]["fill_pct"] is None and mints[1]["max_supply"] is None
     assert mints[2]["fill_pct"] == 24.1 and mints[2]["smart_count"] == 104
     assert api.compute_pulse_24h([nft(4, 600, 50)], now=NOW)["top_nft_mints"][0]["total_minted"] == 50
+
+
+# ------------------------------------------------------------------ card 1: runners over the whole dataset
+
+def live(i, ago, **kw):
+    d = drop(i, ago, token_price_usd=0.01, market_cap=50_000.0, lp_usd=5000.0, volume_24h=5000.0, price_change_24h=0.0)
+    d.update(kw)
+    return d
+
+
+def test_runners_are_ranked_over_every_live_token_whatever_its_age():
+    rows = [
+        live(1, 10 * 86400, price_change_24h=40.0),                       # an old token that is moving today
+        live(2, 600, price_change_24h=150.0, volume_24h=8000.0),
+        live(3, 600, price_change_24h=-20.0, market_cap=900_000.0),       # losing, but the biggest
+        live(4, 600, price_change_24h=5.0),
+        live(5, 600, price_change_24h=500.0, lp_usd=100.0),               # too little liquidity: out
+        live(6, 600, price_change_24h=500.0, volume_24h=50.0),            # too little volume: out
+        live(7, 600, price_change_24h=500.0, market_cap=100.0),           # too small: out
+        live(8, 600, price_change_24h=500.0, token_price_usd=1e-9),       # dust price: out
+        live(9, 600, price_change_24h=500.0, market_stale=True),          # cleared as stale: out
+        live(10, 600, price_change_24h=500.0, risk_level="RUG"),          # rug: out
+        live(11, 600, price_change_24h=500.0, risk_badge="🚨 HONEYPOT"),  # honeypot: out
+    ]
+    runners = api.compute_pulse_24h(rows, now=NOW)["top_runners"]
+    # gainers first, biggest gain first; any age counts (D1 is 10 days old)
+    assert [r["name"] for r in runners] == ["D2", "D1", "D4"]
+    assert runners[0]["price_change_24h"] == 150.0 and runners[0]["_slim"] is True
+
+
+def test_runners_fall_back_to_market_cap_and_volume_when_nothing_is_gaining():
+    rows = [live(1, 600, price_change_24h=-5.0, market_cap=10_000.0, volume_24h=500.0),
+            live(2, 600, price_change_24h=-1.0, market_cap=80_000.0, volume_24h=500.0),
+            live(3, 600, price_change_24h=0.0, market_cap=40_000.0, volume_24h=60_000.0)]
+    assert [r["name"] for r in api.compute_pulse_24h(rows, now=NOW)["top_runners"]] == ["D3", "D2", "D1"]
+
+
+def test_runner_rows_carry_what_the_card_and_modal_need():
+    row = api.compute_pulse_24h([live(1, 600, price_change_24h=12.0, pair_url="https://dexscreener.com/bsc/0xabc",
+                                      fdv=60_000.0)], now=NOW)["top_runners"][0]
+    for key in ("contract", "name", "symbol", "token_price_usd", "price_change_24h", "market_cap", "fdv", "lp_usd",
+                "volume_24h", "pair_url", "market_url", "risk_level", "risk_badge"):
+        assert key in row, key
+    assert row["pair_url"].endswith("0xabc")

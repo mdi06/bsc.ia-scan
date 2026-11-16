@@ -278,6 +278,39 @@ def _smart_count(d: dict) -> int:
     return len(d.get("smart_wallets") or d.get("smart_minters") or [])
 
 
+# Pulse card 1 ("Top 24h Runners"): every live token ranked with the rule app.js always used (a quality guard, then
+# the biggest 24h gainers first, otherwise the largest by market cap and volume), now over the FULL dataset.
+PULSE_RUNNER_MIN_MCAP = 500.0
+PULSE_RUNNER_MIN_LP_USD = 500.0
+PULSE_RUNNER_MIN_VOLUME_USD = 200.0
+PULSE_RUNNER_MIN_PRICE = 1e-8
+PULSE_TOP_RUNNERS = 3
+
+
+def pulse_runner_row(d: dict) -> Optional[tuple]:
+    """(score, row) for a token that qualifies for card 1, or None: live (not cleared as stale), a real market cap,
+    price, liquidity and volume, not flagged as a rug / honeypot."""
+    if d.get("market_stale") or _is_flagged_risky(d):
+        return None
+    mcap = get_sanitized_mcap(d) or 0.0
+    px = filters._num(d.get("token_price_usd") or d.get("market_price_usd"))
+    lp = filters._num(d.get("lp_usd"))
+    vol = filters._num(d.get("volume_24h"))
+    if (mcap < PULSE_RUNNER_MIN_MCAP or px <= PULSE_RUNNER_MIN_PRICE or lp < PULSE_RUNNER_MIN_LP_USD
+            or vol < PULSE_RUNNER_MIN_VOLUME_USD):
+        return None
+    chg = filters._num(d.get("price_change_24h"))
+    score = 1e8 + chg * 1e4 + min(vol, 500000.0) if chg > 0 else mcap + vol * 2.0
+    return score, {
+        "contract": d.get("contract"), "name": d.get("name") or "Unknown", "symbol": d.get("symbol") or "",
+        "standard": d.get("standard") or "", "token_price_usd": px,
+        "price_change_24h": chg if d.get("price_change_24h") is not None else None,
+        "market_cap": mcap, "fdv": filters._num(d.get("fdv")) or None, "lp_usd": lp, "volume_24h": vol,
+        "pair_url": d.get("pair_url") or "", "market_url": d.get("market_url") or "",
+        "risk_level": d.get("risk_level") or "", "risk_badge": d.get("risk_badge") or "", "_slim": True,
+    }
+
+
 def pulse_launch_row(d: dict) -> Optional[dict]:
     """A new token for card 2, or None if it does not qualify: live (not cleared as stale), real liquidity and
     volume, a price, not flagged as a rug / honeypot."""
@@ -294,7 +327,7 @@ def pulse_launch_row(d: dict) -> Optional[dict]:
         "standard": d.get("standard") or "", "token_price_usd": px, "volume_24h": vol, "lp_usd": lp,
         "price_change_24h": None if chg is None else filters._num(chg),
         "market_cap": get_sanitized_mcap(d), "smart_count": _smart_count(d),
-        "pair_url": d.get("pair_url") or "", "detected_at": d.get("detected_at"),
+        "pair_url": d.get("pair_url") or "", "detected_at": d.get("detected_at"), "_slim": True,
     }
 
 
@@ -312,7 +345,7 @@ def pulse_nft_mint_row(d: dict) -> Optional[dict]:
         "standard": d.get("standard") or "", "total_minted": int(minted), "max_supply": int(cap) if cap else None,
         "fill_pct": round(min(100.0, minted / cap * 100.0), 1) if cap else None,
         "mint_price_str": d.get("mint_price_str") or "", "smart_count": _smart_count(d),
-        "market_url": d.get("market_url") or "", "detected_at": d.get("detected_at"),
+        "market_url": d.get("market_url") or "", "detected_at": d.get("detected_at"), "_slim": True,
     }
 
 
@@ -327,10 +360,13 @@ def compute_pulse_24h(projects, now=None) -> dict:
     new_drops = graduated = smart_inflows = clusters = clean = refunds = threats = 0
     dex_volume = 0.0
     hunters: Dict[str, int] = {}
-    launches, nft_mints = [], []
+    launches, nft_mints, runners = [], [], []
     for d in projects:
         if not isinstance(d, dict) or is_bogus_or_synthetic_asset(d):
             continue
+        runner = pulse_runner_row(d)      # any live token, whatever its age
+        if runner:
+            runners.append(runner)
         if str(d.get("detected_at") or "") < since:
             continue
         new_drops += 1
@@ -380,6 +416,7 @@ def compute_pulse_24h(projects, now=None) -> dict:
         "clean_mints": clean,
         "refunds": refunds,
         "threats_blocked": threats,
+        "top_runners": [row for _, row in sorted(runners, key=lambda x: x[0], reverse=True)[:PULSE_TOP_RUNNERS]],
         "top_launches": sorted(launches, key=lambda r: r["volume_24h"], reverse=True)[:PULSE_TOP_LAUNCHES],
         "top_nft_mints": sorted(nft_mints, key=lambda r: (r["total_minted"], r["smart_count"]),
                                 reverse=True)[:PULSE_TOP_NFT_MINTS],
@@ -566,14 +603,28 @@ class _FeedSnapshot:
         return rows
 
     def market_body(self) -> bytes:
-        """Encoded /api/market-data body (identical to what SafeJSONResponse renders)."""
+        """Encoded /api/market-data body (identical to what SafeJSONResponse renders): the live numbers of the contracts
+        in seeded_smart_drops.json (the only ones the page overlays them on), keyed by address with only the fields
+        that have a value, and `_stale`: those contracts whose market data the worker cleared as stale. Only a few
+        hundred of the ~9,000 tracked contracts are in the seed file, and the page ignored every other entry (the
+        unfiltered response was 62 KB compressed, about 8 KB now)."""
         with self._lock:
             if self._market_body is None:
-                out = {}
+                seed, _ = _load_seed("seeded_smart_drops.json")
+                wanted = None
+                if isinstance(seed, list):
+                    wanted = {str(d.get("contract") or "").lower() for d in seed if isinstance(d, dict)}
+                out: dict = {}
+                stale = []
                 for p in self.raw:
                     c = (p.get("contract") or "").lower()
-                    if c and (p.get("token_price_usd") or p.get("lp_usd") or p.get("market_stale")):
-                        out[c] = {k: p.get(k) for k in MARKET_FIELDS + MARKET_FRESHNESS_FIELDS}
+                    if not c or (wanted is not None and c not in wanted):
+                        continue
+                    if p.get("market_stale"):
+                        stale.append(c)
+                    elif p.get("token_price_usd") or p.get("lp_usd"):
+                        out[c] = {k: p[k] for k in MARKET_FIELDS + MARKET_FRESHNESS_FIELDS if p.get(k) is not None}
+                out["_stale"] = sorted(stale)
                 self._market_body = SafeJSONResponse(content=out).body
             return self._market_body
 
@@ -645,18 +696,18 @@ def get_bnb_price():
 
 MARKET_FIELDS = ("token_price_usd", "market_cap", "fdv", "lp_usd", "volume_24h", "price_change_24h",
                  "buys_24h", "sells_24h", "buys_1h")
-# Freshness of those numbers (worker: market_updated_at / market_stale / market_source).
-MARKET_FRESHNESS_FIELDS = ("market_stale", "market_updated_at", "market_source")
+# When the worker last confirmed those numbers (the page shows it as "· 2h ago" next to old data).
+MARKET_FRESHNESS_FIELDS = ("market_updated_at",)
 
 
 @app.get("/api/market-data")
 def get_market_data():
-    """Latest market numbers for every tracked contract that has a price or liquidity, keyed by address,
-    plus the contracts whose market data the worker cleared as stale (fields None, market_stale True).
+    """Latest market numbers for the contracts in seeded_smart_drops.json, keyed by address, plus `_stale`: the ones
+    whose market data the worker cleared as stale.
 
     Not filtered by the feed's exclusion lists on purpose: the frontend uses this to refresh the static
-    seeded files (seeded_smart_drops.json), which contain drops that /api/feed never returns. Stale
-    contracts are included so a seeded drop does not keep its frozen numbers once the live record is cleared."""
+    seeded file, which contains drops that /api/feed never returns. Stale contracts are listed so a seeded drop
+    does not keep its frozen numbers once the live record is cleared."""
     snapshot, _ = _load_snapshot()
     return Response(content=snapshot.market_body(), media_type="application/json",
                     headers={"Cache-Control": "public, max-age=60"})
