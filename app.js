@@ -4072,6 +4072,117 @@ function evaluatePortfolioExit(item, bnbPriceUsd = bnbPrice) {
   }
 }
 
+// One rule for "does this drop match the search text" (name, symbol, contract, deployer, smart wallets). `q` must already
+// be trimmed and lower-cased. Used by the table filter and by the "matches hidden by the current view" hint.
+function dropMatchesQuery(d, q) {
+  const sw = Array.isArray(d.smart_wallets) && d.smart_wallets.length > 0
+    ? d.smart_wallets
+    : (Array.isArray(d.smart_minters) ? d.smart_minters : []);
+  const matchSw = sw.some(w => String(w).toLowerCase().includes(q));
+  return Boolean((d.name && d.name.toLowerCase().includes(q)) ||
+    (d.symbol && d.symbol.toLowerCase().includes(q)) ||
+    (d.contract && d.contract.toLowerCase().includes(q)) ||
+    (d.deployer && d.deployer.toLowerCase().includes(q)) ||
+    matchSw);
+}
+
+// --- Filter pill selection: one place that sets the UI and `activeFilter`, plus remembering the user's last choice ---
+// Replay analysis: at least 8 of 56 scanned sessions re-clicked "FREE MINTS" in every new tab / visit. The last
+// explicit choice is remembered (localStorage) and `?filter=free` links work. Only filters that need no async
+// data are restored; "FOLLOWED" / "SMART" / "FAVORITES" always start from ALL.
+const FILTER_STORAGE_KEY = 'agentRadar.filter';
+const RESTORABLE_FILTERS = ['ALL', 'LAUNCHPAD', 'SNIPER_READY', 'FREE', 'ACTIVE', 'NFT_SURGE', 'PROXY', 'LP'];
+const FILTER_URL_ALIASES = {
+  all: 'ALL', free: 'FREE', freemints: 'FREE', launchpad: 'LAUNCHPAD', snipe: 'SNIPER_READY',
+  sniper: 'SNIPER_READY', sniperready: 'SNIPER_READY', active: 'ACTIVE', nft: 'NFT_SURGE', proxy: 'PROXY', lp: 'LP'
+};
+
+function applyFilterSelection(key) {
+  if (typeof document === 'undefined' || typeof document.querySelectorAll !== 'function' || typeof document.querySelector !== 'function') return false;
+  const pill = document.querySelector(`.pill[data-filter="${key}"]`);
+  const opt = document.querySelector(`#moreFiltersOptions .custom-option[data-filter="${key}"]`);
+  if (!pill && !opt) return false;
+  document.querySelectorAll('.pill').forEach(b => b.classList.toggle('active', b === pill));
+  document.querySelectorAll('#moreFiltersOptions .custom-option').forEach(o => o.classList.toggle('selected', o === opt));
+  const mfTrigger = document.getElementById('moreFiltersTrigger');
+  const mfLabel = document.getElementById('moreFiltersLabel');
+  if (mfTrigger) mfTrigger.classList.toggle('active', Boolean(opt));
+  if (mfLabel) {
+    const optText = opt ? ((opt.querySelector('span') || {}).textContent || key).trim() : '';
+    mfLabel.textContent = opt ? `⚙️ ${optText}` : '⚙️ More Filters';
+  }
+  activeFilter = key;
+  return true;
+}
+
+function saveFilterChoice(key) {
+  try {
+    if (typeof localStorage === 'undefined') return;
+    if (RESTORABLE_FILTERS.includes(key)) localStorage.setItem(FILTER_STORAGE_KEY, key);
+    else localStorage.removeItem(FILTER_STORAGE_KEY); // a non-restorable pick (e.g. FOLLOWED) must not leave a stale choice
+  } catch (_) { /* storage blocked: the filter simply is not remembered */ }
+}
+
+function restoreSavedFilter() {
+  let key = null;
+  let source = null;
+  try {
+    const param = new URLSearchParams(window.location.search).get('filter');
+    const fromUrl = param && FILTER_URL_ALIASES[String(param).toLowerCase().replace(/[^a-z]/g, '')];
+    if (fromUrl) { key = fromUrl; source = 'url'; }
+  } catch (_) { /* no URL API */ }
+  if (!key) {
+    try {
+      const saved = typeof localStorage !== 'undefined' ? localStorage.getItem(FILTER_STORAGE_KEY) : null;
+      if (saved && RESTORABLE_FILTERS.includes(saved)) { key = saved; source = 'saved'; }
+    } catch (_) { /* storage blocked */ }
+  }
+  if (!key || key === 'ALL') return false;
+  if (!applyFilterSelection(key)) return false;
+  trackAnalytics('filter_restored', { filter: key, source });
+  return true;
+}
+
+// Back to the unfiltered Live Radar list, without touching the remembered choice (the view is temporary). Callers
+// re-render themselves.
+function resetViewForSearch() {
+  const tabRadar = document.getElementById('tabRadar');
+  if (activeTab !== 'RADAR' && tabRadar) tabRadar.click();
+  applyFilterSelection('ALL');
+}
+
+const FILTER_LABELS = {
+  FREE: 'Free Mints', LAUNCHPAD: 'Launchpad', SNIPER_READY: 'Snipe Ready', ACTIVE: 'Active Mints', FAVORITES: 'Favorites',
+  NFT_SURGE: 'NFT Surge', PROXY: 'Proxy', LP: 'LP', SMART: 'Smart Money', FOLLOWED: 'Followed'
+};
+const TAB_LABELS = { SECONDARY: 'Secondary Market', LAUNCHPAD: 'Launchpad', SMART: 'Smart Money', PORTFOLIO: 'My Portfolio' };
+
+// Empty table + a search: if drops DO match the text but the active tab / filter pill hides them (replay analysis: a
+// token searched on the main list was found on the Secondary Market tab, and recent chips emptied the table), say so and
+// offer the one click that shows them. Returns '' when nothing matches anywhere, so a genuine "no such token" stays plain.
+function hiddenMatchesHintHtml() {
+  const q = String(searchQuery || '').trim().toLowerCase();
+  if (!q || !Array.isArray(allDrops)) return '';
+  const hidden = allDrops.filter(d => !isExcludedMajorAsset(d) && dropMatchesQuery(d, q)).length;
+  if (hidden === 0) return '';
+  const parts = [];
+  if (activeFilter !== 'ALL') parts.push(`the “${escapeHtml(FILTER_LABELS[activeFilter] || activeFilter)}” filter`);
+  if (activeTab !== 'RADAR') parts.push(`the ${escapeHtml(TAB_LABELS[activeTab] || activeTab)} tab`);
+  if (parts.length === 0) return '';
+  return `
+    <div class="search-hidden-hint" role="status">
+      <span><strong>${hidden}</strong> match${hidden === 1 ? '' : 'es'} for “<strong>${escapeHtml(String(searchQuery).trim())}</strong>” ${hidden === 1 ? 'is' : 'are'} hidden by ${parts.join(' and ')}.</span>
+      <button type="button" class="search-hidden-btn" onclick="showAllForSearch()">Show ${hidden === 1 ? 'it' : 'all'}</button>
+    </div>`;
+}
+
+// "Show them" action of the hidden-matches hint in the empty table state.
+function showAllForSearch() {
+  trackAnalytics('search_hidden_matches_shown', { query_len: String(searchQuery || '').trim().length, from_filter: activeFilter, from_tab: activeTab });
+  resetViewForSearch();
+  renderTable();
+}
+
 // Filter and Sort Drops
 function getFilteredDrops() {
   let list = [...allDrops];
@@ -4150,17 +4261,7 @@ function getFilteredDrops() {
   // Search (matches name, symbol, contract, deployer, and smart wallets)
   if (searchQuery.trim()) {
     const q = searchQuery.toLowerCase().trim();
-    list = list.filter(d => {
-      const sw = Array.isArray(d.smart_wallets) && d.smart_wallets.length > 0
-        ? d.smart_wallets
-        : (Array.isArray(d.smart_minters) ? d.smart_minters : []);
-      const matchSw = sw.some(w => String(w).toLowerCase().includes(q));
-      return (d.name && d.name.toLowerCase().includes(q)) ||
-        (d.symbol && d.symbol.toLowerCase().includes(q)) ||
-        (d.contract && d.contract.toLowerCase().includes(q)) ||
-        (d.deployer && d.deployer.toLowerCase().includes(q)) ||
-        matchSw;
-    });
+    list = list.filter(d => dropMatchesQuery(d, q));
   }
 
   // Sort
@@ -4359,6 +4460,9 @@ function handleRecentChipClick(symbol, contract, event) {
     if (typeof event.stopPropagation === 'function') event.stopPropagation();
   }
   const cleanSym = String(symbol || '').trim();
+  // A recent chip is a token the user already looked at: search it across everything instead of inside whichever tab or
+  // filter happens to be active (that produced an empty table and a manual reset in replay analysis).
+  resetViewForSearch();
   setSearchQuery(cleanSym, true);
 }
 
@@ -4480,15 +4584,29 @@ let searchDropdownSelectedIndex = -1;
 // Server-side fallback for the dropdown. The in-memory feed is only a subset of all drops, and replay analysis showed
 // visitors pasting contract addresses / tickers that were not loaded and hitting a dead-end "No agentic projects" state.
 // One lookup per distinct query (cached), debounced, and ignored if the user has typed on since.
-const remoteSearchCache = new Map(); // lowercased query -> array of projects ([] = looked up, nothing found)
+const remoteSearchCache = new Map(); // lowercased query -> array of projects ([] = looked up successfully, nothing found)
+// A FAILED lookup (backend down / slow / non-2xx) is not "nothing found": it is remembered separately and only briefly,
+// so the dropdown can say "search is unavailable" instead of the misleading "No agentic projects matching", and a retry
+// is possible. (Before this, an outage was cached as an empty result and reported as a genuine miss.)
+const REMOTE_SEARCH_ERROR_TTL_MS = 15000;
+const remoteSearchErrorUntil = new Map(); // lowercased query -> epoch ms until which the failure is shown
 let remoteSearchTimer = null;
 let remoteSearchInFlight = null;
 
+function remoteSearchFailed(q) {
+  const key = String(q || '').trim().toLowerCase();
+  const until = remoteSearchErrorUntil.get(key);
+  if (!until) return false;
+  if (Date.now() < until) return true;
+  remoteSearchErrorUntil.delete(key); // expired: a new keystroke / focus may try again
+  return false;
+}
+
 // A lookup is worth making (and the dropdown shows a "searching" state) for queries of 4+ characters that have not
-// been looked up yet, in a browser that can fetch.
+// been looked up yet (and have not just failed), in a browser that can fetch.
 function isRemoteSearchPending(q) {
   const key = String(q || '').trim().toLowerCase();
-  return typeof fetch !== 'undefined' && key.length >= 4 && !remoteSearchCache.has(key);
+  return typeof fetch !== 'undefined' && key.length >= 4 && !remoteSearchCache.has(key) && !remoteSearchFailed(key);
 }
 
 function scheduleRemoteSearch(q) {
@@ -4497,28 +4615,51 @@ function scheduleRemoteSearch(q) {
   if (!isRemoteSearchPending(key) || remoteSearchInFlight === key) return;
   remoteSearchTimer = setTimeout(async () => {
     remoteSearchInFlight = key;
+    let ok = false;
+    let projects = [];
     try {
       const url = (typeof BACKEND_URL !== 'undefined' ? BACKEND_URL : '') + `/api/projects?limit=7&search=${encodeURIComponent(key)}`;
       const res = await fetch(url);
-      const data = res.ok ? await res.json() : null;
-      remoteSearchCache.set(key, data && Array.isArray(data.projects) ? data.projects.slice(0, 7) : []);
+      if (res.ok) {
+        const data = await res.json();
+        if (data && Array.isArray(data.projects)) {
+          projects = data.projects.slice(0, 7);
+          ok = true;
+        }
+      }
     } catch (_) {
-      remoteSearchCache.set(key, []);
+      ok = false;
     } finally {
       remoteSearchInFlight = null;
     }
-    // Measures how often the fallback rescues a search the loaded feed could not answer.
+    if (ok) {
+      remoteSearchCache.set(key, projects);
+      remoteSearchErrorUntil.delete(key);
+    } else {
+      remoteSearchErrorUntil.set(key, Date.now() + REMOTE_SEARCH_ERROR_TTL_MS);
+    }
+    // Measures how often the fallback rescues a search the loaded feed could not answer, and how often it could not
+    // answer at all (status 'error' is an outage, not a miss).
     trackAnalytics('token_search_remote', {
       query: key,
-      result_count: remoteSearchCache.get(key).length,
+      status: ok ? 'ok' : 'error',
+      result_count: ok ? projects.length : null,
       is_address: /^0x[0-9a-f]{4,}$/i.test(key)
     });
-    // Re-render for the query that is still on screen, with results or, if there are none, the empty state
-    // (replacing the "searching" state either way).
+    // Re-render for the query that is still on screen: results, the empty state, or the unavailable state (replacing
+    // the "searching" state in every case).
     const input = document.getElementById('searchInput');
     const current = input ? String(input.value || '').trim().toLowerCase() : '';
     if (current === key && isSearchDropdownOpen()) renderSearchDropdown(input.value);
   }, 400);
+}
+
+// "Try again" on the unavailable state.
+function retryRemoteSearch() {
+  const input = document.getElementById('searchInput');
+  if (!input) return;
+  remoteSearchErrorUntil.delete(String(input.value || '').trim().toLowerCase());
+  renderSearchDropdown(input.value);
 }
 
 function highlightSearchMatch(text, query) {
@@ -4613,8 +4754,9 @@ function renderSearchDropdown(query) {
     return;
   }
 
+  // (The active row is only reset when the list is actually rebuilt, further down: resetting it on every render would
+  // pull the highlight off the row the user is on whenever an identical re-render happens.)
   searchDropdownResults = getMatchingDrops(q, 7);
-  searchDropdownSelectedIndex = -1;
 
   if (searchDropdownResults.length === 0) {
     const remote = remoteSearchCache.get(q.toLowerCase());
@@ -4627,6 +4769,8 @@ function renderSearchDropdown(query) {
 
   // Nothing loaded matches and the backend lookup is still to come: say so instead of showing a dead-end.
   if (searchDropdownResults.length === 0 && isRemoteSearchPending(q)) {
+    delete dropdown.dataset.renderedHtml; // this state replaces the list: the "skip identical render" cache is stale
+    searchDropdownSelectedIndex = -1;
     dropdown.innerHTML = `
       <div class="search-dropdown-empty search-dropdown-searching" role="status" aria-live="polite">
         <div class="search-empty-icon">⏳</div>
@@ -4638,7 +4782,27 @@ function renderSearchDropdown(query) {
     return;
   }
 
+  // The lookup itself failed: do not claim the token does not exist.
+  if (searchDropdownResults.length === 0 && remoteSearchFailed(q)) {
+    delete dropdown.dataset.renderedHtml;
+    searchDropdownSelectedIndex = -1;
+    dropdown.innerHTML = `
+      <div class="search-dropdown-empty search-dropdown-error" role="alert">
+        <div class="search-empty-icon">⚠️</div>
+        <div class="search-empty-title">Couldn't search all drops for "<strong>${escapeHtml(q)}</strong>"</div>
+        <div class="search-empty-desc">Only the drops already loaded were checked. The full database is unreachable right now.</div>
+        <div class="search-empty-actions">
+          <button type="button" class="search-empty-btn" onclick="retryRemoteSearch()">Try again</button>
+        </div>
+      </div>
+    `;
+    dropdown.style.display = 'block';
+    return;
+  }
+
   if (searchDropdownResults.length === 0) {
+    delete dropdown.dataset.renderedHtml;
+    searchDropdownSelectedIndex = -1;
     dropdown.innerHTML = `
       <div class="search-dropdown-empty">
         <div class="search-empty-icon">🔍</div>
@@ -4662,15 +4826,16 @@ function renderSearchDropdown(query) {
     const shortAddr = cAddr.length > 12 ? `${cAddr.slice(0, 6)}...${cAddr.slice(-4)}` : cAddr;
     const initial = (sym[0] || name[0] || '?').toUpperCase();
 
-    // Badges
+    // Badges: a row never wraps, so at most 3, most important first (a honeypot warning must never be the one dropped).
     const badges = [];
     const pStr = String(item.mint_price_str || '').toUpperCase();
     const isFree = item.has_free_mint || pStr.includes('FREE');
-    if (isFree) badges.push('<span class="search-drop-badge badge-free">Free</span>');
-    if (typeof isSniperReady === 'function' && isSniperReady(item)) badges.push('<span class="search-drop-badge badge-sniper">Snipe Ready</span>');
-    if (item.safety_score === 'HONEYPOT' || item.is_honeypot) badges.push('<span class="search-drop-badge badge-honeypot">Honeypot</span>');
     const sw = Array.isArray(item.smart_wallets) && item.smart_wallets.length > 0 ? item.smart_wallets : (item.smart_minters || []);
+    if (item.safety_score === 'HONEYPOT' || item.is_honeypot) badges.push('<span class="search-drop-badge badge-honeypot">Honeypot</span>');
+    if (isFree) badges.push('<span class="search-drop-badge badge-free">Free</span>');
+    if (typeof isSniperReady === 'function' && isSniperReady(item)) badges.push('<span class="search-drop-badge badge-sniper" title="Snipe Ready">Snipe</span>');
     if (sw.length > 0) badges.push(`<span class="search-drop-badge badge-smart">🧠 ${sw.length}</span>`);
+    badges.length = Math.min(badges.length, 3);
 
     // Price / gain
     const price = item.token_price_usd || item.market_price_usd || item.current_price;
@@ -4694,17 +4859,17 @@ function renderSearchDropdown(query) {
     }
 
     return `
-      <div class="search-dropdown-item" role="option" data-idx="${idx}" data-contract="${escapeHtml(cAddr)}" tabindex="-1">
+      <div class="search-dropdown-item" role="option" id="searchOpt-${idx}" aria-selected="false" data-idx="${idx}" data-contract="${escapeHtml(cAddr)}" tabindex="-1">
         <div class="search-drop-avatar">${initial}</div>
         <div class="search-drop-main">
           <div class="search-drop-title-row">
             <span class="search-drop-name" title="${escapeHtml(name)}">${highlightSearchMatch(name, q)}</span>
             <span class="search-drop-symbol">$${highlightSearchMatch(sym, q)}</span>
-            <div class="search-drop-badges">${badges.join('')}</div>
+            <span class="search-drop-badges">${badges.join('')}</span>
           </div>
           <div class="search-drop-sub">
             <span class="search-drop-addr">${shortAddr}</span>
-            ${item.standard ? `<span>• ${escapeHtml(item.standard)}</span>` : ''}
+            ${item.standard ? `<span class="search-drop-type" title="${escapeHtml(item.standard)}">${escapeHtml(shortStandardLabel(item.standard))}</span>` : ''}
           </div>
         </div>
         <div class="search-drop-meta">
@@ -4716,7 +4881,7 @@ function renderSearchDropdown(query) {
     `;
   }).join('');
 
-  dropdown.innerHTML = `
+  const dropdownHtml = `
     <div class="search-dropdown-inner">
       <div class="search-dropdown-header">
         <span class="search-dropdown-title">Matching Drops <span class="search-dropdown-count">(${searchDropdownResults.length})</span></span>
@@ -4738,41 +4903,91 @@ function renderSearchDropdown(query) {
     </div>
   `;
 
-  // Attach event listeners to items
-  dropdown.querySelectorAll('.search-dropdown-item').forEach(el => {
-    el.addEventListener('click', (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      const idx = Number(el.getAttribute('data-idx'));
-      const item = searchDropdownResults[idx];
-      if (item) {
-        selectSearchDropdownItem(item);
-      }
-    });
-  });
+  // Rebuild only when the content really changed. Re-rendering identical markup (the debounced table render, a late
+  // backend answer, the smart-drops load) recreates every row under a stationary mouse pointer, which restarts the
+  // hover state and reads as flicker/shaking; it also throws away the list's scroll position.
+  if (dropdown.dataset.renderedHtml !== dropdownHtml) {
+    dropdown.innerHTML = dropdownHtml;
+    dropdown.dataset.renderedHtml = dropdownHtml;
+    searchDropdownSelectedIndex = -1;
+    updateSearchDropdownSelection(defaultSearchDropdownSelection(), { scroll: false });
+  }
+  bindSearchDropdownEvents(dropdown);
 
-  const viewTableBtn = document.getElementById('searchDropdownViewTable');
-  if (viewTableBtn) {
-    viewTableBtn.addEventListener('click', (e) => {
+  dropdown.style.display = 'block';
+}
+
+// "Matching drops" glyph for the second line: the long standard strings ("ERC-721 (NFT Collection)",
+// "BEP-20 Token (18 decimals)") wrapped onto extra lines and made rows uneven. The full text stays in the tooltip.
+function shortStandardLabel(std) {
+  const s = String(std || '');
+  if (/1155/.test(s)) return 'ERC-1155';
+  if (/721|NFT/i.test(s)) return 'NFT';
+  if (/BEP-?20|ERC-?20|token/i.test(s)) return 'BEP-20';
+  return s.split('(')[0].trim() || s;
+}
+
+// With a mouse or trackpad the first row is the "active" one, so Enter visibly opens what is highlighted. On touch
+// screens nothing is pre-highlighted (a lit-up first row there just looks like a stuck tap state).
+function defaultSearchDropdownSelection() {
+  try {
+    if (typeof window.matchMedia === 'function' && window.matchMedia('(hover: hover) and (pointer: fine)').matches) return 0;
+  } catch (_) { /* no matchMedia */ }
+  return -1;
+}
+
+// One delegated set of handlers on the dropdown element, bound once (the rows themselves are rebuilt freely).
+function bindSearchDropdownEvents(dropdown) {
+  if (!dropdown || dropdown.dataset.eventsBound === '1') return;
+  dropdown.dataset.eventsBound = '1';
+
+  let lastX = null;
+  let lastY = null;
+
+  dropdown.addEventListener('click', (e) => {
+    const target = e.target;
+    if (!target || typeof target.closest !== 'function') return;
+    if (target.closest('#searchDropdownViewTable')) {
       e.preventDefault();
       e.stopPropagation();
       hideSearchDropdown();
       const tableSec = document.getElementById('tableSection') || document.querySelector('.table-wrapper') || document.getElementById('tableBody');
-      if (tableSec) {
-        tableSec.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      }
-    });
-  }
+      if (tableSec) tableSec.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      return;
+    }
+    const row = target.closest('.search-dropdown-item');
+    if (!row) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const item = searchDropdownResults[Number(row.getAttribute('data-idx'))];
+    if (item) selectSearchDropdownItem(item);
+  });
 
-  dropdown.style.display = 'block';
+  // The hover highlight is driven by REAL pointer movement only. Plain :hover / mouseenter also fire when the list
+  // scrolls under a stationary pointer (arrow-key navigation, wheel), which made the highlight fight the keyboard
+  // selection and the rows appear to shake. Browsers also fire synthetic mousemoves after a scroll: those carry the
+  // same coordinates, so they are ignored.
+  dropdown.addEventListener('mousemove', (e) => {
+    if (e.clientX === lastX && e.clientY === lastY) return;
+    lastX = e.clientX;
+    lastY = e.clientY;
+    const target = e.target;
+    const row = target && typeof target.closest === 'function' ? target.closest('.search-dropdown-item') : null;
+    if (!row) return;
+    const idx = Number(row.getAttribute('data-idx'));
+    if (idx !== searchDropdownSelectedIndex) updateSearchDropdownSelection(idx, { scroll: false });
+  });
 }
 
 function hideSearchDropdown() {
   const dropdown = document.getElementById('searchResultsDropdown');
   if (dropdown) {
     dropdown.style.display = 'none';
+    delete dropdown.dataset.renderedHtml; // reopening rebuilds the list, so it never comes back with a stale highlight
   }
   searchDropdownSelectedIndex = -1;
+  const input = document.getElementById('searchInput');
+  if (input && typeof input.removeAttribute === 'function') input.removeAttribute('aria-activedescendant');
 }
 
 function selectSearchDropdownItem(item) {
@@ -4782,19 +4997,37 @@ function selectSearchDropdownItem(item) {
   openModal(item, 'search_dropdown');
 }
 
-function updateSearchDropdownSelection(newIndex) {
+// The single place that decides which row is active (keyboard, mouse and default all go through here).
+// `opts.scroll === false` (mouse / initial render) never moves the list; keyboard navigation scrolls only the LIST by
+// hand instead of scrollIntoView(), which also scrolls the page and any other scrollable ancestor.
+function updateSearchDropdownSelection(newIndex, opts) {
   const items = document.querySelectorAll('#searchResultsDropdown .search-dropdown-item');
   if (!items || items.length === 0) return;
 
-  items.forEach(el => el.classList.remove('is-selected'));
+  items.forEach(el => {
+    el.classList.remove('is-selected');
+    el.setAttribute('aria-selected', 'false');
+  });
+  const input = document.getElementById('searchInput');
 
   if (newIndex >= 0 && newIndex < items.length) {
     searchDropdownSelectedIndex = newIndex;
     const target = items[newIndex];
     target.classList.add('is-selected');
-    target.scrollIntoView({ block: 'nearest' });
+    target.setAttribute('aria-selected', 'true');
+    if (input && target.id) input.setAttribute('aria-activedescendant', target.id);
+
+    const scrollIt = !opts || opts.scroll !== false;
+    const list = document.getElementById('searchDropdownList');
+    if (scrollIt && list && typeof target.offsetTop === 'number') {
+      const top = target.offsetTop;
+      const bottom = top + target.offsetHeight;
+      if (top < list.scrollTop) list.scrollTop = top;
+      else if (bottom > list.scrollTop + list.clientHeight) list.scrollTop = bottom - list.clientHeight;
+    }
   } else {
     searchDropdownSelectedIndex = -1;
+    if (input && typeof input.removeAttribute === 'function') input.removeAttribute('aria-activedescendant');
   }
 }
 
@@ -5039,7 +5272,18 @@ function renderTable(keepLimit = false) {
         </td>
       `;
     } else if (activeTab === 'SECONDARY') {
-      tr.innerHTML = `
+      // Until the secondary-market list has actually arrived, "no pairs" would be a false statement (replay analysis saw
+      // "No Secondary Market Pairs Found" while the data request was still in flight).
+      const secondaryStillLoading = typeof hasLoadedSecondaryDrops !== 'undefined' && !hasLoadedSecondaryDrops;
+      tr.innerHTML = secondaryStillLoading ? `
+        <td colspan="14" style="text-align: center; padding: 40px 20px; color: var(--text-dim);">
+          <div style="font-size: 28px; margin-bottom: 8px;">⏳</div>
+          <div style="font-weight: 700; color: #ffd600; font-size: 14px; margin-bottom: 6px;" role="status" aria-live="polite">
+            Loading secondary market pairs…
+          </div>
+          ${hiddenMatchesHintHtml()}
+        </td>
+      ` : `
         <td colspan="14" style="text-align: center; padding: 40px 20px; color: var(--text-dim);">
           <div style="font-size: 28px; margin-bottom: 8px;">📈</div>
           <div style="font-weight: 700; color: #ffd600; font-size: 14px; margin-bottom: 6px;">
@@ -5048,10 +5292,11 @@ function renderTable(keepLimit = false) {
           <div style="font-size: 12px; max-width: 500px; margin: 0 auto 14px; line-height: 1.5;">
             Tokens automatically graduate here once they inject PancakeSwap LP, achieve &gt;$500 market cap, or begin active secondary trading.
           </div>
+          ${hiddenMatchesHintHtml()}
         </td>
       `;
     } else {
-      tr.innerHTML = `<td colspan="14" style="text-align: center; padding: 30px; color: var(--text-dim);">No agentic projects match current filter [${activeFilter}] or search.</td>`;
+      tr.innerHTML = `<td colspan="14" style="text-align: center; padding: 30px; color: var(--text-dim);">No agentic projects match current filter [${activeFilter}] or search.${hiddenMatchesHintHtml()}</td>`;
     }
     if (typeof tbody.replaceChildren === 'function') {
       tbody.replaceChildren(tr);
@@ -9383,6 +9628,7 @@ function setupMoreFiltersDropdown() {
       if (labelEl) labelEl.textContent = `⚙️ ${optText}`;
 
       activeFilter = filterKey;
+      saveFilterChoice(activeFilter);
       if ((activeFilter === 'FOLLOWED' || activeFilter === 'SMART') && !hasLoadedSmartDrops) {
         await loadSmartDrops();
       }
@@ -9621,6 +9867,7 @@ async function init() {
         document.querySelectorAll('#moreFiltersOptions .custom-option').forEach(o => o.classList.remove('selected'));
 
         activeFilter = btn.getAttribute('data-filter');
+        saveFilterChoice(activeFilter);
         if (activeFilter === 'FOLLOWED' && !hasLoadedSmartDrops) {
           await loadSmartDrops();
         }
@@ -9796,6 +10043,9 @@ async function init() {
     setupMobileTabDropdown();
     setupMoreFiltersDropdown();
     syncMobileTabSelector();
+
+    // Start from the user's last filter (or ?filter=free) instead of making them re-click it in every tab
+    restoreSavedFilter();
 
     // Sort select fallback
     const sortSel = document.getElementById('sortSelect');
