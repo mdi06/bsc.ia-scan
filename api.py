@@ -994,7 +994,8 @@ def get_feed(
     limit: int = Query(150, ge=1, le=500),
     offset: int = Query(0, ge=0),
     since_block: Optional[int] = Query(None),
-    filter: Optional[str] = Query(None)
+    filter: Optional[str] = Query(None),
+    view: Optional[str] = Query(None)
 ):
     """Paged feed for the UI, or only the drops newer than `since_block` (delta mode).
 
@@ -1060,13 +1061,19 @@ def get_feed(
     target_total = len(target_list)
     paginated = target_list[offset : offset + limit]
 
-    feed_etag = f'"v{content_version}-{latest_block}-{total}-{total_agent_wallets}-{offset}-{limit}-{filter or ""}"'
+    list_view = view == "list"      # any other value (or none) is the full shape
+    feed_etag = (f'"v{content_version}-{latest_block}-{total}-{total_agent_wallets}-{offset}-{limit}-{filter or ""}'
+                 f'{"-list" if list_view else ""}"')
     if _etag_matches(client_etag, feed_etag):
         return Response(status_code=304, headers={"ETag": feed_etag, "Cache-Control": "public, max-age=5"})
 
+    def feed_records():
+        records = serve_records(paginated, price=bnb_price, live=bnb_live)
+        return [slim_for_list_view(p) for p in records] if list_view else records
+
     # an unknown filter name gives the whole list, so it shares the unfiltered entry instead of making its own
     return _cached_json(
-        request, snapshot, ("feed", filter if filter in FEED_FILTERS else None, offset, limit), volatile,
+        request, snapshot, ("feed", filter if filter in FEED_FILTERS else None, offset, limit, list_view), volatile,
         {"ETag": feed_etag, "Cache-Control": "public, max-age=5"},
         lambda: {
             "success": True,
@@ -1078,9 +1085,38 @@ def get_feed(
             "limit": limit,
             "has_more": (offset + limit) < target_total,
             "latest_block": latest_block,
-            "projects": serve_records(paginated, price=bnb_price, live=bnb_live),
-            "stats": stats
+            "projects": feed_records(),
+            "stats": stats,
+            **({"view": "list"} if list_view else {}),
         })
+
+
+# `view=list` (used for the Secondary tab's list): a slimmer record for list views. It leaves out what only the token modal
+# reads or what no code reads at all, which is ~40% of a record (the secondary list went from 137 KB to 89 KB gzipped for
+# 300 records). A record is marked `_slim`; the page upgrades it with the full record (/api/projects) when its modal opens.
+# Dropped: sniper_checklist, tx_hash, token_price_bnb, sniper_status (nothing reads them), risk_flags, hold,
+# holder_distribution, dev_root (modal only), mint_calldata (replaced by has_mint_calldata), and from `security` every key
+# except the ones read outside the modal. Everything else, including every field a table row, a filter or a Pulse card
+# reads, stays. A request without `view=list` gets the unchanged shape.
+LIST_VIEW_DROP = frozenset({
+    "sniper_checklist", "tx_hash", "token_price_bnb", "sniper_status",
+    "risk_flags", "hold", "holder_distribution", "dev_root",
+})
+LIST_VIEW_SECURITY_KEEP = frozenset({"has_refund", "refund_methods", "is_serial_dev", "is_fund_drain", "is_fresh_dev", "serial_count"})
+
+
+def slim_for_list_view(p: dict) -> dict:
+    """The `view=list` shape of a served record (a copy; the stored record is never changed)."""
+    out = {k: v for k, v in p.items() if k not in LIST_VIEW_DROP}
+    calldata = out.get("mint_calldata")
+    if isinstance(calldata, str) and calldata not in ("", "0x"):
+        del out["mint_calldata"]
+        out["has_mint_calldata"] = True
+    security = out.get("security")
+    if isinstance(security, dict):
+        out["security"] = {k: v for k, v in security.items() if k in LIST_VIEW_SECURITY_KEEP}
+    out["_slim"] = True
+    return out
 
 
 # Calldata longer than this is left out of list responses (feed, top gainers): a few contracts carry up to ~98 KB

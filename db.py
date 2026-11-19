@@ -263,6 +263,12 @@ class DatabaseManager:
     # -------------------------------------------------------------------------
     def get_project_count(self) -> int:
         if self.mode == "supabase":
+            # A loaded cache already holds every row (it refreshes about once a minute), so /healthz (the keep-warm
+            # ping every 10 minutes, Render's health checks) answers from it. The count query took ~190 ms in Postgres
+            # plus a round trip, on every call. Only an empty / not yet loaded cache asks the database.
+            with self._cache_lock:
+                if self._cache_initialized and self._projects_cache:
+                    return len(self._projects_cache)
             try:
                 client = self.client
                 if HAS_HTTPX and client:

@@ -99,7 +99,7 @@ def test_a_gzip_client_gets_the_stored_compressed_bytes_exactly_once_compressed(
     assert "Accept-Encoding" in [v.strip() for v in r.headers["vary"].split(",")]   # newer Starlette adds Origin too
     assert int(r.headers["content-length"]) < len(r.content) / 3          # the wire bytes are the small ones
     assert json.loads(r.content)["count"] == 40                            # httpx removed exactly one gzip layer
-    raw = api.get_feed.__globals__["_current_snapshot"].bodies._entries[("feed", None, 0, 40)][1].gz
+    raw = api.get_feed.__globals__["_current_snapshot"].bodies._entries[("feed", None, 0, 40, False)][1].gz
     assert gzip.decompress(raw) == r.content and int(r.headers["content-length"]) == len(raw)
 
 
