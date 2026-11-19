@@ -298,6 +298,281 @@ function sendDesktopNotification(title, body) {
 }
 if (typeof window !== 'undefined') window.sendDesktopNotification = sendDesktopNotification;
 
+// ---- Opt-in drop alerts (the "ALERTS" toggle next to SOUND) ----
+// Browser only, no backend: it works while the page is open and polling. Permission is requested only from the
+// toggle's own click, never on load. While on, each NEW drop that matches the active toolbar filter, or is Free Mint
+// plus Snipe Ready, gets its own notification. Notifications go out at most once per DROP_ALERT_MIN_GAP_MS; drops that
+// arrive inside the gap are sent as one batch when it ends. "Seen" is knownContracts: the snapshot and the first live
+// load seed it, and new-drop detection only runs after that, so drops already on the page never alert.
+const DROP_ALERT_STORAGE_KEY = 'agent_drop_alerts';
+const DROP_ALERT_MIN_GAP_MS = 30000;
+let dropAlertPref = readDropAlertPref();
+let dropAlertQueue = [];
+let dropAlertFlushTimer = null;
+let dropAlertLastShownAt = 0;
+let dropAlertConstructFailed = false; // `new Notification` threw (Android Chrome): treat the API as unsupported here
+
+function readDropAlertPref() {
+  try {
+    return typeof localStorage !== 'undefined' && localStorage.getItem(DROP_ALERT_STORAGE_KEY) === 'on';
+  } catch (e) {
+    return false; // storage blocked (private mode, sandboxed frame): the toggle starts off
+  }
+}
+
+function writeDropAlertPref(on) {
+  dropAlertPref = Boolean(on);
+  try {
+    if (typeof localStorage !== 'undefined') localStorage.setItem(DROP_ALERT_STORAGE_KEY, dropAlertPref ? 'on' : 'off');
+  } catch (e) {
+    // Storage blocked: the setting then lasts for this page view only
+  }
+}
+
+function getNotificationCtor() {
+  try {
+    if (typeof window !== 'undefined' && window.Notification) return window.Notification;
+    if (typeof Notification !== 'undefined') return Notification;
+  } catch (e) {
+    // No Notification API in this context
+  }
+  return null;
+}
+
+// 'unsupported' (no API, e.g. iOS Safari tabs), 'granted', 'denied' or 'default' (never asked, or dismissed)
+function getDropAlertPermission() {
+  const N = getNotificationCtor();
+  if (!N || dropAlertConstructFailed) return 'unsupported';
+  return typeof N.permission === 'string' ? N.permission : 'default';
+}
+
+function isDropAlertActive() {
+  return dropAlertPref && getDropAlertPermission() === 'granted';
+}
+
+// Called only from the toggle click. Resolves 'granted' | 'denied' | 'default'. Handles both the promise and the older
+// callback form of requestPermission; resolves 'default' if the browser throws.
+function askDropAlertPermission() {
+  return new Promise(resolve => {
+    let settled = false;
+    const finish = (result) => {
+      if (settled) return;
+      settled = true;
+      resolve(result || 'default');
+    };
+    try {
+      const ret = getNotificationCtor().requestPermission(finish);
+      if (ret && typeof ret.then === 'function') ret.then(finish, () => finish('default'));
+    } catch (e) {
+      finish('default');
+    }
+  });
+}
+
+async function onDropAlertToggleClick() {
+  const before = getDropAlertPermission();
+  if (before === 'unsupported') return;
+  if (dropAlertPref && before === 'granted') {
+    writeDropAlertPref(false);
+    dropAlertQueue = [];
+    if (dropAlertFlushTimer) { clearTimeout(dropAlertFlushTimer); dropAlertFlushTimer = null; }
+    updateDropAlertToggle();
+    return;
+  }
+  // Only a 'default' permission opens the browser prompt; 'granted' and 'denied' are answered without one.
+  const after = before === 'default' ? await askDropAlertPermission() : before;
+  const on = after === 'granted';
+  writeDropAlertPref(on);
+  trackAnalytics('alert_enabled', {
+    result: on ? 'on' : (after === 'denied' ? 'blocked' : 'dismissed'),
+    permission_before: before,
+    permission: after,
+    filter: activeFilter
+  });
+  if (on) {
+    showToast('🔔 NOTIFICATIONS ON', 'One notification per new matching drop, at most every 30 seconds.', '🔔');
+  } else if (after === 'denied') {
+    showToast('🔕 NOTIFICATIONS BLOCKED', 'Allow notifications for this site in your browser settings, then click ALERTS again.', '🔕');
+  }
+  updateDropAlertToggle();
+}
+
+// Same rules as the toolbar filter block in renderTable (keep the two in step). 'ALL' and unknown keys match everything.
+function dropMatchesToolbarFilter(d, key) {
+  if (!d) return false;
+  switch (key) {
+    case 'LAUNCHPAD': return isLaunchpadDrop(d);
+    case 'SNIPER_READY': return isSniperReady(d);
+    case 'NFT_SURGE': return Boolean(d.is_nft_surge);
+    case 'PROXY': return Boolean(d.is_proxy_clone);
+    case 'FAVORITES': return isFavorited(d.contract, d);
+    case 'FOLLOWED': {
+      if (followedWallets.size === 0) return false;
+      const sw = Array.isArray(d.smart_wallets) && d.smart_wallets.length > 0
+        ? d.smart_wallets
+        : (Array.isArray(d.smart_minters) ? d.smart_minters : []);
+      return sw.some(w => followedWallets.has(String(w).toLowerCase().trim()));
+    }
+    case 'FREE': return isFreeMintDrop(d);
+    case 'SMART': return Boolean((d.smart_wallets && d.smart_wallets.length > 0) || (d.smart_minters && d.smart_minters.length > 0));
+    case 'LP': return Number(d.lp_usd || 0) > 0;
+    case 'ACTIVE': {
+      const ms = Number(d.max_supply || 0);
+      const tm = Number(d.total_minted || 0);
+      return ms === 0 || tm < ms;
+    }
+    default: return true;
+  }
+}
+
+// Why a new drop qualifies: 'filter', 'free_snipe', 'filter_and_free_snipe', or null (no alert).
+function alertMatchType(drop) {
+  const byFilter = dropMatchesToolbarFilter(drop, activeFilter);
+  const byFreeSnipe = isFreeMintDrop(drop) && isSniperReady(drop);
+  if (byFilter && byFreeSnipe) return 'filter_and_free_snipe';
+  if (byFilter) return 'filter';
+  if (byFreeSnipe) return 'free_snipe';
+  return null;
+}
+
+function dropAlertMatchLabel(match) {
+  if (match === 'free_snipe') return 'Free Mint + Snipe Ready';
+  if (match === 'filter_and_free_snipe') return 'Matches your filter · Free Mint + Snipe Ready';
+  return 'Matches your filter';
+}
+
+// Called with the drops each feed poll found for the first time (after the first live load).
+function queueDropAlerts(drops) {
+  if (!dropAlertPref || !Array.isArray(drops) || drops.length === 0) return;
+  if (!isDropAlertActive()) {
+    updateDropAlertToggle(); // e.g. permission was revoked in the browser since the toggle was turned on
+    return;
+  }
+  let added = false;
+  drops.forEach(drop => {
+    const contract = String((drop && drop.contract) || '').toLowerCase();
+    if (!contract || dropAlertQueue.some(q => q.contract === contract)) return;
+    const match = alertMatchType(drop);
+    if (!match) return;
+    dropAlertQueue.push({ contract, drop, match });
+    added = true;
+  });
+  if (added) scheduleDropAlertFlush();
+}
+
+function scheduleDropAlertFlush() {
+  if (dropAlertFlushTimer || dropAlertQueue.length === 0) return;
+  const wait = Math.max(0, dropAlertLastShownAt + DROP_ALERT_MIN_GAP_MS - Date.now());
+  if (wait === 0) {
+    // The gap is open, so the first drop gets its own notification. Anything else queued waits for the gap to end.
+    flushDropAlerts(1);
+    scheduleDropAlertFlush();
+    return;
+  }
+  dropAlertFlushTimer = setTimeout(() => {
+    dropAlertFlushTimer = null;
+    flushDropAlerts(0); // gap over: everything still queued goes out as one notification (a single drop stays a single)
+  }, wait);
+}
+
+// Sends one notification for up to `limit` queued drops (0 = all of them).
+function flushDropAlerts(limit) {
+  if (dropAlertFlushTimer) { clearTimeout(dropAlertFlushTimer); dropAlertFlushTimer = null; }
+  if (dropAlertQueue.length === 0) return;
+  if (!isDropAlertActive()) { dropAlertQueue = []; return; } // turned off or blocked while queued
+  const N = getNotificationCtor();
+  if (!N) { dropAlertQueue = []; return; }
+  const take = limit > 0 ? Math.min(limit, dropAlertQueue.length) : dropAlertQueue.length;
+  const batch = dropAlertQueue.splice(0, take);
+  const target = batch[batch.length - 1]; // a click opens the most recent drop in the batch
+  const matchTypes = [...new Set(batch.map(q => q.match))];
+  const matchType = matchTypes.length === 1 ? matchTypes[0] : 'mixed';
+  const filterKey = activeFilter;
+  let title;
+  let body;
+  if (batch.length === 1) {
+    const d = target.drop;
+    const blk = d.block ? `#${String(d.block).slice(-6)}` : 'LIVE';
+    title = `🚨 New drop: ${d.name || 'New contract'}${d.symbol ? ` (${d.symbol})` : ''}`;
+    body = `${dropAlertMatchLabel(target.match)} · ${d.mint_price_str || 'TBD'} · Block ${blk}`;
+  } else {
+    const names = batch.map(q => q.drop.name || 'New contract');
+    title = `🚨 ${batch.length} new drops match your alerts`;
+    body = names.length > 3 ? `${names.slice(0, 3).join(', ')} and ${names.length - 3} more` : names.join(', ');
+  }
+
+  const sentAt = Date.now();
+  let note;
+  try {
+    note = new N(title, { body, tag: `radar-drop-${sentAt}`, icon: 'icon.svg', badge: 'icon.svg' });
+  } catch (e) {
+    // Some mobile browsers only allow notifications through a service worker: treat the API as unsupported here
+    dropAlertQueue = [];
+    dropAlertConstructFailed = true;
+    updateDropAlertToggle();
+    return;
+  }
+  dropAlertLastShownAt = sentAt;
+  note.onclick = () => {
+    try { if (typeof window !== 'undefined' && typeof window.focus === 'function') window.focus(); } catch (e) { /* ignore */ }
+    try { if (typeof note.close === 'function') note.close(); } catch (e) { /* ignore */ }
+    trackAnalytics('alert_clicked', { match_type: matchType, batch_size: batch.length, permission: 'granted', filter: filterKey });
+    if (typeof openInspectModalByContract === 'function') openInspectModalByContract(target.contract, target.drop);
+  };
+  trackAnalytics('alert_shown', { match_type: matchType, batch_size: batch.length, permission: 'granted', filter: filterKey });
+}
+
+// Reflects state only. Called on load and after each toggle; it never requests permission.
+function updateDropAlertToggle() {
+  if (typeof document === 'undefined' || typeof document.getElementById !== 'function') return;
+  const btn = document.getElementById('dropAlertToggle');
+  if (!btn) return;
+  // The visible label stays "ALERTS" (the header has no room for ON/OFF words at 1280px); the state is the icon, the
+  // colour, aria-pressed and the accessible name. "N/A" is shown only where the API is missing.
+  const perm = getDropAlertPermission();
+  let mode;
+  let icon;
+  let visible;
+  let stateWord;
+  let hint;
+  if (perm === 'unsupported') {
+    mode = 'unsupported'; icon = '🚫'; visible = 'ALERTS N/A'; stateWord = 'not supported here';
+    hint = 'Drop alerts need browser notifications, which this browser does not offer. Nothing is requested.';
+  } else if (perm === 'denied') {
+    mode = 'blocked'; icon = '⛔'; visible = 'ALERTS'; stateWord = 'blocked';
+    hint = 'Notifications are blocked for this site. Click for how to allow them.';
+  } else if (isDropAlertActive()) {
+    mode = 'on'; icon = '🔔'; visible = 'ALERTS'; stateWord = 'on';
+    hint = 'Drop alerts are on: one notification per new drop that matches your filter or is Free Mint + Snipe Ready (at most every 30 seconds). Click to turn off.';
+  } else {
+    mode = 'off'; icon = '🔕'; visible = 'ALERTS'; stateWord = 'off';
+    hint = 'Get a browser notification when a new drop matches your filter or is Free Mint + Snipe Ready. Click to allow.';
+  }
+  // Polls call this while alerts are on but blocked; re-rendering an unchanged state would only churn the DOM.
+  if (typeof btn.getAttribute === 'function' && btn.getAttribute('data-state') === mode) return;
+  btn.className = mode === 'on' ? 'sound-toggle-btn alert-toggle-btn active'
+    : `sound-toggle-btn alert-toggle-btn muted${mode === 'blocked' ? ' blocked' : ''}${mode === 'unsupported' ? ' unsupported' : ''}`;
+  btn.innerHTML = `<span class="sound-icon">${icon}</span><span class="sound-label">${visible}</span>`;
+  btn.disabled = mode === 'unsupported';
+  if (typeof btn.setAttribute === 'function') {
+    btn.setAttribute('aria-pressed', mode === 'on' ? 'true' : 'false');
+    btn.setAttribute('aria-label', `Drop alerts, ${stateWord}`);
+    btn.setAttribute('title', hint);
+    btn.setAttribute('data-state', mode);
+  }
+}
+
+function setupDropAlertToggle() {
+  if (typeof document === 'undefined' || typeof document.getElementById !== 'function') return;
+  const btn = document.getElementById('dropAlertToggle');
+  if (btn && typeof btn.addEventListener === 'function') {
+    btn.addEventListener('click', () => {
+      onDropAlertToggleClick().catch(() => {});
+    });
+  }
+  updateDropAlertToggle(); // state only: no permission request on load
+}
+
 // Safe HTML escaping helper
 function escapeHtml(str) {
   if (!str) return '';
@@ -373,10 +648,13 @@ function showNewMarketToast(item) {
   `;
   container.appendChild(toast);
 
-  sendDesktopNotification(
-    '🚨 New .ai Agent ID Drop!',
-    `${item.name || 'New Contract'} (${item.symbol || ''}) at Block ${blkStr}`
-  );
+  // With drop alerts on, queueDropAlerts() owns browser notifications (one per matching drop), so skip this generic one.
+  if (!isDropAlertActive()) {
+    sendDesktopNotification(
+      '🚨 New .ai Agent ID Drop!',
+      `${item.name || 'New Contract'} (${item.symbol || ''}) at Block ${blkStr}`
+    );
+  }
 
   // Auto-dismiss after 5s
   setTimeout(() => {
@@ -1953,12 +2231,29 @@ function toggleDexChart(contract, customUrl) {
 }
 if (typeof window !== 'undefined') window.toggleDexChart = toggleDexChart;
 
+// How many momentum tokens the banner names, and how long one name may be before it is cut with an ellipsis.
+const MOMENTUM_NAMES_SHOWN = 3;
+const MOMENTUM_NAME_MAX_CHARS = 14;
+
+// Short, never-empty label for a token in the stats banner: name, else symbol, else the shortened contract.
+// Cuts by code point (Array.from) so a CJK / emoji name is never split mid-character.
+function bannerTokenName(item) {
+  const raw = String((item && (item.name || item.symbol)) || '').trim();
+  if (raw) {
+    const chars = Array.from(raw);
+    return chars.length > MOMENTUM_NAME_MAX_CHARS ? `${chars.slice(0, MOMENTUM_NAME_MAX_CHARS - 1).join('')}…` : raw;
+  }
+  const contract = String((item && item.contract) || '');
+  return contract.length > 10 ? `${contract.slice(0, 6)}…${contract.slice(-4)}` : (contract || 'Unnamed');
+}
+
 // Compute Macro Stats
 function computeStats(drops) {
   let cappedTotal = 0;
   let soldOutCount = 0;
   let nearCapCount = 0;
   let warmCapCount = 0;
+  const warmCapItems = [];   // the tokens behind warmCapCount, so the banner can name them
 
   drops.forEach(item => {
     let rawMs = item.max_supply;
@@ -1977,9 +2272,12 @@ function computeStats(drops) {
         nearCapCount++;
       } else if (pct >= 50) {
         warmCapCount++;
+        // Rounded for display but kept inside this bucket: 79.6% must not read "80%" while it is not counted as near cap.
+        warmCapItems.push({ name: bannerTokenName(item), pct: Math.min(79, Math.round(pct)), exactPct: pct });
       }
     }
   });
+  warmCapItems.sort((a, b) => (b.exactPct - a.exactPct) || a.name.localeCompare(b.name));
 
   // Incrementally update our saved top markets memory from incoming recent drops
   updateSavedTopMarkets(drops);
@@ -2003,6 +2301,7 @@ function computeStats(drops) {
     fillRatePct,
     nearCapCount,
     warmCapCount,
+    warmCapItems,
     topGainer,
     runnerUp,
     allGainers,
@@ -2014,7 +2313,6 @@ function computeStats(drops) {
 const AGENT_ID_REGISTRY_ADDR = '0x60B9262456dE011F7d15a54CdD8c48bAaa8B022F';
 const ERC721_TRANSFER_TOPIC = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef';
 const ZERO_ADDRESS_TOPIC = '0x0000000000000000000000000000000000000000000000000000000000000000';
-const PUBLICNODE_LOG_RPCS = ['https://bsc-rpc.publicnode.com', 'https://bsc.publicnode.com'];
 
 let currentAgentWalletsCount = 178001;
 let agentWalletsAnchorBlock = 132757997;
@@ -2096,33 +2394,7 @@ async function syncLiveAgentWalletsOnChain(currBlk) {
 
     while (fBlk <= currBlk) {
       const tBlk = Math.min(fBlk + chunkSize - 1, currBlk);
-      let chunkLogs = null;
-
-      for (const endpoint of PUBLICNODE_LOG_RPCS) {
-        try {
-          const res = await fetchWithTimeout(endpoint, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              jsonrpc: '2.0',
-              id: 1,
-              method: 'eth_getLogs',
-              params: [{
-                fromBlock: '0x' + fBlk.toString(16),
-                toBlock: '0x' + tBlk.toString(16),
-                address: AGENT_ID_REGISTRY_ADDR,
-                topics: [ERC721_TRANSFER_TOPIC, ZERO_ADDRESS_TOPIC]
-              }]
-            })
-          }, 4500);
-          if (!res || !res.ok) continue;
-          const json = await res.json();
-          if (json && Array.isArray(json.result)) {
-            chunkLogs = json.result;
-            break;
-          }
-        } catch (_) {}
-      }
+      const chunkLogs = await fetchRegistryMintLogs(fBlk, tBlk);
 
       if (chunkLogs === null) {
         allOk = false;
@@ -2143,39 +2415,58 @@ async function syncLiveAgentWalletsOnChain(currBlk) {
   }
 }
 
+// The banner never shows sample text: every span below is rewritten on each render, and a span with nothing to say
+// is cleared ('' hides it through the :empty rule in style.css) or shows the dash.
+function setBannerText(id, text) {
+  const el = document.getElementById(id);
+  if (el) el.textContent = String(text);
+  return el;
+}
+
 // Update DOM Header with Macro Stats
 function renderStats(drops) {
   const stats = computeStats(drops);
 
   updateDigitalAiCounter(currentAgentWalletsCount);
 
-  const elFillPct = document.getElementById('fillRatePct');
-  if (elFillPct) elFillPct.textContent = `${stats.fillRatePct.toFixed(1)}%`;
-  const elFillRatio = document.getElementById('fillRateRatio');
-  if (elFillRatio) elFillRatio.textContent = `(${stats.soldOutCount} / ${stats.cappedTotal} Sold Out)`;
-  const elNearCap = document.getElementById('nearCapCount');
-  if (elNearCap) elNearCap.textContent = stats.nearCapCount;
-  const elMom = document.getElementById('momentumCount');
-  if (elMom) elMom.textContent = `${stats.warmCapCount} ACTIVE`;
+  // Fill rate is a ratio: with no capped collections it is undefined, not "0.0% (0 / 0 Sold Out)".
+  const hasCapped = stats.cappedTotal > 0;
+  setBannerText('fillRatePct', hasCapped ? `${stats.fillRatePct.toFixed(1)}%` : '—');
+  setBannerText('fillRateRatio', hasCapped ? `(${stats.soldOutCount} / ${stats.cappedTotal} Sold Out)` : '');
+  setBannerText('nearCapCount', stats.nearCapCount);
+  setBannerText('momentumCount', `${stats.warmCapCount} ACTIVE`);
 
-  if (stats.topGainer) {
-    const tg = stats.topGainer;
+  // Momentum names come from the same list as the count above: the top few tokens at 50-79% of their cap.
+  const momentum = (stats.warmCapItems || []).slice(0, MOMENTUM_NAMES_SHOWN);
+  const elMomNames = setBannerText('momentumNames',
+    momentum.length ? `[${momentum.map(t => `${t.name} ${t.pct}%`).join(', ')}]` : '—');
+  if (elMomNames) {
+    // The full list as a tooltip: the banner cell cuts long names with an ellipsis.
+    const all = (stats.warmCapItems || []).map(t => `${t.name} ${t.pct}%`).join(', ');
+    if (all && typeof elMomNames.setAttribute === 'function') elMomNames.setAttribute('title', all);
+    else if (typeof elMomNames.removeAttribute === 'function') elMomNames.removeAttribute('title');
+  }
+
+  const tg = stats.topGainer;
+  if (tg) {
     const tgMint = tg.isFree || tg.mintUsd === 0 ? 'FREE' : formatCryptoPrice(tg.mintUsd);
     const tgAth = Math.max(tg.athPrice, tg.secUsd);
     const tgNet = Math.max(tg.athProfit, tg.profit);
-    const elTgName = document.getElementById('topGainerName');
-    if (elTgName) elTgName.textContent = `${tg.name} (${tg.symbol})`;
-    const elTgDet = document.getElementById('topGainerDetails');
-    if (elTgDet) elTgDet.textContent = `Mint: ${tgMint} ➔ ATH: ${formatCryptoPrice(tgAth)}`;
-    const elTgNet = document.getElementById('topGainerNet');
-    if (elTgNet) elTgNet.textContent = `Net: ${formatCryptoPrice(tgNet, true)} / token`;
+    setBannerText('topGainerName', `${tg.name} (${tg.symbol})`);
+    setBannerText('topGainerDetails', `Mint: ${tgMint} ➔ ATH: ${formatCryptoPrice(tgAth)}`);
+    setBannerText('topGainerNet', `Net: ${formatCryptoPrice(tgNet, true)} / token`);
+  } else {
+    setBannerText('topGainerName', '—');
+    setBannerText('topGainerDetails', '');
+    setBannerText('topGainerNet', '');
   }
 
-  if (stats.runnerUp) {
-    const ru = stats.runnerUp;
+  const ru = stats.runnerUp;
+  if (ru) {
     const ruAth = Math.max(ru.athPrice, ru.secUsd);
-    const elRu = document.getElementById('runnerUpDetails');
-    if (elRu) elRu.textContent = `│ 🥈 Runner-Up: ${ru.name} (${ru.symbol}) [${formatCryptoPrice(ruAth)}]`;
+    setBannerText('runnerUpDetails', `│ 🥈 Runner-Up: ${ru.name} (${ru.symbol}) [${formatCryptoPrice(ruAth)}]`);
+  } else {
+    setBannerText('runnerUpDetails', '');
   }
 
   renderSmartStreamTicker(drops);
@@ -5069,11 +5360,14 @@ function makeHeaderSortable(el, baseLabel, descMode, ascMode, customToggle) {
     title = `Sorted: Low ➔ High (Click to reset)`;
   }
 
-  el.innerHTML = `${baseLabel} ${indicator}`;
+  // Write only what changed: this runs on every table render, and rewriting an identical header restyles it.
+  const headHtml = `${baseLabel} ${indicator}`;
+  if (el.innerHTML !== headHtml) el.innerHTML = headHtml;
   const baseClass = (el.className || '').replace(/\s*(sortable-th|active-sort)\b/g, '').trim();
-  el.className = `${baseClass} sortable-th${(isActive && (!isDefaultBlock || sortMode === 'BLOCK_ASC')) ? ' active-sort' : ''}`.trim();
-  el.style.cursor = 'pointer';
-  el.title = title;
+  const nextClass = `${baseClass} sortable-th${(isActive && (!isDefaultBlock || sortMode === 'BLOCK_ASC')) ? ' active-sort' : ''}`.trim();
+  if (el.className !== nextClass) el.className = nextClass;
+  if (el.style.cursor !== 'pointer') el.style.cursor = 'pointer';
+  if (el.title !== title) el.title = title;
 
   el.onclick = () => {
     if (typeof customToggle === 'function') {
@@ -5093,6 +5387,55 @@ function makeHeaderSortable(el, baseLabel, descMode, ascMode, customToggle) {
   };
 }
 
+// Puts the rows into tbody in the given order, touching the DOM only where it differs: rows that left are removed,
+// and a row is moved or inserted only where it is out of place. An unchanged list makes no DOM changes.
+function patchRowNodes(tbody, nodes) {
+  if (!('firstElementChild' in tbody) || typeof tbody.insertBefore !== 'function' || typeof tbody.removeChild !== 'function') {
+    const fragment = document.createDocumentFragment();
+    nodes.forEach(node => fragment.appendChild(node));
+    if (typeof tbody.replaceChildren === 'function') {
+      tbody.replaceChildren(fragment);
+    } else {
+      tbody.innerHTML = '';
+      tbody.appendChild(fragment);
+    }
+    return;
+  }
+  const keep = new Set(nodes);
+  Array.from(tbody.children).forEach(child => {
+    if (!keep.has(child)) tbody.removeChild(child);
+  });
+  let ref = tbody.firstElementChild;
+  nodes.forEach(node => {
+    if (node === ref) {
+      ref = ref.nextElementSibling;
+    } else {
+      tbody.insertBefore(node, ref);
+    }
+  });
+}
+
+// Filter and tab taps: the new active state is painted first, and the table rebuild runs in the task after that paint,
+// so the tap's next paint is not held up by the row work. Taps within one frame render once, with the latest state.
+let tableRenderQueued = false;
+function scheduleTableRender() {
+  if (tableRenderQueued) return;
+  tableRenderQueued = true;
+  const run = () => {
+    tableRenderQueued = false;
+    renderTable();
+  };
+  if (typeof requestAnimationFrame === 'function') {
+    requestAnimationFrame(() => setTimeout(run, 0));
+  } else {
+    setTimeout(run, 0);
+  }
+}
+
+// Rows built by recent renderTable calls, by drop object (see the row loop in renderTable).
+const TABLE_ROW_CACHE_MAX = 240;
+let tableRowCache = new Map();
+
 // Render Table Rows
 function renderTable(keepLimit = false) {
   if (typeof document === 'undefined') return;
@@ -5102,6 +5445,13 @@ function renderTable(keepLimit = false) {
     tableRenderLimit = TABLE_RENDER_CHUNK;
   }
   const filtered = getFilteredDrops();
+
+  // The table's reserved height (style.css .table-reserve) only covers the wait for the first feed render; after that,
+  // or on tabs that do not show the table, the table sizes to its content again.
+  if (allDrops.length > 0 || activeTab === 'WALLETS' || activeTab === 'PORTFOLIO') {
+    const wrapEl = (typeof document.querySelector === 'function') ? document.querySelector('.table-wrapper') : null;
+    if (wrapEl && wrapEl.classList && typeof wrapEl.classList.remove === 'function') wrapEl.classList.remove('table-reserve');
+  }
 
   // Counts, the secondary banner and the pulse card depend on the data, not on the filter / search / sort / page.
   const dataChanged = dataDerivedInputsChanged();
@@ -5307,8 +5657,11 @@ function renderTable(keepLimit = false) {
     return;
   }
 
-  const fragment = document.createDocumentFragment();
+  const rowNodes = [];
   const visible = filtered.slice(0, tableRenderLimit);
+  // Rows are reused across renders when their markup is unchanged (see rowSig below).
+  const previousRows = tableRowCache;
+  const nextRows = new Map();
   visible.forEach((item, index) => {
     const tr = document.createElement('tr');
     if (item._isNew) tr.classList.add('row-new');
@@ -5605,8 +5958,9 @@ function renderTable(keepLimit = false) {
       }
     }
 
+    let rowHtml;
     if (isSec) {
-      tr.innerHTML = `
+      rowHtml = `
         <td class="col-fav"><button class="${starClass}" onclick="toggleFavorite('${item.contract}', event)" title="${isFav ? 'Remove from favorites' : 'Add to favorites'}">${starIcon}</button></td>
         <td class="col-num">${index + 1}</td>
         <td class="col-block"><code>${blk}</code></td>
@@ -5623,7 +5977,7 @@ function renderTable(keepLimit = false) {
         <td class="col-action">${actBtn}</td>
       `;
     } else {
-      tr.innerHTML = `
+      rowHtml = `
         <td class="col-fav"><button class="${starClass}" onclick="toggleFavorite('${item.contract}', event)" title="${isFav ? 'Remove from favorites' : 'Add to favorites'}">${starIcon}</button></td>
         <td class="col-num">${index + 1}</td>
         <td class="col-block"><code>${blk}</code></td>
@@ -5640,14 +5994,28 @@ function renderTable(keepLimit = false) {
         <td class="col-action">${actBtn}</td>
       `;
     }
-    fragment.appendChild(tr);
+    // Unchanged row: keep the <tr> already in the DOM (its click handler and cell listeners stay attached).
+    const rowTitle = (typeof tr.getAttribute === 'function') ? tr.getAttribute('title') : '';
+    const rowSig = `${tr.className || ''}\u0001${rowTitle}\u0001${rowHtml}`;
+    const cachedRow = previousRows.get(item);
+    if (cachedRow && cachedRow.sig === rowSig && !nextRows.has(item)) {
+      nextRows.set(item, cachedRow);
+      rowNodes.push(cachedRow.tr);
+      return;
+    }
+    tr.innerHTML = rowHtml;
+    nextRows.set(item, { sig: rowSig, tr });
+    rowNodes.push(tr);
   });
-  if (typeof tbody.replaceChildren === 'function') {
-    tbody.replaceChildren(fragment);
-  } else {
-    tbody.innerHTML = '';
-    tbody.appendChild(fragment);
-  }
+  // Keep the rows just rendered plus recent older ones (up to TABLE_ROW_CACHE_MAX), so switching between two
+  // filters or tabs reuses the rows of both. The oldest leftovers are dropped first.
+  const merged = new Map();
+  previousRows.forEach((cached, key) => { if (!nextRows.has(key)) merged.set(key, cached); });
+  nextRows.forEach((cached, key) => merged.set(key, cached));
+  const cacheLimit = Math.max(TABLE_ROW_CACHE_MAX, nextRows.size);
+  while (merged.size > cacheLimit) merged.delete(merged.keys().next().value);
+  tableRowCache = merged;
+  patchRowNodes(tbody, rowNodes);
 
   // Update pagination button visibility and progress
   if (loadMoreWrap) {
@@ -6268,12 +6636,81 @@ function finishModalTelemetry(exitMethod = 'closed') {
   _modalObservedSections.clear();
 }
 
-function trackCliCopy(type, symbol, contract) {
-  trackAnalytics('cli_copied', {
+// `source` = where the copy was tapped (mint_section, shortcut_bar, sniper_section, mint_gate, pancakeswap_exit).
+// `copied` = whether the text reached the clipboard; callers that cannot tell leave it out.
+function trackCliCopy(type, symbol, contract, source = 'unknown', copied) {
+  const props = {
     type: type,
     token_symbol: symbol || '',
-    token_contract: contract || ''
+    token_contract: contract || '',
+    source: source
+  };
+  if (typeof copied === 'boolean') props.copied = copied;
+  trackAnalytics('cli_copied', props);
+}
+
+// Copies text for a one-tap button. Resolves true when the text reached the clipboard. The async Clipboard API is
+// called synchronously (Safari only allows that inside the tap); a hidden textarea is the fallback where it is missing
+// or refuses (older mobile browsers, non-secure origins).
+function copyTextToClipboard(text) {
+  try {
+    const clipboard = (typeof navigator !== 'undefined') ? navigator.clipboard : null;
+    if (clipboard && typeof clipboard.writeText === 'function') {
+      return Promise.resolve(clipboard.writeText(text)).then(() => true, () => legacyCopyText(text));
+    }
+  } catch (err) {
+    // no async clipboard here: the legacy path below
+  }
+  return Promise.resolve(legacyCopyText(text));
+}
+
+function legacyCopyText(text) {
+  try {
+    if (typeof document === 'undefined' || typeof document.createElement !== 'function' || typeof document.execCommand !== 'function' ||
+        !document.body || typeof document.body.appendChild !== 'function' || typeof document.body.removeChild !== 'function') {
+      return false;
+    }
+    const area = document.createElement('textarea');
+    area.value = text;
+    area.setAttribute('readonly', '');
+    area.style.position = 'fixed';
+    area.style.opacity = '0';
+    document.body.appendChild(area);
+    try {
+      if (typeof area.select === 'function') area.select();
+      if (typeof area.setSelectionRange === 'function') area.setSelectionRange(0, text.length);
+      return Boolean(document.execCommand('copy'));
+    } finally {
+      document.body.removeChild(area);
+    }
+  } catch (err) {
+    return false;
+  }
+}
+
+// The Sniper CLI copy buttons of the token modal (pinned bar, Mint section, Sniper section, Mint gate). The command
+// is the one openModal built for the open token; every tap is tracked with its source.
+let currentSniperCliSnippet = '';   // set by openModal for the token modal that is open
+
+function copyModalSniperCli(btn, source) {
+  const text = currentSniperCliSnippet;
+  if (!text) return;
+  const item = currentInspectItem || {};
+  const symbol = item.symbol || '';
+  const contract = item.contract || '';
+  copyTextToClipboard(text).then(copied => {
+    trackCliCopy('sniper_cli', symbol, contract, source, copied);
+    flashCopyLabel(btn, copied ? 'Copied!' : 'Copy failed');
   });
+}
+
+// Shows a short label on a copy button, then puts its own label back.
+function flashCopyLabel(btn, label) {
+  if (!btn) return;
+  if (btn._copyLabel === undefined) btn._copyLabel = btn.textContent;
+  btn.textContent = label;
+  clearTimeout(btn._copyTimer);
+  btn._copyTimer = setTimeout(() => { btn.textContent = btn._copyLabel; }, 1500);
 }
 
 function trackExternalClick(target, symbol, contract) {
@@ -6284,7 +6721,7 @@ function trackExternalClick(target, symbol, contract) {
   });
 }
 
-function navigateInspectModal(direction) {
+function navigateInspectModal(direction, via = 'arrow') {
   const modal = (typeof document !== 'undefined') ? document.getElementById('inspectModal') : null;
   if (!modal) return;
   const isOpen = Boolean(modal.open || modal.hasAttribute('open'));
@@ -6295,14 +6732,22 @@ function navigateInspectModal(direction) {
   if (!list || list.length === 0 || index === -1) return;
 
   const targetIndex = index + direction;
+  const swiped = via === 'swipe';
   if (targetIndex >= 0 && targetIndex < list.length) {
     const nextTarget = list[targetIndex];
     if (nextTarget) {
-      finishModalTelemetry(direction > 0 ? 'next_arrow' : 'prev_arrow');
-      openModal(nextTarget, direction > 0 ? 'next_arrow' : 'prev_arrow');
+      const reason = swiped
+        ? (direction > 0 ? 'next_swipe' : 'prev_swipe')
+        : (direction > 0 ? 'next_arrow' : 'prev_arrow');
+      finishModalTelemetry(reason);
+      openModal(nextTarget, reason);
       const content = document.getElementById('modalContent');
       if (content) content.scrollTop = 0;
+      if (swiped) playModalSwipeFeedback(content, direction, 'enter');
     }
+  } else if (swiped) {
+    trackAnalytics('modal_swipe_edge', { direction: direction > 0 ? 'next' : 'prev' });
+    playModalSwipeFeedback(document.getElementById('modalContent'), direction, 'edge');
   }
 
   // Pre-load older drops if approaching the end of loaded batch in radar feed
@@ -6311,6 +6756,95 @@ function navigateInspectModal(direction) {
       loadMoreDrops().catch(() => {});
     }
   }
+}
+
+// ==========================================================================
+// 👆 Swipe between tokens in the inspect modal
+// Swipe left = next token, swipe right = previous token, the same as the ‹ › buttons. A gesture counts only when it is
+// one quick, mostly horizontal drag of at least MODAL_SWIPE_MIN_PX. Vertical scrolls, text selection, the CLI box and
+// anything inside a horizontal scroller (wide tables, long code lines) keep their normal behaviour.
+// ==========================================================================
+const MODAL_SWIPE_MIN_PX = 60;
+const MODAL_SWIPE_MAX_MS = 900;
+const MODAL_SWIPE_RATIO = 1.5; // horizontal travel must beat vertical travel by this factor
+const MODAL_SWIPE_IGNORE_SELECTOR = '.cli-box, pre, code, button, a, input, textarea, select, label, [contenteditable], [data-no-swipe]';
+
+function prefersReducedMotion() {
+  try {
+    return typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+      && Boolean(window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+  } catch (_) {
+    return false;
+  }
+}
+
+function hasTextSelection() {
+  try {
+    const sel = (typeof window !== 'undefined' && typeof window.getSelection === 'function') ? window.getSelection() : null;
+    return Boolean(sel) && String(sel).length > 0;
+  } catch (_) {
+    return false;
+  }
+}
+
+// True when the touch started inside a box that scrolls sideways on its own (a wide table, a long code line).
+function isInHorizontalScroller(node, stopAt) {
+  if (typeof getComputedStyle !== 'function') return false;
+  for (let n = node; n && n !== stopAt; n = n.parentElement) {
+    if (n.scrollWidth > n.clientWidth + 1 && /(auto|scroll)/.test(getComputedStyle(n).overflowX || '')) return true;
+  }
+  return false;
+}
+
+// Slide the modal toward the new token (kind 'enter') or nudge it when there is no token that way (kind 'edge').
+// Both are skipped for reduced-motion users; the navigation itself still happens.
+function playModalSwipeFeedback(content, direction, kind) {
+  if (!content || !content.classList || typeof content.classList.add !== 'function') return;
+  if (prefersReducedMotion()) return;
+  const side = direction > 0 ? 'next' : 'prev';
+  const cls = kind === 'edge' ? `is-swipe-edge-${side}` : `is-swipe-enter-${side}`;
+  content.classList.remove('is-swipe-enter-next', 'is-swipe-enter-prev', 'is-swipe-edge-next', 'is-swipe-edge-prev');
+  if (typeof content.offsetWidth === 'number') void content.offsetWidth; // restart the CSS animation
+  content.classList.add(cls);
+  setTimeout(() => {
+    if (content.classList && typeof content.classList.remove === 'function') content.classList.remove(cls);
+  }, 260);
+}
+
+function setupModalSwipeNav() {
+  const content = (typeof document !== 'undefined' && typeof document.getElementById === 'function')
+    ? document.getElementById('modalContent') : null;
+  if (!content || typeof content.addEventListener !== 'function') return;
+  // #modalContent is static markup and survives every re-render, so bind once.
+  if (content.dataset && content.dataset.swipeNav === '1') return;
+  if (content.dataset) content.dataset.swipeNav = '1';
+
+  let start = null;
+  content.addEventListener('touchstart', (e) => {
+    start = null;
+    if (!e.touches || e.touches.length !== 1) return; // a second finger means pinch or zoom, never a swipe
+    const target = e.target;
+    if (target && typeof target.closest === 'function' && target.closest(MODAL_SWIPE_IGNORE_SELECTOR)) return;
+    if (isInHorizontalScroller(target, content)) return;
+    const t = e.touches[0];
+    start = { x: t.clientX, y: t.clientY, at: Date.now() };
+  }, { passive: true });
+
+  content.addEventListener('touchcancel', () => { start = null; }, { passive: true });
+
+  content.addEventListener('touchend', (e) => {
+    const s = start;
+    start = null;
+    const t = e.changedTouches && e.changedTouches[0];
+    if (!s || !t) return;
+    if (Date.now() - s.at > MODAL_SWIPE_MAX_MS) return;
+    const dx = t.clientX - s.x;
+    const dy = t.clientY - s.y;
+    if (Math.abs(dx) < MODAL_SWIPE_MIN_PX) return;
+    if (Math.abs(dx) < Math.abs(dy) * MODAL_SWIPE_RATIO) return; // a vertical scroll
+    if (hasTextSelection()) return; // a long-press selection is not a swipe
+    navigateInspectModal(dx < 0 ? 1 : -1, 'swipe');
+  }, { passive: true });
 }
 
 if (typeof window !== 'undefined') {
@@ -6428,6 +6962,79 @@ function clearModalHash() {
       try { window.location.hash = ''; } catch (_) {}
     }
   }
+}
+
+// Share link for a token: the modal's own #token= deep link, plus UTM tags so visits that come from a shared link
+// can be measured in PostHog. The origin and path come from the current page; nothing else in the query string is
+// carried over. The inline script in index.html strips utm_* from the address bar after the visit is recorded and
+// keeps the hash, so the modal still opens from the link.
+const TOKEN_SHARE_LABEL = '🔗 Copy share link';
+
+function buildTokenShareUrl(symbol) {
+  const sym = String(symbol || '').trim();
+  if (!sym || typeof window === 'undefined' || !window.location) return '';
+  const loc = window.location;
+  const origin = loc.origin && loc.origin !== 'null' ? loc.origin : '';
+  const path = loc.pathname || '/';
+  const enc = encodeURIComponent(sym);
+  return origin + path + '?utm_source=share&utm_medium=modal&utm_campaign=' + enc + '#token=' + enc;
+}
+
+function copyTokenShareLink(btn) {
+  const sym = btn && btn.dataset ? btn.dataset.shareSymbol : '';
+  const url = buildTokenShareUrl(sym);
+  if (!url) return;
+
+  const flash = (text) => {
+    if (!btn) return;
+    btn.textContent = text;
+    setTimeout(() => { btn.textContent = TOKEN_SHARE_LABEL; }, 1500);
+  };
+  const onCopied = () => {
+    trackAnalytics('token_share_link_copied', { token_symbol: sym });
+    flash('✓ Link copied');
+  };
+  const onFailed = () => {
+    // Last resort: show the link so it can still be copied by hand.
+    if (typeof window !== 'undefined' && typeof window.prompt === 'function') {
+      window.prompt('Copy this link:', url);
+    } else {
+      flash('Copy failed');
+    }
+  };
+  const execCopy = () => {
+    let ok = false;
+    try {
+      if (typeof document !== 'undefined' && typeof document.createElement === 'function' && typeof document.execCommand === 'function' && document.body && typeof document.body.appendChild === 'function') {
+        const ta = document.createElement('textarea');
+        ta.value = url;
+        ta.setAttribute('readonly', '');
+        if (ta.style) { ta.style.position = 'fixed'; ta.style.opacity = '0'; }
+        document.body.appendChild(ta);
+        if (typeof ta.select === 'function') ta.select();
+        ok = Boolean(document.execCommand('copy'));
+        if (typeof document.body.removeChild === 'function') document.body.removeChild(ta);
+      }
+    } catch (_) {
+      ok = false;
+    }
+    if (ok) onCopied(); else onFailed();
+  };
+
+  const clip = (typeof navigator !== 'undefined' && navigator) ? navigator.clipboard : null;
+  if (clip && typeof clip.writeText === 'function') {
+    let pending = null;
+    try { pending = clip.writeText(url); } catch (_) { pending = null; }
+    if (pending && typeof pending.then === 'function') {
+      pending.then(onCopied, execCopy);
+      return;
+    }
+  }
+  execCopy();
+}
+
+if (typeof window !== 'undefined') {
+  window.copyTokenShareLink = copyTokenShareLink;
 }
 
 async function resolveTokenAndInspect(tokenQuery, attempts = 0) {
@@ -6679,6 +7286,7 @@ function openModal(item, source = 'direct') {
   }
   const valWei = item.mint_value_wei || '0';
   const cliSnippet = `baw contract-call preview --binanceChainId 56 --from ${userWallet} --to ${cAddr} --value ${valWei} --inputData ${calldata} --json`;
+  currentSniperCliSnippet = cliSnippet;
 
   const isFav = isFavorited(cAddr, item);
   const favBtnClass = isFav ? 'modal-fav-btn starred' : 'modal-fav-btn';
@@ -6832,6 +7440,7 @@ function openModal(item, source = 'direct') {
       </div>
       <div class="modal-header-actions" style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
         <button class="${favBtnClass}" id="modalFavBtn" onclick="toggleModalFav('${cAddr}')">${favBtnText}</button>
+        <button type="button" class="modal-share-btn" id="modalShareBtn" data-share-symbol="${escapeHtml(item.symbol || item.name || item.contract || '')}" onclick="copyTokenShareLink(this)" title="Copy a link to this token; visits from it are tagged utm_source=share, utm_medium=modal">${TOKEN_SHARE_LABEL}</button>
         <button class="modal-close-btn" onclick="document.getElementById('inspectModal').close()" title="Close dialog [ESC]">✕ Close [ESC]</button>
       </div>
     </div>
@@ -7146,12 +7755,16 @@ function openModal(item, source = 'direct') {
           ${calldataPending ? `<button id="modalMintBtn" class="web3-mint-btn sold-out" disabled>
             <span class="mint-icon">⏳</span>
             <span id="modalMintBtnText">Loading mint data…</span>
-          </button>` : `<button id="modalMintBtn" class="web3-mint-btn" onclick="trackAnalytics('mint_button_clicked', { token_symbol: '${escapeHtml(sym)}', is_free: ${isFree} }); executeWeb3Mint('${cAddr}', '${calldata}', '${valWei}', '${escapeHtml(name)}')">
+          </button>` : `<button id="modalMintBtn" class="web3-mint-btn" onclick="trackAnalytics('mint_button_clicked', mintClickProps(${escapeHtml(JSON.stringify(sym))}, ${isFree})); executeWeb3Mint('${cAddr}', '${calldata}', '${valWei}', ${escapeHtml(JSON.stringify(name))})">
             <span class="mint-icon">⚡</span>
             <span id="modalMintBtnText">${connectedWallet ? `1-Click Mint (${mintCostLabel})` : `👛 Connect Wallet & Mint (${mintCostLabel})`}</span>
           </button>`}
         </div>
-        <div id="modalMintStatus" class="mint-status-box" style="display: none; margin-top: 10px;"></div>`}
+        <div id="modalMintStatus" class="mint-status-box" style="display: none; margin-top: 10px;"></div>
+        <div class="mint-cli-row">
+          <span class="mint-cli-hint">Or mint from a terminal with the Binance Agentic Wallet CLI:</span>
+          <button type="button" class="mint-cli-btn" onclick="copyModalSniperCli(this, 'mint_section')">⌨ Copy Sniper CLI</button>
+        </div>`}
       `}
     </div>
 
@@ -7159,7 +7772,7 @@ function openModal(item, source = 'direct') {
       <div class="modal-section-title">⚡ 1-Click Sniper CLI Command (Binance Agentic Wallet)</div>
       <div class="cli-box">
         <code>${escapeHtml(cliSnippet)}</code>
-        <button class="copy-btn" onclick="trackCliCopy('sniper_cli', '${escapeHtml(sym)}', '${cAddr}'); navigator.clipboard.writeText('${cliSnippet.replace(/'/g, "\\'")}'); this.textContent='Copied!'; setTimeout(()=>this.textContent='Copy', 1500)">Copy</button>
+        <button class="copy-btn" onclick="copyModalSniperCli(this, 'sniper_section')">Copy</button>
       </div>
     </div>
 
@@ -7178,7 +7791,7 @@ function openModal(item, source = 'direct') {
       </div>
       <div class="cli-box">
         <code>${escapeHtml(sellCliSnippet)}</code>
-        <button class="copy-btn" onclick="trackCliCopy('exit_cli', '${escapeHtml(sym)}', '${cAddr}'); navigator.clipboard.writeText('${sellCliSnippet.replace(/'/g, "\\'")}'); this.textContent='Copied!'; setTimeout(()=>this.textContent='Copy', 1500)">Copy Exit CLI</button>
+        <button class="copy-btn" onclick="trackCliCopy('exit_cli', '${escapeHtml(sym)}', '${cAddr}', 'pancakeswap_exit'); navigator.clipboard.writeText('${sellCliSnippet.replace(/'/g, "\\'")}'); this.textContent='Copied!'; setTimeout(()=>this.textContent='Copy', 1500)">Copy Exit CLI</button>
       </div>
     </div>
     ` : ''}
@@ -7221,6 +7834,8 @@ function openModal(item, source = 'direct') {
         onclick="jumpToModalSection('mint_action', '${escapeHtml(sym)}', ${isFree}, ${isDexTraded}, ${isSoldOut})">
         ${(!isSoldOut && !isDexTraded && isFree) ? '⚡ Free Mint / Snipe' : '⚡ Mint / Snipe'} <span aria-hidden="true">↓</span>
       </button>
+      <button type="button" class="modal-shortcut-btn modal-shortcut-btn-secondary" title="Copy the Sniper CLI command"
+        onclick="copyModalSniperCli(this, 'shortcut_bar')">⌨ Copy CLI</button>
     </div>
   `;
 
@@ -7422,57 +8037,264 @@ function openHallOfFameModal(filterMode = 'ALL') {
   }
 }
 
-// Official Reliable BSC RPC Endpoints with automatic fallback
-const BSC_PUBLIC_RPCS = [
-  'https://bsc-dataseed.bnbchain.org',
-  'https://bsc-dataseed1.defibit.io',
-  'https://bsc-dataseed1.ninicoin.io',
-  'https://1rpc.io/bnb'
-];
+// ---------------------------------------------------------------------------------------------------
+// Browser-side BSC reads. Every public-node read goes through rpcReadBody(): per-node backoff with
+// jitter, rotation to the next node, a short cache of identical reads and de-duplication of identical
+// in-flight reads. Only the methods in RPC_READ_METHODS get this. Transactions and wallet requests
+// (eth_sendTransaction, eth_sendRawTransaction, wallet_*, and the injected provider's request()) never
+// reach this layer, so they are never retried, cached or de-duplicated here.
+// ---------------------------------------------------------------------------------------------------
 
-// Robust JSON-RPC Single Call with failover
-async function sendRpcCall(method, params) {
-  for (const endpoint of BSC_PUBLIC_RPCS) {
-    try {
-      const res = await fetch(endpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params })
-      });
-      if (!res.ok) continue;
-      const data = await res.json();
-      if (data && data.result !== undefined) {
-        return data.result;
-      }
-    } catch (err) {
-      // try next RPC
+// THE ONE PLACE TO CONFIGURE BSC RPC ENDPOINTS.
+//   keyedUrl          KEYED PROVIDER SLOT, not configured yet. Paste the full https:// URL, key included, to enable
+//                     it. While it is '' (or not an https URL) it is skipped. When set, it is tried first for every
+//                     read and log query, and the public nodes below are the fallback. Everything in this file
+//                     ships to the browser, so the key is visible to every visitor: use a key restricted to this site.
+//   reads             Public nodes for eth_call, eth_getBalance, eth_blockNumber and batched eth_call. Each call
+//                     starts at the next node in turn, so no single node sees all of a visitor's traffic.
+//   logs              Public nodes for eth_getLogs (the agent-ID registry scan). Kept separate, as before.
+//   requestTimeoutMs  Abort for one read request (eth_getLogs uses its own 4.5 s, see fetchRegistryMintLogs).
+//   backoffBaseMs     A node that answers 429, 401, 403, 408 or 5xx, times out or returns bad JSON is skipped for
+//   backoffMaxMs      backoffBaseMs, doubling per consecutive failure up to backoffMaxMs. Each cooldown is jittered
+//                     (between half and all of its length). A Retry-After header raises it, up to the cap.
+//   cacheTtlMs        Identical reads within this window reuse the last successful answer.
+//   cacheMaxEntries   Upper bound on cached answers.
+const BSC_RPC_CONFIG = {
+  keyedUrl: '', // KEYED PROVIDER: paste the full https:// URL here (see above). Empty = skipped.
+  reads: [
+    'https://bsc-dataseed.bnbchain.org',
+    'https://bsc-dataseed1.defibit.io',
+    'https://bsc-dataseed1.ninicoin.io',
+    'https://1rpc.io/bnb'
+  ],
+  logs: [
+    'https://bsc-rpc.publicnode.com',
+    'https://bsc.publicnode.com'
+  ],
+  requestTimeoutMs: 8000,
+  backoffBaseMs: 2000,
+  backoffMaxMs: 60000,
+  cacheTtlMs: 4000,
+  cacheMaxEntries: 200
+};
+
+const RPC_READ_METHODS = new Set(['eth_call', 'eth_getLogs', 'eth_blockNumber', 'eth_getBalance']);
+const rpcEndpointHealth = new Map(); // node url -> { failures, cooldownUntil }
+const rpcInFlight = new Map();       // request key -> promise of response text (null when no node answered)
+const rpcCache = new Map();          // request key -> { text, expiresAt }
+let rpcRoundRobin = 0;
+const rpcClock = { now: () => Date.now(), random: () => Math.random() };
+
+function rpcUrlOf(value) {
+  const url = typeof value === 'string' ? value.trim() : '';
+  return /^https:\/\/\S+$/.test(url) ? url : '';
+}
+
+// Nodes for one read, in the order to try them: the keyed node first (when configured and not cooling
+// down), then the public nodes rotated so the starting node changes from call to call.
+function rpcCandidateUrls(kind, now) {
+  const keyed = rpcUrlOf(BSC_RPC_CONFIG.keyedUrl);
+  const ready = (url) => {
+    const health = rpcEndpointHealth.get(url);
+    return !health || health.cooldownUntil <= now;
+  };
+  const publicUrls = (kind === 'logs' ? BSC_RPC_CONFIG.logs : BSC_RPC_CONFIG.reads)
+    .map(rpcUrlOf)
+    .filter((url, i, all) => url && url !== keyed && all.indexOf(url) === i && ready(url));
+  const order = keyed && ready(keyed) ? [keyed] : [];
+  if (publicUrls.length) {
+    const start = rpcRoundRobin++ % publicUrls.length;
+    order.push(...publicUrls.slice(start), ...publicUrls.slice(0, start));
+  }
+  return order;
+}
+
+// 429 is the rate limit. 401/403 (key or origin refused), 408, and 5xx mean this node cannot serve us now.
+function rpcStatusIsNodeFault(status) {
+  return status === 401 || status === 403 || status === 408 || status === 429 || status >= 500;
+}
+
+function rpcIsRateLimitError(error) {
+  return !!error && /\brate.?limit|too many requests|\b429\b/i.test(String(error.message || ''));
+}
+
+function rpcRetryAfterMs(res) {
+  try {
+    const raw = res && res.headers && typeof res.headers.get === 'function' ? res.headers.get('Retry-After') : null;
+    if (!raw) return 0;
+    const seconds = Number(raw);
+    if (Number.isFinite(seconds)) return Math.max(0, seconds * 1000);
+    const at = Date.parse(raw);
+    return Number.isFinite(at) ? Math.max(0, at - rpcClock.now()) : 0;
+  } catch (_) {
+    return 0;
+  }
+}
+
+// One POST to one node. Resolves to { ok: true, data } when the node answered this request, or to
+// { ok: false, nodeFault, rateLimited, retryAfterMs }. A nodeFault is charged to that node's backoff.
+// Anything else (for example a JSON-RPC error about this one call, such as a block range the node
+// refuses) only moves on to the next node.
+async function rpcPostOnce(url, payload, timeoutMs, accept) {
+  const controller = typeof AbortController === 'function' ? new AbortController() : null;
+  const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+      signal: controller ? controller.signal : undefined
+    });
+    if (!res || !res.ok) {
+      const status = res ? res.status : 0;
+      return { ok: false, nodeFault: !res || rpcStatusIsNodeFault(status), rateLimited: status === 429, retryAfterMs: rpcRetryAfterMs(res) };
     }
+    const data = await res.json();
+    const items = Array.isArray(data) ? data : [data];
+    if (items.some((item) => item && rpcIsRateLimitError(item.error))) {
+      return { ok: false, nodeFault: true, rateLimited: true, retryAfterMs: rpcRetryAfterMs(res) };
+    }
+    return accept(data) ? { ok: true, data } : { ok: false, nodeFault: false };
+  } catch (_) {
+    return { ok: false, nodeFault: true, rateLimited: false, retryAfterMs: 0 };
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+// Starts or extends a node's cooldown after a fault. Exponential in the consecutive failure count, with jitter.
+function rpcChargeNode(url, { retryAfterMs = 0, rateLimited = false } = {}) {
+  const now = rpcClock.now();
+  let health = rpcEndpointHealth.get(url);
+  if (!health) {
+    health = { failures: 0, cooldownUntil: 0 };
+    rpcEndpointHealth.set(url, health);
+  }
+  // Several reads can hit the same failing node at once. Count that outage once, not once per read.
+  if (health.cooldownUntil > now) return;
+  health.failures += 1;
+  const cap = BSC_RPC_CONFIG.backoffMaxMs;
+  const exp = Math.min(cap, BSC_RPC_CONFIG.backoffBaseMs * Math.pow(2, health.failures - 1));
+  const jittered = exp / 2 + rpcClock.random() * (exp / 2);
+  const delay = Math.min(cap, Math.max(jittered, retryAfterMs));
+  health.cooldownUntil = now + delay;
+  trackAnalytics('rpc_endpoint_backoff', {
+    endpoint: url === rpcUrlOf(BSC_RPC_CONFIG.keyedUrl) ? 'keyed' : 'public',
+    rate_limited: !!rateLimited,
+    failures: health.failures,
+    delay_ms: Math.round(delay)
+  });
+}
+
+// Asks nodes in order until one answers. The first good answer is cached and returned as JSON text, so
+// every caller parses its own copy. Resolves to null when no node answered.
+async function rpcFirstAnswer(key, payload, { kind, timeoutMs, accept }) {
+  for (const url of rpcCandidateUrls(kind, rpcClock.now())) {
+    const out = await rpcPostOnce(url, payload, timeoutMs, accept);
+    if (out.ok) {
+      const health = rpcEndpointHealth.get(url);
+      if (health) {
+        health.failures = 0;
+        health.cooldownUntil = 0;
+      }
+      const text = JSON.stringify(out.data);
+      rpcCache.set(key, { text, expiresAt: rpcClock.now() + BSC_RPC_CONFIG.cacheTtlMs });
+      rpcTrimCache();
+      return text;
+    }
+    if (out.nodeFault) rpcChargeNode(url, out);
   }
   return null;
 }
 
-// High-Throughput JSON-RPC Batch Call with failover
+function rpcTrimCache() {
+  const max = BSC_RPC_CONFIG.cacheMaxEntries;
+  if (rpcCache.size <= max) return;
+  const now = rpcClock.now();
+  for (const [key, entry] of rpcCache) {
+    if (entry.expiresAt <= now) rpcCache.delete(key);
+  }
+  while (rpcCache.size > max) rpcCache.delete(rpcCache.keys().next().value);
+}
+
+// Runs one read (a JSON-RPC object, or a batch array) through the cache, the in-flight table and the
+// node list. Resolves to the parsed response, or null when the request is not a read or no node answered.
+async function rpcReadBody(payload, { logs = false, timeoutMs = BSC_RPC_CONFIG.requestTimeoutMs, accept } = {}) {
+  const methods = Array.isArray(payload) ? payload.map((p) => p && p.method) : [payload && payload.method];
+  if (!methods.length || !methods.every((method) => RPC_READ_METHODS.has(method))) return null;
+  const check = accept || (Array.isArray(payload) ? Array.isArray : (d) => !!d && d.result !== undefined);
+  const kind = logs ? 'logs' : 'reads';
+  const key = kind + '|' + JSON.stringify(payload);
+
+  const hit = rpcCache.get(key);
+  if (hit && hit.expiresAt > rpcClock.now()) return JSON.parse(hit.text);
+  if (hit) rpcCache.delete(key);
+
+  if (!rpcInFlight.has(key)) {
+    const pending = rpcFirstAnswer(key, payload, { kind, timeoutMs, accept: check })
+      .finally(() => rpcInFlight.delete(key));
+    rpcInFlight.set(key, pending);
+  }
+  const text = await rpcInFlight.get(key);
+  return text === null ? null : JSON.parse(text);
+}
+
+// Robust JSON-RPC single read with per-node backoff and fallback. Resolves to the `result`, or null.
+async function sendRpcCall(method, params) {
+  const data = await rpcReadBody({ jsonrpc: '2.0', id: 1, method, params });
+  return data && data.result !== undefined ? data.result : null;
+}
+
+// JSON-RPC batch read (eth_call items). Resolves to the response items sorted by id, or [] when no node answered.
 async function sendRpcBatch(batch) {
   if (!Array.isArray(batch) || batch.length === 0) return [];
-  for (const endpoint of BSC_PUBLIC_RPCS) {
-    try {
-      const res = await fetch(endpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(batch)
-      });
-      if (!res.ok) continue;
-      const data = await res.json();
-      if (Array.isArray(data)) {
-        data.sort((a, b) => Number(a.id || 0) - Number(b.id || 0));
-        return data;
-      }
-    } catch (err) {
-      // try next RPC
-    }
-  }
-  return [];
+  const data = await rpcReadBody(batch);
+  if (!Array.isArray(data)) return [];
+  data.sort((a, b) => Number((a && a.id) || 0) - Number((b && b.id) || 0));
+  return data;
 }
+
+// eth_getLogs for agent-ID registry mints between two blocks (inclusive). Resolves to the log array,
+// or null when no logs node answered.
+async function fetchRegistryMintLogs(fromBlk, toBlk) {
+  const data = await rpcReadBody({
+    jsonrpc: '2.0',
+    id: 1,
+    method: 'eth_getLogs',
+    params: [{
+      fromBlock: '0x' + fromBlk.toString(16),
+      toBlock: '0x' + toBlk.toString(16),
+      address: AGENT_ID_REGISTRY_ADDR,
+      topics: [ERC721_TRANSFER_TOPIC, ZERO_ADDRESS_TOPIC]
+    }]
+  }, { logs: true, timeoutMs: 4500, accept: (d) => !!d && Array.isArray(d.result) });
+  return data ? data.result : null;
+}
+
+// Test seams for test_rpc_read_resilience.js: a fake clock and random source, and a reset of all state.
+const rpcReadTestHooks = {
+  setClock(next) {
+    Object.assign(rpcClock, next);
+  },
+  setRoundRobin(n) {
+    rpcRoundRobin = n;
+  },
+  reset() {
+    rpcEndpointHealth.clear();
+    rpcInFlight.clear();
+    rpcCache.clear();
+    rpcRoundRobin = 0;
+    rpcClock.now = () => Date.now();
+    rpcClock.random = () => Math.random();
+  },
+  endpointHealth(url) {
+    const health = rpcEndpointHealth.get(url);
+    return health ? { ...health } : null;
+  },
+  cacheSize() {
+    return rpcCache.size;
+  }
+};
 
 // Injected Web3 Provider Resolver (MetaMask, Binance Web3 Wallet, Rabby, EIP-1193)
 function getInjectedProvider(preferred = 'auto') {
@@ -7584,6 +8406,11 @@ async function connectWeb3(providerType = 'auto') {
       provName = 'MetaMask';
     }
     walletProviderName = provName;
+    trackAnalytics('wallet_connected', {
+      wallet_provider: provName,
+      is_mobile: isMobileClient(),
+      source: _walletSession ? _walletSession.source : 'direct'
+    });
 
     if (typeof window !== 'undefined' && window.posthog && typeof window.posthog.identify === 'function') {
       window.posthog.identify(account, { wallet_provider: provName });
@@ -7652,6 +8479,12 @@ async function connectWeb3(providerType = 'auto') {
     return true;
   } catch (err) {
     console.error('Wallet connection error:', err);
+    trackAnalytics('wallet_connect_failed', {
+      wallet_provider: providerType,
+      rejected: Boolean(err && (err.code === 4001 || String(err.message || '').toLowerCase().includes('user rejected'))),
+      is_mobile: isMobileClient(),
+      source: _walletSession ? _walletSession.source : 'direct'
+    });
     updateWalletButtonUI();
     return false;
   }
@@ -7709,10 +8542,15 @@ async function executeWeb3Mint(contractAddress, rawCalldata, valueWei, name = 'D
   };
 
   try {
-    // 1. Injected Provider Check
+    // 1. Injected Provider Check. Nothing in this browser can sign: explain the next step (wallet gate) instead of a dead end.
     let provider = getInjectedProvider();
     if (!provider) {
-      openWalletModal();
+      trackAnalytics('mint_wallet_gate_shown', {
+        token_symbol: (currentInspectItem && currentInspectItem.symbol) || '',
+        is_mobile: isMobileClient(),
+        watch_only: Boolean(connectedWallet) && walletProviderName === 'Watch-Only'
+      });
+      openMintWalletGate();
       return;
     }
 
@@ -7854,6 +8692,176 @@ async function executeWeb3Mint(contractAddress, rawCalldata, valueWei, name = 'D
   }
 }
 if (typeof window !== 'undefined') window.executeWeb3Mint = executeWeb3Mint;
+
+// ==========================================================================
+// 👛 Mint with no signing wallet in this browser (mobile browsers, desktops without an extension)
+// ==========================================================================
+// Before this, Mint with no injected provider opened the generic extension list (MetaMask / Rabby cards) with no
+// explanation. On Android Chrome the wallet dialog was opened and left without a provider chosen. Now the click says
+// what is missing and opens the wallet dialog with the next steps that work on this device: the Binance app (Discover
+// link / QR) or the Sniper CLI. With an injected provider Mint goes straight to executeWeb3Mint, unchanged.
+//
+// Funnel (PostHog): mint_button_clicked -> mint_wallet_gate_shown -> mint_gate_action | cli_copied (source mint_gate)
+// | wallet_modal_abandoned -> wallet_connected | wallet_connect_failed. A wallet_modal_opened starts a session; the
+// dialog closing with no signing wallet ends it as wallet_modal_abandoned.
+let _walletSession = null;   // { source, view, token_symbol, openedAt } while the wallet dialog is open
+
+function walletDialogIsOpen() {
+  const modal = (typeof document !== 'undefined') ? document.getElementById('walletModal') : null;
+  if (!modal) return false;
+  return Boolean(modal.open || (typeof modal.hasAttribute === 'function' && modal.hasAttribute('open')));
+}
+
+// Starts a wallet-dialog session (one wallet_modal_opened) unless the dialog is already open; then only the view changes.
+// `view` is what the user sees: connect_list, account, mint_gate or binance_qr.
+function beginWalletSession(source, view, extra = {}) {
+  if (_walletSession && walletDialogIsOpen()) {
+    _walletSession.view = view || _walletSession.view;
+    return _walletSession;
+  }
+  _walletSession = {
+    source: source,
+    view: view || source,
+    token_symbol: extra.token_symbol || '',
+    openedAt: Date.now()
+  };
+  trackAnalytics('wallet_modal_opened', {
+    source: source,
+    view: _walletSession.view,
+    token_symbol: _walletSession.token_symbol,
+    is_mobile: isMobileClient(),
+    has_injected_provider: Boolean(getInjectedProvider()),
+    wallet_connected: Boolean(connectedWallet)
+  });
+  return _walletSession;
+}
+
+// The wallet dialog's close event (ESC and the backdrop included). A session that ends with no signing wallet connected
+// is an abandon. The account drawer is not part of the connect funnel, so it is never counted.
+function onWalletModalClosed() {
+  const session = _walletSession;
+  _walletSession = null;
+  if (!session || session.source === 'account_drawer') return;
+  const signing = Boolean(connectedWallet) && walletProviderName !== 'Watch-Only';
+  if (signing) return;
+  trackAnalytics('wallet_modal_abandoned', {
+    source: session.source,
+    view: session.view,
+    token_symbol: session.token_symbol,
+    seconds_open: Math.max(0, Math.round((Date.now() - session.openedAt) / 1000)),
+    is_mobile: isMobileClient(),
+    has_injected_provider: Boolean(getInjectedProvider()),
+    watch_only_connected: Boolean(connectedWallet)
+  });
+}
+
+// Properties of the mint_button_clicked event (the token modal's Mint button): what the user had when they tapped.
+function mintClickProps(symbol, isFree) {
+  return {
+    token_symbol: symbol || '',
+    is_free: Boolean(isFree),
+    wallet_connected: Boolean(connectedWallet),
+    watch_only: Boolean(connectedWallet) && walletProviderName === 'Watch-Only',
+    has_injected_provider: Boolean(getInjectedProvider()),
+    is_mobile: isMobileClient(),
+    source: 'modal_mint_button'
+  };
+}
+
+function trackMintGateAction(action) {
+  trackAnalytics('mint_gate_action', {
+    action: action,
+    token_symbol: (_walletSession && _walletSession.token_symbol) || '',
+    is_mobile: isMobileClient()
+  });
+}
+
+// Mint without a signing wallet, as a step: why nothing can sign here and what to do next on this device. Nothing on
+// this dialog signs. Its options open the Binance guide, copy the Sniper CLI or link to a wallet extension.
+function openMintWalletGate(sym) {
+  const modal = (typeof document !== 'undefined') ? document.getElementById('walletModal') : null;
+  const content = (typeof document !== 'undefined') ? document.getElementById('walletModalContent') : null;
+  if (!modal || !content) return;
+  const symbol = sym || (currentInspectItem && currentInspectItem.symbol) || '';
+  beginWalletSession('mint_gate', 'mint_gate', { token_symbol: symbol });
+
+  const isMobile = isMobileClient();
+  const watchOnly = Boolean(connectedWallet) && walletProviderName === 'Watch-Only';
+  const shortAddr = connectedWallet ? `${connectedWallet.slice(0, 6)}...${connectedWallet.slice(-4)}` : '';
+  const lead = watchOnly
+    ? `You are in watch-only mode (<code>${shortAddr}</code>). It can read a wallet, but it cannot sign a mint.`
+    : (isMobile
+      ? 'Mint sends a transaction from your wallet. Browser-extension wallets (MetaMask, Rabby) do not run in mobile browsers, so nothing on this page can sign yet.'
+      : 'Mint sends a transaction from your wallet. No browser wallet extension was found in this browser, so nothing on this page can sign yet.');
+
+  const binanceOption = `
+      <button type="button" class="mint-gate-option mint-gate-primary" onclick="trackMintGateAction('binance_app'); openBinanceQrModal()">
+        <span class="mint-gate-icon" aria-hidden="true">📱</span>
+        <span class="mint-gate-text"><strong>${isMobile ? 'Open in Binance App' : 'Mint from the Binance app'}</strong><small>${isMobile ? 'Binance Web3 Discover: your Binance wallet signs inside the app.' : 'Scan a QR code with the Binance app, then mint from your phone.'}</small></span>
+      </button>`;
+  const cliOption = `
+      <button type="button" class="mint-gate-option" onclick="copyModalSniperCli(this, 'mint_gate')">
+        <span class="mint-gate-icon" aria-hidden="true">⌨</span>
+        <span class="mint-gate-text"><strong>Copy Sniper CLI</strong><small>Mint from a terminal with the Binance Agentic Wallet CLI.</small></span>
+      </button>`;
+  const extensionOptions = `
+      <a class="mint-gate-option" href="https://metamask.io/download/" target="_blank" rel="noopener" onclick="trackMintGateAction('install_metamask')">
+        <span class="mint-gate-icon" aria-hidden="true">🦊</span>
+        <span class="mint-gate-text"><strong>Install MetaMask</strong><small>Browser extension for desktop Chrome, Edge or Brave.</small></span>
+      </a>
+      <a class="mint-gate-option" href="https://rabby.io/" target="_blank" rel="noopener" onclick="trackMintGateAction('install_rabby')">
+        <span class="mint-gate-icon" aria-hidden="true">🐰</span>
+        <span class="mint-gate-text"><strong>Install Rabby</strong><small>DeFi wallet extension for desktop.</small></span>
+      </a>`;
+  const options = isMobile ? binanceOption + cliOption : extensionOptions + binanceOption + cliOption;
+  const note = isMobile
+    ? 'In the Binance app, open this page in Discover and tap Mint there.'
+    : 'After installing a wallet, reload this page and click Mint again.';
+
+  content.innerHTML = `
+    <div class="wallet-card-container">
+      <div class="modal-header wallet-card-header">
+        <div class="modal-title wallet-card-title">
+          <span class="wallet-title-icon">👛</span>
+          <span>Wallet needed to mint${symbol ? ` ${escapeHtml(symbol)}` : ''}</span>
+        </div>
+        <button class="modal-close-btn" onclick="closeWalletDialog()">✕ [ESC]</button>
+      </div>
+
+      <div class="wallet-connect-body">
+        <p class="wallet-connect-desc">${lead} Pick the next step:</p>
+        <div class="mint-gate-options">${options}</div>
+        <p class="mint-gate-note">${note}</p>
+        <div style="text-align: center; margin-top: 8px;">
+          <button type="button" class="modal-close-btn" onclick="closeWalletDialog()">Not now</button>
+        </div>
+      </div>
+    </div>
+  `;
+
+  // The token modal keeps the reason too, so the Mint section still explains itself after this dialog is closed.
+  const statusBox = document.getElementById('modalMintStatus');
+  if (statusBox) {
+    statusBox.innerHTML = `<div class="mint-status-info">👛 <strong>Minting needs a wallet that can sign in this browser.</strong> <button type="button" class="mint-status-link" onclick="openMintWalletGate()">See your options ›</button></div>`;
+    statusBox.style.display = 'block';
+  }
+
+  if (typeof modal.showModal === 'function') modal.showModal();
+  else modal.setAttribute('open', '');
+}
+
+// "← Back" on the Binance guide: to the Mint gate when the dialog was opened from Mint, else to the connect list.
+function walletModalBack() {
+  if (_walletSession && _walletSession.source === 'mint_gate') openMintWalletGate(_walletSession.token_symbol);
+  else openWalletModal();
+}
+
+function closeWalletDialog() {
+  const modal = (typeof document !== 'undefined') ? document.getElementById('walletModal') : null;
+  if (!modal) return;
+  if (typeof modal.close === 'function') modal.close();
+  else modal.removeAttribute('open');
+}
 
 // Watch-Only Mode (Inspect Any BSC Address Without Private Key)
 function setWatchOnlyWallet(addr) {
@@ -8207,6 +9215,7 @@ function openWalletModal() {
   const modal = document.getElementById('walletModal');
   const content = document.getElementById('walletModalContent');
   if (!modal || !content) return;
+  beginWalletSession(connectedWallet ? 'account_drawer' : 'connect_list', connectedWallet ? 'account' : 'connect_list');
 
   if (!connectedWallet) {
     content.innerHTML = `
@@ -8418,6 +9427,7 @@ function openBinanceQrModal() {
   const modal = document.getElementById('walletModal');
   const content = document.getElementById('walletModalContent');
   if (!modal || !content) return;
+  beginWalletSession('qr_guide', 'binance_qr');
 
   const currentOrigin = (typeof window !== 'undefined' && window.location.origin) ? window.location.origin : 'https://agent-id-monitor.vercel.app';
   const qrApiUrl = `https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(currentOrigin)}&bgcolor=ffffff&color=03080c&margin=6`;
@@ -8426,7 +9436,7 @@ function openBinanceQrModal() {
     <div class="wallet-card-container">
       <div class="modal-header wallet-card-header">
         <div class="modal-title wallet-card-title">
-          <button class="wallet-back-btn" onclick="openWalletModal()">← Back</button>
+          <button class="wallet-back-btn" onclick="walletModalBack()">← Back</button>
           <span class="wallet-title-icon" style="margin-left: 8px;">🟡</span>
           <span>Connect Binance Agentic Wallet</span>
         </div>
@@ -8685,24 +9695,12 @@ function stopBlockPolling() {
 
 async function pollLatestBlock() {
   if (typeof document !== 'undefined' && document.hidden) return;
-  for (const endpoint of BSC_PUBLIC_RPCS) {
-    try {
-      const res = await fetch(endpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_blockNumber', params: [] })
-      });
-      if (!res.ok) continue;
-      const data = await res.json();
-      if (data && data.result) {
-        const blkNum = parseInt(data.result, 16);
-        document.getElementById('latestBlock').textContent = `${blkNum.toLocaleString()}`;
-        syncLiveAgentWalletsOnChain(blkNum).catch(() => {});
-        return;
-      }
-    } catch (err) {
-      // try next RPC endpoint
-    }
+  const hex = await sendRpcCall('eth_blockNumber', []);
+  if (hex) {
+    const blkNum = parseInt(hex, 16);
+    document.getElementById('latestBlock').textContent = `${blkNum.toLocaleString()}`;
+    syncLiveAgentWalletsOnChain(blkNum).catch(() => {});
+    return;
   }
   document.getElementById('latestBlock').textContent = 'Live (BSC 56)';
 }
@@ -8730,9 +9728,10 @@ let lastFeedEtag = '';
 const FEED_REFRESH_INTERVAL_MS = 10 * 60 * 1000;
 const DELTA_POLL_INTERVAL_MS = 25000; // 25s interval protects hosting bandwidth while keeping market data near real-time
 
-// Real-Time Delta Polling (auto-pauses when tab is hidden or backgrounded)
+// Real-Time Delta Polling (auto-pauses when tab is hidden or backgrounded, unless drop alerts are on)
 async function pollDeltaFeed() {
-  if (isPollingDelta || !latestKnownBlock || (typeof document !== 'undefined' && document.hidden)) return;
+  // A hidden tab polls only while drop alerts are on (see startDeltaPolling); otherwise it stays paused as before.
+  if (isPollingDelta || !latestKnownBlock || (typeof document !== 'undefined' && document.hidden && !isDropAlertActive())) return;
   isPollingDelta = true;
 
   try {
@@ -8754,6 +9753,10 @@ async function pollDeltaFeed() {
     if (newEtag) lastDeltaEtag = newEtag;
 
     const data = await res.json();
+
+    // Hidden tab: block polling is paused, so move since_block on with the feed's own head. Otherwise it goes stale and
+    // every poll re-downloads drops the page already has.
+    if (data && data.latest_block && typeof document !== 'undefined' && document.hidden) latestKnownBlock = data.latest_block;
 
     if (data && data.stats) {
       applyOverviewStats(data.stats);
@@ -8788,8 +9791,10 @@ async function pollDeltaFeed() {
           latestKnownBlock = newlyFound[0].block;
         }
 
-        playMarketAlertSound();
+        // A hidden tab stays silent, as it always has. Its drop alerts are the OS notifications.
+        if (!(typeof document !== 'undefined' && document.hidden)) playMarketAlertSound();
         newlyFound.slice(0, 3).forEach(drop => showNewMarketToast(drop));
+        queueDropAlerts(newlyFound);
 
         // Check for sniper ready in new drops
         newlyFound.forEach(drop => {
@@ -8837,9 +9842,16 @@ async function pollDeltaFeed() {
   }
 }
 
+// A hidden tab keeps the delta poll only while drop alerts are on, and then at this slower pace (one request a minute,
+// block polling stays paused). Otherwise the poll stops, as it always has.
+const DROP_ALERT_BACKGROUND_POLL_MS = 60 * 1000;
 function startDeltaPolling() {
   if (deltaPollTimer) clearInterval(deltaPollTimer);
-  if (typeof document !== 'undefined' && document.hidden) return;
+  deltaPollTimer = null;
+  if (typeof document !== 'undefined' && document.hidden) {
+    if (isDropAlertActive()) deltaPollTimer = setInterval(pollDeltaFeed, DROP_ALERT_BACKGROUND_POLL_MS);
+    return;
+  }
   deltaPollTimer = setInterval(pollDeltaFeed, DELTA_POLL_INTERVAL_MS);
 }
 
@@ -8848,10 +9860,7 @@ if (typeof document !== 'undefined') {
   document.addEventListener('visibilitychange', () => {
     const ticker = document.getElementById('tickerTrack');
     if (document.hidden) {
-      if (deltaPollTimer) {
-        clearInterval(deltaPollTimer);
-        deltaPollTimer = null;
-      }
+      startDeltaPolling(); // hidden: drops the fast poll, keeps the slow one only while drop alerts are on
       stopBlockPolling();
       if (ticker) ticker.style.animationPlayState = 'paused';
     } else {
@@ -9039,6 +10048,7 @@ async function fetchDrops() {
       console.log(`%c[🚨 NEW MARKET DETECTED]`, 'color: #00ff88; font-weight: bold;', newlyFound);
       playMarketAlertSound();
       newlyFound.slice(0, 3).forEach(drop => showNewMarketToast(drop));
+      queueDropAlerts(newlyFound);
     }
 
     // Check for newly qualified Sniper Ready projects (Option B fast-track trigger)
@@ -9295,19 +10305,62 @@ function renderReorderModalList() {
 
     const item = document.createElement('div');
     item.className = 'reorder-item';
+    // Edge buttons use aria-disabled, not the disabled attribute: a truly disabled button swallows the tap, so a repeated
+    // tap at the top or bottom looked like a dead button (replay: ~10 taps on ▲ Up in 5 s). They stay tappable and
+    // movePill / movePillToTop say why nothing moved.
     item.innerHTML = `
       <div class="reorder-item-left">
         <span class="reorder-item-idx">#${index + 1}</span>
         <span class="reorder-item-name">${label}</span>
       </div>
       <div class="reorder-item-actions">
-        <button class="reorder-btn" title="Move to Top" ${isFirst ? 'disabled' : ''} onclick="movePillToTop('${key}')">⬆ Top</button>
-        <button class="reorder-btn" title="Move Up" ${isFirst ? 'disabled' : ''} onclick="movePill('${key}', -1)">▲ Up</button>
-        <button class="reorder-btn" title="Move Down" ${isLast ? 'disabled' : ''} onclick="movePill('${key}', 1)">▼ Down</button>
+        <button class="reorder-btn" title="${isFirst ? 'Already at the top' : 'Move to Top'}" aria-disabled="${isFirst}" onclick="movePillToTop('${key}')">⬆ Top</button>
+        <button class="reorder-btn" title="${isFirst ? 'Already at the top' : 'Move Up'}" aria-disabled="${isFirst}" onclick="movePill('${key}', -1)">▲ Up</button>
+        <button class="reorder-btn" title="${isLast ? 'Already at the bottom' : 'Move Down'}" aria-disabled="${isLast}" onclick="movePill('${key}', 1)">▼ Down</button>
       </div>
     `;
     listEl.appendChild(item);
   });
+}
+
+// Reorder sheet feedback. A move highlights the row that moved and says where it went; a tap that cannot move the row
+// (already first or last) shakes that row and says so, instead of doing nothing.
+let _reorderStatusTimer = null;
+
+function getReorderEl(id) {
+  return (typeof document !== 'undefined' && typeof document.getElementById === 'function') ? document.getElementById(id) : null;
+}
+
+function showReorderStatus(text, tone = 'ok') {
+  const el = getReorderEl('reorderPillsStatus');
+  if (!el) return;
+  el.textContent = text;
+  if (el.dataset) el.dataset.tone = tone;
+  clearTimeout(_reorderStatusTimer);
+  _reorderStatusTimer = setTimeout(() => { el.textContent = ''; }, 1800);
+}
+
+function pulseReorderRow(index, className) {
+  const list = getReorderEl('reorderPillsList');
+  const row = list && list.children ? list.children[index] : null;
+  if (!row || !row.classList || typeof row.classList.add !== 'function') return;
+  row.classList.remove('reorder-item--moved', 'reorder-item--edge');
+  if (typeof row.offsetWidth === 'number') void row.offsetWidth; // restart the CSS animation on repeated taps
+  row.classList.add(className);
+  setTimeout(() => {
+    if (row.classList && typeof row.classList.remove === 'function') row.classList.remove(className);
+  }, 900);
+}
+
+function reportReorderMove(newIndex) {
+  pulseReorderRow(newIndex, 'reorder-item--moved');
+  showReorderStatus(`Moved to #${newIndex + 1}`, 'ok');
+}
+
+function reportReorderEdge(index, edge) {
+  trackAnalytics('reorder_edge_tapped', { edge: edge });
+  pulseReorderRow(index, 'reorder-item--edge');
+  showReorderStatus(edge === 'top' ? 'Already at the top' : 'Already at the bottom', 'edge');
 }
 
 function movePill(key, delta) {
@@ -9315,7 +10368,10 @@ function movePill(key, delta) {
   const idx = seq.indexOf(key);
   if (idx === -1) return;
   const targetIdx = idx + delta;
-  if (targetIdx < 0 || targetIdx >= seq.length) return;
+  if (targetIdx < 0 || targetIdx >= seq.length) {
+    reportReorderEdge(idx, targetIdx < 0 ? 'top' : 'bottom');
+    return;
+  }
 
   const temp = seq[idx];
   seq[idx] = seq[targetIdx];
@@ -9324,18 +10380,24 @@ function movePill(key, delta) {
   applyPillSequence(seq);
   savePillSequence(seq);
   renderReorderModalList();
+  reportReorderMove(targetIdx);
 }
 
 function movePillToTop(key) {
   const seq = getCurrentPillSequence();
   const idx = seq.indexOf(key);
-  if (idx <= 0) return;
+  if (idx === -1) return;
+  if (idx === 0) {
+    reportReorderEdge(0, 'top');
+    return;
+  }
   seq.splice(idx, 1);
   seq.unshift(key);
 
   applyPillSequence(seq);
   savePillSequence(seq);
   renderReorderModalList();
+  reportReorderMove(0);
 }
 
 function setupFilterPillsDragAndDrop() {
@@ -9677,6 +10739,7 @@ async function init() {
     const savedPillsSeq = loadSavedPillSequence();
     applyPillSequence(savedPillsSeq);
     setupFilterPillsDragAndDrop();
+    setupModalSwipeNav();
 
     // Sound alert toggle button setup
     const soundBtn = document.getElementById('soundToggle');
@@ -9706,6 +10769,9 @@ async function init() {
       });
     }
 
+    // Drop alerts toggle: state only on load; the permission prompt comes from its own click
+    setupDropAlertToggle();
+
     // Donation buttons
     const donateHeader = document.getElementById('donateHeaderBtn');
     if (donateHeader) {
@@ -9716,12 +10782,12 @@ async function init() {
       footerDonate.addEventListener('click', () => copyDonationAddress(footerDonate, 'footer'));
     }
 
-    // Unlock Web Audio context & request push notifications on user's first click or keystroke anywhere
+    // Unlock the Web Audio context on the user's first click or keystroke anywhere. This does not request notification
+    // permission: that is asked only by the SOUND and ALERTS toggles, so no browser prompt appears before the user chooses.
     const unlockAudio = () => {
       if (audioCtx && audioCtx.state === 'suspended') {
         audioCtx.resume();
       }
-      requestNotificationPermission();
     };
     document.addEventListener('click', unlockAudio, { once: true });
     document.addEventListener('keydown', unlockAudio, { once: true });
@@ -9810,7 +10876,7 @@ async function init() {
         if (typeof window !== 'undefined' && window.va) {
           window.va('event', { name: 'tab_switch', data: { tab: activeTab } });
         }
-        renderTable();
+        scheduleTableRender();
         syncMobileTabSelector();
       });
     });
@@ -9874,7 +10940,7 @@ async function init() {
         if (typeof window !== 'undefined' && window.va) {
           window.va('event', { name: 'filter_changed', data: { filter: activeFilter } });
         }
-        renderTable();
+        scheduleTableRender();
       });
     });
 
@@ -10145,6 +11211,8 @@ async function init() {
       walletModal.addEventListener('click', e => {
         if (e.target === walletModal) walletModal.close ? walletModal.close() : walletModal.removeAttribute('open');
       });
+      // Ends a wallet-dialog session; with no signing wallet connected it is counted as an abandon (wallet_modal_abandoned).
+      if (typeof walletModal.addEventListener === 'function') walletModal.addEventListener('close', onWalletModalClosed);
     }
 
     const syncModal = document.getElementById('syncModal');
@@ -10199,6 +11267,29 @@ if (typeof document !== 'undefined') {
 
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
+    readDropAlertPref,
+    writeDropAlertPref,
+    getDropAlertPermission,
+    isDropAlertActive,
+    onDropAlertToggleClick,
+    showNewMarketToast,
+    pollDeltaFeed,
+    startDeltaPolling,
+    getLatestKnownBlock: () => latestKnownBlock,
+    setLatestKnownBlock: (b) => { latestKnownBlock = b; },
+    dropMatchesToolbarFilter,
+    alertMatchType,
+    queueDropAlerts,
+    flushDropAlerts,
+    updateDropAlertToggle,
+    setupDropAlertToggle,
+    sendRpcCall,
+    sendRpcBatch,
+    fetchRegistryMintLogs,
+    BSC_RPC_CONFIG,
+    rpcReadTestHooks,
+    buildTokenShareUrl,
+    copyTokenShareLink,
     mergeTopGainersList,
     syncSeededTopGainers,
     topGainersSeedLabel,
@@ -10241,6 +11332,7 @@ if (typeof module !== 'undefined' && module.exports) {
     computeItemProfit,
     applyMarketOverlay,
     computeStats,
+    renderStats,
     openHallOfFameModal,
     openWalletModal,
     openBinanceQrModal,
@@ -10270,6 +11362,17 @@ if (typeof module !== 'undefined' && module.exports) {
     sendDesktopNotification,
     buildMintTxParams,
     executeWeb3Mint,
+    mintClickProps,
+    copyModalSniperCli,
+    copyTextToClipboard,
+    trackCliCopy,
+    openMintWalletGate,
+    onWalletModalClosed,
+    walletModalBack,
+    closeWalletDialog,
+    beginWalletSession,
+    getWalletSession: () => _walletSession,
+    setConnectedWalletForTest: (addr, provider) => { connectedWallet = addr; walletProviderName = provider; },
     getInjectedProvider,
     openInspectModalByContract,
     renderSmartStreamTicker,
@@ -10337,6 +11440,7 @@ if (typeof module !== 'undefined' && module.exports) {
     renderReorderModalList,
     movePill,
     movePillToTop,
+    setupModalSwipeNav,
     setupFilterPillsDragAndDrop,
     showToast,
     copyDonationAddress,
