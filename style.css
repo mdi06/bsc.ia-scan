@@ -321,6 +321,9 @@ body {
   top: 44px;
   left: 0;
   right: 0;
+  /* The search box can be narrow in a crowded header; the results need room for name + badges + price. It grows to the
+     right (left stays aligned with the box) and never exceeds the viewport. */
+  min-width: min(440px, calc(100vw - 24px));
   z-index: 10000;
   background: rgba(13, 17, 28, 0.98);
   backdrop-filter: blur(20px);
@@ -328,9 +331,9 @@ body {
   border: 1px solid rgba(240, 185, 11, 0.35);
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.85), 0 0 20px rgba(240, 185, 11, 0.15);
   border-radius: 8px;
-  max-height: 480px;
-  overflow-y: auto;
-  overflow-x: hidden;
+  /* The dropdown itself no longer scrolls: header and footer stay visible and only the result LIST scrolls (see
+     .search-dropdown-list). The old whole-dropdown scroll pushed the header out of sight on long lists. */
+  overflow: hidden;
   box-sizing: border-box;
   animation: dropdownFadeIn 0.15s ease-out;
 }
@@ -375,8 +378,13 @@ body {
 }
 
 .search-dropdown-list {
+  position: relative; /* offsetParent for the keyboard scroll-into-view maths in updateSearchDropdownSelection */
   display: flex;
   flex-direction: column;
+  max-height: min(400px, 55vh);
+  overflow-y: auto;
+  overscroll-behavior: contain; /* a wheel/touch scroll at the end of the list must not scroll the page behind it */
+  scrollbar-width: thin;
 }
 
 .search-dropdown-item {
@@ -384,10 +392,16 @@ body {
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  padding: 9px 12px;
+  flex: 0 0 auto;
+  box-sizing: border-box;
+  min-height: 54px; /* every row the same height, whatever its content */
+  padding: 8px 12px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.04);
   cursor: pointer;
-  transition: background 0.12s ease, border-left 0.12s ease, border-bottom 0.12s ease, padding-left 0.12s ease;
+  /* Only the background animates. The old hover added a 3px border-left and shrank padding-left, both transitioned:
+     the border appeared instantly while the padding eased, so the text jumped right and slid back on every hover
+     ("shaking"). The marker below is an inset shadow: it takes no space, so nothing can move. */
+  transition: background-color 0.1s ease;
   user-select: none;
 }
 
@@ -395,11 +409,11 @@ body {
   border-bottom: none;
 }
 
-.search-dropdown-item:hover,
+/* One highlight only: keyboard and mouse both set .is-selected through JS (a CSS :hover rule here would light up a
+   second row whenever the list scrolls under a resting pointer). */
 .search-dropdown-item.is-selected {
-  background: rgba(240, 185, 11, 0.12);
-  border-left: 3px solid var(--color-gold);
-  padding-left: 9px;
+  background-color: rgba(240, 185, 11, 0.12);
+  box-shadow: inset 3px 0 0 var(--color-gold);
 }
 
 .search-drop-avatar {
@@ -437,29 +451,35 @@ body {
   display: flex;
   align-items: center;
   gap: 6px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap; /* a row is always exactly two lines: the name shrinks (ellipsis) before anything wraps */
+  min-width: 0;
 }
 
 .search-drop-name {
+  flex: 0 1 auto;
+  min-width: 36px;
   font-size: 12.5px;
   font-weight: 700;
   color: var(--text-white);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 160px;
 }
 
 .search-drop-symbol {
+  flex: 0 0 auto;
   font-size: 11px;
   font-family: var(--font-mono);
   color: var(--color-cyan);
   font-weight: 600;
+  white-space: nowrap;
 }
 
 .search-drop-badges {
+  flex: 0 0 auto;
   display: inline-flex;
   gap: 4px;
+  white-space: nowrap;
 }
 
 .search-drop-badge {
@@ -499,13 +519,28 @@ body {
   display: flex;
   align-items: center;
   gap: 8px;
+  min-width: 0;
   font-size: 10.5px;
   color: var(--text-dim);
   font-family: var(--font-mono);
+  white-space: nowrap;
+  overflow: hidden;
 }
 
 .search-drop-addr {
+  flex: 0 0 auto;
   color: rgba(255, 255, 255, 0.45);
+}
+
+.search-drop-type {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.search-drop-type::before {
+  content: "• ";
 }
 
 .search-drop-meta {
@@ -513,11 +548,16 @@ body {
   flex-direction: column;
   align-items: flex-end;
   gap: 2px;
-  flex-shrink: 0;
+  flex: 0 0 auto;
+  min-width: 56px;
   text-align: right;
+  white-space: nowrap;
 }
 
 .search-drop-price {
+  max-width: 112px;
+  overflow: hidden;
+  text-overflow: ellipsis;
   font-size: 12px;
   font-weight: 700;
   font-family: var(--font-mono);
@@ -525,6 +565,9 @@ body {
 }
 
 .search-drop-gain {
+  max-width: 112px;
+  overflow: hidden;
+  text-overflow: ellipsis;
   font-size: 10.5px;
   font-weight: 700;
   font-family: var(--font-mono);
@@ -543,17 +586,17 @@ body {
 }
 
 .search-drop-action {
+  flex: 0 0 14px;
+  width: 14px;
+  text-align: center;
   font-size: 13px;
   color: var(--color-gold);
-  opacity: 0.6;
-  transition: opacity 0.12s ease, transform 0.12s ease;
-  margin-left: 2px;
+  opacity: 0; /* fixed-width slot, so showing it never changes the layout; no translate: movement reads as jitter */
+  transition: opacity 0.1s ease;
 }
 
-.search-dropdown-item:hover .search-drop-action,
 .search-dropdown-item.is-selected .search-drop-action {
   opacity: 1;
-  transform: translate(2px, -2px);
 }
 
 /* Dropdown Footer */
@@ -3431,8 +3474,13 @@ a.inspect-btn:hover {
   }
 
   .search-results-dropdown {
-    max-height: 360px;
     top: 42px;
+  }
+
+  /* Phone: the list is the only scrolling part, so keep it short enough that the footer stays on screen above the
+     keyboard. */
+  .search-dropdown-list {
+    max-height: min(300px, 42vh);
   }
 
   .search-dropdown-shortcuts {
@@ -4126,6 +4174,15 @@ a.inspect-btn:hover {
     padding: 0 !important;
     border: none !important;
     min-width: 0;
+  }
+
+  /* Message rows ("No agentic projects match…", loading / empty states, the hidden-matches hint) are a single cell with
+     colspan. Without this it lands in ONE of the 12 grid columns above (~22px wide) and the text is crushed. */
+  tbody td[colspan] {
+    grid-column: 1 / -1;
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
   }
 
   .col-num {
@@ -7354,5 +7411,64 @@ a.inspect-btn:hover {
   .search-box input,
   button {
     touch-action: manipulation;
+  }
+}
+
+/* Search: "couldn't search" state and the "matches hidden by the current tab / filter" hint (see app.js:
+   remoteSearchFailed, hiddenMatchesHintHtml). */
+button.search-empty-btn {
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.search-dropdown-error .search-empty-title {
+  color: var(--color-yellow, #f0b90b);
+}
+
+.search-hidden-hint {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 8px 12px;
+  margin: 14px auto 0;
+  padding: 10px 14px;
+  max-width: 560px;
+  border: 1px solid rgba(0, 240, 255, 0.3);
+  border-radius: 6px;
+  background: rgba(0, 240, 255, 0.06);
+  color: var(--text-primary, #e6edf3);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.search-hidden-btn {
+  min-height: 32px;
+  padding: 6px 14px;
+  border: 1px solid var(--color-cyan);
+  border-radius: 999px;
+  background: var(--color-cyan);
+  color: #000;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.search-hidden-btn:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+}
+
+/* Search dropdown on real phone widths: at most two badges per row (ordered most important first: honeypot, free,
+   snipe, smart) so the token name keeps room instead of collapsing to "Ag…". */
+@media (max-width: 480px) {
+  .search-drop-badge:nth-child(n+3) {
+    display: none;
+  }
+
+  .search-drop-name {
+    min-width: 52px;
   }
 }
