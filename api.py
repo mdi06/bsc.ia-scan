@@ -640,6 +640,14 @@ def _cached_json(request: Request, snapshot, key, inputs, headers: dict, content
     return _encoded_response(request, enc, headers)
 
 
+# Sort keys of /api/projects (`sort_by`); anything that is not holders / score / progress sorts by block.
+_PROJECT_SORT_KEYS = {
+    "holders": lambda p: int(filters._num(p.get("holders"))),
+    "score": lambda p: filters._num(p.get("score")),
+    "block": lambda p: int(filters._num(p.get("block"))),
+}
+
+
 class _FeedSnapshot:
     """Everything derived from one project list (one content version). Treat the lists it hands out as read-only."""
 
@@ -664,6 +672,10 @@ class _FeedSnapshot:
         self._market_body = None
         self._top_gainers = None          # (bnb price it was computed with, rows)
         self.bodies = _BodyCache(BODY_CACHE_MAX_BYTES)
+        self._index_lock = threading.Lock()    # one build of the /api/projects structures at a time, outside self._lock
+        self._search_index = None         # (names, symbols, contracts lowercased, {contract: [positions]}), see search_index()
+        self._rows = None                 # [(record, progress, status)] parallel to self.projects, see project_rows()
+        self._sort_keys: Dict[str, list] = {}
 
     def matches(self, database, version: int, raw_len: int) -> bool:
         # raw_len is a cheap guard for callers (tests, stubs) that swap the list without bumping the version
@@ -750,12 +762,83 @@ class _FeedSnapshot:
 
     def warm(self, bnb_price_usd: float) -> None:
         """Builds the heavy per-version parts now (counts are built with the snapshot): the pulse, the secondary list,
-        the top gainers and the market-data body. Called from a background thread right after the data changed, so
+        the top gainers, the market-data body and the search index. Called from a background thread right after the data changed, so
         the first visitor does not wait for all of it."""
         self.stats()
         self.filtered("secondary")
         self.top_gainers(bnb_price_usd)
         self.market_body()
+        self.search_index()      # what /api/projects?search=<address> (every modal that needs a full record) looks up
+
+    # --- what /api/projects needs, built once per content version (it used to derive every record on every call) ---
+
+    def search_index(self):
+        """(names, symbols, contracts, {contract: [positions]}): the lowercased search fields of every project, parallel
+        to self.projects. About 2-3 MB; built on the first search of a version."""
+        with self._lock:
+            index = self._search_index
+        if index is not None:
+            return index
+        with self._index_lock:
+            with self._lock:
+                index = self._search_index
+            if index is None:
+                names = [(p.get("name") or "").lower() for p in self.projects]
+                symbols = [(p.get("symbol") or "").lower() for p in self.projects]
+                contracts = [(p.get("contract") or "").lower() for p in self.projects]
+                positions: Dict[str, list] = {}
+                for i, c in enumerate(contracts):
+                    positions.setdefault(c, []).append(i)
+                index = (names, symbols, contracts, positions)
+                with self._lock:
+                    self._search_index = index
+            return index
+
+    def project_rows(self) -> list:
+        """[(record, progress, status)] parallel to self.projects: the derived fields (derive_progress / derive_status)
+        for every project, without copying the records. About 1 MB; built once per version."""
+        with self._lock:
+            rows = self._rows
+        if rows is not None:
+            return rows
+        with self._index_lock:
+            with self._lock:
+                rows = self._rows
+            if rows is None:
+                rows = []
+                for p in self.projects:
+                    progress = derive_progress(p)
+                    rows.append((p, progress, derive_status(p, progress)))
+                with self._lock:
+                    self._rows = rows
+            return rows
+
+    def project_row(self, i: int):
+        """project_rows()[i], derived on the spot when the full list has not been built (a lookup by address needs
+        only the one or two records it matches)."""
+        with self._lock:
+            rows = self._rows
+        if rows is not None:
+            return rows[i]
+        p = self.projects[i]
+        progress = derive_progress(p)
+        return (p, progress, derive_status(p, progress))
+
+    def sort_keys(self, key_name: str) -> list:
+        """Sort keys of every project for `block`, `holders` or `score` (see _PROJECT_SORT_KEYS), parallel to self.projects."""
+        with self._lock:
+            keys = self._sort_keys.get(key_name)
+        if keys is not None:
+            return keys
+        fn = _PROJECT_SORT_KEYS[key_name]
+        with self._index_lock:
+            with self._lock:
+                keys = self._sort_keys.get(key_name)
+            if keys is None:
+                keys = [fn(p) for p in self.projects]
+                with self._lock:
+                    self._sort_keys[key_name] = keys
+            return keys
 
     def market_body(self) -> bytes:
         """Encoded /api/market-data body (identical to what SafeJSONResponse renders): the live numbers of the contracts
@@ -1308,33 +1391,56 @@ def get_projects(
 
     Bogus / pegged / synthetic assets are removed FIRST, so `total` and `count` describe the list that is
     actually returned. `status` and `progress` are derived from each record (see derive_status)."""
-    projs = [with_derived_fields(p) for p in db.get_all_projects() if isinstance(p, dict) and not is_bogus_or_synthetic_asset(p)]
+    snapshot, _ = _load_snapshot()
+    n = len(snapshot.projects)
+    q = search.lower().strip() if search else None
 
-    if search:
-        q = search.lower().strip()
-        projs = [p for p in projs if q in (p.get("name") or "").lower() or q in (p.get("symbol") or "").lower()
-                 or q in (p.get("contract") or "").lower()]
+    # Positions (in snapshot order, newest block first) of the projects that match the search. A full contract address
+    # is looked up directly: no scan over every record, and no derived fields for the records that do not match.
+    exact_address = bool(q) and ADDRESS_RE.fullmatch(q) is not None
+    if q:
+        names, symbols, contracts, by_contract = snapshot.search_index()
+        if exact_address:
+            hits = set(by_contract.get(q, ()))
+            hits.update(i for i, (a, b) in enumerate(zip(names, symbols)) if q in a or q in b)
+            idxs = sorted(hits)
+        else:
+            idxs = [i for i in range(n) if q in names[i] or q in symbols[i] or q in contracts[i]]
+        row_of = snapshot.project_row if exact_address else snapshot.project_rows().__getitem__
+    else:
+        idxs = list(range(n))
+        row_of = snapshot.project_rows().__getitem__
+
     if status:
         st = status.lower().strip()
-        projs = [p for p in projs if str(p.get("status") or "").lower() == st]
+        idxs = [i for i in idxs if str(row_of(i)[2] or "").lower() == st]
     if sniper_ready is not None:
-        projs = [p for p in projs if bool(p.get("sniper_ready")) == sniper_ready]
+        idxs = [i for i in idxs if bool(row_of(i)[0].get("sniper_ready")) == sniper_ready]
     if min_progress is not None:
-        projs = [p for p in projs if p["progress"] is not None and p["progress"] >= min_progress]
+        idxs = [i for i in idxs if row_of(i)[1] is not None and row_of(i)[1] >= min_progress]
 
     reverse = order.lower() == "desc"
     if sort_by == "progress":
-        known = sorted([p for p in projs if p["progress"] is not None], key=lambda x: x["progress"], reverse=reverse)
-        projs = known + [p for p in projs if p["progress"] is None]          # unknown progress always last
-    elif sort_by == "holders":
-        projs.sort(key=lambda x: int(filters._num(x.get("holders"))), reverse=reverse)
-    elif sort_by == "score":
-        projs.sort(key=lambda x: filters._num(x.get("score")), reverse=reverse)
+        known = sorted([i for i in idxs if row_of(i)[1] is not None], key=lambda i: row_of(i)[1], reverse=reverse)
+        idxs = known + [i for i in idxs if row_of(i)[1] is None]          # unknown progress always last
     else:
-        projs.sort(key=lambda x: int(filters._num(x.get("block"))), reverse=reverse)
+        key_name = sort_by if sort_by in ("holders", "score") else "block"
+        if exact_address:                       # a handful of matches: compute their keys directly
+            fn = _PROJECT_SORT_KEYS[key_name]
+            idxs.sort(key=lambda i: fn(snapshot.projects[i]), reverse=reverse)
+        else:
+            keys = snapshot.sort_keys(key_name)
+            idxs.sort(key=keys.__getitem__, reverse=reverse)
 
-    total = len(projs)
-    page = serve_records(projs[offset: offset + limit], slim=False)
+    total = len(idxs)
+    records = []
+    for i in idxs[offset: offset + limit]:     # the copies with progress / status filled in (with_derived_fields) are made for the page only
+        p, progress, derived_status = row_of(i)
+        d = dict(p)
+        d["progress"] = progress
+        d["status"] = derived_status
+        records.append(d)
+    page = serve_records(records, slim=False)
     return {"success": True, "total": total, "count": len(page), "offset": offset, "limit": limit, "projects": page}
 
 
