@@ -29,6 +29,7 @@ import uvicorn
 import filters
 import monitor
 from common.runtime import run_memory_guard_loop
+from compact import CompactRecord
 from db import db
 from filters import (
     BOGUS_SCAM_CONTRACTS,
@@ -1159,6 +1160,11 @@ def slim_for_list(p: dict) -> dict:
 SERVER_METRICS_KEY = "server_metrics"
 
 
+def _plain_copy(p: dict) -> dict:
+    """A new plain dict with every field of the record, in its key order (a CompactRecord is expanded)."""
+    return p.full() if isinstance(p, CompactRecord) else dict(p)
+
+
 def with_server_metrics(p: dict, bnb_price=None, bnb_live=None) -> dict:
     """A copy of the record with `server_metrics` and the refreshed profit fields. `bnb_price` / `bnb_live` default to
     the server's cached BNB/USD (pass them once per response so every record uses the same price)."""
@@ -1168,7 +1174,7 @@ def with_server_metrics(p: dict, bnb_price=None, bnb_live=None) -> dict:
         bnb_live = monitor.bnb_price_is_live()
     if bnb_price is None:
         bnb_price = monitor.cached_bnb_price()
-    out = dict(p)
+    out = _plain_copy(p)
     excluded = filters.is_excluded_asset(p)
     metrics = {
         "excluded": excluded,
@@ -1223,7 +1229,7 @@ def compute_live_top_gainers(projects, limit: int = TOP_GAINERS_LIMIT) -> list:
     for p in projects:
         if not isinstance(p, dict) or is_bogus_or_synthetic_asset(p):
             continue
-        d = dict(p)
+        d = p.hot() if isinstance(p, CompactRecord) else dict(p)    # the maths reads hot fields only: no blob is decoded
         try:
             info = monitor.update_post_mint_profit_metrics(d)
         except Exception:
@@ -1247,7 +1253,7 @@ def compute_live_top_gainers(projects, limit: int = TOP_GAINERS_LIMIT) -> list:
             "isSold": bool(info["is_sold"]),
             "isFree": bool(info["is_free"]),
             "holders": int(filters._num(d.get("holders"))),
-            "item": slim_for_list({k: d[k] for k in TOP_GAINER_ITEM_FIELDS if k in d}),
+            "item": slim_for_list({k: (d[k] if k in d else p[k]) for k in TOP_GAINER_ITEM_FIELDS if k in d or k in p}),
         })
     rows.sort(key=lambda r: (r["multiplier"] is not None, r["multiplier"] or 0.0, r["athProfit"]), reverse=True)
     return rows[:limit]
@@ -1406,7 +1412,7 @@ def derive_status(p: dict, progress=None) -> str:
 def with_derived_fields(p: dict) -> dict:
     """A copy of the record with `progress` and `status` filled in from its own data."""
     progress = derive_progress(p)
-    out = dict(p)
+    out = _plain_copy(p)
     out["progress"] = progress
     out["status"] = derive_status(p, progress)
     return out
@@ -1472,7 +1478,7 @@ def get_projects(
     records = []
     for i in idxs[offset: offset + limit]:     # the copies with progress / status filled in (with_derived_fields) are made for the page only
         p, progress, derived_status = row_of(i)
-        d = dict(p)
+        d = _plain_copy(p)
         d["progress"] = progress
         d["status"] = derived_status
         records.append(d)
@@ -1614,6 +1620,8 @@ if not os.environ.get("RENDER") and os.path.exists(os.path.join(workspace_dir, "
 def start_api(port=8080):
     """Runs the API under uvicorn."""
     print(f"[🌐 FastAPI & Uvicorn API Server] Serving on http://0.0.0.0:{port}...", flush=True)
+    if os.getenv("DB_COMPACT_CACHE", "1").strip().lower() not in ("0", "false", "no", "off"):
+        db.enable_compact_cache()      # the API keeps every record in RAM: cold fields stay compressed (compact.py)
     uvicorn.run(app, host="0.0.0.0", port=port, log_level="info")
 
 
