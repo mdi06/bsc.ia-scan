@@ -527,8 +527,8 @@ function updateDropAlertToggle() {
   if (typeof document === 'undefined' || typeof document.getElementById !== 'function') return;
   const btn = document.getElementById('dropAlertToggle');
   if (!btn) return;
-  // The visible label stays "ALERTS" (the header has no room for ON/OFF words at 1280px); the state is the icon, the
-  // colour, aria-pressed and the accessible name. "N/A" is shown only where the API is missing.
+  // The visible label spells out the state (ON / OFF / BLOCKED) next to the icon and colour, plus aria-pressed and the
+  // accessible name. "N/A" is shown only where the API is missing.
   const perm = getDropAlertPermission();
   let mode;
   let icon;
@@ -539,13 +539,13 @@ function updateDropAlertToggle() {
     mode = 'unsupported'; icon = '🚫'; visible = 'ALERTS N/A'; stateWord = 'not supported here';
     hint = 'Drop alerts need browser notifications, which this browser does not offer. Nothing is requested.';
   } else if (perm === 'denied') {
-    mode = 'blocked'; icon = '⛔'; visible = 'ALERTS'; stateWord = 'blocked';
+    mode = 'blocked'; icon = '⛔'; visible = 'ALERTS BLOCKED'; stateWord = 'blocked';
     hint = 'Notifications are blocked for this site. Click for how to allow them.';
   } else if (isDropAlertActive()) {
-    mode = 'on'; icon = '🔔'; visible = 'ALERTS'; stateWord = 'on';
+    mode = 'on'; icon = '🔔'; visible = 'ALERTS ON'; stateWord = 'on';
     hint = 'Drop alerts are on: one notification per new drop that matches your filter or is Free Mint + Snipe Ready (at most every 30 seconds). Click to turn off.';
   } else {
-    mode = 'off'; icon = '🔕'; visible = 'ALERTS'; stateWord = 'off';
+    mode = 'off'; icon = '🔕'; visible = 'ALERTS OFF'; stateWord = 'off';
     hint = 'Get a browser notification when a new drop matches your filter or is Free Mint + Snipe Ready. Click to allow.';
   }
   // Polls call this while alerts are on but blocked; re-rendering an unchanged state would only churn the DOM.
