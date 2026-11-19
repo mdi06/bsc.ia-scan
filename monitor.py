@@ -62,13 +62,39 @@ def matches_tracked_registry(data_str: str) -> bool:
     return any(b in d for b in TRACKED_REGISTRY_BYTES)
 
 # Default BSC RPC Endpoints (with fallback)
-RPC_ENDPOINTS = [
+PUBLIC_RPC_ENDPOINTS = [
     "https://bsc-rpc.publicnode.com",
     "https://bsc-dataseed.bnbchain.org",
     "https://bsc-dataseed1.defibit.io",
     "https://bsc-dataseed1.ninicoin.io",
     "https://bsc.publicnode.com"
 ]
+# eth_getLogs for the agent-ID mint counter: publicnode serves wide block ranges.
+PUBLIC_LOG_RPC_ENDPOINTS = [
+    "https://bsc-rpc.publicnode.com",
+    "https://bsc.publicnode.com"
+]
+
+
+def build_rpc_endpoints(public: List[str], env: Optional[Dict[str, str]] = None) -> List[str]:
+    """Public endpoints, with the keyed provider from BSC_RPC_URL (.env.worker) placed first when set.
+
+    The value is used only if it is one https URL with no whitespace. Anything else is ignored, so a
+    half-pasted line cannot break the worker. The URL is never logged: the endpoint list is never printed.
+    """
+    env = os.environ if env is None else env
+    keyed = (env.get("BSC_RPC_URL") or "").strip()
+    endpoints: List[str] = []
+    if keyed.startswith("https://") and not any(ch.isspace() for ch in keyed):
+        endpoints.append(keyed)
+    for url in public:
+        if url not in endpoints:
+            endpoints.append(url)
+    return endpoints
+
+
+RPC_ENDPOINTS = build_rpc_endpoints(PUBLIC_RPC_ENDPOINTS)
+LOG_RPC_ENDPOINTS = build_rpc_endpoints(PUBLIC_LOG_RPC_ENDPOINTS)
 
 DEFAULT_WALLET = os.environ.get("AGENT_WALLET", "0xA3FbE3664dB8478c094dD36b2BB306d72CBCb37A")
 # On-Chain DEX & Infrastructure Addresses
