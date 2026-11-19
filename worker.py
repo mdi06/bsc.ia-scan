@@ -1504,11 +1504,8 @@ def run_proxy_factory_watcher_loop():
 def run_agent_id_counter_loop():
     """Counts new Binance .ai Agent ID mints (registry Transfer-from-zero logs) and persists the total."""
     print("[🤖 Agent ID Tracker] Starting live SPACE ID (.ai) mint counter loop...", flush=True)
-    # publicnode allows eth_getLogs over up to 50k blocks per call.
-    logs_rpc = monitor.BscRpcClient([
-        "https://bsc-rpc.publicnode.com",
-        "https://bsc.publicnode.com"
-    ])
+    # publicnode allows eth_getLogs over up to 50k blocks per call. A keyed BSC_RPC_URL goes first when set.
+    logs_rpc = monitor.BscRpcClient(monitor.LOG_RPC_ENDPOINTS)
     transfer_topic = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
     zero_from_topic = "0x0000000000000000000000000000000000000000000000000000000000000000"
     registry_addr = monitor.AGENT_ID_REGISTRY
