@@ -8,6 +8,7 @@ worker.py's job.
 """
 
 import bisect
+import gzip
 import json
 import math
 import os
@@ -16,6 +17,7 @@ import secrets
 import threading
 import time
 import traceback
+from collections import OrderedDict
 from typing import Dict, Optional
 from fastapi import FastAPI, Query, HTTPException, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
@@ -83,7 +85,20 @@ app = FastAPI(
 )
 
 # Compress responses to stay under Render's 5 GB monthly bandwidth cap.
-app.add_middleware(GZipMiddleware, minimum_size=500)
+GZIP_MIN_SIZE = 500
+app.add_middleware(GZipMiddleware, minimum_size=GZIP_MIN_SIZE)
+
+# Finished responses (/api/feed, /api/stats, /api/market-data) are encoded and compressed once and reused until their
+# inputs change, instead of for every visitor (see _BodyCache). API_BODY_CACHE=0 switches it off (the code then
+# answers exactly as it did before); tests use that to compare the two.
+BODY_CACHE_ENABLED = os.environ.get("API_BODY_CACHE", "1") != "0"
+BODY_CACHE_MAX_BYTES = 6 * 1024 * 1024     # compressed bytes held per snapshot (one snapshot is current at a time)
+BODY_CACHE_GZIP_LEVEL = 6                  # the middleware used 9; 6 is ~3x cheaper for ~2% more bytes
+# A background thread rebuilds the heavy per-version lists right after the data changes, so the first visitor does not
+# wait for them. It only runs while the data endpoints have been used recently.
+SNAPSHOT_WARMER_ENABLED = os.environ.get("API_SNAPSHOT_WARMER", "1") != "0"
+SNAPSHOT_WARM_INTERVAL_SEC = float(os.environ.get("API_WARM_INTERVAL_SEC", "15"))
+SNAPSHOT_WARM_IDLE_AFTER_SEC = 300.0
 
 # In-memory rate limiting: fixed 60s window per client IP.
 RATE_LIMIT_WINDOW = 60
@@ -178,6 +193,8 @@ MAX_FAVORITES = 500
 def startup_event():
     t = threading.Thread(target=run_memory_guard_loop, daemon=True, name="ApiMemoryGuard")
     t.start()
+    if SNAPSHOT_WARMER_ENABLED:
+        threading.Thread(target=_snapshot_warmer_loop, daemon=True, name="SnapshotWarmer").start()
 
 
 @app.post("/api/admin/purge-bogus", dependencies=[Depends(require_admin)])
@@ -528,6 +545,101 @@ def compute_global_overview_stats(all_projs=None) -> dict:
 PULSE_CACHE_TTL_SEC = 5.0
 
 
+class _Encoded:
+    """One finished JSON response body. Bodies the middleware would compress (>= GZIP_MIN_SIZE) are held only as gzip
+    bytes (about 1/9 of the plain size); a client that does not accept gzip gets them decompressed, which is cheap
+    and rare. Small bodies are held plain, as the middleware never compresses them."""
+    __slots__ = ("gz", "plain")
+
+    def __init__(self, plain: bytes):
+        if len(plain) >= GZIP_MIN_SIZE:
+            self.gz, self.plain = gzip.compress(plain, BODY_CACHE_GZIP_LEVEL), None
+        else:
+            self.gz, self.plain = None, plain
+
+    def size(self) -> int:
+        return len(self.gz if self.gz is not None else self.plain)
+
+    def plain_bytes(self) -> bytes:
+        return self.plain if self.plain is not None else gzip.decompress(self.gz)
+
+
+class _BodyCache:
+    """Finished response bodies of one snapshot (one content version), by key.
+
+    An entry also remembers the volatile inputs it was built from (BNB price, the agent-wallet counter, the pulse...):
+    it is served only while the caller's inputs compare equal, otherwise it is rebuilt and replaced, so a cached body
+    is always byte-for-byte what the uncached code would have produced from the same inputs. Total size is bounded
+    (least recently used entries go first) and the whole cache dies with its snapshot when the data changes. Builds
+    are serialised: concurrent first requests for a page wait for one build instead of each doing it."""
+
+    def __init__(self, max_bytes: int):
+        self.max_bytes = max_bytes
+        self._lock = threading.Lock()
+        self._build_lock = threading.Lock()
+        self._entries: "OrderedDict" = OrderedDict()   # key -> (inputs, _Encoded)
+        self._bytes = 0
+
+    def _get(self, key, inputs):
+        with self._lock:
+            hit = self._entries.get(key)
+            if hit is not None and hit[0] == inputs:
+                self._entries.move_to_end(key)
+                return hit[1]
+        return None
+
+    def _put(self, key, inputs, enc: _Encoded) -> None:
+        with self._lock:
+            old = self._entries.pop(key, None)
+            if old is not None:
+                self._bytes -= old[1].size()
+            self._entries[key] = (inputs, enc)
+            self._bytes += enc.size()
+            while self._bytes > self.max_bytes and len(self._entries) > 1:
+                _, (_, dropped) = self._entries.popitem(last=False)
+                self._bytes -= dropped.size()
+
+    def get_or_build(self, key, inputs, build) -> _Encoded:
+        """The cached body for `key` if it was built from equal `inputs`, else `build()` (plain bytes) encoded and stored."""
+        hit = self._get(key, inputs)
+        if hit is not None:
+            return hit
+        with self._build_lock:
+            hit = self._get(key, inputs)       # another thread may have built it while this one waited
+            if hit is not None:
+                return hit
+            enc = _Encoded(build())
+            self._put(key, inputs, enc)
+            return enc
+
+    def stats(self) -> dict:
+        with self._lock:
+            return {"entries": len(self._entries), "bytes": self._bytes}
+
+
+def _accepts_gzip(request: Request) -> bool:
+    return "gzip" in request.headers.get("accept-encoding", "")      # the same test GZipMiddleware makes
+
+
+def _encoded_response(request: Request, enc: _Encoded, headers: Optional[dict] = None) -> Response:
+    """The response for a cached body. A gzip-accepting client gets the stored compressed bytes with Content-Encoding
+    set, which makes GZipMiddleware pass them through untouched."""
+    headers = dict(headers or {})
+    if enc.gz is not None and _accepts_gzip(request):
+        headers["Content-Encoding"] = "gzip"
+        headers["Vary"] = "Accept-Encoding"
+        return Response(content=enc.gz, status_code=200, headers=headers, media_type="application/json")
+    return Response(content=enc.plain_bytes(), status_code=200, headers=headers, media_type="application/json")
+
+
+def _cached_json(request: Request, snapshot, key, inputs, headers: dict, content_fn) -> Response:
+    """A 200 JSON response whose body is `content_fn()` encoded as SafeJSONResponse does, cached on the snapshot."""
+    if not BODY_CACHE_ENABLED:
+        return SafeJSONResponse(status_code=200, headers=headers, content=content_fn())
+    enc = snapshot.bodies.get_or_build(key, inputs, lambda: SafeJSONResponse(content=content_fn()).body)
+    return _encoded_response(request, enc, headers)
+
+
 class _FeedSnapshot:
     """Everything derived from one project list (one content version). Treat the lists it hands out as read-only."""
 
@@ -543,12 +655,15 @@ class _FeedSnapshot:
             print(f"[⚠️ Overview Stats Fallback Error] {e}", flush=True)
             self.counts = None
         self._lock = threading.Lock()
+        self._filter_lock = threading.Lock()   # one filter list is built at a time, outside self._lock
+        self._pulse_lock = threading.Lock()    # one pulse recomputation at a time, outside self._lock
         self._by_filter: Dict[str, list] = {}
         self._int_blocks = None           # (-block for each project) when the list is block-descending, else False
         self._pulse = None
         self._pulse_at = 0.0
         self._market_body = None
         self._top_gainers = None          # (bnb price it was computed with, rows)
+        self.bodies = _BodyCache(BODY_CACHE_MAX_BYTES)
 
     def matches(self, database, version: int, raw_len: int) -> bool:
         # raw_len is a cheap guard for callers (tests, stubs) that swap the list without bumping the version
@@ -561,11 +676,19 @@ class _FeedSnapshot:
             return self.projects
         with self._lock:
             out = self._by_filter.get(name)
+        if out is not None:
+            return out
+        # Built outside self._lock (the secondary list takes ~100 ms locally, ~1 s on Render): feed pages, the delta
+        # poll and the pulse must not wait behind it. Concurrent requests for the same list wait for the one build.
+        with self._filter_lock:
+            with self._lock:
+                out = self._by_filter.get(name)
             if out is None:
                 out = [d for d in self.projects if predicate(d)]
                 if name == "secondary":
                     out.sort(key=lambda x: get_sanitized_mcap(x) or 0.0, reverse=True)
-                self._by_filter[name] = out
+                with self._lock:
+                    self._by_filter[name] = out
             return out
 
     def newer_than(self, since_block: int) -> list:
@@ -581,12 +704,29 @@ class _FeedSnapshot:
         return self.projects[:bisect.bisect_left(neg_blocks, -since_block)]
 
     def pulse(self):
+        """The 24h pulse, recomputed when its cached value is PULSE_CACHE_TTL_SEC old. The recomputation (~85 ms locally,
+        ~1 s on Render) runs outside self._lock and in one thread only: while it runs, other requests get the previous
+        value (at most one recomputation older than the TTL already allows); only the very first call waits for it."""
         with self._lock:
-            now = time.monotonic()
-            if self._pulse is None or now - self._pulse_at >= PULSE_CACHE_TTL_SEC:
-                self._pulse = compute_pulse_24h(self.projects)
-                self._pulse_at = now
-            return self._pulse
+            if self._pulse is not None and time.monotonic() - self._pulse_at < PULSE_CACHE_TTL_SEC:
+                return self._pulse
+            previous = self._pulse
+        if previous is not None:
+            if not self._pulse_lock.acquire(blocking=False):
+                return previous               # another thread is recomputing it
+        else:
+            self._pulse_lock.acquire()        # nothing to serve yet: wait for the first computation
+            with self._lock:
+                if self._pulse is not None:   # the thread we waited for finished it
+                    self._pulse_lock.release()
+                    return self._pulse
+        try:
+            pulse = compute_pulse_24h(self.projects)
+            with self._lock:
+                self._pulse, self._pulse_at = pulse, time.monotonic()
+            return pulse
+        finally:
+            self._pulse_lock.release()
 
     def stats(self) -> dict:
         """Same dict compute_global_overview_stats builds, from the cached counts; a new dict on every call."""
@@ -607,6 +747,15 @@ class _FeedSnapshot:
         with self._lock:
             self._top_gainers = (bnb_price_usd, rows)
         return rows
+
+    def warm(self, bnb_price_usd: float) -> None:
+        """Builds the heavy per-version parts now (counts are built with the snapshot): the pulse, the secondary list,
+        the top gainers and the market-data body. Called from a background thread right after the data changed, so
+        the first visitor does not wait for all of it."""
+        self.stats()
+        self.filtered("secondary")
+        self.top_gainers(bnb_price_usd)
+        self.market_body()
 
     def market_body(self) -> bytes:
         """Encoded /api/market-data body (identical to what SafeJSONResponse renders): the live numbers of the contracts
@@ -639,13 +788,18 @@ _snapshot_lock = threading.Lock()
 _current_snapshot: Optional[_FeedSnapshot] = None
 
 
-def _load_snapshot():
+_last_data_request = 0.0     # time.monotonic() of the last data-endpoint request (the warmer only runs after one)
+
+
+def _load_snapshot(touch: bool = True):
     """(snapshot, content_version) for the project list the database serves right now.
 
     The version is read before and after get_all_projects(): if it moved in between (the call refreshed the cache,
     or a write landed), the list may belong to either version, so the snapshot is built for this request only and
     not kept. The next request then caches normally."""
-    global _current_snapshot
+    global _current_snapshot, _last_data_request
+    if touch:
+        _last_data_request = time.monotonic()
     database = db
     v_before = database.content_version()
     raw = database.get_all_projects()
@@ -658,6 +812,23 @@ def _load_snapshot():
         if v_before == version:
             _current_snapshot = snap
         return snap, version
+
+
+def _snapshot_warmer_loop() -> None:
+    """Refreshes the project list and builds the heavy per-version parts in the background, so a visitor rarely
+    triggers it. Idle (no Supabase reads, no work) until a data endpoint was used in the last few minutes."""
+    warmed = None
+    while True:
+        time.sleep(SNAPSHOT_WARM_INTERVAL_SEC)
+        if time.monotonic() - _last_data_request > SNAPSHOT_WARM_IDLE_AFTER_SEC:
+            continue
+        try:
+            snap, _ = _load_snapshot(touch=False)
+            if snap is not warmed:
+                snap.warm(monitor.cached_bnb_price())
+                warmed = snap
+        except Exception as e:
+            print(f"[⚠️ Snapshot Warmer] {e}", flush=True)
 
 
 # Main route: /api/stats. /api/overview and /api/summary are aliases kept for external clients.
@@ -674,10 +845,10 @@ def get_overview_stats(request: Request):
     client_etag = request.headers.get("if-none-match")
     if _etag_matches(client_etag, stats_etag):
         return Response(status_code=304, headers={"ETag": stats_etag, "Cache-Control": "public, max-age=5"})
-    return SafeJSONResponse(
-        status_code=200,
-        headers={"ETag": stats_etag, "Cache-Control": "public, max-age=5"},
-        content={
+    return _cached_json(
+        request, snapshot, ("stats",), stats,
+        {"ETag": stats_etag, "Cache-Control": "public, max-age=5"},
+        lambda: {
             "success": True,
             "mode": "stats",
             "stats": stats,
@@ -685,8 +856,7 @@ def get_overview_stats(request: Request):
             "total_created_wallets": stats["total_created_wallets"],
             "agent_wallets_block": stats.get("agent_wallets_block", 0),
             "latest_block": stats.get("latest_block")
-        }
-    )
+        })
 
 
 @app.get("/api/bnb-price")
@@ -707,7 +877,7 @@ MARKET_FRESHNESS_FIELDS = ("market_updated_at",)
 
 
 @app.get("/api/market-data")
-def get_market_data():
+def get_market_data(request: Request):
     """Latest market numbers for the contracts in seeded_smart_drops.json, keyed by address, plus `_stale`: the ones
     whose market data the worker cleared as stale.
 
@@ -715,8 +885,11 @@ def get_market_data():
     seeded file, which contains drops that /api/feed never returns. Stale contracts are listed so a seeded drop
     does not keep its frozen numbers once the live record is cleared."""
     snapshot, _ = _load_snapshot()
-    return Response(content=snapshot.market_body(), media_type="application/json",
-                    headers={"Cache-Control": "public, max-age=60"})
+    headers = {"Cache-Control": "public, max-age=60"}
+    if not BODY_CACHE_ENABLED:
+        return Response(content=snapshot.market_body(), media_type="application/json", headers=headers)
+    enc = snapshot.bodies.get_or_build(("market",), None, snapshot.market_body)
+    return _encoded_response(request, enc, headers)
 
 
 @app.get("/agent_id_stats.json")
@@ -755,6 +928,11 @@ def get_feed(
     agent_wallets_block = stats.get("agent_wallets_block", 0)
 
     client_etag = request.headers.get("if-none-match")
+    # What a cached body also depends on besides the data (which the snapshot / content version stands for): the
+    # BNB price and its liveness (server metrics of every record), and the stats dict (agent-wallet counter, pulse).
+    # They are read once here and passed down, so the body, its cache key and the check on a hit all use the same values.
+    bnb_price, bnb_live = monitor.cached_bnb_price(), monitor.bnb_price_is_live()
+    volatile = (bnb_price, bnb_live, stats)
 
     if since_block is not None:
         delta = snapshot.newer_than(since_block)
@@ -764,10 +942,10 @@ def get_feed(
             if _etag_matches(client_etag, delta_etag):
                 return Response(status_code=304, headers={"ETag": delta_etag, "Cache-Control": "public, max-age=5"})
             # No new drops: send a minimal payload without the nested stats.
-            return SafeJSONResponse(
-                status_code=200,
-                headers={"ETag": delta_etag, "Cache-Control": "public, max-age=5"},
-                content={
+            return _cached_json(
+                request, snapshot, ("delta-empty",), (total_agent_wallets, agent_wallets_block),
+                {"ETag": delta_etag, "Cache-Control": "public, max-age=5"},
+                lambda: {
                     "success": True,
                     "mode": "delta",
                     "total": total,
@@ -776,14 +954,13 @@ def get_feed(
                     "agent_wallets": total_agent_wallets,
                     "agent_wallets_block": agent_wallets_block,
                     "projects": []
-                }
-            )
+                })
 
         delta_etag = f'"v{content_version}-{latest_block}-{total}-{total_agent_wallets}-delta-{since_block}"'
-        return SafeJSONResponse(
-            status_code=200,
-            headers={"ETag": delta_etag, "Cache-Control": "public, max-age=5"},
-            content={
+        return _cached_json(
+            request, snapshot, ("delta", since_block), volatile,
+            {"ETag": delta_etag, "Cache-Control": "public, max-age=5"},
+            lambda: {
                 "success": True,
                 "mode": "delta",
                 "total": total,
@@ -791,10 +968,9 @@ def get_feed(
                 "latest_block": latest_block,
                 "agent_wallets": total_agent_wallets,
                 "agent_wallets_block": agent_wallets_block,
-                "projects": serve_records(delta),
+                "projects": serve_records(delta, price=bnb_price, live=bnb_live),
                 "stats": stats
-            }
-        )
+            })
 
     target_list = snapshot.filtered(filter)
 
@@ -805,10 +981,11 @@ def get_feed(
     if _etag_matches(client_etag, feed_etag):
         return Response(status_code=304, headers={"ETag": feed_etag, "Cache-Control": "public, max-age=5"})
 
-    return SafeJSONResponse(
-        status_code=200,
-        headers={"ETag": feed_etag, "Cache-Control": "public, max-age=5"},
-        content={
+    # an unknown filter name gives the whole list, so it shares the unfiltered entry instead of making its own
+    return _cached_json(
+        request, snapshot, ("feed", filter if filter in FEED_FILTERS else None, offset, limit), volatile,
+        {"ETag": feed_etag, "Cache-Control": "public, max-age=5"},
+        lambda: {
             "success": True,
             "mode": "feed",
             "total": total,
@@ -818,10 +995,9 @@ def get_feed(
             "limit": limit,
             "has_more": (offset + limit) < target_total,
             "latest_block": latest_block,
-            "projects": serve_records(paginated),
+            "projects": serve_records(paginated, price=bnb_price, live=bnb_live),
             "stats": stats
-        }
-    )
+        })
 
 
 # Calldata longer than this is left out of list responses (feed, top gainers): a few contracts carry up to ~98 KB
@@ -898,11 +1074,12 @@ def with_server_metrics(p: dict, bnb_price=None, bnb_live=None) -> dict:
     return out
 
 
-def serve_records(projects, slim: bool = True) -> list:
+def serve_records(projects, slim: bool = True, price=None, live=None) -> list:
     """Records as sent in responses: server-computed metrics added (the BNB/USD price is read once for the whole
-    batch) and, for list responses (`slim`), oversized calldata left out. /api/projects keeps the full record."""
-    live = monitor.bnb_price_is_live()
-    price = monitor.cached_bnb_price()
+    batch, or passed in by a caller that also keys a cache on it) and, for list responses (`slim`), oversized calldata
+    left out. /api/projects keeps the full record."""
+    live = monitor.bnb_price_is_live() if live is None else live
+    price = monitor.cached_bnb_price() if price is None else price
     out = [with_server_metrics(p, price, live) for p in projects]
     return [slim_for_list(p) for p in out] if slim else out
 
