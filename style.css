@@ -235,6 +235,8 @@ body {
   align-items: center;
   gap: 6px;
   margin-top: 6px;
+  /* Layout stability: the chips are filled in by app.js after first paint; hold their row height from the start. */
+  min-height: 25px;
   overflow-x: auto;
   overflow-y: hidden;
   scrollbar-width: none;
@@ -790,6 +792,14 @@ mark.search-hl {
 }
 
 /* Navigation & Controls */
+/* Layout stability (narrow desktop, 941-1079px): the four tab labels gain their counts after the feed loads, and the
+   tab row then wraps onto a second line, which pushes the whole page down. Hold the wrapped height from the start. */
+@media (min-width: 941px) and (max-width: 1079px) {
+  .nav-container {
+    min-height: 112px;
+  }
+}
+
 .nav-container {
   display: flex;
   flex-direction: column;
@@ -1916,6 +1926,12 @@ mark.search-hl {
   -webkit-overflow-scrolling: touch;
   scrollbar-width: thin;
   scrollbar-color: rgba(240, 185, 11, 0.3) rgba(14, 18, 27, 0.8);
+}
+
+/* Layout stability: until the first feed render, hold the height the table reaches once rows are in
+   (renderTable removes this class), so the rows filling in do not push the footer and everything below. */
+.table-wrapper.table-reserve {
+  min-block-size: calc(100vh - 200px);
 }
 
 table {
@@ -3887,7 +3903,8 @@ a.inspect-btn:hover {
     gap: 6px;
     padding: 8px 10px;
     height: auto;
-    min-height: 0;
+    /* Layout stability: the stat values fill in after the feed loads; hold the filled height from the start. */
+    min-height: 281px;
     max-height: none;
     border-radius: 8px;
     border: 1px solid rgba(240, 185, 11, 0.25);
@@ -4989,6 +5006,12 @@ a.inspect-btn:hover {
   gap: 6px;
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
   transition: border-color 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;
+  /* Layout stability: the runner / launch / smart / NFT lists fill in after the feed loads. Their filled height is
+     reserved here so the hero does not grow under the banner and table (221px = the settled height of the tallest
+     card on desktop; phones use the carousel rule below, 209px). */
+  min-height: 221px;
+  /* The four cards share equal grid tracks; without this, a card's unbreakable header/footer text would widen its track. */
+  min-width: 0;
 }
 
 .pulse-card:hover {
@@ -5027,6 +5050,8 @@ a.inspect-btn:hover {
   font-size: 14px;
 }
 
+/* Layout stability: the card's header and footer stay on one line, so the web font swapping in (a fallback face
+   wraps a little differently) does not change the card's height. A line too long for the card is cut with an ellipsis. */
 .pulse-card-title {
   font-size: 11px;
   font-weight: 800;
@@ -5034,6 +5059,19 @@ a.inspect-btn:hover {
   letter-spacing: 0.6px;
   flex: 1;
   font-family: var(--font-sans);
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Phones: the card is narrow, so a long title may take two lines (it is cut only on desktop widths). */
+@media (max-width: 768px) {
+  .pulse-card-title {
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+  }
 }
 
 .pulse-card-badge {
@@ -5044,6 +5082,7 @@ a.inspect-btn:hover {
   letter-spacing: 0.3px;
   border: 1px solid rgba(255, 255, 255, 0.12);
   font-family: var(--font-mono);
+  white-space: nowrap;
 }
 
 .pulse-card-runner .pulse-card-badge {
@@ -5074,6 +5113,8 @@ a.inspect-btn:hover {
   display: flex;
   flex-direction: column;
   gap: 4px;
+  /* Layout stability: the list inside fills in after the feed loads; hold its filled height. */
+  min-height: 129px;
 }
 
 /* Mini Ranked List for Top 3 Runners & Top 3 Smart Mints */
@@ -5345,6 +5386,9 @@ a.inspect-btn:hover {
   font-size: 10.5px;
   padding-top: 4px;
   border-top: 1px dashed rgba(255, 255, 255, 0.06);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .pulse-dex-link {
@@ -5458,7 +5502,8 @@ a.inspect-btn:hover {
     box-sizing: border-box !important;
     margin: 0 !important;
     height: auto !important;
-    min-height: 160px;
+    /* Layout stability: the settled height of a filled carousel card on phones (see .pulse-card) */
+    min-height: 209px;
   }
 
   /* Carousel Navigation Bar & Slide Pills */
