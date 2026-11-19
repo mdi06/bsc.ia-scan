@@ -2891,7 +2891,6 @@ function openInspectModalByContract(contractAddress, fallbackData = null) {
   if (target && modalFn) {
     const finalTarget = target.item ? { ...target, ...target.item } : target;
     modalFn(finalTarget);
-    if (finalTarget._slim) upgradeSlimPulseItem(finalTarget);
   }
 }
 
@@ -3181,6 +3180,39 @@ function isSecondaryMarketAsset(d) {
 
 let hasLoadedSecondaryDrops = false;
 let isLoadingSecondaryDrops = false;
+// The Secondary list is the top SECONDARY_FIRST_PAGE + SECONDARY_REST_PAGE by market cap, in two requests. The second one
+// starts SECONDARY_OVERLAP rows early because the ranking can shift between the two (a minute-old snapshot each); the
+// merge ignores contracts it already has.
+const SECONDARY_FIRST_PAGE = 150;
+const SECONDARY_REST_PAGE = 150;
+const SECONDARY_OVERLAP = 10;
+let secondaryRestRequested = false;
+
+function afterSecondaryMerge() {
+  updateSecondaryTabCount();
+  updateSecondaryBannerUI();
+  updateDailyPulseUI();
+  if (activeTab === 'SECONDARY') {
+    renderTable();
+  }
+}
+
+async function loadSecondaryRest() {
+  if (secondaryRestRequested) return;
+  secondaryRestRequested = true;
+  try {
+    const offset = SECONDARY_FIRST_PAGE - SECONDARY_OVERLAP;
+    const res = await fetchWithTimeout(
+      `${BACKEND_URL}/api/feed?filter=secondary&limit=${SECONDARY_REST_PAGE + SECONDARY_OVERLAP}&offset=${offset}&view=list`,
+      { cache: 'default' }, 8000);
+    if (!res || !res.ok) { secondaryRestRequested = false; return; }
+    const payload = await res.json();
+    const drops = Array.isArray(payload) ? payload : (payload.projects || []);
+    if (drops.length > 0 && mergeDropsIntoAllDrops(drops) > 0) afterSecondaryMerge();
+  } catch (err) {
+    secondaryRestRequested = false;      // the first page is already on screen; a later load tries again
+  }
+}
 
 async function loadSecondaryDrops() {
   if (hasLoadedSecondaryDrops) return;
@@ -3194,9 +3226,12 @@ async function loadSecondaryDrops() {
   try {
     // One attempt only: BACKEND_URL already is the Render host in production, so a second request to the same
     // host would just wait out another timeout on a sleeping server.
+    // `view=list` asks for the slim record (no modal-only fields, see api.LIST_VIEW_DROP); an older backend ignores it
+    // and answers with the full shape, which works the same. The first page is what the tab shows first (about 55 KB
+    // gzipped instead of the 137 KB the 300 full records took); the rest follows in the background.
     let res;
     try {
-      res = await fetchWithTimeout(`${BACKEND_URL}/api/feed?filter=secondary&limit=300`, { cache: 'default' }, 8000);
+      res = await fetchWithTimeout(`${BACKEND_URL}/api/feed?filter=secondary&limit=${SECONDARY_FIRST_PAGE}&view=list`, { cache: 'default' }, 8000);
     } catch (e1) {
       return;
     }
@@ -3207,12 +3242,8 @@ async function loadSecondaryDrops() {
       if (Array.isArray(drops) && drops.length > 0) {
         mergeDropsIntoAllDrops(drops);
         hasLoadedSecondaryDrops = true;
-        updateSecondaryTabCount();
-        updateSecondaryBannerUI();
-        updateDailyPulseUI();
-        if (activeTab === 'SECONDARY') {
-          renderTable();
-        }
+        afterSecondaryMerge();
+        if (payload && payload.has_more) setTimeout(loadSecondaryRest, 0);
       }
     }
   } catch (err) {
@@ -7154,18 +7185,26 @@ async function loadFullMintCalldata(item) {
   return true;
 }
 
-// The Pulse cards (runners, launches, NFT mints) list records the server ranked over the whole dataset, and send only the
-// few fields a card shows (`_slim`). A click on one that this page has not loaded as a full record opens the modal at
-// once with that row, then replaces it with the complete record when the API answers (one request, only on a click).
+// Some lists carry slim records (`_slim`): the Pulse cards (runners, launches, NFT mints: only what a card shows) and the
+// Secondary list (`view=list`: no modal-only fields). A slim record opens the modal at once, then is replaced by the
+// complete record when the API answers: one request, only on a click. The full fields are copied into every object the
+// page holds for that contract (the list row, the Pulse row, the one the modal shows), so later opens are complete.
 const slimPulseRequested = new Set();
-function upgradeSlimPulseItem(item) {
+function upgradeSlimItem(item) {
   const c = String((item && item.contract) || '').toLowerCase();
   if (!c || slimPulseRequested.has(c)) return;
   slimPulseRequested.add(c);
   fetchFullProject(c).then(full => {
     if (!full) { slimPulseRequested.delete(c); return; }   // try again on the next click
+    const apply = (obj) => {
+      if (obj && obj._slim) { Object.assign(obj, full); delete obj._slim; }
+    };
+    allDrops.forEach(d => { if (String((d && d.contract) || '').toLowerCase() === c) apply(d); });
+    apply(item);
     pulseItemsMap.set(c, full);
-    if (currentInspectItem && String(currentInspectItem.contract || '').toLowerCase() === c) openModal(full, 'redraw');
+    if (currentInspectItem && String(currentInspectItem.contract || '').toLowerCase() === c) {
+      openModal(currentInspectItem._slim ? full : currentInspectItem, 'redraw');
+    }
   });
 }
 
@@ -7253,7 +7292,9 @@ function openModal(item, source = 'direct') {
     addRecentInspected(item);
     setupModalTelemetry(item, source);
   }
-  if (item.has_mint_calldata && !item.mint_calldata && !item._calldataRequested) {
+  if (item._slim) upgradeSlimItem(item);
+  // (a slim record's upgrade above fetches the whole record, calldata included: no second request for it)
+  if (item.has_mint_calldata && !item.mint_calldata && !item._calldataRequested && !item._slim) {
     item._calldataRequested = true;
     loadFullMintCalldata(item).then(ok => {
       if (ok && currentInspectItem === item) openModal(item, 'redraw');

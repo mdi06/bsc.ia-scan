@@ -143,5 +143,47 @@ const BIG = '0x' + 'ab'.repeat(2000);
   assert.strictEqual(seededDrops[1].lp_usd, 500, 'a field the response leaves out is not cleared');
   assert.strictEqual(seededDrops[2].token_price_usd, 7);
   console.log('✔ Market overlay: _stale clears seeded numbers, absent fields are left alone: PASS');
+
+  // ---- Secondary list: slim records, first page now and the rest in the background
+  const { loadSecondaryDrops, getAllDrops } = app;
+  const sec = (n, extra = {}) => ({ contract: '0x' + n.toString(16).padStart(40, '0'), name: 'S' + n, symbol: 'S' + n,
+    standard: 'BEP-20 Token (18 decimals)', block: 1000 - n, lp_usd: 5000, token_price_usd: 0.1, market_cap: 100000 - n, _slim: true, ...extra });
+  setAllDrops([]);
+  const secUrls = [];
+  global.fetch = async (url) => {
+    secUrls.push(String(url));
+    const second = String(url).includes('offset=140');
+    return { ok: true, status: 200, json: async () => (second
+      ? { projects: [sec(145), sec(146), sec(200)], has_more: false, view: 'list' }
+      : { projects: [sec(1, { has_mint_calldata: true }), sec(2), sec(145)], has_more: true, view: 'list' }) };
+  };
+  await loadSecondaryDrops();
+  assert.ok(secUrls[0].includes('/api/feed?filter=secondary&limit=150&view=list'), 'the first page asks for 150 slim records');
+  await new Promise(r => setTimeout(r, 60));
+  assert.ok(secUrls[1].includes('/api/feed?filter=secondary&limit=160&offset=140&view=list'), 'the rest starts 10 rows early');
+  assert.strictEqual(secUrls.length, 2);
+  assert.deepStrictEqual(getAllDrops().map(d => d.name).sort(), ['S1', 'S145', 'S146', 'S2', 'S200'], 'the overlapping row is kept once');
+  console.log('✔ Secondary list: slim first page now, the rest in the background, overlap merged once: PASS');
+
+  // ---- a slim record opened from a list row is upgraded once, in place, with one request
+  const slimRow = getAllDrops().find(d => d.name === 'S1');
+  assert.ok(slimRow._slim && slimRow.has_mint_calldata);
+  const projectCalls = [];
+  global.fetch = async (url) => {
+    projectCalls.push(String(url));
+    return { ok: true, status: 200, json: async () => ({ projects: [{ contract: slimRow.contract, name: 'S1', symbol: 'S1',
+      standard: 'BEP-20 Token (18 decimals)', security: { is_honeypot: '0' }, sniper_checklist: [{ ok: true }], mint_calldata: '0x1249c58b00' }] }) };
+  };
+  openModal(slimRow);
+  await new Promise(r => setTimeout(r, 40));
+  assert.strictEqual(projectCalls.filter(u => u.includes('/api/projects?search=')).length, 1, 'one request: the calldata is not fetched separately');
+  assert.strictEqual(slimRow._slim, undefined, 'the list row is no longer slim');
+  assert.strictEqual(slimRow.security.is_honeypot, '0');
+  assert.strictEqual(slimRow.mint_calldata, '0x1249c58b00');
+  assert.strictEqual(getAllDrops().find(d => d.name === 'S1'), slimRow, 'upgraded in place, the same object the table holds');
+  openModal(slimRow);
+  await new Promise(r => setTimeout(r, 40));
+  assert.strictEqual(projectCalls.length, 1, 'a second open asks for nothing');
+  console.log('✔ Slim list rows are upgraded in place on the first modal open, once: PASS');
   process.exit(0);
 })().catch(e => { console.error(e); process.exit(1); });
