@@ -298,6 +298,281 @@ function sendDesktopNotification(title, body) {
 }
 if (typeof window !== 'undefined') window.sendDesktopNotification = sendDesktopNotification;
 
+// ---- Opt-in drop alerts (the "ALERTS" toggle next to SOUND) ----
+// Browser only, no backend: it works while the page is open and polling. Permission is requested only from the
+// toggle's own click, never on load. While on, each NEW drop that matches the active toolbar filter, or is Free Mint
+// plus Snipe Ready, gets its own notification. Notifications go out at most once per DROP_ALERT_MIN_GAP_MS; drops that
+// arrive inside the gap are sent as one batch when it ends. "Seen" is knownContracts: the snapshot and the first live
+// load seed it, and new-drop detection only runs after that, so drops already on the page never alert.
+const DROP_ALERT_STORAGE_KEY = 'agent_drop_alerts';
+const DROP_ALERT_MIN_GAP_MS = 30000;
+let dropAlertPref = readDropAlertPref();
+let dropAlertQueue = [];
+let dropAlertFlushTimer = null;
+let dropAlertLastShownAt = 0;
+let dropAlertConstructFailed = false; // `new Notification` threw (Android Chrome): treat the API as unsupported here
+
+function readDropAlertPref() {
+  try {
+    return typeof localStorage !== 'undefined' && localStorage.getItem(DROP_ALERT_STORAGE_KEY) === 'on';
+  } catch (e) {
+    return false; // storage blocked (private mode, sandboxed frame): the toggle starts off
+  }
+}
+
+function writeDropAlertPref(on) {
+  dropAlertPref = Boolean(on);
+  try {
+    if (typeof localStorage !== 'undefined') localStorage.setItem(DROP_ALERT_STORAGE_KEY, dropAlertPref ? 'on' : 'off');
+  } catch (e) {
+    // Storage blocked: the setting then lasts for this page view only
+  }
+}
+
+function getNotificationCtor() {
+  try {
+    if (typeof window !== 'undefined' && window.Notification) return window.Notification;
+    if (typeof Notification !== 'undefined') return Notification;
+  } catch (e) {
+    // No Notification API in this context
+  }
+  return null;
+}
+
+// 'unsupported' (no API, e.g. iOS Safari tabs), 'granted', 'denied' or 'default' (never asked, or dismissed)
+function getDropAlertPermission() {
+  const N = getNotificationCtor();
+  if (!N || dropAlertConstructFailed) return 'unsupported';
+  return typeof N.permission === 'string' ? N.permission : 'default';
+}
+
+function isDropAlertActive() {
+  return dropAlertPref && getDropAlertPermission() === 'granted';
+}
+
+// Called only from the toggle click. Resolves 'granted' | 'denied' | 'default'. Handles both the promise and the older
+// callback form of requestPermission; resolves 'default' if the browser throws.
+function askDropAlertPermission() {
+  return new Promise(resolve => {
+    let settled = false;
+    const finish = (result) => {
+      if (settled) return;
+      settled = true;
+      resolve(result || 'default');
+    };
+    try {
+      const ret = getNotificationCtor().requestPermission(finish);
+      if (ret && typeof ret.then === 'function') ret.then(finish, () => finish('default'));
+    } catch (e) {
+      finish('default');
+    }
+  });
+}
+
+async function onDropAlertToggleClick() {
+  const before = getDropAlertPermission();
+  if (before === 'unsupported') return;
+  if (dropAlertPref && before === 'granted') {
+    writeDropAlertPref(false);
+    dropAlertQueue = [];
+    if (dropAlertFlushTimer) { clearTimeout(dropAlertFlushTimer); dropAlertFlushTimer = null; }
+    updateDropAlertToggle();
+    return;
+  }
+  // Only a 'default' permission opens the browser prompt; 'granted' and 'denied' are answered without one.
+  const after = before === 'default' ? await askDropAlertPermission() : before;
+  const on = after === 'granted';
+  writeDropAlertPref(on);
+  trackAnalytics('alert_enabled', {
+    result: on ? 'on' : (after === 'denied' ? 'blocked' : 'dismissed'),
+    permission_before: before,
+    permission: after,
+    filter: activeFilter
+  });
+  if (on) {
+    showToast('🔔 NOTIFICATIONS ON', 'One notification per new matching drop, at most every 30 seconds.', '🔔');
+  } else if (after === 'denied') {
+    showToast('🔕 NOTIFICATIONS BLOCKED', 'Allow notifications for this site in your browser settings, then click ALERTS again.', '🔕');
+  }
+  updateDropAlertToggle();
+}
+
+// Same rules as the toolbar filter block in renderTable (keep the two in step). 'ALL' and unknown keys match everything.
+function dropMatchesToolbarFilter(d, key) {
+  if (!d) return false;
+  switch (key) {
+    case 'LAUNCHPAD': return isLaunchpadDrop(d);
+    case 'SNIPER_READY': return isSniperReady(d);
+    case 'NFT_SURGE': return Boolean(d.is_nft_surge);
+    case 'PROXY': return Boolean(d.is_proxy_clone);
+    case 'FAVORITES': return isFavorited(d.contract, d);
+    case 'FOLLOWED': {
+      if (followedWallets.size === 0) return false;
+      const sw = Array.isArray(d.smart_wallets) && d.smart_wallets.length > 0
+        ? d.smart_wallets
+        : (Array.isArray(d.smart_minters) ? d.smart_minters : []);
+      return sw.some(w => followedWallets.has(String(w).toLowerCase().trim()));
+    }
+    case 'FREE': return isFreeMintDrop(d);
+    case 'SMART': return Boolean((d.smart_wallets && d.smart_wallets.length > 0) || (d.smart_minters && d.smart_minters.length > 0));
+    case 'LP': return Number(d.lp_usd || 0) > 0;
+    case 'ACTIVE': {
+      const ms = Number(d.max_supply || 0);
+      const tm = Number(d.total_minted || 0);
+      return ms === 0 || tm < ms;
+    }
+    default: return true;
+  }
+}
+
+// Why a new drop qualifies: 'filter', 'free_snipe', 'filter_and_free_snipe', or null (no alert).
+function alertMatchType(drop) {
+  const byFilter = dropMatchesToolbarFilter(drop, activeFilter);
+  const byFreeSnipe = isFreeMintDrop(drop) && isSniperReady(drop);
+  if (byFilter && byFreeSnipe) return 'filter_and_free_snipe';
+  if (byFilter) return 'filter';
+  if (byFreeSnipe) return 'free_snipe';
+  return null;
+}
+
+function dropAlertMatchLabel(match) {
+  if (match === 'free_snipe') return 'Free Mint + Snipe Ready';
+  if (match === 'filter_and_free_snipe') return 'Matches your filter · Free Mint + Snipe Ready';
+  return 'Matches your filter';
+}
+
+// Called with the drops each feed poll found for the first time (after the first live load).
+function queueDropAlerts(drops) {
+  if (!dropAlertPref || !Array.isArray(drops) || drops.length === 0) return;
+  if (!isDropAlertActive()) {
+    updateDropAlertToggle(); // e.g. permission was revoked in the browser since the toggle was turned on
+    return;
+  }
+  let added = false;
+  drops.forEach(drop => {
+    const contract = String((drop && drop.contract) || '').toLowerCase();
+    if (!contract || dropAlertQueue.some(q => q.contract === contract)) return;
+    const match = alertMatchType(drop);
+    if (!match) return;
+    dropAlertQueue.push({ contract, drop, match });
+    added = true;
+  });
+  if (added) scheduleDropAlertFlush();
+}
+
+function scheduleDropAlertFlush() {
+  if (dropAlertFlushTimer || dropAlertQueue.length === 0) return;
+  const wait = Math.max(0, dropAlertLastShownAt + DROP_ALERT_MIN_GAP_MS - Date.now());
+  if (wait === 0) {
+    // The gap is open, so the first drop gets its own notification. Anything else queued waits for the gap to end.
+    flushDropAlerts(1);
+    scheduleDropAlertFlush();
+    return;
+  }
+  dropAlertFlushTimer = setTimeout(() => {
+    dropAlertFlushTimer = null;
+    flushDropAlerts(0); // gap over: everything still queued goes out as one notification (a single drop stays a single)
+  }, wait);
+}
+
+// Sends one notification for up to `limit` queued drops (0 = all of them).
+function flushDropAlerts(limit) {
+  if (dropAlertFlushTimer) { clearTimeout(dropAlertFlushTimer); dropAlertFlushTimer = null; }
+  if (dropAlertQueue.length === 0) return;
+  if (!isDropAlertActive()) { dropAlertQueue = []; return; } // turned off or blocked while queued
+  const N = getNotificationCtor();
+  if (!N) { dropAlertQueue = []; return; }
+  const take = limit > 0 ? Math.min(limit, dropAlertQueue.length) : dropAlertQueue.length;
+  const batch = dropAlertQueue.splice(0, take);
+  const target = batch[batch.length - 1]; // a click opens the most recent drop in the batch
+  const matchTypes = [...new Set(batch.map(q => q.match))];
+  const matchType = matchTypes.length === 1 ? matchTypes[0] : 'mixed';
+  const filterKey = activeFilter;
+  let title;
+  let body;
+  if (batch.length === 1) {
+    const d = target.drop;
+    const blk = d.block ? `#${String(d.block).slice(-6)}` : 'LIVE';
+    title = `🚨 New drop: ${d.name || 'New contract'}${d.symbol ? ` (${d.symbol})` : ''}`;
+    body = `${dropAlertMatchLabel(target.match)} · ${d.mint_price_str || 'TBD'} · Block ${blk}`;
+  } else {
+    const names = batch.map(q => q.drop.name || 'New contract');
+    title = `🚨 ${batch.length} new drops match your alerts`;
+    body = names.length > 3 ? `${names.slice(0, 3).join(', ')} and ${names.length - 3} more` : names.join(', ');
+  }
+
+  const sentAt = Date.now();
+  let note;
+  try {
+    note = new N(title, { body, tag: `radar-drop-${sentAt}`, icon: 'icon.svg', badge: 'icon.svg' });
+  } catch (e) {
+    // Some mobile browsers only allow notifications through a service worker: treat the API as unsupported here
+    dropAlertQueue = [];
+    dropAlertConstructFailed = true;
+    updateDropAlertToggle();
+    return;
+  }
+  dropAlertLastShownAt = sentAt;
+  note.onclick = () => {
+    try { if (typeof window !== 'undefined' && typeof window.focus === 'function') window.focus(); } catch (e) { /* ignore */ }
+    try { if (typeof note.close === 'function') note.close(); } catch (e) { /* ignore */ }
+    trackAnalytics('alert_clicked', { match_type: matchType, batch_size: batch.length, permission: 'granted', filter: filterKey });
+    if (typeof openInspectModalByContract === 'function') openInspectModalByContract(target.contract, target.drop);
+  };
+  trackAnalytics('alert_shown', { match_type: matchType, batch_size: batch.length, permission: 'granted', filter: filterKey });
+}
+
+// Reflects state only. Called on load and after each toggle; it never requests permission.
+function updateDropAlertToggle() {
+  if (typeof document === 'undefined' || typeof document.getElementById !== 'function') return;
+  const btn = document.getElementById('dropAlertToggle');
+  if (!btn) return;
+  // The visible label stays "ALERTS" (the header has no room for ON/OFF words at 1280px); the state is the icon, the
+  // colour, aria-pressed and the accessible name. "N/A" is shown only where the API is missing.
+  const perm = getDropAlertPermission();
+  let mode;
+  let icon;
+  let visible;
+  let stateWord;
+  let hint;
+  if (perm === 'unsupported') {
+    mode = 'unsupported'; icon = '🚫'; visible = 'ALERTS N/A'; stateWord = 'not supported here';
+    hint = 'Drop alerts need browser notifications, which this browser does not offer. Nothing is requested.';
+  } else if (perm === 'denied') {
+    mode = 'blocked'; icon = '⛔'; visible = 'ALERTS'; stateWord = 'blocked';
+    hint = 'Notifications are blocked for this site. Click for how to allow them.';
+  } else if (isDropAlertActive()) {
+    mode = 'on'; icon = '🔔'; visible = 'ALERTS'; stateWord = 'on';
+    hint = 'Drop alerts are on: one notification per new drop that matches your filter or is Free Mint + Snipe Ready (at most every 30 seconds). Click to turn off.';
+  } else {
+    mode = 'off'; icon = '🔕'; visible = 'ALERTS'; stateWord = 'off';
+    hint = 'Get a browser notification when a new drop matches your filter or is Free Mint + Snipe Ready. Click to allow.';
+  }
+  // Polls call this while alerts are on but blocked; re-rendering an unchanged state would only churn the DOM.
+  if (typeof btn.getAttribute === 'function' && btn.getAttribute('data-state') === mode) return;
+  btn.className = mode === 'on' ? 'sound-toggle-btn alert-toggle-btn active'
+    : `sound-toggle-btn alert-toggle-btn muted${mode === 'blocked' ? ' blocked' : ''}${mode === 'unsupported' ? ' unsupported' : ''}`;
+  btn.innerHTML = `<span class="sound-icon">${icon}</span><span class="sound-label">${visible}</span>`;
+  btn.disabled = mode === 'unsupported';
+  if (typeof btn.setAttribute === 'function') {
+    btn.setAttribute('aria-pressed', mode === 'on' ? 'true' : 'false');
+    btn.setAttribute('aria-label', `Drop alerts, ${stateWord}`);
+    btn.setAttribute('title', hint);
+    btn.setAttribute('data-state', mode);
+  }
+}
+
+function setupDropAlertToggle() {
+  if (typeof document === 'undefined' || typeof document.getElementById !== 'function') return;
+  const btn = document.getElementById('dropAlertToggle');
+  if (btn && typeof btn.addEventListener === 'function') {
+    btn.addEventListener('click', () => {
+      onDropAlertToggleClick().catch(() => {});
+    });
+  }
+  updateDropAlertToggle(); // state only: no permission request on load
+}
+
 // Safe HTML escaping helper
 function escapeHtml(str) {
   if (!str) return '';
@@ -373,10 +648,13 @@ function showNewMarketToast(item) {
   `;
   container.appendChild(toast);
 
-  sendDesktopNotification(
-    '🚨 New .ai Agent ID Drop!',
-    `${item.name || 'New Contract'} (${item.symbol || ''}) at Block ${blkStr}`
-  );
+  // With drop alerts on, queueDropAlerts() owns browser notifications (one per matching drop), so skip this generic one.
+  if (!isDropAlertActive()) {
+    sendDesktopNotification(
+      '🚨 New .ai Agent ID Drop!',
+      `${item.name || 'New Contract'} (${item.symbol || ''}) at Block ${blkStr}`
+    );
+  }
 
   // Auto-dismiss after 5s
   setTimeout(() => {
@@ -8963,9 +9241,10 @@ let lastFeedEtag = '';
 const FEED_REFRESH_INTERVAL_MS = 10 * 60 * 1000;
 const DELTA_POLL_INTERVAL_MS = 25000; // 25s interval protects hosting bandwidth while keeping market data near real-time
 
-// Real-Time Delta Polling (auto-pauses when tab is hidden or backgrounded)
+// Real-Time Delta Polling (auto-pauses when tab is hidden or backgrounded, unless drop alerts are on)
 async function pollDeltaFeed() {
-  if (isPollingDelta || !latestKnownBlock || (typeof document !== 'undefined' && document.hidden)) return;
+  // A hidden tab polls only while drop alerts are on (see startDeltaPolling); otherwise it stays paused as before.
+  if (isPollingDelta || !latestKnownBlock || (typeof document !== 'undefined' && document.hidden && !isDropAlertActive())) return;
   isPollingDelta = true;
 
   try {
@@ -8987,6 +9266,10 @@ async function pollDeltaFeed() {
     if (newEtag) lastDeltaEtag = newEtag;
 
     const data = await res.json();
+
+    // Hidden tab: block polling is paused, so move since_block on with the feed's own head. Otherwise it goes stale and
+    // every poll re-downloads drops the page already has.
+    if (data && data.latest_block && typeof document !== 'undefined' && document.hidden) latestKnownBlock = data.latest_block;
 
     if (data && data.stats) {
       applyOverviewStats(data.stats);
@@ -9021,8 +9304,10 @@ async function pollDeltaFeed() {
           latestKnownBlock = newlyFound[0].block;
         }
 
-        playMarketAlertSound();
+        // A hidden tab stays silent, as it always has. Its drop alerts are the OS notifications.
+        if (!(typeof document !== 'undefined' && document.hidden)) playMarketAlertSound();
         newlyFound.slice(0, 3).forEach(drop => showNewMarketToast(drop));
+        queueDropAlerts(newlyFound);
 
         // Check for sniper ready in new drops
         newlyFound.forEach(drop => {
@@ -9070,9 +9355,16 @@ async function pollDeltaFeed() {
   }
 }
 
+// A hidden tab keeps the delta poll only while drop alerts are on, and then at this slower pace (one request a minute,
+// block polling stays paused). Otherwise the poll stops, as it always has.
+const DROP_ALERT_BACKGROUND_POLL_MS = 60 * 1000;
 function startDeltaPolling() {
   if (deltaPollTimer) clearInterval(deltaPollTimer);
-  if (typeof document !== 'undefined' && document.hidden) return;
+  deltaPollTimer = null;
+  if (typeof document !== 'undefined' && document.hidden) {
+    if (isDropAlertActive()) deltaPollTimer = setInterval(pollDeltaFeed, DROP_ALERT_BACKGROUND_POLL_MS);
+    return;
+  }
   deltaPollTimer = setInterval(pollDeltaFeed, DELTA_POLL_INTERVAL_MS);
 }
 
@@ -9081,10 +9373,7 @@ if (typeof document !== 'undefined') {
   document.addEventListener('visibilitychange', () => {
     const ticker = document.getElementById('tickerTrack');
     if (document.hidden) {
-      if (deltaPollTimer) {
-        clearInterval(deltaPollTimer);
-        deltaPollTimer = null;
-      }
+      startDeltaPolling(); // hidden: drops the fast poll, keeps the slow one only while drop alerts are on
       stopBlockPolling();
       if (ticker) ticker.style.animationPlayState = 'paused';
     } else {
@@ -9272,6 +9561,7 @@ async function fetchDrops() {
       console.log(`%c[🚨 NEW MARKET DETECTED]`, 'color: #00ff88; font-weight: bold;', newlyFound);
       playMarketAlertSound();
       newlyFound.slice(0, 3).forEach(drop => showNewMarketToast(drop));
+      queueDropAlerts(newlyFound);
     }
 
     // Check for newly qualified Sniper Ready projects (Option B fast-track trigger)
@@ -9991,6 +10281,9 @@ async function init() {
       });
     }
 
+    // Drop alerts toggle: state only on load; the permission prompt comes from its own click
+    setupDropAlertToggle();
+
     // Donation buttons
     const donateHeader = document.getElementById('donateHeaderBtn');
     if (donateHeader) {
@@ -10001,12 +10294,12 @@ async function init() {
       footerDonate.addEventListener('click', () => copyDonationAddress(footerDonate, 'footer'));
     }
 
-    // Unlock Web Audio context & request push notifications on user's first click or keystroke anywhere
+    // Unlock the Web Audio context on the user's first click or keystroke anywhere. This does not request notification
+    // permission: that is asked only by the SOUND and ALERTS toggles, so no browser prompt appears before the user chooses.
     const unlockAudio = () => {
       if (audioCtx && audioCtx.state === 'suspended') {
         audioCtx.resume();
       }
-      requestNotificationPermission();
     };
     document.addEventListener('click', unlockAudio, { once: true });
     document.addEventListener('keydown', unlockAudio, { once: true });
@@ -10482,6 +10775,22 @@ if (typeof document !== 'undefined') {
 
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
+    readDropAlertPref,
+    writeDropAlertPref,
+    getDropAlertPermission,
+    isDropAlertActive,
+    onDropAlertToggleClick,
+    showNewMarketToast,
+    pollDeltaFeed,
+    startDeltaPolling,
+    getLatestKnownBlock: () => latestKnownBlock,
+    setLatestKnownBlock: (b) => { latestKnownBlock = b; },
+    dropMatchesToolbarFilter,
+    alertMatchType,
+    queueDropAlerts,
+    flushDropAlerts,
+    updateDropAlertToggle,
+    setupDropAlertToggle,
     mergeTopGainersList,
     syncSeededTopGainers,
     topGainersSeedLabel,

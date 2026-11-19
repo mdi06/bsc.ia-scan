@@ -3219,6 +3219,29 @@ a.inspect-btn:hover {
   opacity: 0.75;
 }
 
+/* Drop alerts toggle: the sound toggle's look, plus blocked (permission denied) and unsupported (no Notification API) */
+.alert-toggle-btn.blocked {
+  border-color: var(--color-red);
+  color: var(--color-red);
+  opacity: 0.9;
+}
+
+.alert-toggle-btn:disabled,
+.alert-toggle-btn.unsupported {
+  opacity: 0.45;
+  cursor: not-allowed;
+  transform: none;
+}
+
+/* Header width: on origin/main the header row already runs past the viewport below about 1335px (CONNECT WALLET is
+   clipped), and the ALERTS toggle needs room beside SOUND. Below 1400px the pill keeps its count and tooltip but drops
+   the "BINANCE AGENTIC WALLETS:" words. Above 1400px nothing changes. */
+@media (min-width: 769px) and (max-width: 1399px) {
+  #headerAiWalletsPill .desktop-only {
+    display: none;
+  }
+}
+
 /* Dynamic Market Toast Notifications */
 .toast-container {
   position: fixed;
