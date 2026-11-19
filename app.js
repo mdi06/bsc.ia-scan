@@ -1953,12 +1953,29 @@ function toggleDexChart(contract, customUrl) {
 }
 if (typeof window !== 'undefined') window.toggleDexChart = toggleDexChart;
 
+// How many momentum tokens the banner names, and how long one name may be before it is cut with an ellipsis.
+const MOMENTUM_NAMES_SHOWN = 3;
+const MOMENTUM_NAME_MAX_CHARS = 14;
+
+// Short, never-empty label for a token in the stats banner: name, else symbol, else the shortened contract.
+// Cuts by code point (Array.from) so a CJK / emoji name is never split mid-character.
+function bannerTokenName(item) {
+  const raw = String((item && (item.name || item.symbol)) || '').trim();
+  if (raw) {
+    const chars = Array.from(raw);
+    return chars.length > MOMENTUM_NAME_MAX_CHARS ? `${chars.slice(0, MOMENTUM_NAME_MAX_CHARS - 1).join('')}…` : raw;
+  }
+  const contract = String((item && item.contract) || '');
+  return contract.length > 10 ? `${contract.slice(0, 6)}…${contract.slice(-4)}` : (contract || 'Unnamed');
+}
+
 // Compute Macro Stats
 function computeStats(drops) {
   let cappedTotal = 0;
   let soldOutCount = 0;
   let nearCapCount = 0;
   let warmCapCount = 0;
+  const warmCapItems = [];   // the tokens behind warmCapCount, so the banner can name them
 
   drops.forEach(item => {
     let rawMs = item.max_supply;
@@ -1977,9 +1994,12 @@ function computeStats(drops) {
         nearCapCount++;
       } else if (pct >= 50) {
         warmCapCount++;
+        // Rounded for display but kept inside this bucket: 79.6% must not read "80%" while it is not counted as near cap.
+        warmCapItems.push({ name: bannerTokenName(item), pct: Math.min(79, Math.round(pct)), exactPct: pct });
       }
     }
   });
+  warmCapItems.sort((a, b) => (b.exactPct - a.exactPct) || a.name.localeCompare(b.name));
 
   // Incrementally update our saved top markets memory from incoming recent drops
   updateSavedTopMarkets(drops);
@@ -2003,6 +2023,7 @@ function computeStats(drops) {
     fillRatePct,
     nearCapCount,
     warmCapCount,
+    warmCapItems,
     topGainer,
     runnerUp,
     allGainers,
@@ -2143,39 +2164,58 @@ async function syncLiveAgentWalletsOnChain(currBlk) {
   }
 }
 
+// The banner never shows sample text: every span below is rewritten on each render, and a span with nothing to say
+// is cleared ('' hides it through the :empty rule in style.css) or shows the dash.
+function setBannerText(id, text) {
+  const el = document.getElementById(id);
+  if (el) el.textContent = String(text);
+  return el;
+}
+
 // Update DOM Header with Macro Stats
 function renderStats(drops) {
   const stats = computeStats(drops);
 
   updateDigitalAiCounter(currentAgentWalletsCount);
 
-  const elFillPct = document.getElementById('fillRatePct');
-  if (elFillPct) elFillPct.textContent = `${stats.fillRatePct.toFixed(1)}%`;
-  const elFillRatio = document.getElementById('fillRateRatio');
-  if (elFillRatio) elFillRatio.textContent = `(${stats.soldOutCount} / ${stats.cappedTotal} Sold Out)`;
-  const elNearCap = document.getElementById('nearCapCount');
-  if (elNearCap) elNearCap.textContent = stats.nearCapCount;
-  const elMom = document.getElementById('momentumCount');
-  if (elMom) elMom.textContent = `${stats.warmCapCount} ACTIVE`;
+  // Fill rate is a ratio: with no capped collections it is undefined, not "0.0% (0 / 0 Sold Out)".
+  const hasCapped = stats.cappedTotal > 0;
+  setBannerText('fillRatePct', hasCapped ? `${stats.fillRatePct.toFixed(1)}%` : '—');
+  setBannerText('fillRateRatio', hasCapped ? `(${stats.soldOutCount} / ${stats.cappedTotal} Sold Out)` : '');
+  setBannerText('nearCapCount', stats.nearCapCount);
+  setBannerText('momentumCount', `${stats.warmCapCount} ACTIVE`);
 
-  if (stats.topGainer) {
-    const tg = stats.topGainer;
+  // Momentum names come from the same list as the count above: the top few tokens at 50-79% of their cap.
+  const momentum = (stats.warmCapItems || []).slice(0, MOMENTUM_NAMES_SHOWN);
+  const elMomNames = setBannerText('momentumNames',
+    momentum.length ? `[${momentum.map(t => `${t.name} ${t.pct}%`).join(', ')}]` : '—');
+  if (elMomNames) {
+    // The full list as a tooltip: the banner cell cuts long names with an ellipsis.
+    const all = (stats.warmCapItems || []).map(t => `${t.name} ${t.pct}%`).join(', ');
+    if (all && typeof elMomNames.setAttribute === 'function') elMomNames.setAttribute('title', all);
+    else if (typeof elMomNames.removeAttribute === 'function') elMomNames.removeAttribute('title');
+  }
+
+  const tg = stats.topGainer;
+  if (tg) {
     const tgMint = tg.isFree || tg.mintUsd === 0 ? 'FREE' : formatCryptoPrice(tg.mintUsd);
     const tgAth = Math.max(tg.athPrice, tg.secUsd);
     const tgNet = Math.max(tg.athProfit, tg.profit);
-    const elTgName = document.getElementById('topGainerName');
-    if (elTgName) elTgName.textContent = `${tg.name} (${tg.symbol})`;
-    const elTgDet = document.getElementById('topGainerDetails');
-    if (elTgDet) elTgDet.textContent = `Mint: ${tgMint} ➔ ATH: ${formatCryptoPrice(tgAth)}`;
-    const elTgNet = document.getElementById('topGainerNet');
-    if (elTgNet) elTgNet.textContent = `Net: ${formatCryptoPrice(tgNet, true)} / token`;
+    setBannerText('topGainerName', `${tg.name} (${tg.symbol})`);
+    setBannerText('topGainerDetails', `Mint: ${tgMint} ➔ ATH: ${formatCryptoPrice(tgAth)}`);
+    setBannerText('topGainerNet', `Net: ${formatCryptoPrice(tgNet, true)} / token`);
+  } else {
+    setBannerText('topGainerName', '—');
+    setBannerText('topGainerDetails', '');
+    setBannerText('topGainerNet', '');
   }
 
-  if (stats.runnerUp) {
-    const ru = stats.runnerUp;
+  const ru = stats.runnerUp;
+  if (ru) {
     const ruAth = Math.max(ru.athPrice, ru.secUsd);
-    const elRu = document.getElementById('runnerUpDetails');
-    if (elRu) elRu.textContent = `│ 🥈 Runner-Up: ${ru.name} (${ru.symbol}) [${formatCryptoPrice(ruAth)}]`;
+    setBannerText('runnerUpDetails', `│ 🥈 Runner-Up: ${ru.name} (${ru.symbol}) [${formatCryptoPrice(ruAth)}]`);
+  } else {
+    setBannerText('runnerUpDetails', '');
   }
 
   renderSmartStreamTicker(drops);
@@ -9991,6 +10031,7 @@ if (typeof module !== 'undefined' && module.exports) {
     computeItemProfit,
     applyMarketOverlay,
     computeStats,
+    renderStats,
     openHallOfFameModal,
     openWalletModal,
     openBinanceQrModal,

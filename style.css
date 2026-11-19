@@ -1659,6 +1659,32 @@ mark.search-hl {
   font-size: 11px;
 }
 
+/* Wide desktop: the momentum card holds the longest text in the row (up to three "NAME 60%" entries) and the near-cap
+   card the shortest, so share the row accordingly instead of in equal thirds. Only from 1200px up: below that the
+   fill-rate card (about 340px of content) has no width to give. The mobile grid ignores flex-grow. */
+@media (min-width: 1200px) {
+  .stats-macro-group > .stat-card:nth-child(3) {
+    flex-grow: 0.8;
+  }
+
+  .stats-macro-group > .stat-card:nth-child(5) {
+    flex-grow: 1.4;
+  }
+}
+
+.stats-macro-group .stat-highlight {
+  max-width: 320px;
+}
+
+/* A banner span with no text (cold load, or nothing to report) takes no space and draws no empty chip. */
+.stats-banner .badge:empty,
+.stats-banner .stat-sub:empty,
+.stats-banner .stat-text:empty,
+.stats-banner .stat-runner:empty,
+.stats-banner .stat-highlight:empty {
+  display: none !important;
+}
+
 /* Dedicated Digital Hardware Counter Box in Stats Banner */
 .digital-counter-wrapper {
   display: flex;
@@ -3940,6 +3966,7 @@ a.inspect-btn:hover {
     flex-direction: row !important;
     align-items: center !important;
     justify-content: space-between !important;
+    flex-wrap: wrap !important;   /* the names drop to their own line when "[A 79%, B 73%, C 71%]" does not fit beside the label */
     gap: 6px !important;
     padding: 6px 10px !important;
     min-height: 34px !important;
@@ -3953,7 +3980,7 @@ a.inspect-btn:hover {
     overflow: hidden !important;
     text-overflow: ellipsis !important;
     white-space: nowrap !important;
-    max-width: 55% !important;
+    max-width: 100% !important;
   }
 
   .stat-card.gainer-card {
