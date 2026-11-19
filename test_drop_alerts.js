@@ -32,12 +32,14 @@ class El {
 }
 const els = new Map();
 const getEl = (id) => { if (!els.has(id)) els.set(id, new El(id)); return els.get(id); };
+// Document-level listeners, so a test can fire the page's own click and keydown handlers
+const docListeners = {};
 global.document = {
   getElementById: getEl,
   querySelector: () => null,
   querySelectorAll: () => [],
   createElement: () => new El('created'),
-  addEventListener() {},
+  addEventListener(type, fn, opts) { (docListeners[type] = docListeners[type] || []).push({ fn, opts }); },
   removeEventListener() {},
   hidden: false,
   body: new El('body'),
@@ -192,6 +194,48 @@ function resetState() {
 const flush = () => new Promise(r => setImmediate(r));
 
 (async () => {
+  // ---- first click or keydown: the page unlocks audio and asks for no notification permission. Runs the real init()
+  // (the DOMContentLoaded listener) so the page's own document listeners are the ones exercised.
+  resetState();
+  els.clear(); // fresh stand-in controls, so init's listeners are the only ones on each one
+  global.fetch = async () => { throw new Error('no network in tests'); };
+  const firstLog = makeNotification({ permission: 'default', requestResult: 'granted' });
+  installNotification(firstLog);
+  await docListeners.DOMContentLoaded[0].fn();
+  const once = (type) => (docListeners[type] || []).filter(l => l.opts && l.opts.once);
+  check('first click/keydown: unlock listeners are registered', () => {
+    assert.strictEqual(once('click').length >= 1, true);
+    assert.strictEqual(once('keydown').length >= 1, true);
+  });
+  // Fire the page's document listeners the way a first click and a first key press would.
+  const fire = (type, evt) => {
+    for (const l of (docListeners[type] || []).slice()) {
+      if (l.opts && l.opts.once) docListeners[type] = docListeners[type].filter(x => x !== l);
+      try { l.fn(evt); } catch (err) { /* other page handlers may touch the stand-in DOM; only the permission call matters here */ }
+    }
+  };
+  fire('click', { type: 'click', target: getEl('body') });
+  fire('keydown', { type: 'keydown', key: 'a', target: getEl('body') });
+  await flush();
+  check('first click or keydown: no notification permission request', () => {
+    assert.strictEqual(firstLog.requests, 0);
+    assert.strictEqual(firstLog.permission, 'default');
+  });
+  // ALERTS is the one control that asks, and it asks exactly once
+  getEl('dropAlertToggle').click();
+  await flush();
+  check('ALERTS click: asks for permission exactly once and turns alerts on', () => {
+    assert.strictEqual(firstLog.requests, 1);
+    assert.strictEqual(readDropAlertPref(), true);
+    assert.strictEqual(getEl('dropAlertToggle').getAttribute('data-state'), 'on');
+  });
+  // The SOUND toggle's existing request is unchanged
+  firstLog.permission = 'default';
+  getEl('soundToggle').click();
+  await flush();
+  check('SOUND click: still asks for permission, as before', () => assert.strictEqual(firstLog.requests, 2));
+  uninstallNotification();
+
   // ---- storage: persisted with try/catch
   resetState();
   check('storage: default off', () => assert.strictEqual(readDropAlertPref(), false));

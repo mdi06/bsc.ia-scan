@@ -9763,12 +9763,12 @@ async function init() {
       footerDonate.addEventListener('click', () => copyDonationAddress(footerDonate, 'footer'));
     }
 
-    // Unlock Web Audio context & request push notifications on user's first click or keystroke anywhere
+    // Unlock the Web Audio context on the user's first click or keystroke anywhere. This does not request notification
+    // permission: that is asked only by the SOUND and ALERTS toggles, so no browser prompt appears before the user chooses.
     const unlockAudio = () => {
       if (audioCtx && audioCtx.state === 'suspended') {
         audioCtx.resume();
       }
-      requestNotificationPermission();
     };
     document.addEventListener('click', unlockAudio, { once: true });
     document.addEventListener('keydown', unlockAudio, { once: true });
