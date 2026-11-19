@@ -6039,7 +6039,7 @@ function trackExternalClick(target, symbol, contract) {
   });
 }
 
-function navigateInspectModal(direction) {
+function navigateInspectModal(direction, via = 'arrow') {
   const modal = (typeof document !== 'undefined') ? document.getElementById('inspectModal') : null;
   if (!modal) return;
   const isOpen = Boolean(modal.open || modal.hasAttribute('open'));
@@ -6050,14 +6050,22 @@ function navigateInspectModal(direction) {
   if (!list || list.length === 0 || index === -1) return;
 
   const targetIndex = index + direction;
+  const swiped = via === 'swipe';
   if (targetIndex >= 0 && targetIndex < list.length) {
     const nextTarget = list[targetIndex];
     if (nextTarget) {
-      finishModalTelemetry(direction > 0 ? 'next_arrow' : 'prev_arrow');
-      openModal(nextTarget, direction > 0 ? 'next_arrow' : 'prev_arrow');
+      const reason = swiped
+        ? (direction > 0 ? 'next_swipe' : 'prev_swipe')
+        : (direction > 0 ? 'next_arrow' : 'prev_arrow');
+      finishModalTelemetry(reason);
+      openModal(nextTarget, reason);
       const content = document.getElementById('modalContent');
       if (content) content.scrollTop = 0;
+      if (swiped) playModalSwipeFeedback(content, direction, 'enter');
     }
+  } else if (swiped) {
+    trackAnalytics('modal_swipe_edge', { direction: direction > 0 ? 'next' : 'prev' });
+    playModalSwipeFeedback(document.getElementById('modalContent'), direction, 'edge');
   }
 
   // Pre-load older drops if approaching the end of loaded batch in radar feed
@@ -6066,6 +6074,95 @@ function navigateInspectModal(direction) {
       loadMoreDrops().catch(() => {});
     }
   }
+}
+
+// ==========================================================================
+// 👆 Swipe between tokens in the inspect modal
+// Swipe left = next token, swipe right = previous token, the same as the ‹ › buttons. A gesture counts only when it is
+// one quick, mostly horizontal drag of at least MODAL_SWIPE_MIN_PX. Vertical scrolls, text selection, the CLI box and
+// anything inside a horizontal scroller (wide tables, long code lines) keep their normal behaviour.
+// ==========================================================================
+const MODAL_SWIPE_MIN_PX = 60;
+const MODAL_SWIPE_MAX_MS = 900;
+const MODAL_SWIPE_RATIO = 1.5; // horizontal travel must beat vertical travel by this factor
+const MODAL_SWIPE_IGNORE_SELECTOR = '.cli-box, pre, code, button, a, input, textarea, select, label, [contenteditable], [data-no-swipe]';
+
+function prefersReducedMotion() {
+  try {
+    return typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+      && Boolean(window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+  } catch (_) {
+    return false;
+  }
+}
+
+function hasTextSelection() {
+  try {
+    const sel = (typeof window !== 'undefined' && typeof window.getSelection === 'function') ? window.getSelection() : null;
+    return Boolean(sel) && String(sel).length > 0;
+  } catch (_) {
+    return false;
+  }
+}
+
+// True when the touch started inside a box that scrolls sideways on its own (a wide table, a long code line).
+function isInHorizontalScroller(node, stopAt) {
+  if (typeof getComputedStyle !== 'function') return false;
+  for (let n = node; n && n !== stopAt; n = n.parentElement) {
+    if (n.scrollWidth > n.clientWidth + 1 && /(auto|scroll)/.test(getComputedStyle(n).overflowX || '')) return true;
+  }
+  return false;
+}
+
+// Slide the modal toward the new token (kind 'enter') or nudge it when there is no token that way (kind 'edge').
+// Both are skipped for reduced-motion users; the navigation itself still happens.
+function playModalSwipeFeedback(content, direction, kind) {
+  if (!content || !content.classList || typeof content.classList.add !== 'function') return;
+  if (prefersReducedMotion()) return;
+  const side = direction > 0 ? 'next' : 'prev';
+  const cls = kind === 'edge' ? `is-swipe-edge-${side}` : `is-swipe-enter-${side}`;
+  content.classList.remove('is-swipe-enter-next', 'is-swipe-enter-prev', 'is-swipe-edge-next', 'is-swipe-edge-prev');
+  if (typeof content.offsetWidth === 'number') void content.offsetWidth; // restart the CSS animation
+  content.classList.add(cls);
+  setTimeout(() => {
+    if (content.classList && typeof content.classList.remove === 'function') content.classList.remove(cls);
+  }, 260);
+}
+
+function setupModalSwipeNav() {
+  const content = (typeof document !== 'undefined' && typeof document.getElementById === 'function')
+    ? document.getElementById('modalContent') : null;
+  if (!content || typeof content.addEventListener !== 'function') return;
+  // #modalContent is static markup and survives every re-render, so bind once.
+  if (content.dataset && content.dataset.swipeNav === '1') return;
+  if (content.dataset) content.dataset.swipeNav = '1';
+
+  let start = null;
+  content.addEventListener('touchstart', (e) => {
+    start = null;
+    if (!e.touches || e.touches.length !== 1) return; // a second finger means pinch or zoom, never a swipe
+    const target = e.target;
+    if (target && typeof target.closest === 'function' && target.closest(MODAL_SWIPE_IGNORE_SELECTOR)) return;
+    if (isInHorizontalScroller(target, content)) return;
+    const t = e.touches[0];
+    start = { x: t.clientX, y: t.clientY, at: Date.now() };
+  }, { passive: true });
+
+  content.addEventListener('touchcancel', () => { start = null; }, { passive: true });
+
+  content.addEventListener('touchend', (e) => {
+    const s = start;
+    start = null;
+    const t = e.changedTouches && e.changedTouches[0];
+    if (!s || !t) return;
+    if (Date.now() - s.at > MODAL_SWIPE_MAX_MS) return;
+    const dx = t.clientX - s.x;
+    const dy = t.clientY - s.y;
+    if (Math.abs(dx) < MODAL_SWIPE_MIN_PX) return;
+    if (Math.abs(dx) < Math.abs(dy) * MODAL_SWIPE_RATIO) return; // a vertical scroll
+    if (hasTextSelection()) return; // a long-press selection is not a swipe
+    navigateInspectModal(dx < 0 ? 1 : -1, 'swipe');
+  }, { passive: true });
 }
 
 if (typeof window !== 'undefined') {
@@ -9050,19 +9147,62 @@ function renderReorderModalList() {
 
     const item = document.createElement('div');
     item.className = 'reorder-item';
+    // Edge buttons use aria-disabled, not the disabled attribute: a truly disabled button swallows the tap, so a repeated
+    // tap at the top or bottom looked like a dead button (replay: ~10 taps on ▲ Up in 5 s). They stay tappable and
+    // movePill / movePillToTop say why nothing moved.
     item.innerHTML = `
       <div class="reorder-item-left">
         <span class="reorder-item-idx">#${index + 1}</span>
         <span class="reorder-item-name">${label}</span>
       </div>
       <div class="reorder-item-actions">
-        <button class="reorder-btn" title="Move to Top" ${isFirst ? 'disabled' : ''} onclick="movePillToTop('${key}')">⬆ Top</button>
-        <button class="reorder-btn" title="Move Up" ${isFirst ? 'disabled' : ''} onclick="movePill('${key}', -1)">▲ Up</button>
-        <button class="reorder-btn" title="Move Down" ${isLast ? 'disabled' : ''} onclick="movePill('${key}', 1)">▼ Down</button>
+        <button class="reorder-btn" title="${isFirst ? 'Already at the top' : 'Move to Top'}" aria-disabled="${isFirst}" onclick="movePillToTop('${key}')">⬆ Top</button>
+        <button class="reorder-btn" title="${isFirst ? 'Already at the top' : 'Move Up'}" aria-disabled="${isFirst}" onclick="movePill('${key}', -1)">▲ Up</button>
+        <button class="reorder-btn" title="${isLast ? 'Already at the bottom' : 'Move Down'}" aria-disabled="${isLast}" onclick="movePill('${key}', 1)">▼ Down</button>
       </div>
     `;
     listEl.appendChild(item);
   });
+}
+
+// Reorder sheet feedback. A move highlights the row that moved and says where it went; a tap that cannot move the row
+// (already first or last) shakes that row and says so, instead of doing nothing.
+let _reorderStatusTimer = null;
+
+function getReorderEl(id) {
+  return (typeof document !== 'undefined' && typeof document.getElementById === 'function') ? document.getElementById(id) : null;
+}
+
+function showReorderStatus(text, tone = 'ok') {
+  const el = getReorderEl('reorderPillsStatus');
+  if (!el) return;
+  el.textContent = text;
+  if (el.dataset) el.dataset.tone = tone;
+  clearTimeout(_reorderStatusTimer);
+  _reorderStatusTimer = setTimeout(() => { el.textContent = ''; }, 1800);
+}
+
+function pulseReorderRow(index, className) {
+  const list = getReorderEl('reorderPillsList');
+  const row = list && list.children ? list.children[index] : null;
+  if (!row || !row.classList || typeof row.classList.add !== 'function') return;
+  row.classList.remove('reorder-item--moved', 'reorder-item--edge');
+  if (typeof row.offsetWidth === 'number') void row.offsetWidth; // restart the CSS animation on repeated taps
+  row.classList.add(className);
+  setTimeout(() => {
+    if (row.classList && typeof row.classList.remove === 'function') row.classList.remove(className);
+  }, 900);
+}
+
+function reportReorderMove(newIndex) {
+  pulseReorderRow(newIndex, 'reorder-item--moved');
+  showReorderStatus(`Moved to #${newIndex + 1}`, 'ok');
+}
+
+function reportReorderEdge(index, edge) {
+  trackAnalytics('reorder_edge_tapped', { edge: edge });
+  pulseReorderRow(index, 'reorder-item--edge');
+  showReorderStatus(edge === 'top' ? 'Already at the top' : 'Already at the bottom', 'edge');
 }
 
 function movePill(key, delta) {
@@ -9070,7 +9210,10 @@ function movePill(key, delta) {
   const idx = seq.indexOf(key);
   if (idx === -1) return;
   const targetIdx = idx + delta;
-  if (targetIdx < 0 || targetIdx >= seq.length) return;
+  if (targetIdx < 0 || targetIdx >= seq.length) {
+    reportReorderEdge(idx, targetIdx < 0 ? 'top' : 'bottom');
+    return;
+  }
 
   const temp = seq[idx];
   seq[idx] = seq[targetIdx];
@@ -9079,18 +9222,24 @@ function movePill(key, delta) {
   applyPillSequence(seq);
   savePillSequence(seq);
   renderReorderModalList();
+  reportReorderMove(targetIdx);
 }
 
 function movePillToTop(key) {
   const seq = getCurrentPillSequence();
   const idx = seq.indexOf(key);
-  if (idx <= 0) return;
+  if (idx === -1) return;
+  if (idx === 0) {
+    reportReorderEdge(0, 'top');
+    return;
+  }
   seq.splice(idx, 1);
   seq.unshift(key);
 
   applyPillSequence(seq);
   savePillSequence(seq);
   renderReorderModalList();
+  reportReorderMove(0);
 }
 
 function setupFilterPillsDragAndDrop() {
@@ -9431,6 +9580,7 @@ async function init() {
     const savedPillsSeq = loadSavedPillSequence();
     applyPillSequence(savedPillsSeq);
     setupFilterPillsDragAndDrop();
+    setupModalSwipeNav();
 
     // Sound alert toggle button setup
     const soundBtn = document.getElementById('soundToggle');
@@ -10087,6 +10237,7 @@ if (typeof module !== 'undefined' && module.exports) {
     renderReorderModalList,
     movePill,
     movePillToTop,
+    setupModalSwipeNav,
     setupFilterPillsDragAndDrop,
     showToast,
     copyDonationAddress,
