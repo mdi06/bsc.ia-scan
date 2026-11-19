@@ -6063,12 +6063,81 @@ function finishModalTelemetry(exitMethod = 'closed') {
   _modalObservedSections.clear();
 }
 
-function trackCliCopy(type, symbol, contract) {
-  trackAnalytics('cli_copied', {
+// `source` = where the copy was tapped (mint_section, shortcut_bar, sniper_section, mint_gate, pancakeswap_exit).
+// `copied` = whether the text reached the clipboard; callers that cannot tell leave it out.
+function trackCliCopy(type, symbol, contract, source = 'unknown', copied) {
+  const props = {
     type: type,
     token_symbol: symbol || '',
-    token_contract: contract || ''
+    token_contract: contract || '',
+    source: source
+  };
+  if (typeof copied === 'boolean') props.copied = copied;
+  trackAnalytics('cli_copied', props);
+}
+
+// Copies text for a one-tap button. Resolves true when the text reached the clipboard. The async Clipboard API is
+// called synchronously (Safari only allows that inside the tap); a hidden textarea is the fallback where it is missing
+// or refuses (older mobile browsers, non-secure origins).
+function copyTextToClipboard(text) {
+  try {
+    const clipboard = (typeof navigator !== 'undefined') ? navigator.clipboard : null;
+    if (clipboard && typeof clipboard.writeText === 'function') {
+      return Promise.resolve(clipboard.writeText(text)).then(() => true, () => legacyCopyText(text));
+    }
+  } catch (err) {
+    // no async clipboard here: the legacy path below
+  }
+  return Promise.resolve(legacyCopyText(text));
+}
+
+function legacyCopyText(text) {
+  try {
+    if (typeof document === 'undefined' || typeof document.createElement !== 'function' || typeof document.execCommand !== 'function' ||
+        !document.body || typeof document.body.appendChild !== 'function' || typeof document.body.removeChild !== 'function') {
+      return false;
+    }
+    const area = document.createElement('textarea');
+    area.value = text;
+    area.setAttribute('readonly', '');
+    area.style.position = 'fixed';
+    area.style.opacity = '0';
+    document.body.appendChild(area);
+    try {
+      if (typeof area.select === 'function') area.select();
+      if (typeof area.setSelectionRange === 'function') area.setSelectionRange(0, text.length);
+      return Boolean(document.execCommand('copy'));
+    } finally {
+      document.body.removeChild(area);
+    }
+  } catch (err) {
+    return false;
+  }
+}
+
+// The Sniper CLI copy buttons of the token modal (pinned bar, Mint section, Sniper section, Mint gate). The command
+// is the one openModal built for the open token; every tap is tracked with its source.
+let currentSniperCliSnippet = '';   // set by openModal for the token modal that is open
+
+function copyModalSniperCli(btn, source) {
+  const text = currentSniperCliSnippet;
+  if (!text) return;
+  const item = currentInspectItem || {};
+  const symbol = item.symbol || '';
+  const contract = item.contract || '';
+  copyTextToClipboard(text).then(copied => {
+    trackCliCopy('sniper_cli', symbol, contract, source, copied);
+    flashCopyLabel(btn, copied ? 'Copied!' : 'Copy failed');
   });
+}
+
+// Shows a short label on a copy button, then puts its own label back.
+function flashCopyLabel(btn, label) {
+  if (!btn) return;
+  if (btn._copyLabel === undefined) btn._copyLabel = btn.textContent;
+  btn.textContent = label;
+  clearTimeout(btn._copyTimer);
+  btn._copyTimer = setTimeout(() => { btn.textContent = btn._copyLabel; }, 1500);
 }
 
 function trackExternalClick(target, symbol, contract) {
@@ -6474,6 +6543,7 @@ function openModal(item, source = 'direct') {
   }
   const valWei = item.mint_value_wei || '0';
   const cliSnippet = `baw contract-call preview --binanceChainId 56 --from ${userWallet} --to ${cAddr} --value ${valWei} --inputData ${calldata} --json`;
+  currentSniperCliSnippet = cliSnippet;
 
   const isFav = isFavorited(cAddr, item);
   const favBtnClass = isFav ? 'modal-fav-btn starred' : 'modal-fav-btn';
@@ -6941,12 +7011,16 @@ function openModal(item, source = 'direct') {
           ${calldataPending ? `<button id="modalMintBtn" class="web3-mint-btn sold-out" disabled>
             <span class="mint-icon">⏳</span>
             <span id="modalMintBtnText">Loading mint data…</span>
-          </button>` : `<button id="modalMintBtn" class="web3-mint-btn" onclick="trackAnalytics('mint_button_clicked', { token_symbol: '${escapeHtml(sym)}', is_free: ${isFree} }); executeWeb3Mint('${cAddr}', '${calldata}', '${valWei}', '${escapeHtml(name)}')">
+          </button>` : `<button id="modalMintBtn" class="web3-mint-btn" onclick="trackAnalytics('mint_button_clicked', mintClickProps(${escapeHtml(JSON.stringify(sym))}, ${isFree})); executeWeb3Mint('${cAddr}', '${calldata}', '${valWei}', ${escapeHtml(JSON.stringify(name))})">
             <span class="mint-icon">⚡</span>
             <span id="modalMintBtnText">${connectedWallet ? `1-Click Mint (${mintCostLabel})` : `👛 Connect Wallet & Mint (${mintCostLabel})`}</span>
           </button>`}
         </div>
-        <div id="modalMintStatus" class="mint-status-box" style="display: none; margin-top: 10px;"></div>`}
+        <div id="modalMintStatus" class="mint-status-box" style="display: none; margin-top: 10px;"></div>
+        <div class="mint-cli-row">
+          <span class="mint-cli-hint">Or mint from a terminal with the Binance Agentic Wallet CLI:</span>
+          <button type="button" class="mint-cli-btn" onclick="copyModalSniperCli(this, 'mint_section')">⌨ Copy Sniper CLI</button>
+        </div>`}
       `}
     </div>
 
@@ -6954,7 +7028,7 @@ function openModal(item, source = 'direct') {
       <div class="modal-section-title">⚡ 1-Click Sniper CLI Command (Binance Agentic Wallet)</div>
       <div class="cli-box">
         <code>${escapeHtml(cliSnippet)}</code>
-        <button class="copy-btn" onclick="trackCliCopy('sniper_cli', '${escapeHtml(sym)}', '${cAddr}'); navigator.clipboard.writeText('${cliSnippet.replace(/'/g, "\\'")}'); this.textContent='Copied!'; setTimeout(()=>this.textContent='Copy', 1500)">Copy</button>
+        <button class="copy-btn" onclick="copyModalSniperCli(this, 'sniper_section')">Copy</button>
       </div>
     </div>
 
@@ -6973,7 +7047,7 @@ function openModal(item, source = 'direct') {
       </div>
       <div class="cli-box">
         <code>${escapeHtml(sellCliSnippet)}</code>
-        <button class="copy-btn" onclick="trackCliCopy('exit_cli', '${escapeHtml(sym)}', '${cAddr}'); navigator.clipboard.writeText('${sellCliSnippet.replace(/'/g, "\\'")}'); this.textContent='Copied!'; setTimeout(()=>this.textContent='Copy', 1500)">Copy Exit CLI</button>
+        <button class="copy-btn" onclick="trackCliCopy('exit_cli', '${escapeHtml(sym)}', '${cAddr}', 'pancakeswap_exit'); navigator.clipboard.writeText('${sellCliSnippet.replace(/'/g, "\\'")}'); this.textContent='Copied!'; setTimeout(()=>this.textContent='Copy', 1500)">Copy Exit CLI</button>
       </div>
     </div>
     ` : ''}
@@ -7016,6 +7090,8 @@ function openModal(item, source = 'direct') {
         onclick="jumpToModalSection('mint_action', '${escapeHtml(sym)}', ${isFree}, ${isDexTraded}, ${isSoldOut})">
         ${(!isSoldOut && !isDexTraded && isFree) ? '⚡ Free Mint / Snipe' : '⚡ Mint / Snipe'} <span aria-hidden="true">↓</span>
       </button>
+      <button type="button" class="modal-shortcut-btn modal-shortcut-btn-secondary" title="Copy the Sniper CLI command"
+        onclick="copyModalSniperCli(this, 'shortcut_bar')">⌨ Copy CLI</button>
     </div>
   `;
 
@@ -7379,6 +7455,11 @@ async function connectWeb3(providerType = 'auto') {
       provName = 'MetaMask';
     }
     walletProviderName = provName;
+    trackAnalytics('wallet_connected', {
+      wallet_provider: provName,
+      is_mobile: isMobileClient(),
+      source: _walletSession ? _walletSession.source : 'direct'
+    });
 
     if (typeof window !== 'undefined' && window.posthog && typeof window.posthog.identify === 'function') {
       window.posthog.identify(account, { wallet_provider: provName });
@@ -7447,6 +7528,12 @@ async function connectWeb3(providerType = 'auto') {
     return true;
   } catch (err) {
     console.error('Wallet connection error:', err);
+    trackAnalytics('wallet_connect_failed', {
+      wallet_provider: providerType,
+      rejected: Boolean(err && (err.code === 4001 || String(err.message || '').toLowerCase().includes('user rejected'))),
+      is_mobile: isMobileClient(),
+      source: _walletSession ? _walletSession.source : 'direct'
+    });
     updateWalletButtonUI();
     return false;
   }
@@ -7504,10 +7591,15 @@ async function executeWeb3Mint(contractAddress, rawCalldata, valueWei, name = 'D
   };
 
   try {
-    // 1. Injected Provider Check
+    // 1. Injected Provider Check. Nothing in this browser can sign: explain the next step (wallet gate) instead of a dead end.
     let provider = getInjectedProvider();
     if (!provider) {
-      openWalletModal();
+      trackAnalytics('mint_wallet_gate_shown', {
+        token_symbol: (currentInspectItem && currentInspectItem.symbol) || '',
+        is_mobile: isMobileClient(),
+        watch_only: Boolean(connectedWallet) && walletProviderName === 'Watch-Only'
+      });
+      openMintWalletGate();
       return;
     }
 
@@ -7649,6 +7741,176 @@ async function executeWeb3Mint(contractAddress, rawCalldata, valueWei, name = 'D
   }
 }
 if (typeof window !== 'undefined') window.executeWeb3Mint = executeWeb3Mint;
+
+// ==========================================================================
+// 👛 Mint with no signing wallet in this browser (mobile browsers, desktops without an extension)
+// ==========================================================================
+// Before this, Mint with no injected provider opened the generic extension list (MetaMask / Rabby cards) with no
+// explanation. On Android Chrome the wallet dialog was opened and left without a provider chosen. Now the click says
+// what is missing and opens the wallet dialog with the next steps that work on this device: the Binance app (Discover
+// link / QR) or the Sniper CLI. With an injected provider Mint goes straight to executeWeb3Mint, unchanged.
+//
+// Funnel (PostHog): mint_button_clicked -> mint_wallet_gate_shown -> mint_gate_action | cli_copied (source mint_gate)
+// | wallet_modal_abandoned -> wallet_connected | wallet_connect_failed. A wallet_modal_opened starts a session; the
+// dialog closing with no signing wallet ends it as wallet_modal_abandoned.
+let _walletSession = null;   // { source, view, token_symbol, openedAt } while the wallet dialog is open
+
+function walletDialogIsOpen() {
+  const modal = (typeof document !== 'undefined') ? document.getElementById('walletModal') : null;
+  if (!modal) return false;
+  return Boolean(modal.open || (typeof modal.hasAttribute === 'function' && modal.hasAttribute('open')));
+}
+
+// Starts a wallet-dialog session (one wallet_modal_opened) unless the dialog is already open; then only the view changes.
+// `view` is what the user sees: connect_list, account, mint_gate or binance_qr.
+function beginWalletSession(source, view, extra = {}) {
+  if (_walletSession && walletDialogIsOpen()) {
+    _walletSession.view = view || _walletSession.view;
+    return _walletSession;
+  }
+  _walletSession = {
+    source: source,
+    view: view || source,
+    token_symbol: extra.token_symbol || '',
+    openedAt: Date.now()
+  };
+  trackAnalytics('wallet_modal_opened', {
+    source: source,
+    view: _walletSession.view,
+    token_symbol: _walletSession.token_symbol,
+    is_mobile: isMobileClient(),
+    has_injected_provider: Boolean(getInjectedProvider()),
+    wallet_connected: Boolean(connectedWallet)
+  });
+  return _walletSession;
+}
+
+// The wallet dialog's close event (ESC and the backdrop included). A session that ends with no signing wallet connected
+// is an abandon. The account drawer is not part of the connect funnel, so it is never counted.
+function onWalletModalClosed() {
+  const session = _walletSession;
+  _walletSession = null;
+  if (!session || session.source === 'account_drawer') return;
+  const signing = Boolean(connectedWallet) && walletProviderName !== 'Watch-Only';
+  if (signing) return;
+  trackAnalytics('wallet_modal_abandoned', {
+    source: session.source,
+    view: session.view,
+    token_symbol: session.token_symbol,
+    seconds_open: Math.max(0, Math.round((Date.now() - session.openedAt) / 1000)),
+    is_mobile: isMobileClient(),
+    has_injected_provider: Boolean(getInjectedProvider()),
+    watch_only_connected: Boolean(connectedWallet)
+  });
+}
+
+// Properties of the mint_button_clicked event (the token modal's Mint button): what the user had when they tapped.
+function mintClickProps(symbol, isFree) {
+  return {
+    token_symbol: symbol || '',
+    is_free: Boolean(isFree),
+    wallet_connected: Boolean(connectedWallet),
+    watch_only: Boolean(connectedWallet) && walletProviderName === 'Watch-Only',
+    has_injected_provider: Boolean(getInjectedProvider()),
+    is_mobile: isMobileClient(),
+    source: 'modal_mint_button'
+  };
+}
+
+function trackMintGateAction(action) {
+  trackAnalytics('mint_gate_action', {
+    action: action,
+    token_symbol: (_walletSession && _walletSession.token_symbol) || '',
+    is_mobile: isMobileClient()
+  });
+}
+
+// Mint without a signing wallet, as a step: why nothing can sign here and what to do next on this device. Nothing on
+// this dialog signs. Its options open the Binance guide, copy the Sniper CLI or link to a wallet extension.
+function openMintWalletGate(sym) {
+  const modal = (typeof document !== 'undefined') ? document.getElementById('walletModal') : null;
+  const content = (typeof document !== 'undefined') ? document.getElementById('walletModalContent') : null;
+  if (!modal || !content) return;
+  const symbol = sym || (currentInspectItem && currentInspectItem.symbol) || '';
+  beginWalletSession('mint_gate', 'mint_gate', { token_symbol: symbol });
+
+  const isMobile = isMobileClient();
+  const watchOnly = Boolean(connectedWallet) && walletProviderName === 'Watch-Only';
+  const shortAddr = connectedWallet ? `${connectedWallet.slice(0, 6)}...${connectedWallet.slice(-4)}` : '';
+  const lead = watchOnly
+    ? `You are in watch-only mode (<code>${shortAddr}</code>). It can read a wallet, but it cannot sign a mint.`
+    : (isMobile
+      ? 'Mint sends a transaction from your wallet. Browser-extension wallets (MetaMask, Rabby) do not run in mobile browsers, so nothing on this page can sign yet.'
+      : 'Mint sends a transaction from your wallet. No browser wallet extension was found in this browser, so nothing on this page can sign yet.');
+
+  const binanceOption = `
+      <button type="button" class="mint-gate-option mint-gate-primary" onclick="trackMintGateAction('binance_app'); openBinanceQrModal()">
+        <span class="mint-gate-icon" aria-hidden="true">📱</span>
+        <span class="mint-gate-text"><strong>${isMobile ? 'Open in Binance App' : 'Mint from the Binance app'}</strong><small>${isMobile ? 'Binance Web3 Discover: your Binance wallet signs inside the app.' : 'Scan a QR code with the Binance app, then mint from your phone.'}</small></span>
+      </button>`;
+  const cliOption = `
+      <button type="button" class="mint-gate-option" onclick="copyModalSniperCli(this, 'mint_gate')">
+        <span class="mint-gate-icon" aria-hidden="true">⌨</span>
+        <span class="mint-gate-text"><strong>Copy Sniper CLI</strong><small>Mint from a terminal with the Binance Agentic Wallet CLI.</small></span>
+      </button>`;
+  const extensionOptions = `
+      <a class="mint-gate-option" href="https://metamask.io/download/" target="_blank" rel="noopener" onclick="trackMintGateAction('install_metamask')">
+        <span class="mint-gate-icon" aria-hidden="true">🦊</span>
+        <span class="mint-gate-text"><strong>Install MetaMask</strong><small>Browser extension for desktop Chrome, Edge or Brave.</small></span>
+      </a>
+      <a class="mint-gate-option" href="https://rabby.io/" target="_blank" rel="noopener" onclick="trackMintGateAction('install_rabby')">
+        <span class="mint-gate-icon" aria-hidden="true">🐰</span>
+        <span class="mint-gate-text"><strong>Install Rabby</strong><small>DeFi wallet extension for desktop.</small></span>
+      </a>`;
+  const options = isMobile ? binanceOption + cliOption : extensionOptions + binanceOption + cliOption;
+  const note = isMobile
+    ? 'In the Binance app, open this page in Discover and tap Mint there.'
+    : 'After installing a wallet, reload this page and click Mint again.';
+
+  content.innerHTML = `
+    <div class="wallet-card-container">
+      <div class="modal-header wallet-card-header">
+        <div class="modal-title wallet-card-title">
+          <span class="wallet-title-icon">👛</span>
+          <span>Wallet needed to mint${symbol ? ` ${escapeHtml(symbol)}` : ''}</span>
+        </div>
+        <button class="modal-close-btn" onclick="closeWalletDialog()">✕ [ESC]</button>
+      </div>
+
+      <div class="wallet-connect-body">
+        <p class="wallet-connect-desc">${lead} Pick the next step:</p>
+        <div class="mint-gate-options">${options}</div>
+        <p class="mint-gate-note">${note}</p>
+        <div style="text-align: center; margin-top: 8px;">
+          <button type="button" class="modal-close-btn" onclick="closeWalletDialog()">Not now</button>
+        </div>
+      </div>
+    </div>
+  `;
+
+  // The token modal keeps the reason too, so the Mint section still explains itself after this dialog is closed.
+  const statusBox = document.getElementById('modalMintStatus');
+  if (statusBox) {
+    statusBox.innerHTML = `<div class="mint-status-info">👛 <strong>Minting needs a wallet that can sign in this browser.</strong> <button type="button" class="mint-status-link" onclick="openMintWalletGate()">See your options ›</button></div>`;
+    statusBox.style.display = 'block';
+  }
+
+  if (typeof modal.showModal === 'function') modal.showModal();
+  else modal.setAttribute('open', '');
+}
+
+// "← Back" on the Binance guide: to the Mint gate when the dialog was opened from Mint, else to the connect list.
+function walletModalBack() {
+  if (_walletSession && _walletSession.source === 'mint_gate') openMintWalletGate(_walletSession.token_symbol);
+  else openWalletModal();
+}
+
+function closeWalletDialog() {
+  const modal = (typeof document !== 'undefined') ? document.getElementById('walletModal') : null;
+  if (!modal) return;
+  if (typeof modal.close === 'function') modal.close();
+  else modal.removeAttribute('open');
+}
 
 // Watch-Only Mode (Inspect Any BSC Address Without Private Key)
 function setWatchOnlyWallet(addr) {
@@ -8002,6 +8264,7 @@ function openWalletModal() {
   const modal = document.getElementById('walletModal');
   const content = document.getElementById('walletModalContent');
   if (!modal || !content) return;
+  beginWalletSession(connectedWallet ? 'account_drawer' : 'connect_list', connectedWallet ? 'account' : 'connect_list');
 
   if (!connectedWallet) {
     content.innerHTML = `
@@ -8213,6 +8476,7 @@ function openBinanceQrModal() {
   const modal = document.getElementById('walletModal');
   const content = document.getElementById('walletModalContent');
   if (!modal || !content) return;
+  beginWalletSession('qr_guide', 'binance_qr');
 
   const currentOrigin = (typeof window !== 'undefined' && window.location.origin) ? window.location.origin : 'https://agent-id-monitor.vercel.app';
   const qrApiUrl = `https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(currentOrigin)}&bgcolor=ffffff&color=03080c&margin=6`;
@@ -8221,7 +8485,7 @@ function openBinanceQrModal() {
     <div class="wallet-card-container">
       <div class="modal-header wallet-card-header">
         <div class="modal-title wallet-card-title">
-          <button class="wallet-back-btn" onclick="openWalletModal()">← Back</button>
+          <button class="wallet-back-btn" onclick="walletModalBack()">← Back</button>
           <span class="wallet-title-icon" style="margin-left: 8px;">🟡</span>
           <span>Connect Binance Agentic Wallet</span>
         </div>
@@ -9935,6 +10199,8 @@ async function init() {
       walletModal.addEventListener('click', e => {
         if (e.target === walletModal) walletModal.close ? walletModal.close() : walletModal.removeAttribute('open');
       });
+      // Ends a wallet-dialog session; with no signing wallet connected it is counted as an abandon (wallet_modal_abandoned).
+      if (typeof walletModal.addEventListener === 'function') walletModal.addEventListener('close', onWalletModalClosed);
     }
 
     const syncModal = document.getElementById('syncModal');
@@ -10061,6 +10327,17 @@ if (typeof module !== 'undefined' && module.exports) {
     sendDesktopNotification,
     buildMintTxParams,
     executeWeb3Mint,
+    mintClickProps,
+    copyModalSniperCli,
+    copyTextToClipboard,
+    trackCliCopy,
+    openMintWalletGate,
+    onWalletModalClosed,
+    walletModalBack,
+    closeWalletDialog,
+    beginWalletSession,
+    getWalletSession: () => _walletSession,
+    setConnectedWalletForTest: (addr, provider) => { connectedWallet = addr; walletProviderName = provider; },
     getInjectedProvider,
     openInspectModalByContract,
     renderSmartStreamTicker,

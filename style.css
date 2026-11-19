@@ -2591,7 +2591,9 @@ a.inspect-btn:hover {
   margin: 0 calc(var(--modal-pad-x) * -1) calc(var(--modal-pad-y) * -1);
   padding: 22px var(--modal-pad-x) 12px;
   display: flex;
+  flex-wrap: wrap;
   justify-content: center;
+  gap: 8px;
   background: linear-gradient(to top, #0a0c14 55%, rgba(10, 12, 20, 0));
   pointer-events: none;
   transition: opacity 0.15s ease, transform 0.15s ease;
@@ -2631,10 +2633,36 @@ a.inspect-btn:hover {
   outline-offset: 2px;
 }
 
+/* Second pinned action: one-tap "Copy CLI" beside Mint / Snipe (copyModalSniperCli in app.js) */
+.modal-shortcut-btn-secondary {
+  background: rgba(2, 7, 9, 0.94);
+  color: var(--color-cyan);
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(0, 0, 0, 0.4);
+}
+
+.modal-shortcut-btn-secondary:hover {
+  background: rgba(0, 240, 255, 0.12);
+  box-shadow: 0 6px 22px rgba(0, 240, 255, 0.3), 0 0 0 1px rgba(0, 0, 0, 0.4);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .modal-shortcut-bar,
   .modal-shortcut-btn {
     transition: none;
+  }
+}
+
+/* Narrow phones (320px): Mint / Snipe and Copy CLI stay on one row (min-height keeps the 40px tap target) */
+@media (max-width: 380px) {
+  .modal-shortcut-bar {
+    gap: 6px;
+    padding-left: 8px;
+    padding-right: 8px;
+  }
+
+  .modal-shortcut-btn {
+    padding: 9px 12px;
+    font-size: 12px;
   }
 }
 
@@ -6458,6 +6486,137 @@ a.inspect-btn:hover {
 
 .mint-status-error {
   color: var(--color-red);
+}
+
+.mint-status-link {
+  background: none;
+  border: 0;
+  padding: 0;
+  margin-left: 4px;
+  color: var(--color-cyan);
+  font: inherit;
+  font-weight: 700;
+  text-decoration: underline;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+/* "Copy Sniper CLI" under the Mint button: the terminal route, one tap, visible in the Mint section */
+.mint-cli-row {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.mint-cli-hint {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.mint-cli-btn {
+  width: 100%;
+  min-height: 40px;
+  padding: 9px 14px;
+  background: rgba(0, 255, 136, 0.06);
+  border: 1px dashed rgba(0, 255, 136, 0.5);
+  border-radius: 6px;
+  color: var(--color-green);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  touch-action: manipulation;
+  transition: background 0.2s ease, border-color 0.2s ease;
+}
+
+.mint-cli-btn:hover {
+  background: rgba(0, 255, 136, 0.14);
+  border-color: var(--color-green);
+}
+
+.mint-cli-btn:focus-visible,
+.mint-gate-option:focus-visible,
+.mint-status-link:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+}
+
+/* Mint gate: the wallet dialog opened from Mint when nothing in this browser can sign (app.js openMintWalletGate) */
+.mint-gate-options {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 12px 0 10px;
+}
+
+.mint-gate-option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 48px;
+  padding: 10px 12px;
+  background: rgba(0, 240, 255, 0.05);
+  border: 1px solid rgba(0, 240, 255, 0.3);
+  border-radius: 8px;
+  color: var(--text-white);
+  font-family: inherit;
+  font-size: 12px;
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+  touch-action: manipulation;
+  transition: background 0.2s ease, border-color 0.2s ease;
+}
+
+.mint-gate-option:hover {
+  background: rgba(0, 240, 255, 0.12);
+  border-color: var(--color-cyan);
+}
+
+.mint-gate-option.mint-gate-primary {
+  background: rgba(240, 185, 11, 0.1);
+  border-color: rgba(240, 185, 11, 0.6);
+}
+
+.mint-gate-option.mint-gate-primary:hover {
+  background: rgba(240, 185, 11, 0.2);
+  border-color: #f0b90b;
+}
+
+.mint-gate-icon {
+  flex: 0 0 24px;
+  width: 24px;
+  text-align: center;
+  font-size: 18px;
+  line-height: 1;
+}
+
+.mint-gate-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.mint-gate-text strong {
+  font-size: 13px;
+  color: var(--text-white);
+}
+
+.mint-gate-text small {
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text-dim);
+  overflow-wrap: anywhere;
+}
+
+.mint-gate-note {
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-dim);
+  margin: 0;
 }
 
 @keyframes pulse-border {
