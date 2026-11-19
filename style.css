@@ -120,8 +120,8 @@ body {
 /* Prominent Global Suite Search Bar */
 .suite-search-wrap {
   position: relative;
-  flex: 1 1 560px;
-  max-width: 780px;
+  flex: 1 1 720px;
+  max-width: 960px;
   min-width: 240px;
   margin: 0 12px;
 }
