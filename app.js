@@ -4836,11 +4836,14 @@ function makeHeaderSortable(el, baseLabel, descMode, ascMode, customToggle) {
     title = `Sorted: Low ➔ High (Click to reset)`;
   }
 
-  el.innerHTML = `${baseLabel} ${indicator}`;
+  // Write only what changed: this runs on every table render, and rewriting an identical header restyles it.
+  const headHtml = `${baseLabel} ${indicator}`;
+  if (el.innerHTML !== headHtml) el.innerHTML = headHtml;
   const baseClass = (el.className || '').replace(/\s*(sortable-th|active-sort)\b/g, '').trim();
-  el.className = `${baseClass} sortable-th${(isActive && (!isDefaultBlock || sortMode === 'BLOCK_ASC')) ? ' active-sort' : ''}`.trim();
-  el.style.cursor = 'pointer';
-  el.title = title;
+  const nextClass = `${baseClass} sortable-th${(isActive && (!isDefaultBlock || sortMode === 'BLOCK_ASC')) ? ' active-sort' : ''}`.trim();
+  if (el.className !== nextClass) el.className = nextClass;
+  if (el.style.cursor !== 'pointer') el.style.cursor = 'pointer';
+  if (el.title !== title) el.title = title;
 
   el.onclick = () => {
     if (typeof customToggle === 'function') {
@@ -4860,6 +4863,55 @@ function makeHeaderSortable(el, baseLabel, descMode, ascMode, customToggle) {
   };
 }
 
+// Puts the rows into tbody in the given order, touching the DOM only where it differs: rows that left are removed,
+// and a row is moved or inserted only where it is out of place. An unchanged list makes no DOM changes.
+function patchRowNodes(tbody, nodes) {
+  if (!('firstElementChild' in tbody) || typeof tbody.insertBefore !== 'function' || typeof tbody.removeChild !== 'function') {
+    const fragment = document.createDocumentFragment();
+    nodes.forEach(node => fragment.appendChild(node));
+    if (typeof tbody.replaceChildren === 'function') {
+      tbody.replaceChildren(fragment);
+    } else {
+      tbody.innerHTML = '';
+      tbody.appendChild(fragment);
+    }
+    return;
+  }
+  const keep = new Set(nodes);
+  Array.from(tbody.children).forEach(child => {
+    if (!keep.has(child)) tbody.removeChild(child);
+  });
+  let ref = tbody.firstElementChild;
+  nodes.forEach(node => {
+    if (node === ref) {
+      ref = ref.nextElementSibling;
+    } else {
+      tbody.insertBefore(node, ref);
+    }
+  });
+}
+
+// Filter and tab taps: the new active state is painted first, and the table rebuild runs in the task after that paint,
+// so the tap's next paint is not held up by the row work. Taps within one frame render once, with the latest state.
+let tableRenderQueued = false;
+function scheduleTableRender() {
+  if (tableRenderQueued) return;
+  tableRenderQueued = true;
+  const run = () => {
+    tableRenderQueued = false;
+    renderTable();
+  };
+  if (typeof requestAnimationFrame === 'function') {
+    requestAnimationFrame(() => setTimeout(run, 0));
+  } else {
+    setTimeout(run, 0);
+  }
+}
+
+// Rows built by recent renderTable calls, by drop object (see the row loop in renderTable).
+const TABLE_ROW_CACHE_MAX = 240;
+let tableRowCache = new Map();
+
 // Render Table Rows
 function renderTable(keepLimit = false) {
   if (typeof document === 'undefined') return;
@@ -4869,6 +4921,13 @@ function renderTable(keepLimit = false) {
     tableRenderLimit = TABLE_RENDER_CHUNK;
   }
   const filtered = getFilteredDrops();
+
+  // The table's reserved height (style.css .table-reserve) only covers the wait for the first feed render; after that,
+  // or on tabs that do not show the table, the table sizes to its content again.
+  if (allDrops.length > 0 || activeTab === 'WALLETS' || activeTab === 'PORTFOLIO') {
+    const wrapEl = (typeof document.querySelector === 'function') ? document.querySelector('.table-wrapper') : null;
+    if (wrapEl && wrapEl.classList && typeof wrapEl.classList.remove === 'function') wrapEl.classList.remove('table-reserve');
+  }
 
   // Counts, the secondary banner and the pulse card depend on the data, not on the filter / search / sort / page.
   const dataChanged = dataDerivedInputsChanged();
@@ -5062,8 +5121,11 @@ function renderTable(keepLimit = false) {
     return;
   }
 
-  const fragment = document.createDocumentFragment();
+  const rowNodes = [];
   const visible = filtered.slice(0, tableRenderLimit);
+  // Rows are reused across renders when their markup is unchanged (see rowSig below).
+  const previousRows = tableRowCache;
+  const nextRows = new Map();
   visible.forEach((item, index) => {
     const tr = document.createElement('tr');
     if (item._isNew) tr.classList.add('row-new');
@@ -5360,8 +5422,9 @@ function renderTable(keepLimit = false) {
       }
     }
 
+    let rowHtml;
     if (isSec) {
-      tr.innerHTML = `
+      rowHtml = `
         <td class="col-fav"><button class="${starClass}" onclick="toggleFavorite('${item.contract}', event)" title="${isFav ? 'Remove from favorites' : 'Add to favorites'}">${starIcon}</button></td>
         <td class="col-num">${index + 1}</td>
         <td class="col-block"><code>${blk}</code></td>
@@ -5378,7 +5441,7 @@ function renderTable(keepLimit = false) {
         <td class="col-action">${actBtn}</td>
       `;
     } else {
-      tr.innerHTML = `
+      rowHtml = `
         <td class="col-fav"><button class="${starClass}" onclick="toggleFavorite('${item.contract}', event)" title="${isFav ? 'Remove from favorites' : 'Add to favorites'}">${starIcon}</button></td>
         <td class="col-num">${index + 1}</td>
         <td class="col-block"><code>${blk}</code></td>
@@ -5395,14 +5458,28 @@ function renderTable(keepLimit = false) {
         <td class="col-action">${actBtn}</td>
       `;
     }
-    fragment.appendChild(tr);
+    // Unchanged row: keep the <tr> already in the DOM (its click handler and cell listeners stay attached).
+    const rowTitle = (typeof tr.getAttribute === 'function') ? tr.getAttribute('title') : '';
+    const rowSig = `${tr.className || ''}\u0001${rowTitle}\u0001${rowHtml}`;
+    const cachedRow = previousRows.get(item);
+    if (cachedRow && cachedRow.sig === rowSig && !nextRows.has(item)) {
+      nextRows.set(item, cachedRow);
+      rowNodes.push(cachedRow.tr);
+      return;
+    }
+    tr.innerHTML = rowHtml;
+    nextRows.set(item, { sig: rowSig, tr });
+    rowNodes.push(tr);
   });
-  if (typeof tbody.replaceChildren === 'function') {
-    tbody.replaceChildren(fragment);
-  } else {
-    tbody.innerHTML = '';
-    tbody.appendChild(fragment);
-  }
+  // Keep the rows just rendered plus recent older ones (up to TABLE_ROW_CACHE_MAX), so switching between two
+  // filters or tabs reuses the rows of both. The oldest leftovers are dropped first.
+  const merged = new Map();
+  previousRows.forEach((cached, key) => { if (!nextRows.has(key)) merged.set(key, cached); });
+  nextRows.forEach((cached, key) => merged.set(key, cached));
+  const cacheLimit = Math.max(TABLE_ROW_CACHE_MAX, nextRows.size);
+  while (merged.size > cacheLimit) merged.delete(merged.keys().next().value);
+  tableRowCache = merged;
+  patchRowNodes(tbody, rowNodes);
 
   // Update pagination button visibility and progress
   if (loadMoreWrap) {
@@ -9564,7 +9641,7 @@ async function init() {
         if (typeof window !== 'undefined' && window.va) {
           window.va('event', { name: 'tab_switch', data: { tab: activeTab } });
         }
-        renderTable();
+        scheduleTableRender();
         syncMobileTabSelector();
       });
     });
@@ -9627,7 +9704,7 @@ async function init() {
         if (typeof window !== 'undefined' && window.va) {
           window.va('event', { name: 'filter_changed', data: { filter: activeFilter } });
         }
-        renderTable();
+        scheduleTableRender();
       });
     });
 
