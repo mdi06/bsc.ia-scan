@@ -2255,6 +2255,31 @@ tbody tr.selected {
   transform: translateY(-1px);
 }
 
+.modal-share-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+  cursor: pointer;
+  background: rgba(0, 240, 255, 0.08);
+  border: 1px solid rgba(0, 240, 255, 0.35);
+  color: var(--color-cyan);
+  font-family: var(--font-sans);
+}
+
+.modal-share-btn:hover {
+  background: rgba(0, 240, 255, 0.18);
+}
+
+.modal-share-btn:focus-visible {
+  outline: 2px solid var(--color-cyan);
+  outline-offset: 2px;
+}
+
 .modal-fav-btn.starred {
   background: var(--color-gold);
   color: #000;

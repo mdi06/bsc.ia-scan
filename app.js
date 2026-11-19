@@ -6719,6 +6719,79 @@ function clearModalHash() {
   }
 }
 
+// Share link for a token: the modal's own #token= deep link, plus UTM tags so visits that come from a shared link
+// can be measured in PostHog. The origin and path come from the current page; nothing else in the query string is
+// carried over. The inline script in index.html strips utm_* from the address bar after the visit is recorded and
+// keeps the hash, so the modal still opens from the link.
+const TOKEN_SHARE_LABEL = '🔗 Copy share link';
+
+function buildTokenShareUrl(symbol) {
+  const sym = String(symbol || '').trim();
+  if (!sym || typeof window === 'undefined' || !window.location) return '';
+  const loc = window.location;
+  const origin = loc.origin && loc.origin !== 'null' ? loc.origin : '';
+  const path = loc.pathname || '/';
+  const enc = encodeURIComponent(sym);
+  return origin + path + '?utm_source=share&utm_medium=modal&utm_campaign=' + enc + '#token=' + enc;
+}
+
+function copyTokenShareLink(btn) {
+  const sym = btn && btn.dataset ? btn.dataset.shareSymbol : '';
+  const url = buildTokenShareUrl(sym);
+  if (!url) return;
+
+  const flash = (text) => {
+    if (!btn) return;
+    btn.textContent = text;
+    setTimeout(() => { btn.textContent = TOKEN_SHARE_LABEL; }, 1500);
+  };
+  const onCopied = () => {
+    trackAnalytics('token_share_link_copied', { token_symbol: sym });
+    flash('✓ Link copied');
+  };
+  const onFailed = () => {
+    // Last resort: show the link so it can still be copied by hand.
+    if (typeof window !== 'undefined' && typeof window.prompt === 'function') {
+      window.prompt('Copy this link:', url);
+    } else {
+      flash('Copy failed');
+    }
+  };
+  const execCopy = () => {
+    let ok = false;
+    try {
+      if (typeof document !== 'undefined' && typeof document.createElement === 'function' && typeof document.execCommand === 'function' && document.body && typeof document.body.appendChild === 'function') {
+        const ta = document.createElement('textarea');
+        ta.value = url;
+        ta.setAttribute('readonly', '');
+        if (ta.style) { ta.style.position = 'fixed'; ta.style.opacity = '0'; }
+        document.body.appendChild(ta);
+        if (typeof ta.select === 'function') ta.select();
+        ok = Boolean(document.execCommand('copy'));
+        if (typeof document.body.removeChild === 'function') document.body.removeChild(ta);
+      }
+    } catch (_) {
+      ok = false;
+    }
+    if (ok) onCopied(); else onFailed();
+  };
+
+  const clip = (typeof navigator !== 'undefined' && navigator) ? navigator.clipboard : null;
+  if (clip && typeof clip.writeText === 'function') {
+    let pending = null;
+    try { pending = clip.writeText(url); } catch (_) { pending = null; }
+    if (pending && typeof pending.then === 'function') {
+      pending.then(onCopied, execCopy);
+      return;
+    }
+  }
+  execCopy();
+}
+
+if (typeof window !== 'undefined') {
+  window.copyTokenShareLink = copyTokenShareLink;
+}
+
 async function resolveTokenAndInspect(tokenQuery, attempts = 0) {
   if (!tokenQuery) return;
   const modal = (typeof document !== 'undefined') ? document.getElementById('inspectModal') : null;
@@ -7122,6 +7195,7 @@ function openModal(item, source = 'direct') {
       </div>
       <div class="modal-header-actions" style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
         <button class="${favBtnClass}" id="modalFavBtn" onclick="toggleModalFav('${cAddr}')">${favBtnText}</button>
+        <button type="button" class="modal-share-btn" id="modalShareBtn" data-share-symbol="${escapeHtml(item.symbol || item.name || item.contract || '')}" onclick="copyTokenShareLink(this)" title="Copy a link to this token; visits from it are tagged utm_source=share, utm_medium=modal">${TOKEN_SHARE_LABEL}</button>
         <button class="modal-close-btn" onclick="document.getElementById('inspectModal').close()" title="Close dialog [ESC]">✕ Close [ESC]</button>
       </div>
     </div>
@@ -10964,6 +11038,8 @@ if (typeof module !== 'undefined' && module.exports) {
     fetchRegistryMintLogs,
     BSC_RPC_CONFIG,
     rpcReadTestHooks,
+    buildTokenShareUrl,
+    copyTokenShareLink,
     mergeTopGainersList,
     syncSeededTopGainers,
     topGainersSeedLabel,
