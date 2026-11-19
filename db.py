@@ -72,6 +72,11 @@ class DatabaseManager:
         # In-memory cache: {contract_lower: project_dict}. The 60s TTL caps Supabase reads at one per minute;
         # upserts update the cache immediately so new drops show up without waiting for a refresh.
         self._projects_cache: Dict[str, Dict[str, Any]] = {}
+        # The cache sorted by block (newest first), kept until the cache changes: every request used to sort all
+        # records again (2 ms locally, ~22 ms on Render) even when nothing had changed. Keyed on (content version,
+        # record count); each mutation of the cache bumps one of them. Callers get a shallow copy.
+        self._sorted_items: Optional[List[Dict[str, Any]]] = None
+        self._sorted_key: Optional[tuple] = None
         self._p_fingerprints: Dict[str, str] = {}
         self._p_written_at: Dict[str, float] = {}  # contract -> when it was last durably written
         self._retry_queue: set = set()  # contracts whose last remote write failed; resent by the next upsert
@@ -352,6 +357,17 @@ class DatabaseManager:
                 raise RuntimeError(f"incomplete read: got {len(items)} projects but the table has {total} rows")
         return items
 
+    def _sorted_projects(self) -> List[Dict[str, Any]]:
+        """All cached records, newest block first, as a new list (the caller may mutate it). The sort is redone
+        only when the cache changed. Takes the (re-entrant) cache lock itself."""
+        with self._cache_lock:
+            key = (self._content_version, len(self._projects_cache))
+            if self._sorted_items is None or self._sorted_key != key:
+                items = list(self._projects_cache.values())
+                items.sort(key=lambda x: x.get("block", 0) or 0, reverse=True)
+                self._sorted_items, self._sorted_key = items, key
+            return list(self._sorted_items)
+
     def get_all_projects(self, force_refresh: bool = False) -> List[Dict[str, Any]]:
         """Returns all projects as dictionaries, sorted by block descending.
         Uses in-memory cache with incremental delta sync to avoid memory churn and re-allocations.
@@ -359,8 +375,7 @@ class DatabaseManager:
         now = time.time()
         with self._cache_lock:
             if not force_refresh and self._cache_initialized and self._projects_cache and (now - self._last_cache_time < self._cache_ttl):
-                items = list(self._projects_cache.values())
-                items.sort(key=lambda x: x.get("block", 0) or 0, reverse=True)
+                items = self._sorted_projects()
                 return items
 
         # the full load just failed: every request retrying it would pile more multi-MB reads onto a database that is
@@ -368,8 +383,7 @@ class DatabaseManager:
         cooling = (self.mode == "supabase" and not force_refresh and not self._cache_initialized
                    and time.time() < self._load_failed_until)
         if cooling and self._projects_cache:
-            items = list(self._projects_cache.values())
-            items.sort(key=lambda x: x.get("block", 0) or 0, reverse=True)
+            items = self._sorted_projects()
             return items
         if self.mode == "supabase":
             # one load at a time: concurrent requests wait for it and then read the cache it filled
@@ -377,8 +391,7 @@ class DatabaseManager:
                 now = time.time()
                 with self._cache_lock:
                     if not force_refresh and self._cache_initialized and self._projects_cache and (now - self._last_cache_time < self._cache_ttl):
-                        items = list(self._projects_cache.values())
-                        items.sort(key=lambda x: x.get("block", 0) or 0, reverse=True)
+                        items = self._sorted_projects()
                         return items
                 try:
                     client = None if cooling else self.client
@@ -394,8 +407,7 @@ class DatabaseManager:
                                         # Zero new drops or updates: return existing in-memory cache with zero allocation
                                         with self._cache_lock:
                                             self._last_cache_time = now
-                                            items = list(self._projects_cache.values())
-                                            items.sort(key=lambda x: x.get("block", 0) or 0, reverse=True)
+                                            items = self._sorted_projects()
                                             return items
 
                         # 2. Only fetch delta (rows updated since last sync) or initial full load
@@ -443,8 +455,7 @@ class DatabaseManager:
                                 self._cache_dirty = True
                                 self._content_version += 1
                                 self._last_cache_time = now
-                                items = list(self._projects_cache.values())
-                                items.sort(key=lambda x: x.get("block", 0) or 0, reverse=True)
+                                items = self._sorted_projects()
                                 return items
                 except Exception as e:
                     print(f"[⚠️ Supabase Read Error] {e}", flush=True)
@@ -462,8 +473,7 @@ class DatabaseManager:
                         print("[⚠️ DB Warning] Supabase unreachable on a cold start: serving the history.json snapshot until it answers", flush=True)
                     except Exception as e:
                         print(f"[⚠️ DB Warning] Could not read {HISTORY_FILE}: {e}", flush=True)
-                    items = list(self._projects_cache.values())
-                    items.sort(key=lambda x: x.get("block", 0) or 0, reverse=True)
+                    items = self._sorted_projects()
                     return items
 
         # Fallback / SQLite with incremental check
@@ -478,8 +488,7 @@ class DatabaseManager:
                     if latest_ts <= self._last_synced_updated_at:
                         with self._cache_lock:
                             self._last_cache_time = now
-                            items = list(self._projects_cache.values())
-                            items.sort(key=lambda x: x.get("block", 0) or 0, reverse=True)
+                            items = self._sorted_projects()
                             return items
 
                 if not self._cache_initialized or not self._projects_cache or force_refresh:
@@ -507,8 +516,7 @@ class DatabaseManager:
                     self._cache_dirty = True
                     self._content_version += 1
                     self._last_cache_time = now
-                    items = list(self._projects_cache.values())
-                    items.sort(key=lambda x: x.get("block", 0) or 0, reverse=True)
+                    items = self._sorted_projects()
                     return items
             finally:
                 conn.close()
@@ -523,8 +531,7 @@ class DatabaseManager:
         self.get_all_projects()
         with self._cache_lock:
             if not self._cached_json_bytes or self._cache_dirty:
-                items = list(self._projects_cache.values())
-                items.sort(key=lambda x: x.get("block", 0) or 0, reverse=True)
+                items = self._sorted_projects()
                 self._cached_json_bytes = json.dumps(items, separators=(',', ':')).encode("utf-8")
                 self._cached_json_etag = f'"{hashlib.md5(self._cached_json_bytes).hexdigest()}"'
                 self._cache_dirty = False
