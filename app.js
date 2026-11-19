@@ -2313,7 +2313,6 @@ function computeStats(drops) {
 const AGENT_ID_REGISTRY_ADDR = '0x60B9262456dE011F7d15a54CdD8c48bAaa8B022F';
 const ERC721_TRANSFER_TOPIC = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef';
 const ZERO_ADDRESS_TOPIC = '0x0000000000000000000000000000000000000000000000000000000000000000';
-const PUBLICNODE_LOG_RPCS = ['https://bsc-rpc.publicnode.com', 'https://bsc.publicnode.com'];
 
 let currentAgentWalletsCount = 178001;
 let agentWalletsAnchorBlock = 132757997;
@@ -2395,33 +2394,7 @@ async function syncLiveAgentWalletsOnChain(currBlk) {
 
     while (fBlk <= currBlk) {
       const tBlk = Math.min(fBlk + chunkSize - 1, currBlk);
-      let chunkLogs = null;
-
-      for (const endpoint of PUBLICNODE_LOG_RPCS) {
-        try {
-          const res = await fetchWithTimeout(endpoint, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              jsonrpc: '2.0',
-              id: 1,
-              method: 'eth_getLogs',
-              params: [{
-                fromBlock: '0x' + fBlk.toString(16),
-                toBlock: '0x' + tBlk.toString(16),
-                address: AGENT_ID_REGISTRY_ADDR,
-                topics: [ERC721_TRANSFER_TOPIC, ZERO_ADDRESS_TOPIC]
-              }]
-            })
-          }, 4500);
-          if (!res || !res.ok) continue;
-          const json = await res.json();
-          if (json && Array.isArray(json.result)) {
-            chunkLogs = json.result;
-            break;
-          }
-        } catch (_) {}
-      }
+      const chunkLogs = await fetchRegistryMintLogs(fBlk, tBlk);
 
       if (chunkLogs === null) {
         allOk = false;
@@ -7745,57 +7718,264 @@ function openHallOfFameModal(filterMode = 'ALL') {
   }
 }
 
-// Official Reliable BSC RPC Endpoints with automatic fallback
-const BSC_PUBLIC_RPCS = [
-  'https://bsc-dataseed.bnbchain.org',
-  'https://bsc-dataseed1.defibit.io',
-  'https://bsc-dataseed1.ninicoin.io',
-  'https://1rpc.io/bnb'
-];
+// ---------------------------------------------------------------------------------------------------
+// Browser-side BSC reads. Every public-node read goes through rpcReadBody(): per-node backoff with
+// jitter, rotation to the next node, a short cache of identical reads and de-duplication of identical
+// in-flight reads. Only the methods in RPC_READ_METHODS get this. Transactions and wallet requests
+// (eth_sendTransaction, eth_sendRawTransaction, wallet_*, and the injected provider's request()) never
+// reach this layer, so they are never retried, cached or de-duplicated here.
+// ---------------------------------------------------------------------------------------------------
 
-// Robust JSON-RPC Single Call with failover
-async function sendRpcCall(method, params) {
-  for (const endpoint of BSC_PUBLIC_RPCS) {
-    try {
-      const res = await fetch(endpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params })
-      });
-      if (!res.ok) continue;
-      const data = await res.json();
-      if (data && data.result !== undefined) {
-        return data.result;
-      }
-    } catch (err) {
-      // try next RPC
+// THE ONE PLACE TO CONFIGURE BSC RPC ENDPOINTS.
+//   keyedUrl          KEYED PROVIDER SLOT, not configured yet. Paste the full https:// URL, key included, to enable
+//                     it. While it is '' (or not an https URL) it is skipped. When set, it is tried first for every
+//                     read and log query, and the public nodes below are the fallback. Everything in this file
+//                     ships to the browser, so the key is visible to every visitor: use a key restricted to this site.
+//   reads             Public nodes for eth_call, eth_getBalance, eth_blockNumber and batched eth_call. Each call
+//                     starts at the next node in turn, so no single node sees all of a visitor's traffic.
+//   logs              Public nodes for eth_getLogs (the agent-ID registry scan). Kept separate, as before.
+//   requestTimeoutMs  Abort for one read request (eth_getLogs uses its own 4.5 s, see fetchRegistryMintLogs).
+//   backoffBaseMs     A node that answers 429, 401, 403, 408 or 5xx, times out or returns bad JSON is skipped for
+//   backoffMaxMs      backoffBaseMs, doubling per consecutive failure up to backoffMaxMs. Each cooldown is jittered
+//                     (between half and all of its length). A Retry-After header raises it, up to the cap.
+//   cacheTtlMs        Identical reads within this window reuse the last successful answer.
+//   cacheMaxEntries   Upper bound on cached answers.
+const BSC_RPC_CONFIG = {
+  keyedUrl: '', // KEYED PROVIDER: paste the full https:// URL here (see above). Empty = skipped.
+  reads: [
+    'https://bsc-dataseed.bnbchain.org',
+    'https://bsc-dataseed1.defibit.io',
+    'https://bsc-dataseed1.ninicoin.io',
+    'https://1rpc.io/bnb'
+  ],
+  logs: [
+    'https://bsc-rpc.publicnode.com',
+    'https://bsc.publicnode.com'
+  ],
+  requestTimeoutMs: 8000,
+  backoffBaseMs: 2000,
+  backoffMaxMs: 60000,
+  cacheTtlMs: 4000,
+  cacheMaxEntries: 200
+};
+
+const RPC_READ_METHODS = new Set(['eth_call', 'eth_getLogs', 'eth_blockNumber', 'eth_getBalance']);
+const rpcEndpointHealth = new Map(); // node url -> { failures, cooldownUntil }
+const rpcInFlight = new Map();       // request key -> promise of response text (null when no node answered)
+const rpcCache = new Map();          // request key -> { text, expiresAt }
+let rpcRoundRobin = 0;
+const rpcClock = { now: () => Date.now(), random: () => Math.random() };
+
+function rpcUrlOf(value) {
+  const url = typeof value === 'string' ? value.trim() : '';
+  return /^https:\/\/\S+$/.test(url) ? url : '';
+}
+
+// Nodes for one read, in the order to try them: the keyed node first (when configured and not cooling
+// down), then the public nodes rotated so the starting node changes from call to call.
+function rpcCandidateUrls(kind, now) {
+  const keyed = rpcUrlOf(BSC_RPC_CONFIG.keyedUrl);
+  const ready = (url) => {
+    const health = rpcEndpointHealth.get(url);
+    return !health || health.cooldownUntil <= now;
+  };
+  const publicUrls = (kind === 'logs' ? BSC_RPC_CONFIG.logs : BSC_RPC_CONFIG.reads)
+    .map(rpcUrlOf)
+    .filter((url, i, all) => url && url !== keyed && all.indexOf(url) === i && ready(url));
+  const order = keyed && ready(keyed) ? [keyed] : [];
+  if (publicUrls.length) {
+    const start = rpcRoundRobin++ % publicUrls.length;
+    order.push(...publicUrls.slice(start), ...publicUrls.slice(0, start));
+  }
+  return order;
+}
+
+// 429 is the rate limit. 401/403 (key or origin refused), 408, and 5xx mean this node cannot serve us now.
+function rpcStatusIsNodeFault(status) {
+  return status === 401 || status === 403 || status === 408 || status === 429 || status >= 500;
+}
+
+function rpcIsRateLimitError(error) {
+  return !!error && /\brate.?limit|too many requests|\b429\b/i.test(String(error.message || ''));
+}
+
+function rpcRetryAfterMs(res) {
+  try {
+    const raw = res && res.headers && typeof res.headers.get === 'function' ? res.headers.get('Retry-After') : null;
+    if (!raw) return 0;
+    const seconds = Number(raw);
+    if (Number.isFinite(seconds)) return Math.max(0, seconds * 1000);
+    const at = Date.parse(raw);
+    return Number.isFinite(at) ? Math.max(0, at - rpcClock.now()) : 0;
+  } catch (_) {
+    return 0;
+  }
+}
+
+// One POST to one node. Resolves to { ok: true, data } when the node answered this request, or to
+// { ok: false, nodeFault, rateLimited, retryAfterMs }. A nodeFault is charged to that node's backoff.
+// Anything else (for example a JSON-RPC error about this one call, such as a block range the node
+// refuses) only moves on to the next node.
+async function rpcPostOnce(url, payload, timeoutMs, accept) {
+  const controller = typeof AbortController === 'function' ? new AbortController() : null;
+  const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+      signal: controller ? controller.signal : undefined
+    });
+    if (!res || !res.ok) {
+      const status = res ? res.status : 0;
+      return { ok: false, nodeFault: !res || rpcStatusIsNodeFault(status), rateLimited: status === 429, retryAfterMs: rpcRetryAfterMs(res) };
     }
+    const data = await res.json();
+    const items = Array.isArray(data) ? data : [data];
+    if (items.some((item) => item && rpcIsRateLimitError(item.error))) {
+      return { ok: false, nodeFault: true, rateLimited: true, retryAfterMs: rpcRetryAfterMs(res) };
+    }
+    return accept(data) ? { ok: true, data } : { ok: false, nodeFault: false };
+  } catch (_) {
+    return { ok: false, nodeFault: true, rateLimited: false, retryAfterMs: 0 };
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+// Starts or extends a node's cooldown after a fault. Exponential in the consecutive failure count, with jitter.
+function rpcChargeNode(url, { retryAfterMs = 0, rateLimited = false } = {}) {
+  const now = rpcClock.now();
+  let health = rpcEndpointHealth.get(url);
+  if (!health) {
+    health = { failures: 0, cooldownUntil: 0 };
+    rpcEndpointHealth.set(url, health);
+  }
+  // Several reads can hit the same failing node at once. Count that outage once, not once per read.
+  if (health.cooldownUntil > now) return;
+  health.failures += 1;
+  const cap = BSC_RPC_CONFIG.backoffMaxMs;
+  const exp = Math.min(cap, BSC_RPC_CONFIG.backoffBaseMs * Math.pow(2, health.failures - 1));
+  const jittered = exp / 2 + rpcClock.random() * (exp / 2);
+  const delay = Math.min(cap, Math.max(jittered, retryAfterMs));
+  health.cooldownUntil = now + delay;
+  trackAnalytics('rpc_endpoint_backoff', {
+    endpoint: url === rpcUrlOf(BSC_RPC_CONFIG.keyedUrl) ? 'keyed' : 'public',
+    rate_limited: !!rateLimited,
+    failures: health.failures,
+    delay_ms: Math.round(delay)
+  });
+}
+
+// Asks nodes in order until one answers. The first good answer is cached and returned as JSON text, so
+// every caller parses its own copy. Resolves to null when no node answered.
+async function rpcFirstAnswer(key, payload, { kind, timeoutMs, accept }) {
+  for (const url of rpcCandidateUrls(kind, rpcClock.now())) {
+    const out = await rpcPostOnce(url, payload, timeoutMs, accept);
+    if (out.ok) {
+      const health = rpcEndpointHealth.get(url);
+      if (health) {
+        health.failures = 0;
+        health.cooldownUntil = 0;
+      }
+      const text = JSON.stringify(out.data);
+      rpcCache.set(key, { text, expiresAt: rpcClock.now() + BSC_RPC_CONFIG.cacheTtlMs });
+      rpcTrimCache();
+      return text;
+    }
+    if (out.nodeFault) rpcChargeNode(url, out);
   }
   return null;
 }
 
-// High-Throughput JSON-RPC Batch Call with failover
+function rpcTrimCache() {
+  const max = BSC_RPC_CONFIG.cacheMaxEntries;
+  if (rpcCache.size <= max) return;
+  const now = rpcClock.now();
+  for (const [key, entry] of rpcCache) {
+    if (entry.expiresAt <= now) rpcCache.delete(key);
+  }
+  while (rpcCache.size > max) rpcCache.delete(rpcCache.keys().next().value);
+}
+
+// Runs one read (a JSON-RPC object, or a batch array) through the cache, the in-flight table and the
+// node list. Resolves to the parsed response, or null when the request is not a read or no node answered.
+async function rpcReadBody(payload, { logs = false, timeoutMs = BSC_RPC_CONFIG.requestTimeoutMs, accept } = {}) {
+  const methods = Array.isArray(payload) ? payload.map((p) => p && p.method) : [payload && payload.method];
+  if (!methods.length || !methods.every((method) => RPC_READ_METHODS.has(method))) return null;
+  const check = accept || (Array.isArray(payload) ? Array.isArray : (d) => !!d && d.result !== undefined);
+  const kind = logs ? 'logs' : 'reads';
+  const key = kind + '|' + JSON.stringify(payload);
+
+  const hit = rpcCache.get(key);
+  if (hit && hit.expiresAt > rpcClock.now()) return JSON.parse(hit.text);
+  if (hit) rpcCache.delete(key);
+
+  if (!rpcInFlight.has(key)) {
+    const pending = rpcFirstAnswer(key, payload, { kind, timeoutMs, accept: check })
+      .finally(() => rpcInFlight.delete(key));
+    rpcInFlight.set(key, pending);
+  }
+  const text = await rpcInFlight.get(key);
+  return text === null ? null : JSON.parse(text);
+}
+
+// Robust JSON-RPC single read with per-node backoff and fallback. Resolves to the `result`, or null.
+async function sendRpcCall(method, params) {
+  const data = await rpcReadBody({ jsonrpc: '2.0', id: 1, method, params });
+  return data && data.result !== undefined ? data.result : null;
+}
+
+// JSON-RPC batch read (eth_call items). Resolves to the response items sorted by id, or [] when no node answered.
 async function sendRpcBatch(batch) {
   if (!Array.isArray(batch) || batch.length === 0) return [];
-  for (const endpoint of BSC_PUBLIC_RPCS) {
-    try {
-      const res = await fetch(endpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(batch)
-      });
-      if (!res.ok) continue;
-      const data = await res.json();
-      if (Array.isArray(data)) {
-        data.sort((a, b) => Number(a.id || 0) - Number(b.id || 0));
-        return data;
-      }
-    } catch (err) {
-      // try next RPC
-    }
-  }
-  return [];
+  const data = await rpcReadBody(batch);
+  if (!Array.isArray(data)) return [];
+  data.sort((a, b) => Number((a && a.id) || 0) - Number((b && b.id) || 0));
+  return data;
 }
+
+// eth_getLogs for agent-ID registry mints between two blocks (inclusive). Resolves to the log array,
+// or null when no logs node answered.
+async function fetchRegistryMintLogs(fromBlk, toBlk) {
+  const data = await rpcReadBody({
+    jsonrpc: '2.0',
+    id: 1,
+    method: 'eth_getLogs',
+    params: [{
+      fromBlock: '0x' + fromBlk.toString(16),
+      toBlock: '0x' + toBlk.toString(16),
+      address: AGENT_ID_REGISTRY_ADDR,
+      topics: [ERC721_TRANSFER_TOPIC, ZERO_ADDRESS_TOPIC]
+    }]
+  }, { logs: true, timeoutMs: 4500, accept: (d) => !!d && Array.isArray(d.result) });
+  return data ? data.result : null;
+}
+
+// Test seams for test_rpc_read_resilience.js: a fake clock and random source, and a reset of all state.
+const rpcReadTestHooks = {
+  setClock(next) {
+    Object.assign(rpcClock, next);
+  },
+  setRoundRobin(n) {
+    rpcRoundRobin = n;
+  },
+  reset() {
+    rpcEndpointHealth.clear();
+    rpcInFlight.clear();
+    rpcCache.clear();
+    rpcRoundRobin = 0;
+    rpcClock.now = () => Date.now();
+    rpcClock.random = () => Math.random();
+  },
+  endpointHealth(url) {
+    const health = rpcEndpointHealth.get(url);
+    return health ? { ...health } : null;
+  },
+  cacheSize() {
+    return rpcCache.size;
+  }
+};
 
 // Injected Web3 Provider Resolver (MetaMask, Binance Web3 Wallet, Rabby, EIP-1193)
 function getInjectedProvider(preferred = 'auto') {
@@ -9196,24 +9376,12 @@ function stopBlockPolling() {
 
 async function pollLatestBlock() {
   if (typeof document !== 'undefined' && document.hidden) return;
-  for (const endpoint of BSC_PUBLIC_RPCS) {
-    try {
-      const res = await fetch(endpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_blockNumber', params: [] })
-      });
-      if (!res.ok) continue;
-      const data = await res.json();
-      if (data && data.result) {
-        const blkNum = parseInt(data.result, 16);
-        document.getElementById('latestBlock').textContent = `${blkNum.toLocaleString()}`;
-        syncLiveAgentWalletsOnChain(blkNum).catch(() => {});
-        return;
-      }
-    } catch (err) {
-      // try next RPC endpoint
-    }
+  const hex = await sendRpcCall('eth_blockNumber', []);
+  if (hex) {
+    const blkNum = parseInt(hex, 16);
+    document.getElementById('latestBlock').textContent = `${blkNum.toLocaleString()}`;
+    syncLiveAgentWalletsOnChain(blkNum).catch(() => {});
+    return;
   }
   document.getElementById('latestBlock').textContent = 'Live (BSC 56)';
 }
@@ -10791,6 +10959,11 @@ if (typeof module !== 'undefined' && module.exports) {
     flushDropAlerts,
     updateDropAlertToggle,
     setupDropAlertToggle,
+    sendRpcCall,
+    sendRpcBatch,
+    fetchRegistryMintLogs,
+    BSC_RPC_CONFIG,
+    rpcReadTestHooks,
     mergeTopGainersList,
     syncSeededTopGainers,
     topGainersSeedLabel,
