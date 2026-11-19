@@ -77,8 +77,18 @@ global.clearTimeout = (id) => {
   const t = timers.find(x => x.id === id);
   if (t) t.done = true;
 };
-global.setInterval = () => 0;
-global.clearInterval = () => {};
+// Recorded intervals, so the poll cadence can be checked
+const intervals = [];
+global.setInterval = (fn, ms) => {
+  const iv = { id: intervals.length + 1, ms, fn, cleared: false };
+  intervals.push(iv);
+  return iv.id;
+};
+global.clearInterval = (id) => {
+  const iv = intervals.find(x => x.id === id);
+  if (iv) iv.cleared = true;
+};
+const liveIntervals = () => intervals.filter(x => !x.cleared);
 Date.now = () => fakeNow;
 function advance(ms) {
   const end = fakeNow + ms;
@@ -134,6 +144,7 @@ const {
   readDropAlertPref, writeDropAlertPref, getDropAlertPermission, isDropAlertActive,
   onDropAlertToggleClick, showNewMarketToast, dropMatchesToolbarFilter, alertMatchType,
   queueDropAlerts, updateDropAlertToggle, setupDropAlertToggle, setActiveFilter,
+  pollDeltaFeed, startDeltaPolling, getLatestKnownBlock, setLatestKnownBlock,
 } = app;
 
 let checks = 0;
@@ -166,6 +177,8 @@ function resetState() {
   // Run out any flush still pending from the previous section, then start from a closed 30 s gap.
   advance(120000);
   timers = [];
+  intervals.length = 0;
+  global.document.hidden = false;
   store.clear();
   events.length = 0;
   storage.throwOnGet = false;
@@ -425,6 +438,88 @@ const flush = () => new Promise(r => setImmediate(r));
     assert.strictEqual(log.created.length, 1);
     assert.strictEqual(log.created[0].title, '🚨 New .ai Agent ID Drop!');
   });
+
+  // ---- background polling: a hidden tab keeps the delta poll only while alerts are on, at a slower pace
+  resetState();
+  global.document.hidden = true;
+  startDeltaPolling();
+  check('hidden, alerts off: no delta poll', () => assert.strictEqual(liveIntervals().length, 0));
+
+  log = makeNotification({ permission: 'granted' });
+  installNotification(log);
+  await onDropAlertToggleClick();
+  startDeltaPolling();
+  check('hidden, alerts on: one delta poll a minute', () => {
+    const live = liveIntervals();
+    assert.strictEqual(live.length, 1);
+    assert.strictEqual(live[0].ms, 60000);
+  });
+  global.document.hidden = false;
+  startDeltaPolling();
+  check('visible again: the fast poll replaces the slow one', () => {
+    const live = liveIntervals();
+    assert.strictEqual(live.length, 1);
+    assert.strictEqual(live[0].ms, 25000);
+  });
+
+  // a hidden poll moves the block on and alerts for a new drop, and stays silent
+  global.document.hidden = true;
+  const requests = [];
+  const respond = (projects, latestBlock) => async (url) => {
+    requests.push(String(url));
+    return {
+      status: 200,
+      ok: true,
+      headers: { get: () => null },
+      json: async () => ({ success: true, mode: 'delta', projects, latest_block: latestBlock }),
+    };
+  };
+  global.fetch = respond([drop('Bg Drop', { block: 1005 })], 1005);
+  let audioContexts = 0;
+  global.window.AudioContext = class {
+    constructor() { audioContexts++; this.currentTime = 0; this.state = 'running'; this.destination = {}; }
+    resume() {}
+    createOscillator() { return { type: '', frequency: { setValueAtTime() {} }, connect() {}, start() {}, stop() {} }; }
+    createGain() { return { gain: { setValueAtTime() {}, linearRampToValueAtTime() {}, exponentialRampToValueAtTime() {} }, connect() {} }; }
+  };
+  setLatestKnownBlock(1000);
+  await pollDeltaFeed();
+  check('hidden + alerts on: polls since the last block', () => {
+    assert.strictEqual(requests.length, 1);
+    assert.ok(requests[0].includes('since_block=1000'), requests[0]);
+  });
+  check('hidden: the block moves on to the response head', () => assert.strictEqual(getLatestKnownBlock(), 1005));
+  check('hidden: the new drop alerts once', () => assert.strictEqual(log.created.length, 1));
+  check('hidden: no chime', () => assert.strictEqual(audioContexts, 0));
+
+  requests.length = 0;
+  global.fetch = respond([], 1005);
+  await pollDeltaFeed();
+  check('hidden: the next poll asks from the new head', () => {
+    assert.strictEqual(requests.length, 1);
+    assert.ok(requests[0].includes('since_block=1005'), requests[0]);
+  });
+  delete global.window.AudioContext;
+
+  // hidden with alerts off: no request at all
+  resetState();
+  global.document.hidden = true;
+  log = makeNotification({ permission: 'granted' });
+  installNotification(log);
+  requests.length = 0;
+  global.fetch = respond([], 1005);
+  setLatestKnownBlock(1000);
+  await pollDeltaFeed();
+  check('hidden, alerts off: no delta request', () => assert.strictEqual(requests.length, 0));
+
+  // visible: a poll that finds nothing new leaves the block alone (block polling owns it there)
+  resetState();
+  global.document.hidden = false;
+  requests.length = 0;
+  global.fetch = respond([], 1005);
+  setLatestKnownBlock(1000);
+  await pollDeltaFeed();
+  check('visible: foreground poll does not move the block', () => assert.strictEqual(getLatestKnownBlock(), 1000));
 
   // notification constructor throws (Android Chrome: only service-worker notifications): reported as unsupported.
   // Last on purpose: this sets a flag that stays set for the life of the module.

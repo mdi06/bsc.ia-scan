@@ -8763,9 +8763,10 @@ let lastFeedEtag = '';
 const FEED_REFRESH_INTERVAL_MS = 10 * 60 * 1000;
 const DELTA_POLL_INTERVAL_MS = 25000; // 25s interval protects hosting bandwidth while keeping market data near real-time
 
-// Real-Time Delta Polling (auto-pauses when tab is hidden or backgrounded)
+// Real-Time Delta Polling (auto-pauses when tab is hidden or backgrounded, unless drop alerts are on)
 async function pollDeltaFeed() {
-  if (isPollingDelta || !latestKnownBlock || (typeof document !== 'undefined' && document.hidden)) return;
+  // A hidden tab polls only while drop alerts are on (see startDeltaPolling); otherwise it stays paused as before.
+  if (isPollingDelta || !latestKnownBlock || (typeof document !== 'undefined' && document.hidden && !isDropAlertActive())) return;
   isPollingDelta = true;
 
   try {
@@ -8787,6 +8788,10 @@ async function pollDeltaFeed() {
     if (newEtag) lastDeltaEtag = newEtag;
 
     const data = await res.json();
+
+    // Hidden tab: block polling is paused, so move since_block on with the feed's own head. Otherwise it goes stale and
+    // every poll re-downloads drops the page already has.
+    if (data && data.latest_block && typeof document !== 'undefined' && document.hidden) latestKnownBlock = data.latest_block;
 
     if (data && data.stats) {
       applyOverviewStats(data.stats);
@@ -8821,7 +8826,8 @@ async function pollDeltaFeed() {
           latestKnownBlock = newlyFound[0].block;
         }
 
-        playMarketAlertSound();
+        // A hidden tab stays silent, as it always has. Its drop alerts are the OS notifications.
+        if (!(typeof document !== 'undefined' && document.hidden)) playMarketAlertSound();
         newlyFound.slice(0, 3).forEach(drop => showNewMarketToast(drop));
         queueDropAlerts(newlyFound);
 
@@ -8871,9 +8877,16 @@ async function pollDeltaFeed() {
   }
 }
 
+// A hidden tab keeps the delta poll only while drop alerts are on, and then at this slower pace (one request a minute,
+// block polling stays paused). Otherwise the poll stops, as it always has.
+const DROP_ALERT_BACKGROUND_POLL_MS = 60 * 1000;
 function startDeltaPolling() {
   if (deltaPollTimer) clearInterval(deltaPollTimer);
-  if (typeof document !== 'undefined' && document.hidden) return;
+  deltaPollTimer = null;
+  if (typeof document !== 'undefined' && document.hidden) {
+    if (isDropAlertActive()) deltaPollTimer = setInterval(pollDeltaFeed, DROP_ALERT_BACKGROUND_POLL_MS);
+    return;
+  }
   deltaPollTimer = setInterval(pollDeltaFeed, DELTA_POLL_INTERVAL_MS);
 }
 
@@ -8882,10 +8895,7 @@ if (typeof document !== 'undefined') {
   document.addEventListener('visibilitychange', () => {
     const ticker = document.getElementById('tickerTrack');
     if (document.hidden) {
-      if (deltaPollTimer) {
-        clearInterval(deltaPollTimer);
-        deltaPollTimer = null;
-      }
+      startDeltaPolling(); // hidden: drops the fast poll, keeps the slow one only while drop alerts are on
       stopBlockPolling();
       if (ticker) ticker.style.animationPlayState = 'paused';
     } else {
@@ -10238,6 +10248,10 @@ if (typeof module !== 'undefined' && module.exports) {
     isDropAlertActive,
     onDropAlertToggleClick,
     showNewMarketToast,
+    pollDeltaFeed,
+    startDeltaPolling,
+    getLatestKnownBlock: () => latestKnownBlock,
+    setLatestKnownBlock: (b) => { latestKnownBlock = b; },
     dropMatchesToolbarFilter,
     alertMatchType,
     queueDropAlerts,
