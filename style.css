@@ -120,8 +120,8 @@ body {
 /* Prominent Global Suite Search Bar */
 .suite-search-wrap {
   position: relative;
-  flex: 1 1 440px;
-  max-width: 620px;
+  flex: 1 1 560px;
+  max-width: 780px;
   min-width: 240px;
   margin: 0 12px;
 }
@@ -2042,6 +2042,7 @@ th {
   letter-spacing: 0.5px;
   text-transform: uppercase;
   border-bottom: 2px solid rgba(240, 185, 11, 0.45);
+  background: #121726; /* opaque: sticky header cells must never let scrolled rows show through */
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2322,17 +2323,17 @@ th.sortable-th {
 
 th.sortable-th:hover {
   color: var(--color-gold);
-  background: rgba(240, 185, 11, 0.08);
+  background: linear-gradient(rgba(240, 185, 11, 0.08), rgba(240, 185, 11, 0.08)), #121726;
 }
 
 th.sortable-th:active {
-  background: rgba(240, 185, 11, 0.22);
+  background: linear-gradient(rgba(240, 185, 11, 0.22), rgba(240, 185, 11, 0.22)), #121726;
   transform: scale(0.98);
 }
 
 th.sortable-th.active-sort {
   color: var(--color-gold);
-  background: rgba(240, 185, 11, 0.08);
+  background: linear-gradient(rgba(240, 185, 11, 0.08), rgba(240, 185, 11, 0.08)), #121726;
 }
 
 th.sortable-th .sort-indicator {
