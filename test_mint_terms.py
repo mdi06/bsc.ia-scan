@@ -183,7 +183,11 @@ def test_deploy_bytecode_or_foreign_selector_is_not_a_mint_call():
     deploy = "0x60806040523480156100" + "ab" * 1200
     rpc = RevertRpc(code=code_with("1249c58b"), can_mint=[PROBE])
     t = monitor.probe_mint_terms(rpc, "0xabc", deploy, "0")
-    assert t["mint_call"] == "invalid" and t["gate"] == "unknown"
+    # the stored call is unusable, but the contract's own mint() works for anyone (probe v4 tries it)
+    assert t["mint_call"] == "invalid" and t["gate"] == "open" and t["alt_call"] == "mint()"
+    # with no public mint function in the code at all, it stays unknown
+    t = monitor.probe_mint_terms(RevertRpc(code=code_with("deadbeef"), can_mint=[PROBE]), "0xabc", deploy, "0")
+    assert t["mint_call"] == "invalid" and t["gate"] == "unknown" and "alt_call" not in t
     assert monitor.mint_call_is_usable("0xdeadbeef", code_with("1249c58b")) is False
     assert monitor.mint_call_is_usable("0x1249c58b", code_with("1249c58b")) is True
     assert monitor.mint_call_is_usable("0x", code_with()) is True
@@ -265,3 +269,64 @@ def test_backfill_puts_the_newest_drops_first_even_if_older_ones_have_no_terms()
     worker._mint_terms_tried.clear()
     assert [x["contract"][2] for x in worker._mint_terms_backfill_candidates(history, now)] == ["b", "c", "a"]
     worker._mint_terms_tried.clear()
+
+
+def test_alternative_mint_function_settles_the_gate_and_is_offered_as_repair():
+    mint_sel = "1249c58b"
+    deploy = "0x60806040523480156100" + "ab" * 1200
+    # stored call is deployment bytecode; the contract's own mint() refuses a fresh wallet for its Agent ID
+    rpc = RevertRpc(code=code_with(mint_sel), can_mint=[HOLDER], reverts={PROBE: _err("AgentIdRequired()")})
+    t = monitor.probe_mint_terms(rpc, "0xabc", deploy, "0")
+    assert t["mint_call"] == "invalid" and t["gate"] == "agent_id"
+    assert t["alt_call"] == "mint()" and t["working_call"] == "0x" + mint_sel
+    item = {"mint_calldata": deploy}
+    worker._apply_mint_terms(item, t)
+    assert item["mint_calldata"] == "0x1249c58b" and item["mint_terms"]["mint_call"] == "repaired"
+
+
+def test_owner_only_stored_call_falls_back_to_public_mint():
+    owner_fn = "fca3b5aa"
+    rpc = RevertRpc(code=code_with(owner_fn, "1249c58b"))
+    rpc.can_mint = set()
+    # the owner-only stored call is refused with "not owner"; mint() works for anyone
+    class R(RevertRpc):
+        def call_with_revert(self, method, params):
+            data = params[0]["data"]
+            if data.startswith("0x" + owner_fn):
+                return False, {"message": "execution reverted: not owner"}
+            return True, "0x"
+    rpc = R(code=code_with(owner_fn, "1249c58b"))
+    t = monitor.probe_mint_terms(rpc, "0xabc", "0x" + owner_fn + "1".zfill(64), "0")
+    assert t["gate"] == "open" and t["alt_call"] == "mint()"
+
+
+def test_no_alternative_keeps_unknown_and_never_repairs():
+    rpc = RevertRpc(code=code_with("1249c58b"), reverts={PROBE: _err("SoldOut()"), HOLDER: _err("SoldOut()")})
+    t = monitor.probe_mint_terms(rpc, "0xabc", "0x1249c58b", "0")
+    assert t["gate"] == "unknown" and "working_call" not in t and "alt_call" not in t
+    item = {"mint_calldata": "0x1249c58b"}
+    worker._apply_mint_terms(item, t)
+    assert item["mint_calldata"] == "0x1249c58b"
+
+
+def test_new_revert_phrases():
+    c = monitor.classify_revert
+    assert c({"message": "execution reverted: not on sale"}) == "not_open"
+    assert c({"message": "execution reverted: Ownable: caller is not the owner"}) == "owner_only"
+    assert c({"message": "execution reverted: BEP20: transfer amount exceeds balance"}) == "payment"
+    assert c({"message": "execution reverted: Unauthorized: Agent ID required"}) == "agent_id"
+
+
+def test_a_proven_gate_survives_a_recheck_that_cannot_decide():
+    item = {"mint_terms": {"gate": "agent_id", "v": 3}}
+    worker._apply_mint_terms(item, {"gate": "unknown", "state": "not_open", "v": monitor.MINT_TERMS_VERSION})
+    assert item["mint_terms"]["gate"] == "agent_id" and item["mint_terms"]["gate_from"] == "earlier_check"
+    assert item["mint_terms"]["state"] == "not_open"
+    # a decisive new answer always wins
+    item = {"mint_terms": {"gate": "agent_id"}}
+    worker._apply_mint_terms(item, {"gate": "open"})
+    assert item["mint_terms"]["gate"] == "open"
+    # nothing proven before: unknown stays unknown
+    item = {"mint_terms": {"gate": "unknown"}}
+    worker._apply_mint_terms(item, {"gate": "unknown"})
+    assert item["mint_terms"]["gate"] == "unknown"

@@ -97,17 +97,35 @@ def _enrich_contract_background(rpc: monitor.BscRpcClient, contract_addr: str, d
         print(f"[⚠️ Background Enrichment Notice {contract_addr}] {e}", flush=True)
 
 
+def _apply_mint_terms(item: dict, terms: dict) -> None:
+    """Stores the terms; when the stored mint call gave no verdict and one of the contract's own public mint
+    functions went through instead (terms["working_call"]), that call replaces the stored one, so the site's Mint
+    button and CLI command use a call that works (the stored one was often the deployment bytecode).
+
+    A gate proven earlier is kept when a re-check can't decide: once a mint is paused or closed, a test mint never
+    reaches the Agent ID check again (seen: House answered NoAgent(), then Paused()), but the requirement stands."""
+    prev = item.get("mint_terms") if isinstance(item.get("mint_terms"), dict) else {}
+    if terms.get("gate") == "unknown" and prev.get("gate") in ("agent_id", "whitelist", "open"):
+        terms["gate"] = prev["gate"]
+        terms["gate_from"] = "earlier_check"
+    working = terms.get("working_call")
+    if working and terms.get("alt_call"):
+        item["mint_calldata"] = working
+        terms["mint_call"] = "repaired"
+    item["mint_terms"] = terms
+
+
 def _attach_mint_terms(rpc, entry: dict, det: dict, holder: Optional[str] = None) -> None:
     """Sets entry["mint_terms"] (per-wallet limit, start/end, gate, cap status; see monitor.probe_mint_terms).
     A failure leaves the field out: the backfill loop retries it later."""
     if not _has_mint(entry):
         return
     try:
-        entry["mint_terms"] = monitor.probe_mint_terms(
+        _apply_mint_terms(entry, monitor.probe_mint_terms(
             rpc, entry["contract"], entry.get("mint_calldata"), entry.get("mint_value_wei"),
             code=det.get("_code"), cap_status=det.get("cap_status"),
             holder_wallets=[holder] if holder else (),
-        )
+        ))
     except Exception as exc:
         print(f"[⚠️ Mint Terms] probe failed for {entry.get('contract')}: {exc}", flush=True)
 
@@ -1673,7 +1691,7 @@ def run_mint_terms_backfill_loop():
                     history = get_shared_history()
                     for it in history:
                         if (it.get("contract") or "").lower() == c.lower():
-                            it["mint_terms"] = terms
+                            _apply_mint_terms(it, terms)
                             monitor.save_history(history, delta=it)
                             break
         except Exception as exc:

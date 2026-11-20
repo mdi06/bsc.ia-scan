@@ -24,6 +24,7 @@ function mintTermsModalHtml(item) {
     : (terms.checked ? '<span class="dim" title="Neither a fresh wallet nor an Agent ID wallet could mint in a simulation (ended, paused or unusual calldata)">Unknown</span>' : unknown);
   const notes = [];
   if (!terms.checked) notes.push('Not scanned yet: the radar reads these from the contract within a few minutes of discovery.');
+  if (item.mint_terms && item.mint_terms.mint_call === 'repaired') notes.push(`ℹ️ The recorded mint call did not work; the radar found this contract's own <code>${escapeHtml(String(item.mint_terms.alt_call || 'mint'))}</code> and the Mint button uses it.`);
   if (terms.invalidCall) notes.push('⚠️ The recorded mint call is not a function of this contract (it looks like deployment code): mint from the project\'s own site.');
   if (terms.closed) notes.push('⏸ The contract reports its mint as closed right now.');
   if (terms.stateEnded) notes.push('⌛ The contract refused a test mint because the mint has ended.');
