@@ -50,7 +50,7 @@
   <link rel="icon" type="image/svg+xml" href="icon.svg">
   <link rel="apple-touch-icon" href="/thumbnail-square.png">
   <!-- Third-party analytics load after the page is interactive (window load, then an idle callback), so they do not
-       compete with first paint. Everything queued before that (dataLayer pushes, posthog.* calls, window.va events)
+       compete with first paint. Everything queued before that (posthog.* calls, window.va events)
        is replayed once the libraries load. -->
   <script>
     window.loadWhenIdle = function (fn) {
@@ -61,20 +61,11 @@
       if (document.readyState === 'complete') run();
       else window.addEventListener('load', run, { once: true });
     };
-    window.loadScriptWhenIdle = function (src) {
-      window.loadWhenIdle(function () {
-        var s = document.createElement('script');
-        s.async = true;
-        s.src = src;
-        document.head.appendChild(s);
-      });
-    };
   </script>
 
   <!-- Remove utm_* parameters from the address bar once the visit has been recorded, so a link copied from the page
-       does not carry (and miscredit) the original campaign tag. It waits for both PostHog's $pageview (seen in its
-       before_send hook) and GA4's page_view request (seen in resource timing); if either never comes (blocked,
-       developer opt-out), it strips UTM_STRIP_FALLBACK_MS after load anyway. Vercel Analytics records its page view
+       does not carry (and miscredit) the original campaign tag. It waits for PostHog's $pageview (seen in its
+       before_send hook); if that never comes (blocked, developer opt-out), it strips UTM_STRIP_FALLBACK_MS after load anyway. Vercel Analytics records its page view
        at startup and does not count replaceState as a new page. Other query parameters and the #hash are kept. -->
   <script>
     (function () {
@@ -84,7 +75,7 @@
       var utmKeys = [];
       params.forEach(function (_, key) { if (/^utm_/i.test(key) && utmKeys.indexOf(key) < 0) utmKeys.push(key); });
       if (!utmKeys.length) return;
-      var recorded = { posthog: false, ga4: false };
+      var recorded = { posthog: false };
       var stripped = false;
       function strip() {
         if (stripped) return;
@@ -97,27 +88,10 @@
       window.markVisitRecorded = function (tracker) {
         if (stripped || recorded[tracker] !== false) return;
         recorded[tracker] = true;
-        if (recorded.posthog && recorded.ga4) setTimeout(strip, 250);
+        if (recorded.posthog) setTimeout(strip, 250);
       };
-      if (window.PerformanceObserver) {
-        try {
-          new PerformanceObserver(function (list) {
-            list.getEntries().forEach(function (e) {
-              if (/google-analytics\.com\/g\/collect/.test(e.name) && /[?&]en=page_view(&|$)/.test(e.name)) window.markVisitRecorded('ga4');
-            });
-          }).observe({ type: 'resource', buffered: true });
-        } catch (_) {}
-      }
       window.addEventListener('load', function () { setTimeout(strip, UTM_STRIP_FALLBACK_MS); }, { once: true });
     })();
-  </script>
-
-  <!-- Google Tag Manager: dataLayer is queued now, gtm.js loads when idle -->
-  <script>
-    window.dataLayer = window.dataLayer || [];
-    function gtag() { dataLayer.push(arguments); }
-    gtag('js', new Date());
-    window.loadScriptWhenIdle('https://www.googletagmanager.com/gtm.js?id=GTM-WK4N2DD6');
   </script>
 
   <!-- PostHog Analytics & Session Replay. The stub below defines posthog.capture/identify/... immediately and queues
@@ -126,7 +100,8 @@
     // Share of (non-developer) browser sessions that get session replay: 1 = every session, 0.25 = a quarter, 0 = none.
     // A sampled session is recorded in full. The roll happens once per browser session (sessionStorage), so reloads
     // and page changes within a session keep the same decision.
-    var POSTHOG_REPLAY_SAMPLE_RATE = 1;
+    // 0.25: the recorder (~73 KB compressed) and the ongoing replay uploads now cost only a quarter of visitors.
+    var POSTHOG_REPLAY_SAMPLE_RATE = 0.25;
     !function(t,e){var o,n,p,r;e.__SV||(window.posthog=e,e._i=[],e.init=function(i,s,a){function g(t,e){var o=e.split(".");2==o.length&&(t=t[o[0]],e=o[1]),t[e]=function(){t.push([e].concat(Array.prototype.slice.call(arguments,0)))}}(p=t.createElement("script")).type="text/javascript",p.async=!0,p.src=s.api_host+"/static/array.js",window.loadWhenIdle(function(){document.head.appendChild(p)});var u=e;for(void 0!==a?u=e[a]=[]:a="posthog",u.people=u.people||[],u.toString=function(t){var e="posthog";return"posthog"!==a&&(e+="."+a),t||(e+=" (stub)"),e},u.people.toString=function(){return u.toString(1)+".people (stub)"},o="capture identify alias people.set people.set_once set_config register register_once unregister opt_out_capturing has_opted_out_capturing opt_in_capturing reset isFeatureEnabled onFeatureFlags getFeatureFlag getFeatureFlagPayload reloadFeatureFlags group updateEarlyAccessFeatureEnrollment getEarlyAccessFeatures getActiveMatchingSurveys getSurveys onSessionId".split(" "),n=0;n<o.length;n++)g(u,o[n]);e._i.push([i,s,a])},e.__SV=1)}(document,window.posthog||[]);
 
     // 🛡️ Automatic Developer & Internal Traffic Exclusion
@@ -178,6 +153,8 @@
       capture_exceptions: !isDevOptedOut,
       capture_dead_clicks: !isDevOptedOut,
       disable_session_recording: isDevOptedOut || !isReplaySampled,
+      // No surveys are configured; without this every visit downloads surveys.js (~49 KB compressed).
+      disable_surveys: true,
       loaded: function(ph) {
         if (isDevOptedOut) {
           ph.opt_out_capturing();

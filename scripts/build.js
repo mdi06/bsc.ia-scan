@@ -36,7 +36,6 @@ const COPY = [
   'icon.svg',
   'og-preview.png',
   'thumbnail-square.png',
-  'feed_snapshot.json',
   'seeded_smart_drops.json',
   'seeded_smart_hunters.json',
   'seeded_top_gainers.json',
@@ -45,6 +44,24 @@ const COPY = [
   'template-square.html',
   'google4b1d4cb8f54015fa.html',
 ];
+
+// feed_snapshot.json is written slimmed rather than copied: compact JSON (the source is pretty-printed) and without
+// the fields below, which app.js never reads (it builds its own checklist from the other fields). The browser parses
+// it on every first paint, so this cuts that work by about a third. The source file is left as it is.
+const SNAPSHOT = 'feed_snapshot.json';
+const SNAPSHOT_DROP_FIELDS = ['sniper_checklist'];
+
+function writeSlimSnapshot() {
+  const records = JSON.parse(fs.readFileSync(path.join(ROOT, SNAPSHOT), 'utf8'));
+  if (!Array.isArray(records)) throw new Error(`${SNAPSHOT}: expected a JSON array`);
+  for (const rec of records) {
+    if (rec && typeof rec === 'object') for (const key of SNAPSHOT_DROP_FIELDS) delete rec[key];
+  }
+  const out = JSON.stringify(records);
+  fs.writeFileSync(path.join(DIST, SNAPSHOT), out);
+  const before = fs.statSync(path.join(ROOT, SNAPSHOT)).size;
+  console.log(`${SNAPSHOT}: ${before} -> ${out.length} bytes`);
+}
 
 // app.js falls back to data/agent_id_stats.json as its last candidate. data/ is gitignored, so
 // copy it only when it exists locally.
@@ -84,6 +101,7 @@ function main() {
   for (const name of COPY) {
     fs.copyFileSync(path.join(ROOT, name), path.join(DIST, name));
   }
+  writeSlimSnapshot();
 
   // Content-hashed copies of the minified files, referenced from dist/index.html.
   fs.mkdirSync(path.join(DIST, ASSETS_DIR), { recursive: true });

@@ -40,3 +40,6 @@ dappbay_*.png
 
 # Per-developer Claude Code settings (e.g. the local preview launch config)
 .claude/
+
+# generated daily stats cards
+out/
