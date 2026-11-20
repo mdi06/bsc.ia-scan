@@ -2074,8 +2074,9 @@ table {
   /* Dedicated Column Sizing for Secondary Market Mode to prevent header overlap */
   #dropsTable.secondary-mode th:nth-child(9),
   #dropsTable.secondary-mode td:nth-child(9) {
-    width: 120px !important;
-    min-width: 120px !important;
+    /* DEX PRICE: price + chart arrow + the 24h % badge (e.g. -76.3%) on one line */
+    width: 230px !important;
+    min-width: 230px !important;
   }
 
   #dropsTable.secondary-mode th:nth-child(10),

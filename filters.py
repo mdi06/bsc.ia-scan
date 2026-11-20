@@ -45,6 +45,8 @@ PEG_SYMBOLS_CORE = {
 EXCLUDED_PEGS_SYMBOLS = PEG_SYMBOLS_CORE | {
     "SOL", "XRP", "ADA", "DOGE", "DOT", "AVAX", "MATIC", "POL", "LINK", "LTC", "SHIB", "UNI",
     "ZEC", "BCH", "XLM", "EOS", "ATOM", "TRX", "FIL", "NEAR", "XMR", "ETC", "APT", "SUI", "PEPE", "FLOKI", "DOGEZILLA",
+    # Other dollar stablecoins: not agent mints, and their multi-billion caps would top every valuation stat
+    "USD1", "USDE", "USDD", "USDS", "USD0", "FRAX", "LUSD", "PYUSD", "USDP", "GUSD",
 }
 
 EQUITY_SYMBOLS_CORE = {
@@ -68,7 +70,7 @@ EXCLUDED_CONTRACTS_ALL = frozenset(EXCLUDED_PEGS_CONTRACTS) | BOGUS_SET | {EXCLU
 EXCLUDED_NAME_PHRASES = (
     "ETF", "PROSHARES", "DIREXION", "BEAR 3X", "BULL 3X", "INVESQO", "INVESCO",
     "BSTOCKS", "TOKENIZED STOCK", "S&P 500", "NASDAQ", "ISHARES", "VANGUARD",
-    "PANCAKESWAP", "BINANCE-PEG", "WRAPPED BNB", "TETHER USD", "USD COIN", "ZCASH", "DOGEZILLA",
+    "PANCAKESWAP", "BINANCE-PEG", "WRAPPED BNB", "TETHER USD", "USD COIN", "WORLD LIBERTY", "ZCASH", "DOGEZILLA",
 )
 _EXCLUDED_NAME_RE = re.compile(
     "|".join("(?<![A-Z0-9])" + re.escape(p) + "(?![A-Z0-9])" for p in EXCLUDED_NAME_PHRASES)

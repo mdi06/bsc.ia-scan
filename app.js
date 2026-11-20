@@ -877,7 +877,9 @@ const EXCLUDED_PEGS_SYMBOLS = new Set([
   'BTCB', 'WBTC', 'BTC', 'ETH', 'WETH', 'WBNB', 'BNB', 'USDT', 'USDC', 'BUSD',
   'DAI', 'TUSD', 'FDUSD', 'CAKE', 'U', 'OSK', 'FIST',
   'SOL', 'XRP', 'ADA', 'DOGE', 'DOT', 'AVAX', 'MATIC', 'POL', 'LINK', 'LTC', 'SHIB', 'UNI',
-  'ZEC', 'BCH', 'XLM', 'EOS', 'ATOM', 'TRX', 'FIL', 'NEAR', 'XMR', 'ETC', 'APT', 'SUI', 'PEPE', 'FLOKI', 'DOGEZILLA'
+  'ZEC', 'BCH', 'XLM', 'EOS', 'ATOM', 'TRX', 'FIL', 'NEAR', 'XMR', 'ETC', 'APT', 'SUI', 'PEPE', 'FLOKI', 'DOGEZILLA',
+  // Other dollar stablecoins: not agent mints, and their multi-billion caps would top every valuation stat
+  'USD1', 'USDE', 'USDD', 'USDS', 'USD0', 'FRAX', 'LUSD', 'PYUSD', 'USDP', 'GUSD'
 ]);
 
 const EXCLUDED_PEGS_CONTRACTS = new Set([
@@ -917,7 +919,7 @@ const SYNTHETIC_EQUITY_SYMBOLS = new Set([
 const EXCLUDED_NAME_PHRASES = [
   'ETF', 'PROSHARES', 'DIREXION', 'BEAR 3X', 'BULL 3X', 'INVESQO', 'INVESCO',
   'BSTOCKS', 'TOKENIZED STOCK', 'S&P 500', 'NASDAQ', 'ISHARES', 'VANGUARD',
-  'PANCAKESWAP', 'BINANCE-PEG', 'WRAPPED BNB', 'TETHER USD', 'USD COIN', 'ZCASH', 'DOGEZILLA'
+  'PANCAKESWAP', 'BINANCE-PEG', 'WRAPPED BNB', 'TETHER USD', 'USD COIN', 'WORLD LIBERTY', 'ZCASH', 'DOGEZILLA'
 ];
 const EXCLUDED_NAME_RE = new RegExp(
   EXCLUDED_NAME_PHRASES.map(p => '(?<![A-Z0-9])' + p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(?![A-Z0-9])').join('|')
