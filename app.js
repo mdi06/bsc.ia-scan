@@ -1152,7 +1152,7 @@ function countDropsByFilter(drops = allDrops, stats = globalStats) {
     if (!d) continue;
     if (isFavorited(d.contract, d)) counts.favorites++;
     if (needSniper && isSniperReady(d)) counts.sniperReady++;
-    if (isFreeMintDrop(d)) counts.freeMints++;
+    if (isFreeMintableNow(d)) counts.freeMints++;
     if (needSurge && d.is_nft_surge) counts.nftSurge++;
     if (needProxy && d.is_proxy_clone) counts.proxy++;
     if (isLaunchpadDrop(d)) counts.launchpad++;
@@ -1161,7 +1161,8 @@ function countDropsByFilter(drops = allDrops, stats = globalStats) {
   if (!needSniper) counts.sniperReady = stats.sniper_ready;
   if (!needSurge) counts.nftSurge = stats.nft_surge;
   if (!needProxy) counts.proxy = stats.proxy;
-  if (stats && stats.secondary) counts.secondary = Math.max(counts.secondary, stats.secondary);
+  // Secondary = pairs actually loaded (what the table can show), not the server's total: a 2,809 badge over an
+  // empty table read as broken. The server total stays in globalStats.secondary for the overview stats.
   return counts;
 }
 
@@ -1646,14 +1647,18 @@ let tabWalletsSortMode = 'DEFAULT';
 let tabWalletsSearchKeyword = '';
 let tabWalletsDisplayLimit = 50;
 let cachedHunters = null;
-let cachedHuntersAllDropsLen = 0;
+let cachedHuntersAllDropsLen = '';
 
 function updateWalletsTabBadge() {
   if (typeof document === 'undefined') return;
   const countEl = document.getElementById('walletsTabCount');
-  if (!cachedHunters || cachedHuntersAllDropsLen !== allDrops.length) {
+  // Keyed on everything the leaderboard reads: in-place drop edits (dropsDataVersion), the drop count, and the hunter
+  // seed list. Keying on allDrops.length alone left the badge on a stale count (2,149) while the table, which always
+  // recomputes, showed the current one (2,655) once seeded_smart_hunters.json or merged smart wallets arrived.
+  const huntersKey = `${dropsDataVersion}|${allDrops.length}|${smartHuntersCache ? smartHuntersCache.length : 0}`;
+  if (!cachedHunters || cachedHuntersAllDropsLen !== huntersKey) {
     cachedHunters = computeSmartWalletLeaderboard(allDrops);
-    cachedHuntersAllDropsLen = allDrops.length;
+    cachedHuntersAllDropsLen = huntersKey;
   }
   const allHunters = cachedHunters;
   if (countEl) countEl.textContent = allHunters.length.toLocaleString();
@@ -2487,13 +2492,65 @@ function isFreeMintDrop(d) {
   return Boolean(d.has_free_mint || pStr.includes('FREE') || (vWei === 0 && Number(d.mint_price_bnb || 0) === 0 && !pStr.includes('PAID') && !pStr.includes('DEX') && !pStr.includes('TBD')));
 }
 
+// Cap filled. Mirrors computeSniperReady: an ERC-20 whose whole supply was pre-minted (minted === supply with no
+// mint-cap markers) is NOT sold out — that is the token's supply, not a filled mint.
+function isDropSoldOut(d) {
+  if (!d) return false;
+  const ms = Number(d.max_supply || 0);
+  const tm = Number(d.total_minted || 0);
+  if (!(ms > 0)) return false;
+  const std = String(d.standard || '').toUpperCase();
+  const isNft = /721|1155|NFT/.test(std);
+  if (!isNft && tm === ms && !d.sold_sel && !d.cap) return false;
+  return tm / ms >= 0.999;
+}
+
+// Contracts a free-mint hunter should never be sent to: rug / high risk, honeypot, fund drain.
+function isDropUnsafeToMint(d) {
+  if (!d) return false;
+  const level = String(d.risk_level || '').toUpperCase();
+  const badge = String(d.risk_badge || '').toUpperCase();
+  return level === 'RUG' || level === 'HIGH'
+    || badge.includes('HONEYPOT') || badge.includes('FUND DRAIN') || badge.includes('DRAIN')
+    || Boolean(d.is_honeypot) || Boolean(d.security && d.security.is_fund_drain);
+}
+
+// The FREE pill: free, not sold out, not paused, and not flagged unsafe — i.e. mintable right now.
+function isFreeMintableNow(d) {
+  return isFreeMintDrop(d) && !isDropSoldOut(d) && !isDropUnsafeToMint(d) && !(d && d.is_paused);
+}
+
+// Back to the ALL pill, More Filters cleared. Used when the user switches tabs.
+function resetActiveFilterToAll() {
+  activeFilter = 'ALL';
+  if (typeof document === 'undefined' || !document.querySelectorAll) return;
+  document.querySelectorAll('.pill').forEach(b => b.classList.remove('active'));
+  const pillAll = document.querySelector('.pill[data-filter="ALL"]');
+  if (pillAll) pillAll.classList.add('active');
+  const mfTrigger = document.getElementById('moreFiltersTrigger');
+  const mfLabel = document.getElementById('moreFiltersLabel');
+  if (mfTrigger) mfTrigger.classList.remove('active');
+  if (mfLabel) mfLabel.textContent = '⚙️ More Filters';
+  document.querySelectorAll('#moreFiltersOptions .custom-option').forEach(o => o.classList.remove('selected'));
+}
+
 function updateFreeMintsCount() {
   if (typeof document === 'undefined') return;
   const el = document.getElementById('freeMintsCount');
   if (el) {
-    const cnt = allDrops.filter(d => isFreeMintDrop(d)).length;
+    const cnt = allDrops.filter(d => isFreeMintableNow(d)).length;
     el.textContent = cnt;
   }
+}
+
+// Server timestamps ("YYYY-MM-DD HH:MM:SS" or ISO without a zone) are UTC. Returns a Date, or null if unparseable.
+function parseServerUtc(value) {
+  if (!value) return null;
+  let str = String(value).trim().replace(' ', 'T');
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(str)) return null;
+  if (!/(Z|[+-]\d{2}:?\d{2})$/.test(str)) str += 'Z';
+  const dt = new Date(str);
+  return Number.isNaN(dt.getTime()) ? null : dt;
 }
 
 // Registry of all 24H Market Pulse & Hero Card items for instant modal inspection
@@ -2601,18 +2658,16 @@ function renderSmartStreamTicker(drops) {
   const trackEl = document.getElementById('tickerTrack');
   if (!trackEl || !Array.isArray(drops) || drops.length === 0) return;
 
+  // detected_at is UTC ("YYYY-MM-DD HH:MM:SS", no zone). Show it in the viewer's own time with the zone named,
+  // e.g. "14:11 CET": a bare "02:11:57" left people guessing whose clock it was.
   const formatTickerTime = (detected_at) => {
-    if (!detected_at) return 'LIVE';
-    const str = String(detected_at).trim();
-    if (str.includes(' ')) {
-      const parts = str.split(' ');
-      if (parts[1]) return parts[1].slice(0, 8);
+    const dt = parseServerUtc(detected_at);
+    if (!dt) return 'LIVE';
+    try {
+      return dt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', timeZoneName: 'short' });
+    } catch (e) {
+      return `${dt.toISOString().slice(11, 16)} UTC`;
     }
-    if (str.includes('T')) {
-      const parts = str.split('T');
-      if (parts[1]) return parts[1].slice(0, 8);
-    }
-    return str.slice(-8);
   };
 
   const events = [];
@@ -2927,8 +2982,7 @@ if (typeof window !== 'undefined') {
 
 function updateSecondaryTabCount() {
   if (typeof document === 'undefined') return;
-  const localCnt = allDrops.filter(d => isSecondaryMarketAsset(d)).length;
-  const count = (globalStats && globalStats.secondary) ? Math.max(localCnt, globalStats.secondary) : localCnt;
+  const count = allDrops.filter(d => isSecondaryMarketAsset(d)).length;
   const tabEl = document.getElementById('secondaryTabCount');
   if (tabEl) tabEl.textContent = count;
   if (typeof syncMobileTabSelector === 'function') syncMobileTabSelector();
@@ -4111,11 +4165,7 @@ function getFilteredDrops() {
       });
     }
   } else if (activeFilter === 'FREE') {
-    list = list.filter(d => {
-      const pStr = String(d.mint_price_str || '').toUpperCase();
-      const vWei = Number(d.mint_value_wei || 0);
-      return d.has_free_mint || pStr.includes('FREE') || (vWei === 0 && Number(d.mint_price_bnb || 0) === 0 && !pStr.includes('PAID') && !pStr.includes('DEX') && !pStr.includes('TBD'));
-    });
+    list = list.filter(d => isFreeMintableNow(d));
   } else if (activeFilter === 'SMART') {
     list = list.filter(d => (d.smart_wallets && d.smart_wallets.length > 0) || (d.smart_minters && d.smart_minters.length > 0));
   } else if (activeFilter === 'LP') {
@@ -5198,7 +5248,7 @@ function renderTable(keepLimit = false) {
     // Mint Price
     const pStr = String(item.mint_price_str || '').toUpperCase();
     const vWei = Number(item.mint_value_wei || 0);
-    const isFree = Boolean(item.has_free_mint || pStr.includes('FREE') || (vWei === 0 && Number(item.mint_price_bnb || 0) === 0 && !pStr.includes('PAID') && !pStr.includes('DEX') && !pStr.includes('TBD')));
+    const isFree = isFreeMintDrop(item);
     let priceStr = `<span class="dim">TBD</span>`;
     if (pStr.includes('DEX')) {
       priceStr = `<span style="color: var(--color-cyan);">DEX Traded</span>`;
@@ -5515,7 +5565,7 @@ function appendNextTableBatch() {
     // Mint Price
     const pStr = String(item.mint_price_str || '').toUpperCase();
     const vWei = Number(item.mint_value_wei || 0);
-    const isFree = item.has_free_mint || pStr.includes('FREE') || (vWei === 0 && Number(item.mint_price_bnb || 0) === 0 && !pStr.includes('PAID') && !pStr.includes('DEX') && !pStr.includes('TBD'));
+    const isFree = isFreeMintDrop(item);
     let priceStr = `<span class="dim">TBD</span>`;
     if (pStr.includes('DEX')) {
       priceStr = `<span style="color: var(--color-cyan);">DEX Traded</span>`;
@@ -6405,12 +6455,11 @@ function openModal(item, source = 'direct') {
   const sellCalldata = !isNft ? buildPancakeSwapSellCalldata(cAddr, rawHeldWei, userWallet) : '';
   const sellCliSnippet = !isNft ? `baw contract-call preview --binanceChainId 56 --from ${userWallet} --to ${PANCAKE_ROUTER_V2} --value 0 --inputData ${sellCalldata} --json` : '';
 
-  // Same rule as computeItemProfit / the table: free = has_free_mint or a "FREE" price string. A zero price alone
-  // is NOT "free": DEX-traded records have no mint, and TBD records have an unknown cost.
+  // Same rule as the table and the FREE pill (isFreeMintDrop). DEX-traded records have no mint at all.
   const mintBnbNum = Number(item.mint_price_bnb || 0);
   const mintPriceUpper = String(item.mint_price_str || '').toUpperCase();
   const isDexTraded = mintPriceUpper.includes('DEX');
-  const isFree = !isDexTraded && (Boolean(item.has_free_mint) || mintPriceUpper.includes('FREE'));
+  const isFree = !isDexTraded && isFreeMintDrop(item);
   const hasPaidMint = !isDexTraded && !isFree && (mintBnbNum > 0 || Number(valWei) > 0);
   const paidBnb = mintBnbNum > 0 ? mintBnbNum : Number(valWei) / 1e18;
   const mintCostLabel = isDexTraded ? 'DEX TRADED'
@@ -6434,14 +6483,33 @@ function openModal(item, source = 'direct') {
   }
 
   const holdersCount = Number(item.holders || 0);
-  let whaleConcentrationBadge = '<span class="whale-alert-pill" style="background: rgba(74, 222, 128, 0.15); border: 1px solid var(--color-green); color: var(--color-green);" title="Distributed holder base across unique wallets">🟢 Distributed</span>';
-  let whaleConcentrationDesc = `Clean holder distribution across ${formatCount(holdersCount)} agent wallets. Low single-holder dump risk.`;
-  if (holdersCount > 0 && holdersCount < 30) {
-    whaleConcentrationBadge = '<span class="whale-alert-pill" style="background: rgba(239, 68, 68, 0.15); border: 1px solid var(--color-red); color: var(--color-red);" title="Extreme Whale Concentration (>50% Top 10 wallets)">🚨 Extreme (>50%)</span>';
-    whaleConcentrationDesc = `High dump risk: Supply is concentrated in only ${holdersCount} wallets. Early snipers hold outsized control.`;
-  } else if (holdersCount >= 30 && holdersCount < 100) {
-    whaleConcentrationBadge = '<span class="whale-alert-pill" style="background: rgba(250, 204, 21, 0.15); border: 1px solid var(--color-yellow); color: var(--color-yellow);" title="Moderate Distribution (25%-49% Top 10 wallets)">🟡 Moderate (25-49%)</span>';
-    whaleConcentrationDesc = `Medium wallet clustering across ${holdersCount} wallets. Monitor large seller outflows.`;
+  // Real top-10 share from the security scan (security.top10_pct). Holder count alone says nothing about
+  // concentration: a fresh drop with 1 holder at 0 minted used to read "Extreme (>50%)", a false alarm.
+  const top10Raw = item.security ? Number(item.security.top10_pct) : NaN;
+  const hasTop10 = Number.isFinite(top10Raw) && top10Raw > 0;
+  const tooEarly = tm === 0 || holdersCount < 10;
+  const neutralPill = (label, title) => `<span class="whale-alert-pill" style="background: rgba(148, 163, 184, 0.12); border: 1px solid rgba(148, 163, 184, 0.5); color: var(--text-secondary, #94a3b8);" title="${title}">${label}</span>`;
+  let whaleConcentrationBadge;
+  let whaleConcentrationDesc;
+  if (tooEarly) {
+    whaleConcentrationBadge = neutralPill('⏳ Too early', 'Not enough mints or holders yet to judge concentration');
+    whaleConcentrationDesc = `Only ${formatCount(holdersCount)} holder${holdersCount === 1 ? '' : 's'} so far${tm === 0 ? ' and nothing minted yet' : ''} — normal for a fresh drop, not a whale signal.`;
+  } else if (!hasTop10) {
+    whaleConcentrationBadge = neutralPill('— Not measured', 'No top-holder scan for this contract yet');
+    whaleConcentrationDesc = `Spread across ${formatCount(holdersCount)} wallets; top-10 holder share not scanned yet.`;
+  } else {
+    const pct = Math.min(100, top10Raw);
+    const pctLabel = `${pct.toFixed(pct >= 10 ? 0 : 1)}%`;
+    if (pct > 50) {
+      whaleConcentrationBadge = `<span class="whale-alert-pill" style="background: rgba(239, 68, 68, 0.15); border: 1px solid var(--color-red); color: var(--color-red);" title="Top 10 wallets hold ${pctLabel} of supply">🚨 Extreme (top 10: ${pctLabel})</span>`;
+      whaleConcentrationDesc = `High dump risk: the top 10 wallets hold ${pctLabel} of supply across ${formatCount(holdersCount)} holders.`;
+    } else if (pct >= 25) {
+      whaleConcentrationBadge = `<span class="whale-alert-pill" style="background: rgba(250, 204, 21, 0.15); border: 1px solid var(--color-yellow); color: var(--color-yellow);" title="Top 10 wallets hold ${pctLabel} of supply">🟡 Moderate (top 10: ${pctLabel})</span>`;
+      whaleConcentrationDesc = `Medium clustering: the top 10 wallets hold ${pctLabel} across ${formatCount(holdersCount)} holders. Watch large sellers.`;
+    } else {
+      whaleConcentrationBadge = `<span class="whale-alert-pill" style="background: rgba(74, 222, 128, 0.15); border: 1px solid var(--color-green); color: var(--color-green);" title="Top 10 wallets hold ${pctLabel} of supply">🟢 Distributed (top 10: ${pctLabel})</span>`;
+      whaleConcentrationDesc = `Clean distribution: the top 10 wallets hold ${pctLabel} across ${formatCount(holdersCount)} holders.`;
+    }
   }
 
   // Feature 1: Dev Funding Root & Cluster Metrics (Exclude zero / burn address from ever being a dev root)
@@ -9388,7 +9456,7 @@ async function init() {
 
     // Initialize smart hunters & followed wallets
     loadFollowedWallets();
-    syncSeededSmartHunters();
+    syncSeededSmartHunters().then(() => { if (typeof updateWalletsTabBadge === 'function') updateWalletsTabBadge(); });
 
     // Initialize customized tab/pill sequence & drag-and-drop
     const savedPillsSeq = loadSavedPillSequence();
@@ -9492,7 +9560,10 @@ async function init() {
         });
         btn.classList.add('active');
         btn.setAttribute('aria-selected', 'true');
+        const prevTab = activeTab;
         activeTab = btn.getAttribute('data-tab');
+        // A filter picked on one tab must not carry over: FREE left on while opening Secondary emptied its table.
+        if (prevTab !== activeTab) resetActiveFilterToAll();
 
         if (activeTab === 'SMART' && !hasLoadedSmartDrops) {
           loadSmartDrops().then(() => renderTable());
@@ -10112,7 +10183,11 @@ if (typeof module !== 'undefined' && module.exports) {
     renderSearchDropdown,
     hideSearchDropdown,
     selectSearchDropdownItem,
-    highlightSearchMatch
+    highlightSearchMatch,
+    isFreeMintDrop,
+    isDropSoldOut,
+    isDropUnsafeToMint,
+    isFreeMintableNow,
+    parseServerUtc
   };
 }
-

@@ -319,11 +319,11 @@ def pulse_nft_mint_row(d: dict) -> Optional[dict]:
 def compute_pulse_24h(projects, now=None) -> dict:
     """24h Pulse aggregates over the FULL dataset (not whatever page the browser has loaded).
 
-    The window is time based: records whose `detected_at` ("YYYY-MM-DD HH:MM:SS", the server's local clock, the
-    same clock that wrote it) is within the last 24 hours. `since` is that cutoff in the same format, so clients
+    The window is time based: records whose `detected_at` ("YYYY-MM-DD HH:MM:SS", UTC, as the worker writes it) is
+    within the last 24 hours. `since` is that cutoff in the same format, so clients
     can filter their own lists with a plain string comparison and no timezone guessing."""
     now = time.time() if now is None else now
-    since = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(now - PULSE_WINDOW_SEC))
+    since = time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(now - PULSE_WINDOW_SEC))
     new_drops = graduated = smart_inflows = clusters = clean = refunds = threats = 0
     dex_volume = 0.0
     hunters: Dict[str, int] = {}
