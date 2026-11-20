@@ -97,23 +97,10 @@ def _enrich_contract_background(rpc: monitor.BscRpcClient, contract_addr: str, d
         print(f"[⚠️ Background Enrichment Notice {contract_addr}] {e}", flush=True)
 
 
-def _has_mint_to_probe(item: dict) -> bool:
-    """A drop whose mint terms are worth reading: it has a mint (not a DEX-traded token) and is not sold out."""
-    if str(item.get("mint_price_str") or "").upper().startswith("DEX"):
-        return False
-    ms, tm = item.get("max_supply"), item.get("total_minted")
-    try:
-        if ms and tm is not None and float(tm) >= float(ms):
-            return False
-    except (TypeError, ValueError):
-        pass
-    return True
-
-
 def _attach_mint_terms(rpc, entry: dict, det: dict, holder: Optional[str] = None) -> None:
     """Sets entry["mint_terms"] (per-wallet limit, start/end, gate, cap status; see monitor.probe_mint_terms).
     A failure leaves the field out: the backfill loop retries it later."""
-    if not _has_mint_to_probe(entry):
+    if not _has_mint(entry):
         return
     try:
         entry["mint_terms"] = monitor.probe_mint_terms(
@@ -1614,8 +1601,7 @@ def run_agent_id_counter_loop():
 
 
 MINT_TERMS_BACKFILL_INTERVAL_SEC = 60.0
-MINT_TERMS_BACKFILL_BATCH = 6               # drops probed per cycle (~3 eth_calls + 1 getCode each)
-MINT_TERMS_BACKFILL_MAX_AGE_DAYS = 14       # older drops are rarely still minting
+MINT_TERMS_BACKFILL_BATCH = 20              # drops probed per cycle (~3 eth_calls + 1 getCode each): ~3,000 drops in ~2.5 h
 MINT_TERMS_RETRY_SEC = 6 * 3600
 # Creators often set the mint window / switch after deploying (seen: saleStart() set minutes after discovery), so
 # drops from the last 3 days are re-read every 2 hours. Terms from an older probe version are re-read once.
@@ -1624,19 +1610,23 @@ MINT_TERMS_REFRESH_MAX_AGE_DAYS = 3
 _mint_terms_tried: Dict[str, float] = {}
 
 
+def _has_mint(item: dict) -> bool:
+    """Any drop with a mint (not a DEX-only token), sold out or not: who may mint (the Agent ID badge) is shown
+    on every row, so every such drop gets its terms."""
+    return not str(item.get("mint_price_str") or "").upper().startswith("DEX")
+
+
 def _mint_terms_backfill_candidates(history: list, now: float, batch: int = MINT_TERMS_BACKFILL_BATCH) -> list:
-    """Drops still mintable whose mint_terms are missing, from an older probe version, or (for drops from the last
-    3 days) older than 2 hours. Missing first, newest first; nothing tried in the last 6 hours."""
-    cutoff = time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(now - MINT_TERMS_BACKFILL_MAX_AGE_DAYS * 86400))
+    """Drops with a mint, of any age, whose mint_terms are missing or from an older probe version; and drops from
+    the last 3 days whose terms are older than 2 hours (windows are often set after deploying). Missing first,
+    newest first; nothing tried in the last 6 hours (2 hours for a refresh)."""
     recent = time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(now - MINT_TERMS_REFRESH_MAX_AGE_DAYS * 86400))
     missing, stale = [], []
     for it in history:
         c = (it.get("contract") or "").lower()
-        if not c or not _has_mint_to_probe(it) or monitor.is_system_infra(it):
+        if not c or not _has_mint(it) or monitor.is_system_infra(it):
             continue
         detected = str(it.get("detected_at") or "")
-        if detected < cutoff:
-            continue
         terms = it.get("mint_terms") if isinstance(it.get("mint_terms"), dict) else None
         if terms is None:
             bucket = missing

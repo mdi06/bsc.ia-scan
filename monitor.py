@@ -1345,6 +1345,10 @@ _REVERT_ERROR_SELECTORS = {
     **{k: "agent_id" for k in _sels(["AgentIdRequired()", "NoAgent()", "NotAgent()", "NotAnAgent()", "NoAgentId()",
                                      "NotAgentHolder()", "AgentRequired()", "MissingAgentId()", "NotRegistered()",
                                      "OnlyAgents()"])},
+    # Unnamed custom errors seen on live drops where a fresh wallet gets the error and an Agent ID wallet mints:
+    # 0xea11784e on 10 drops, 0x3cb97240 on 4 (one-off codes are left out rather than guessed).
+    "ea11784e": "agent_id",
+    "3cb97240": "agent_id",
     **{k: "whitelist" for k in _sels(["NotWhitelisted()", "NotAllowlisted()", "NotAllowListed()", "InvalidProof()",
                                       "InvalidMerkleProof()", "NotEligible()", "NothingToClaim()", "NoTokensToClaim()"])},
     **{k: "not_open" for k in _sels(["MintNotStarted()", "SaleNotStarted()", "MintNotActive()", "MintNotOpen()",
@@ -1434,7 +1438,21 @@ MINT_OPEN_GETTERS = tuple((n, sel) for sel, n in _sels([
     "saleActive()", "isSaleActive()", "saleIsActive()", "publicSaleActive()", "isPublicSaleActive()",
     "mintIsActive()", "publicMintOpen()", "claimOpen()", "isClaimOpen()",
 ]).items())
-MINT_TERMS_VERSION = 2
+MINT_TERMS_VERSION = 3
+
+# Agent ID checks written into the drop's own bytecode: an agent custom error (PUSH4 <selector>) or the
+# "Agent ID" revert text. On 53 live drops of known gate this matched none of the 20 open ones (no false alarm)
+# and 11 of the 33 Agent-ID-gated ones: the others call a shared checker contract, so the simulated mint's revert
+# stays the first signal and this is only the fallback when the simulation can't decide (sold out, paid with an
+# unread price, unusable mint call).
+_AGENT_ERROR_SELECTORS = tuple(k for k, v in _REVERT_ERROR_SELECTORS.items() if v == "agent_id")
+_AGENT_TEXT_MARKERS = tuple(t.encode().hex() for t in ("Agent ID", "agent ID", "Agent Id", "AgentID required"))
+
+
+def has_agent_id_check(code: str) -> bool:
+    """True if the (proxy-resolved) bytecode itself carries an Agent ID check (see above)."""
+    code = (code or "").lower()
+    return any(("63" + sel) in code for sel in _AGENT_ERROR_SELECTORS) or any(m in code for m in _AGENT_TEXT_MARKERS)
 
 
 def probe_mint_terms(
@@ -1484,9 +1502,12 @@ def probe_mint_terms(
         terms["open"] = bool(switch[1])
     merkle = _first_uint_getter(rpc, contract, code, MERKLE_ROOT_GETTERS, lambda v: v != 0)
 
+    agent_in_code = has_agent_id_check(code)
     if not mint_call_is_usable(calldata, code):
         terms["mint_call"] = "invalid"
-        terms["gate"] = "unknown"
+        terms["gate"] = "agent_id" if agent_in_code else "unknown"
+        if agent_in_code:
+            terms["gate_from"] = "bytecode"
         return terms
 
     gate = "unknown"
@@ -1511,6 +1532,9 @@ def probe_mint_terms(
             reasons.append(h_why)
         if gate == "unknown" and "whitelist" in reasons:
             gate = "whitelist"             # e.g. a claim contract: no allocation for either wallet
+        if gate == "unknown" and agent_in_code:
+            gate = "agent_id"              # the simulation could not decide; the bytecode carries an Agent ID check
+            terms["gate_from"] = "bytecode"
     terms["gate"] = gate
     for state in ("sold_out", "ended", "not_open"):
         if state in reasons:

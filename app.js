@@ -2877,6 +2877,22 @@ function mintTimingLabel(terms, nowSec = Date.now() / 1000) {
   return '';
 }
 
+// Who may mint, next to the drop's name on every row (desktop and cards), so it is seen before anything else.
+// From record.mint_terms.gate (see monitor.probe_mint_terms); "open" is shown in the mint chips instead.
+function gateBadgeHtml(item) {
+  const gate = getMintTerms(item).gate;
+  if (gate === 'agent_id') {
+    const how = item.mint_terms && item.mint_terms.gate_from === 'bytecode'
+      ? 'The contract code checks for an Agent ID'
+      : 'A test mint from a wallet without an Agent ID was refused';
+    return `<span class="gate-badge gate-badge-agent" title="Agent ID needed to mint. ${how}.">🪪 Agent ID</span>`;
+  }
+  if (gate === 'whitelist') {
+    return `<span class="gate-badge gate-badge-wl" title="${MINT_GATE_LABELS.whitelist.title}">📝 Whitelist</span>`;
+  }
+  return '';
+}
+
 // Mobile card only (hidden on desktop, where the chips sit under the mint price): a full-width row with the mint
 // terms chips and a one-tap Mint button that opens the token modal at its Mint section. No button for drops that
 // cannot be minted (DEX-only, sold out, ended) or that are flagged unsafe (honeypot / rug / drain / high risk).
@@ -6219,7 +6235,7 @@ function renderTable(keepLimit = false) {
         <td class="col-num">${index + 1}</td>
         <td class="col-block"><code>${blk}</code></td>
         <td class="col-sm">${smBadge}</td>
-        <td class="col-project">${tokenLink}</td>
+        <td class="col-project">${tokenLink}${gateBadgeHtml(item)}</td>
         <td class="col-type">${stdBadge}</td>
         <td class="col-safety">${safeBadge}</td>
         <td class="col-interest">${intBadge}</td>
@@ -6236,7 +6252,7 @@ function renderTable(keepLimit = false) {
         <td class="col-num">${index + 1}</td>
         <td class="col-block"><code>${blk}</code></td>
         <td class="col-sm">${smBadge}</td>
-        <td class="col-project">${tokenLink}</td>
+        <td class="col-project">${tokenLink}${gateBadgeHtml(item)}</td>
         <td class="col-type">${stdBadge}</td>
         <td class="col-safety">${safeBadge}</td>
         <td class="col-interest">${intBadge}</td>
@@ -6580,7 +6596,7 @@ function appendNextTableBatch() {
         <td class="col-num">${index + 1}</td>
         <td class="col-block"><code>${blk}</code></td>
         <td class="col-sm">${smBadge}</td>
-        <td class="col-project">${tokenLink}</td>
+        <td class="col-project">${tokenLink}${gateBadgeHtml(item)}</td>
         <td class="col-type">${stdBadge}</td>
         <td class="col-safety">${safeBadge}</td>
         <td class="col-interest">${intBadge}</td>
@@ -6597,7 +6613,7 @@ function appendNextTableBatch() {
         <td class="col-num">${index + 1}</td>
         <td class="col-block"><code>${blk}</code></td>
         <td class="col-sm">${smBadge}</td>
-        <td class="col-project">${tokenLink}</td>
+        <td class="col-project">${tokenLink}${gateBadgeHtml(item)}</td>
         <td class="col-type">${stdBadge}</td>
         <td class="col-safety">${safeBadge}</td>
         <td class="col-interest">${intBadge}</td>
@@ -11238,6 +11254,7 @@ if (typeof module !== 'undefined' && module.exports) {
     mintTimingLabel,
     smartWalletCount,
     canMintFromCard,
-    cardTermsCellHtml
+    cardTermsCellHtml,
+    gateBadgeHtml
   };
 }

@@ -133,9 +133,9 @@ def test_backfill_picks_recent_open_mints_without_terms():
     ]
     worker._mint_terms_tried.clear()
     picked = [x["contract"][2] for x in worker._mint_terms_backfill_candidates(history, now)]
-    assert picked == ["2", "1"]
+    assert picked == ["2", "5", "1", "6"]   # sold-out and old drops are in scope too (the gate is shown on every row)
     worker._mint_terms_tried["0x" + "2" * 40] = now
-    assert [x["contract"][2] for x in worker._mint_terms_backfill_candidates(history, now)] == ["1"]
+    assert [x["contract"][2] for x in worker._mint_terms_backfill_candidates(history, now)] == ["5", "1", "6"]
     worker._mint_terms_tried.clear()
 
 
@@ -212,4 +212,42 @@ def test_backfill_reprobes_old_versions_and_stale_recent_terms():
     ]
     worker._mint_terms_tried.clear()
     assert [x["contract"][2] for x in worker._mint_terms_backfill_candidates(history, now)] == ["5", "2", "1"]
+    worker._mint_terms_tried.clear()
+
+
+def test_bytecode_agent_check_is_the_fallback_when_simulation_cannot_decide():
+    agent_err = monitor.keccak_selector("AgentIdRequired()")[2:]
+    # sold out: both wallets refused for supply; the code itself carries the Agent ID error
+    rpc = RevertRpc(code=code_with("1249c58b", agent_err), reverts={PROBE: _err("SoldOut()"), HOLDER: _err("SoldOut()")})
+    t = monitor.probe_mint_terms(rpc, "0xabc", "0x1249c58b", "0")
+    assert t["gate"] == "agent_id" and t["gate_from"] == "bytecode" and t["state"] == "sold_out"
+    # the "Agent ID" revert text in the bytecode counts too
+    text_code = code_with("1249c58b") + "Agent ID required".encode().hex()
+    rpc = RevertRpc(code=text_code, reverts={PROBE: {"message": "execution reverted"}, HOLDER: {"message": "execution reverted"}})
+    assert monitor.probe_mint_terms(rpc, "0xabc", "0x1249c58b", "0")["gate"] == "agent_id"
+    # a drop anyone can mint stays open even if its code mentions an Agent ID
+    rpc = RevertRpc(code=code_with("1249c58b", agent_err), can_mint=[PROBE])
+    t = monitor.probe_mint_terms(rpc, "0xabc", "0x1249c58b", "0")
+    assert t["gate"] == "open" and "gate_from" not in t
+    # no marker, nothing decided: unknown
+    rpc = RevertRpc(code=code_with("1249c58b"), reverts={PROBE: _err("SoldOut()"), HOLDER: _err("SoldOut()")})
+    assert monitor.probe_mint_terms(rpc, "0xabc", "0x1249c58b", "0")["gate"] == "unknown"
+
+
+def test_learned_agent_error_codes():
+    assert monitor.classify_revert({"message": "execution reverted", "data": "0xea11784e"}) == "agent_id"
+    assert monitor.classify_revert({"message": "execution reverted", "data": "0x3cb97240"}) == "agent_id"
+
+
+def test_backfill_covers_every_drop_with_a_mint_of_any_age():
+    now = time.time()
+    old = time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(now - 60 * 86400))
+    base = {"name": "X", "standard": "ERC-721", "mint_price_str": "⭐ FREE", "detected_at": old}
+    history = [
+        {**base, "contract": "0x" + "1" * 40, "block": 1},                                         # 60 days old: probed
+        {**base, "contract": "0x" + "2" * 40, "block": 2, "max_supply": 5, "total_minted": 5},     # sold out: probed
+        {**base, "contract": "0x" + "3" * 40, "block": 3, "mint_price_str": "DEX Traded"},         # no mint: skipped
+    ]
+    worker._mint_terms_tried.clear()
+    assert [x["contract"][2] for x in worker._mint_terms_backfill_candidates(history, now)] == ["2", "1"]
     worker._mint_terms_tried.clear()

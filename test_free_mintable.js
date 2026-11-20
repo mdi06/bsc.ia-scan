@@ -116,3 +116,11 @@ const paidTbd = { mint_price_str: 'TBD', mint_calldata: '0x1249c58b', mint_terms
 assert.match(app.mintTermsChipsHtml(paidTbd), /💎 Paid/);
 assert.match(app.mintTermsChipsHtml(paidTbd), /Agent ID needed/);
 console.log('✔ Probe v2 states (closed, ended, sold out, unusable call, paid): PASS');
+
+// Agent ID badge next to the name, on every row
+assert.match(app.gateBadgeHtml({ mint_terms: { gate: 'agent_id' } }), /🪪 Agent ID/);
+assert.match(app.gateBadgeHtml({ mint_terms: { gate: 'agent_id', gate_from: 'bytecode' } }), /contract code checks/);
+assert.match(app.gateBadgeHtml({ mint_terms: { gate: 'whitelist' } }), /Whitelist/);
+assert.strictEqual(app.gateBadgeHtml({ mint_terms: { gate: 'open' } }), '');
+assert.strictEqual(app.gateBadgeHtml({}), '');
+console.log('✔ Agent ID badge next to the drop name: PASS');
