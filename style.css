@@ -1993,122 +1993,60 @@ table {
     min-width: 1260px;
   }
 
-  /* Stable fixed column widths across all tabs and data rows */
+  /* Stable fixed column widths across all tabs and data rows.
+     Widths are sized to the widest normal content of each column (badge text, "1.0B/1.0B", "178.3K / 10.5K", the
+     DexScreener button) so nothing is cut to an ellipsis; the table scrolls sideways before it squeezes them. */
+  #dropsTable th,
+  #dropsTable td {
+    padding-left: 9px;
+    padding-right: 9px;
+  }
+
+  #dropsTable { min-width: 1760px; }
+  #dropsTable.secondary-mode { min-width: 1720px; }
+
   #dropsTable th:nth-child(1),
-  #dropsTable td:nth-child(1) {
-    width: 34px;
-    max-width: 34px;
-    text-align: center;
-  }
-
+  #dropsTable td:nth-child(1) { width: 34px; max-width: 34px; text-align: center; padding-left: 4px; padding-right: 4px; }
   #dropsTable th:nth-child(2),
-  #dropsTable td:nth-child(2) {
-    width: 38px;
-  }
-
+  #dropsTable td:nth-child(2) { width: 42px; }
   #dropsTable th:nth-child(3),
-  #dropsTable td:nth-child(3) {
-    width: 78px;
-  }
-
+  #dropsTable td:nth-child(3) { width: 92px; }
   #dropsTable th:nth-child(4),
-  #dropsTable td:nth-child(4) {
-    width: 42px;
-    text-align: center;
-  }
-
+  #dropsTable td:nth-child(4) { width: 72px; text-align: center; }
   #dropsTable th:nth-child(5),
-  #dropsTable td:nth-child(5) {
-    width: 200px;
-    min-width: 180px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
+  #dropsTable td:nth-child(5) { width: 282px; min-width: 240px; overflow: hidden; text-overflow: ellipsis; }
   #dropsTable th:nth-child(6),
-  #dropsTable td:nth-child(6) {
-    width: 75px;
-  }
-
+  #dropsTable td:nth-child(6) { width: 104px; }
   #dropsTable th:nth-child(7),
-  #dropsTable td:nth-child(7) {
-    width: 85px;
-  }
-
+  #dropsTable td:nth-child(7) { width: 128px; }
   #dropsTable th:nth-child(8),
-  #dropsTable td:nth-child(8) {
-    width: 85px;
-  }
-
+  #dropsTable td:nth-child(8) { width: 132px; }
   #dropsTable th:nth-child(9),
-  #dropsTable td:nth-child(9) {
-    width: 115px;
-  }
-
+  #dropsTable td:nth-child(9) { width: 128px; }
   #dropsTable th:nth-child(10),
-  #dropsTable td:nth-child(10) {
-    width: 105px;
-  }
-
+  #dropsTable td:nth-child(10) { width: 128px; }
   #dropsTable th:nth-child(11),
-  #dropsTable td:nth-child(11) {
-    width: 220px;
-  }
-
+  #dropsTable td:nth-child(11) { width: 262px; }
   #dropsTable th:nth-child(12),
-  #dropsTable td:nth-child(12) {
-    width: 100px;
-  }
-
+  #dropsTable td:nth-child(12) { width: 136px; }
   #dropsTable th:nth-child(13),
-  #dropsTable td:nth-child(13) {
-    width: 110px;
-  }
-
+  #dropsTable td:nth-child(13) { width: 225px; }
   #dropsTable th:nth-child(14),
-  #dropsTable td:nth-child(14) {
-    width: 85px;
-    text-align: center;
-  }
+  #dropsTable td:nth-child(14) { width: 110px; text-align: center; }
 
-  /* Dedicated Column Sizing for Secondary Market Mode to prevent header overlap */
+  /* Secondary Market mode: DEX PRICE, MARKET CAP, 24H VOL, DEX LP, HOLDERS, DEXSCREENER */
   #dropsTable.secondary-mode th:nth-child(9),
-  #dropsTable.secondary-mode td:nth-child(9) {
-    /* DEX PRICE: price + chart arrow + the 24h % badge (e.g. -76.3%) on one line */
-    width: 230px !important;
-    min-width: 230px !important;
-  }
-
+  #dropsTable.secondary-mode td:nth-child(9) { width: 230px !important; min-width: 230px !important; }
   #dropsTable.secondary-mode th:nth-child(10),
-  #dropsTable.secondary-mode td:nth-child(10) {
-    width: 145px !important;
-    min-width: 145px !important;
-  }
-
+  #dropsTable.secondary-mode td:nth-child(10) { width: 150px !important; min-width: 150px !important; }
   #dropsTable.secondary-mode th:nth-child(11),
-  #dropsTable.secondary-mode td:nth-child(11) {
-    width: 115px !important;
-    min-width: 115px !important;
-  }
-
+  #dropsTable.secondary-mode td:nth-child(11) { width: 125px !important; min-width: 125px !important; }
   #dropsTable.secondary-mode th:nth-child(12),
-  #dropsTable.secondary-mode td:nth-child(12) {
-    width: 120px !important;
-    min-width: 120px !important;
-  }
-
+  #dropsTable.secondary-mode td:nth-child(12) { width: 125px !important; min-width: 125px !important; }
   #dropsTable.secondary-mode th:nth-child(13),
-  #dropsTable.secondary-mode td:nth-child(13) {
-    width: 115px !important;
-    min-width: 115px !important;
-  }
-
+  #dropsTable.secondary-mode td:nth-child(13) { width: 150px !important; min-width: 150px !important; }
   #dropsTable.secondary-mode th:nth-child(14),
-  #dropsTable.secondary-mode td:nth-child(14) {
-    width: 110px !important;
-    min-width: 110px !important;
-    text-align: center;
-  }
+  #dropsTable.secondary-mode td:nth-child(14) { width: 150px !important; min-width: 150px !important; text-align: center; }
 }
 
 thead {
@@ -2153,9 +2091,9 @@ th.col-block {
 }
 
 th.col-sm {
-  width: 42px;
-  min-width: 42px;
-  max-width: 44px;
+  width: 72px;
+  min-width: 72px;
+  max-width: 72px;
 }
 
 th.col-project {
