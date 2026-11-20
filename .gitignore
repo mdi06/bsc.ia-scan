@@ -30,6 +30,13 @@ METRICS_AUDIT_REPORT.md
 MIGRATION_GUIDE.md
 PREVIEW_VERIFICATION_REPORT.md
 REFACTOR_PROMPT.md
+# Every prompt file stays local (BACKEND_PERF_PROMPTS.md and any future *PROMPT*.md / *PROMPTS*.md)
+*PROMPT*.md
+
+# Daily Pulse card generator: a local marketing tool, kept out of the repo
+scripts/daily_card.py
+scripts/run_daily_card.sh
+template-daily.html
 
 # Local marketing screenshots / logo exports in the repo root
 binance_agent_radar_logo_transparent.png
