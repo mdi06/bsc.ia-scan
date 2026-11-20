@@ -71,25 +71,9 @@ def _run_candidate(monkeypatch, rpc, inp):
     return bool(called)
 
 
-def test_gate_blocks_approve_and_unlinked_but_allows_linked_mint(monkeypatch):
-    linked = FakeRpc(code={"0xaaa": "0x6080" + REG})
-    plain = FakeRpc(code={"0xaaa": "0x6080" + "cd" * 40})
-    approve = "0x095ea7b3" + "0" * 128
-    mint = "0x1249c58b"
-    assert _run_candidate(monkeypatch, linked, approve) is False   # approve: never a drop
-    assert _run_candidate(monkeypatch, plain, mint) is False       # no registry link: not an agent mint
-    assert _run_candidate(monkeypatch, linked, mint) is True       # linked + mint-like: analyzed as before
-
-
-def test_eip1167_clone_is_linked_through_its_implementation():
-    impl = "bb" * 20
-    clone = "0x363d3d373d3d3d363d73" + impl + "5af43d82803e903d91602b57fd5bf3"
-    rpc = FakeRpc(code={"0xaaa": clone, "0x" + impl: "0x6080" + REG})
-    assert monitor.contract_links_to_registry(rpc, "0xaaa") is True
-
-
-def test_eip1167_clone_of_plain_token_is_not_linked():
-    impl = "bb" * 20
-    clone = "0x363d3d373d3d3d363d73" + impl + "5af43d82803e903d91602b57fd5bf3"
-    rpc = FakeRpc(code={"0xaaa": clone, "0x" + impl: "0x6080" + "cd" * 40})
-    assert monitor.contract_links_to_registry(rpc, "0xaaa") is False
+def test_gate_blocks_approve_and_transfer_but_allows_mint_calls(monkeypatch):
+    rpc = FakeRpc(code={"0xaaa": "0x6080" + "cd" * 40})   # no registry link: launchpad tokens look like this
+    assert _run_candidate(monkeypatch, rpc, "0x095ea7b3" + "0" * 128) is False   # approve
+    assert _run_candidate(monkeypatch, rpc, "0xa9059cbb" + "0" * 128) is False   # transfer
+    assert _run_candidate(monkeypatch, rpc, "0x1249c58b") is True                # mint(): analyzed as before
+    assert _run_candidate(monkeypatch, rpc, "0x") is True                        # plain payable send: analyzed as before
