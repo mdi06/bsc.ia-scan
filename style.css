@@ -120,8 +120,8 @@ body {
 /* Prominent Global Suite Search Bar */
 .suite-search-wrap {
   position: relative;
-  flex: 1 1 440px;
-  max-width: 620px;
+  flex: 1 1 720px;
+  max-width: 960px;
   min-width: 240px;
   margin: 0 12px;
 }
@@ -235,6 +235,8 @@ body {
   align-items: center;
   gap: 6px;
   margin-top: 6px;
+  /* Layout stability: the chips are filled in by app.js after first paint; hold their row height from the start. */
+  min-height: 25px;
   overflow-x: auto;
   overflow-y: hidden;
   scrollbar-width: none;
@@ -321,6 +323,9 @@ body {
   top: 44px;
   left: 0;
   right: 0;
+  /* The search box can be narrow in a crowded header; the results need room for name + badges + price. It grows to the
+     right (left stays aligned with the box) and never exceeds the viewport. */
+  min-width: min(440px, calc(100vw - 24px));
   z-index: 10000;
   background: rgba(13, 17, 28, 0.98);
   backdrop-filter: blur(20px);
@@ -328,9 +333,9 @@ body {
   border: 1px solid rgba(240, 185, 11, 0.35);
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.85), 0 0 20px rgba(240, 185, 11, 0.15);
   border-radius: 8px;
-  max-height: 480px;
-  overflow-y: auto;
-  overflow-x: hidden;
+  /* The dropdown itself no longer scrolls: header and footer stay visible and only the result LIST scrolls (see
+     .search-dropdown-list). The old whole-dropdown scroll pushed the header out of sight on long lists. */
+  overflow: hidden;
   box-sizing: border-box;
   animation: dropdownFadeIn 0.15s ease-out;
 }
@@ -375,8 +380,13 @@ body {
 }
 
 .search-dropdown-list {
+  position: relative; /* offsetParent for the keyboard scroll-into-view maths in updateSearchDropdownSelection */
   display: flex;
   flex-direction: column;
+  max-height: min(400px, 55vh);
+  overflow-y: auto;
+  overscroll-behavior: contain; /* a wheel/touch scroll at the end of the list must not scroll the page behind it */
+  scrollbar-width: thin;
 }
 
 .search-dropdown-item {
@@ -384,10 +394,16 @@ body {
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  padding: 9px 12px;
+  flex: 0 0 auto;
+  box-sizing: border-box;
+  min-height: 54px; /* every row the same height, whatever its content */
+  padding: 8px 12px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.04);
   cursor: pointer;
-  transition: background 0.12s ease, border-left 0.12s ease, border-bottom 0.12s ease, padding-left 0.12s ease;
+  /* Only the background animates. The old hover added a 3px border-left and shrank padding-left, both transitioned:
+     the border appeared instantly while the padding eased, so the text jumped right and slid back on every hover
+     ("shaking"). The marker below is an inset shadow: it takes no space, so nothing can move. */
+  transition: background-color 0.1s ease;
   user-select: none;
 }
 
@@ -395,11 +411,11 @@ body {
   border-bottom: none;
 }
 
-.search-dropdown-item:hover,
+/* One highlight only: keyboard and mouse both set .is-selected through JS (a CSS :hover rule here would light up a
+   second row whenever the list scrolls under a resting pointer). */
 .search-dropdown-item.is-selected {
-  background: rgba(240, 185, 11, 0.12);
-  border-left: 3px solid var(--color-gold);
-  padding-left: 9px;
+  background-color: rgba(240, 185, 11, 0.12);
+  box-shadow: inset 3px 0 0 var(--color-gold);
 }
 
 .search-drop-avatar {
@@ -437,29 +453,35 @@ body {
   display: flex;
   align-items: center;
   gap: 6px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap; /* a row is always exactly two lines: the name shrinks (ellipsis) before anything wraps */
+  min-width: 0;
 }
 
 .search-drop-name {
+  flex: 0 1 auto;
+  min-width: 36px;
   font-size: 12.5px;
   font-weight: 700;
   color: var(--text-white);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 160px;
 }
 
 .search-drop-symbol {
+  flex: 0 0 auto;
   font-size: 11px;
   font-family: var(--font-mono);
   color: var(--color-cyan);
   font-weight: 600;
+  white-space: nowrap;
 }
 
 .search-drop-badges {
+  flex: 0 0 auto;
   display: inline-flex;
   gap: 4px;
+  white-space: nowrap;
 }
 
 .search-drop-badge {
@@ -499,13 +521,28 @@ body {
   display: flex;
   align-items: center;
   gap: 8px;
+  min-width: 0;
   font-size: 10.5px;
   color: var(--text-dim);
   font-family: var(--font-mono);
+  white-space: nowrap;
+  overflow: hidden;
 }
 
 .search-drop-addr {
+  flex: 0 0 auto;
   color: rgba(255, 255, 255, 0.45);
+}
+
+.search-drop-type {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.search-drop-type::before {
+  content: "• ";
 }
 
 .search-drop-meta {
@@ -513,11 +550,16 @@ body {
   flex-direction: column;
   align-items: flex-end;
   gap: 2px;
-  flex-shrink: 0;
+  flex: 0 0 auto;
+  min-width: 56px;
   text-align: right;
+  white-space: nowrap;
 }
 
 .search-drop-price {
+  max-width: 112px;
+  overflow: hidden;
+  text-overflow: ellipsis;
   font-size: 12px;
   font-weight: 700;
   font-family: var(--font-mono);
@@ -525,6 +567,9 @@ body {
 }
 
 .search-drop-gain {
+  max-width: 112px;
+  overflow: hidden;
+  text-overflow: ellipsis;
   font-size: 10.5px;
   font-weight: 700;
   font-family: var(--font-mono);
@@ -543,17 +588,17 @@ body {
 }
 
 .search-drop-action {
+  flex: 0 0 14px;
+  width: 14px;
+  text-align: center;
   font-size: 13px;
   color: var(--color-gold);
-  opacity: 0.6;
-  transition: opacity 0.12s ease, transform 0.12s ease;
-  margin-left: 2px;
+  opacity: 0; /* fixed-width slot, so showing it never changes the layout; no translate: movement reads as jitter */
+  transition: opacity 0.1s ease;
 }
 
-.search-dropdown-item:hover .search-drop-action,
 .search-dropdown-item.is-selected .search-drop-action {
   opacity: 1;
-  transform: translate(2px, -2px);
 }
 
 /* Dropdown Footer */
@@ -790,6 +835,14 @@ mark.search-hl {
 }
 
 /* Navigation & Controls */
+/* Layout stability (narrow desktop, 941-1079px): the four tab labels gain their counts after the feed loads, and the
+   tab row then wraps onto a second line, which pushes the whole page down. Hold the wrapped height from the start. */
+@media (min-width: 941px) and (max-width: 1079px) {
+  .nav-container {
+    min-height: 112px;
+  }
+}
+
 .nav-container {
   display: flex;
   flex-direction: column;
@@ -1659,6 +1712,32 @@ mark.search-hl {
   font-size: 11px;
 }
 
+/* Wide desktop: the momentum card holds the longest text in the row (up to three "NAME 60%" entries) and the near-cap
+   card the shortest, so share the row accordingly instead of in equal thirds. Only from 1200px up: below that the
+   fill-rate card (about 340px of content) has no width to give. The mobile grid ignores flex-grow. */
+@media (min-width: 1200px) {
+  .stats-macro-group > .stat-card:nth-child(3) {
+    flex-grow: 0.8;
+  }
+
+  .stats-macro-group > .stat-card:nth-child(5) {
+    flex-grow: 1.4;
+  }
+}
+
+.stats-macro-group .stat-highlight {
+  max-width: 320px;
+}
+
+/* A banner span with no text (cold load, or nothing to report) takes no space and draws no empty chip. */
+.stats-banner .badge:empty,
+.stats-banner .stat-sub:empty,
+.stats-banner .stat-text:empty,
+.stats-banner .stat-runner:empty,
+.stats-banner .stat-highlight:empty {
+  display: none !important;
+}
+
 /* Dedicated Digital Hardware Counter Box in Stats Banner */
 .digital-counter-wrapper {
   display: flex;
@@ -1892,6 +1971,12 @@ mark.search-hl {
   scrollbar-color: rgba(240, 185, 11, 0.3) rgba(14, 18, 27, 0.8);
 }
 
+/* Layout stability: until the first feed render, hold the height the table reaches once rows are in
+   (renderTable removes this class), so the rows filling in do not push the footer and everything below. */
+.table-wrapper.table-reserve {
+  min-block-size: calc(100vh - 200px);
+}
+
 table {
   width: 100%;
   border-collapse: separate;
@@ -1908,121 +1993,60 @@ table {
     min-width: 1260px;
   }
 
-  /* Stable fixed column widths across all tabs and data rows */
+  /* Stable fixed column widths across all tabs and data rows.
+     Widths are sized to the widest normal content of each column (badge text, "1.0B/1.0B", "178.3K / 10.5K", the
+     DexScreener button) so nothing is cut to an ellipsis; the table scrolls sideways before it squeezes them. */
+  #dropsTable th,
+  #dropsTable td {
+    padding-left: 9px;
+    padding-right: 9px;
+  }
+
+  #dropsTable { min-width: 1760px; }
+  #dropsTable.secondary-mode { min-width: 1720px; }
+
   #dropsTable th:nth-child(1),
-  #dropsTable td:nth-child(1) {
-    width: 34px;
-    max-width: 34px;
-    text-align: center;
-  }
-
+  #dropsTable td:nth-child(1) { width: 34px; max-width: 34px; text-align: center; padding-left: 4px; padding-right: 4px; }
   #dropsTable th:nth-child(2),
-  #dropsTable td:nth-child(2) {
-    width: 38px;
-  }
-
+  #dropsTable td:nth-child(2) { width: 42px; }
   #dropsTable th:nth-child(3),
-  #dropsTable td:nth-child(3) {
-    width: 78px;
-  }
-
+  #dropsTable td:nth-child(3) { width: 92px; }
   #dropsTable th:nth-child(4),
-  #dropsTable td:nth-child(4) {
-    width: 42px;
-    text-align: center;
-  }
-
+  #dropsTable td:nth-child(4) { width: 72px; text-align: center; }
   #dropsTable th:nth-child(5),
-  #dropsTable td:nth-child(5) {
-    width: 200px;
-    min-width: 180px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
+  #dropsTable td:nth-child(5) { width: 282px; min-width: 240px; overflow: hidden; text-overflow: ellipsis; }
   #dropsTable th:nth-child(6),
-  #dropsTable td:nth-child(6) {
-    width: 75px;
-  }
-
+  #dropsTable td:nth-child(6) { width: 104px; }
   #dropsTable th:nth-child(7),
-  #dropsTable td:nth-child(7) {
-    width: 85px;
-  }
-
+  #dropsTable td:nth-child(7) { width: 128px; }
   #dropsTable th:nth-child(8),
-  #dropsTable td:nth-child(8) {
-    width: 85px;
-  }
-
+  #dropsTable td:nth-child(8) { width: 132px; }
   #dropsTable th:nth-child(9),
-  #dropsTable td:nth-child(9) {
-    width: 115px;
-  }
-
+  #dropsTable td:nth-child(9) { width: 128px; }
   #dropsTable th:nth-child(10),
-  #dropsTable td:nth-child(10) {
-    width: 105px;
-  }
-
+  #dropsTable td:nth-child(10) { width: 128px; }
   #dropsTable th:nth-child(11),
-  #dropsTable td:nth-child(11) {
-    width: 220px;
-  }
-
+  #dropsTable td:nth-child(11) { width: 262px; }
   #dropsTable th:nth-child(12),
-  #dropsTable td:nth-child(12) {
-    width: 100px;
-  }
-
+  #dropsTable td:nth-child(12) { width: 136px; }
   #dropsTable th:nth-child(13),
-  #dropsTable td:nth-child(13) {
-    width: 110px;
-  }
-
+  #dropsTable td:nth-child(13) { width: 225px; }
   #dropsTable th:nth-child(14),
-  #dropsTable td:nth-child(14) {
-    width: 85px;
-    text-align: center;
-  }
+  #dropsTable td:nth-child(14) { width: 110px; text-align: center; }
 
-  /* Dedicated Column Sizing for Secondary Market Mode to prevent header overlap */
+  /* Secondary Market mode: DEX PRICE, MARKET CAP, 24H VOL, DEX LP, HOLDERS, DEXSCREENER */
   #dropsTable.secondary-mode th:nth-child(9),
-  #dropsTable.secondary-mode td:nth-child(9) {
-    width: 120px !important;
-    min-width: 120px !important;
-  }
-
+  #dropsTable.secondary-mode td:nth-child(9) { width: 230px !important; min-width: 230px !important; }
   #dropsTable.secondary-mode th:nth-child(10),
-  #dropsTable.secondary-mode td:nth-child(10) {
-    width: 145px !important;
-    min-width: 145px !important;
-  }
-
+  #dropsTable.secondary-mode td:nth-child(10) { width: 150px !important; min-width: 150px !important; }
   #dropsTable.secondary-mode th:nth-child(11),
-  #dropsTable.secondary-mode td:nth-child(11) {
-    width: 115px !important;
-    min-width: 115px !important;
-  }
-
+  #dropsTable.secondary-mode td:nth-child(11) { width: 125px !important; min-width: 125px !important; }
   #dropsTable.secondary-mode th:nth-child(12),
-  #dropsTable.secondary-mode td:nth-child(12) {
-    width: 120px !important;
-    min-width: 120px !important;
-  }
-
+  #dropsTable.secondary-mode td:nth-child(12) { width: 125px !important; min-width: 125px !important; }
   #dropsTable.secondary-mode th:nth-child(13),
-  #dropsTable.secondary-mode td:nth-child(13) {
-    width: 115px !important;
-    min-width: 115px !important;
-  }
-
+  #dropsTable.secondary-mode td:nth-child(13) { width: 150px !important; min-width: 150px !important; }
   #dropsTable.secondary-mode th:nth-child(14),
-  #dropsTable.secondary-mode td:nth-child(14) {
-    width: 110px !important;
-    min-width: 110px !important;
-    text-align: center;
-  }
+  #dropsTable.secondary-mode td:nth-child(14) { width: 150px !important; min-width: 150px !important; text-align: center; }
 }
 
 thead {
@@ -2042,6 +2066,7 @@ th {
   letter-spacing: 0.5px;
   text-transform: uppercase;
   border-bottom: 2px solid rgba(240, 185, 11, 0.45);
+  background: #121726; /* opaque: sticky header cells must never let scrolled rows show through */
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2066,9 +2091,9 @@ th.col-block {
 }
 
 th.col-sm {
-  width: 42px;
-  min-width: 42px;
-  max-width: 44px;
+  width: 72px;
+  min-width: 72px;
+  max-width: 72px;
 }
 
 th.col-project {
@@ -2213,6 +2238,31 @@ tbody tr.selected {
   transform: translateY(-1px);
 }
 
+.modal-share-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+  cursor: pointer;
+  background: rgba(0, 240, 255, 0.08);
+  border: 1px solid rgba(0, 240, 255, 0.35);
+  color: var(--color-cyan);
+  font-family: var(--font-sans);
+}
+
+.modal-share-btn:hover {
+  background: rgba(0, 240, 255, 0.18);
+}
+
+.modal-share-btn:focus-visible {
+  outline: 2px solid var(--color-cyan);
+  outline-offset: 2px;
+}
+
 .modal-fav-btn.starred {
   background: var(--color-gold);
   color: #000;
@@ -2322,17 +2372,17 @@ th.sortable-th {
 
 th.sortable-th:hover {
   color: var(--color-gold);
-  background: rgba(240, 185, 11, 0.08);
+  background: linear-gradient(rgba(240, 185, 11, 0.08), rgba(240, 185, 11, 0.08)), #121726;
 }
 
 th.sortable-th:active {
-  background: rgba(240, 185, 11, 0.22);
+  background: linear-gradient(rgba(240, 185, 11, 0.22), rgba(240, 185, 11, 0.22)), #121726;
   transform: scale(0.98);
 }
 
 th.sortable-th.active-sort {
   color: var(--color-gold);
-  background: rgba(240, 185, 11, 0.08);
+  background: linear-gradient(rgba(240, 185, 11, 0.08), rgba(240, 185, 11, 0.08)), #121726;
 }
 
 th.sortable-th .sort-indicator {
@@ -2565,7 +2615,9 @@ a.inspect-btn:hover {
   margin: 0 calc(var(--modal-pad-x) * -1) calc(var(--modal-pad-y) * -1);
   padding: 22px var(--modal-pad-x) 12px;
   display: flex;
+  flex-wrap: wrap;
   justify-content: center;
+  gap: 8px;
   background: linear-gradient(to top, #0a0c14 55%, rgba(10, 12, 20, 0));
   pointer-events: none;
   transition: opacity 0.15s ease, transform 0.15s ease;
@@ -2605,10 +2657,36 @@ a.inspect-btn:hover {
   outline-offset: 2px;
 }
 
+/* Second pinned action: one-tap "Copy CLI" beside Mint / Snipe (copyModalSniperCli in app.js) */
+.modal-shortcut-btn-secondary {
+  background: rgba(2, 7, 9, 0.94);
+  color: var(--color-cyan);
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(0, 0, 0, 0.4);
+}
+
+.modal-shortcut-btn-secondary:hover {
+  background: rgba(0, 240, 255, 0.12);
+  box-shadow: 0 6px 22px rgba(0, 240, 255, 0.3), 0 0 0 1px rgba(0, 0, 0, 0.4);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .modal-shortcut-bar,
   .modal-shortcut-btn {
     transition: none;
+  }
+}
+
+/* Narrow phones (320px): Mint / Snipe and Copy CLI stay on one row (min-height keeps the 40px tap target) */
+@media (max-width: 380px) {
+  .modal-shortcut-bar {
+    gap: 6px;
+    padding-left: 8px;
+    padding-right: 8px;
+  }
+
+  .modal-shortcut-btn {
+    padding: 9px 12px;
+    font-size: 12px;
   }
 }
 
@@ -3149,6 +3227,29 @@ a.inspect-btn:hover {
   opacity: 0.75;
 }
 
+/* Drop alerts toggle: the sound toggle's look, plus blocked (permission denied) and unsupported (no Notification API) */
+.alert-toggle-btn.blocked {
+  border-color: var(--color-red);
+  color: var(--color-red);
+  opacity: 0.9;
+}
+
+.alert-toggle-btn:disabled,
+.alert-toggle-btn.unsupported {
+  opacity: 0.45;
+  cursor: not-allowed;
+  transform: none;
+}
+
+/* Header width: on origin/main the header row already runs past the viewport below about 1335px (CONNECT WALLET is
+   clipped), and the ALERTS toggle needs room beside SOUND. Below 1400px the pill keeps its count and tooltip but drops
+   the "BINANCE AGENTIC WALLETS:" words. Above 1400px nothing changes. */
+@media (min-width: 769px) and (max-width: 1399px) {
+  #headerAiWalletsPill .desktop-only {
+    display: none;
+  }
+}
+
 /* Dynamic Market Toast Notifications */
 .toast-container {
   position: fixed;
@@ -3431,8 +3532,13 @@ a.inspect-btn:hover {
   }
 
   .search-results-dropdown {
-    max-height: 360px;
     top: 42px;
+  }
+
+  /* Phone: the list is the only scrolling part, so keep it short enough that the footer stays on screen above the
+     keyboard. */
+  .search-dropdown-list {
+    max-height: min(300px, 42vh);
   }
 
   .search-dropdown-shortcuts {
@@ -3833,7 +3939,8 @@ a.inspect-btn:hover {
     gap: 6px;
     padding: 8px 10px;
     height: auto;
-    min-height: 0;
+    /* Layout stability: the stat values fill in after the feed loads; hold the filled height from the start. */
+    min-height: 281px;
     max-height: none;
     border-radius: 8px;
     border: 1px solid rgba(240, 185, 11, 0.25);
@@ -3940,6 +4047,7 @@ a.inspect-btn:hover {
     flex-direction: row !important;
     align-items: center !important;
     justify-content: space-between !important;
+    flex-wrap: wrap !important;   /* the names drop to their own line when "[A 79%, B 73%, C 71%]" does not fit beside the label */
     gap: 6px !important;
     padding: 6px 10px !important;
     min-height: 34px !important;
@@ -3953,7 +4061,7 @@ a.inspect-btn:hover {
     overflow: hidden !important;
     text-overflow: ellipsis !important;
     white-space: nowrap !important;
-    max-width: 55% !important;
+    max-width: 100% !important;
   }
 
   .stat-card.gainer-card {
@@ -4126,6 +4234,15 @@ a.inspect-btn:hover {
     padding: 0 !important;
     border: none !important;
     min-width: 0;
+  }
+
+  /* Message rows ("No agentic projects match…", loading / empty states, the hidden-matches hint) are a single cell with
+     colspan. Without this it lands in ONE of the 12 grid columns above (~22px wide) and the text is crushed. */
+  tbody td[colspan] {
+    grid-column: 1 / -1;
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
   }
 
   .col-num {
@@ -4934,6 +5051,12 @@ a.inspect-btn:hover {
   gap: 6px;
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
   transition: border-color 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;
+  /* Layout stability: the runner / launch / smart / NFT lists fill in after the feed loads. Their filled height is
+     reserved here so the hero does not grow under the banner and table (221px = the settled height of the tallest
+     card on desktop; phones use the carousel rule below, 209px). */
+  min-height: 221px;
+  /* The four cards share equal grid tracks; without this, a card's unbreakable header/footer text would widen its track. */
+  min-width: 0;
 }
 
 .pulse-card:hover {
@@ -4972,6 +5095,8 @@ a.inspect-btn:hover {
   font-size: 14px;
 }
 
+/* Layout stability: the card's header and footer stay on one line, so the web font swapping in (a fallback face
+   wraps a little differently) does not change the card's height. A line too long for the card is cut with an ellipsis. */
 .pulse-card-title {
   font-size: 11px;
   font-weight: 800;
@@ -4979,6 +5104,19 @@ a.inspect-btn:hover {
   letter-spacing: 0.6px;
   flex: 1;
   font-family: var(--font-sans);
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Phones: the card is narrow, so a long title may take two lines (it is cut only on desktop widths). */
+@media (max-width: 768px) {
+  .pulse-card-title {
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+  }
 }
 
 .pulse-card-badge {
@@ -4989,6 +5127,7 @@ a.inspect-btn:hover {
   letter-spacing: 0.3px;
   border: 1px solid rgba(255, 255, 255, 0.12);
   font-family: var(--font-mono);
+  white-space: nowrap;
 }
 
 .pulse-card-runner .pulse-card-badge {
@@ -5019,6 +5158,8 @@ a.inspect-btn:hover {
   display: flex;
   flex-direction: column;
   gap: 4px;
+  /* Layout stability: the list inside fills in after the feed loads; hold its filled height. */
+  min-height: 129px;
 }
 
 /* Mini Ranked List for Top 3 Runners & Top 3 Smart Mints */
@@ -5290,6 +5431,9 @@ a.inspect-btn:hover {
   font-size: 10.5px;
   padding-top: 4px;
   border-top: 1px dashed rgba(255, 255, 255, 0.06);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .pulse-dex-link {
@@ -5403,7 +5547,8 @@ a.inspect-btn:hover {
     box-sizing: border-box !important;
     margin: 0 !important;
     height: auto !important;
-    min-height: 160px;
+    /* Layout stability: the settled height of a filled carousel card on phones (see .pulse-card) */
+    min-height: 209px;
   }
 
   /* Carousel Navigation Bar & Slide Pills */
@@ -6433,6 +6578,137 @@ a.inspect-btn:hover {
   color: var(--color-red);
 }
 
+.mint-status-link {
+  background: none;
+  border: 0;
+  padding: 0;
+  margin-left: 4px;
+  color: var(--color-cyan);
+  font: inherit;
+  font-weight: 700;
+  text-decoration: underline;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+/* "Copy Sniper CLI" under the Mint button: the terminal route, one tap, visible in the Mint section */
+.mint-cli-row {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.mint-cli-hint {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.mint-cli-btn {
+  width: 100%;
+  min-height: 40px;
+  padding: 9px 14px;
+  background: rgba(0, 255, 136, 0.06);
+  border: 1px dashed rgba(0, 255, 136, 0.5);
+  border-radius: 6px;
+  color: var(--color-green);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  touch-action: manipulation;
+  transition: background 0.2s ease, border-color 0.2s ease;
+}
+
+.mint-cli-btn:hover {
+  background: rgba(0, 255, 136, 0.14);
+  border-color: var(--color-green);
+}
+
+.mint-cli-btn:focus-visible,
+.mint-gate-option:focus-visible,
+.mint-status-link:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+}
+
+/* Mint gate: the wallet dialog opened from Mint when nothing in this browser can sign (app.js openMintWalletGate) */
+.mint-gate-options {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 12px 0 10px;
+}
+
+.mint-gate-option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 48px;
+  padding: 10px 12px;
+  background: rgba(0, 240, 255, 0.05);
+  border: 1px solid rgba(0, 240, 255, 0.3);
+  border-radius: 8px;
+  color: var(--text-white);
+  font-family: inherit;
+  font-size: 12px;
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+  touch-action: manipulation;
+  transition: background 0.2s ease, border-color 0.2s ease;
+}
+
+.mint-gate-option:hover {
+  background: rgba(0, 240, 255, 0.12);
+  border-color: var(--color-cyan);
+}
+
+.mint-gate-option.mint-gate-primary {
+  background: rgba(240, 185, 11, 0.1);
+  border-color: rgba(240, 185, 11, 0.6);
+}
+
+.mint-gate-option.mint-gate-primary:hover {
+  background: rgba(240, 185, 11, 0.2);
+  border-color: #f0b90b;
+}
+
+.mint-gate-icon {
+  flex: 0 0 24px;
+  width: 24px;
+  text-align: center;
+  font-size: 18px;
+  line-height: 1;
+}
+
+.mint-gate-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.mint-gate-text strong {
+  font-size: 13px;
+  color: var(--text-white);
+}
+
+.mint-gate-text small {
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text-dim);
+  overflow-wrap: anywhere;
+}
+
+.mint-gate-note {
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-dim);
+  margin: 0;
+}
+
 @keyframes pulse-border {
   0%, 100% {
     opacity: 0.75;
@@ -7245,6 +7521,8 @@ a.inspect-btn:hover {
 
 .reorder-item {
   display: flex;
+  flex-wrap: wrap; /* on a 320px phone the three buttons drop below the name instead of spilling out of the row */
+  row-gap: 8px;
   align-items: center;
   justify-content: space-between;
   background: rgba(13, 17, 23, 0.85);
@@ -7285,6 +7563,8 @@ a.inspect-btn:hover {
   display: flex;
   align-items: center;
   gap: 4px;
+  flex-shrink: 0;
+  margin-left: auto;
 }
 
 .reorder-btn {
@@ -7297,17 +7577,82 @@ a.inspect-btn:hover {
   cursor: pointer;
   transition: color 0.15s ease, background 0.15s ease, border-color 0.15s ease, opacity 0.15s ease;
   font-family: var(--font-mono);
+  white-space: nowrap; /* "⬆ Top" must not break onto two lines; the row name wraps instead */
 }
 
-.reorder-btn:hover:not(:disabled) {
+.reorder-btn:hover:not(:disabled):not([aria-disabled='true']) {
   background: var(--color-cyan);
   color: #000;
   border-color: var(--color-cyan);
 }
 
-.reorder-btn:disabled {
-  opacity: 0.3;
+/* Edge positions (Move Up on the top row, Move Down on the bottom row): visibly off, dashed and struck through, but still
+   tappable so the tap can explain itself (reportReorderEdge in app.js). */
+.reorder-btn:disabled,
+.reorder-btn[aria-disabled='true'] {
+  background: transparent;
+  border-style: dashed;
+  color: var(--text-dim);
+  opacity: 0.55;
+  text-decoration: line-through;
   cursor: not-allowed;
+}
+
+.reorder-item--moved {
+  border-color: var(--color-cyan);
+  box-shadow: inset 0 0 0 1px rgba(0, 240, 255, 0.35);
+}
+
+.reorder-item--edge {
+  border-color: var(--color-yellow);
+}
+
+.reorder-status {
+  min-height: 1.4em;
+  margin: 10px 0 0;
+  font-size: 12px;
+  color: var(--color-cyan);
+}
+
+.reorder-status[data-tone='edge'] {
+  color: var(--color-yellow);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .reorder-item--edge {
+    animation: reorder-edge-nudge 260ms ease-in-out;
+  }
+}
+
+@keyframes reorder-edge-nudge {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-4px); }
+  75% { transform: translateX(4px); }
+}
+
+/* Swipe between tokens in the token modal (setupModalSwipeNav in app.js): a short slide toward the new token, or a
+   small nudge when there is no token further that way. Motion is off for reduced-motion users. */
+@media (prefers-reduced-motion: no-preference) {
+  .modal-content.is-swipe-enter-next { animation: modal-swipe-in-next 220ms ease-out; }
+  .modal-content.is-swipe-enter-prev { animation: modal-swipe-in-prev 220ms ease-out; }
+  .modal-content.is-swipe-edge-next,
+  .modal-content.is-swipe-edge-prev { animation: modal-swipe-edge 240ms ease-in-out; }
+}
+
+@keyframes modal-swipe-in-next {
+  from { transform: translateX(24px); opacity: 0.6; }
+  to { transform: translateX(0); opacity: 1; }
+}
+
+@keyframes modal-swipe-in-prev {
+  from { transform: translateX(-24px); opacity: 0.6; }
+  to { transform: translateX(0); opacity: 1; }
+}
+
+@keyframes modal-swipe-edge {
+  0%, 100% { transform: translateX(0); }
+  30% { transform: translateX(-8px); }
+  70% { transform: translateX(8px); }
 }
 
 .btn-reset-order {
@@ -7354,5 +7699,64 @@ a.inspect-btn:hover {
   .search-box input,
   button {
     touch-action: manipulation;
+  }
+}
+
+/* Search: "couldn't search" state and the "matches hidden by the current tab / filter" hint (see app.js:
+   remoteSearchFailed, hiddenMatchesHintHtml). */
+button.search-empty-btn {
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.search-dropdown-error .search-empty-title {
+  color: var(--color-yellow, #f0b90b);
+}
+
+.search-hidden-hint {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 8px 12px;
+  margin: 14px auto 0;
+  padding: 10px 14px;
+  max-width: 560px;
+  border: 1px solid rgba(0, 240, 255, 0.3);
+  border-radius: 6px;
+  background: rgba(0, 240, 255, 0.06);
+  color: var(--text-primary, #e6edf3);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.search-hidden-btn {
+  min-height: 32px;
+  padding: 6px 14px;
+  border: 1px solid var(--color-cyan);
+  border-radius: 999px;
+  background: var(--color-cyan);
+  color: #000;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.search-hidden-btn:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+}
+
+/* Search dropdown on real phone widths: at most two badges per row (ordered most important first: honeypot, free,
+   snipe, smart) so the token name keeps room instead of collapsing to "Ag…". */
+@media (max-width: 480px) {
+  .search-drop-badge:nth-child(n+3) {
+    display: none;
+  }
+
+  .search-drop-name {
+    min-width: 52px;
   }
 }

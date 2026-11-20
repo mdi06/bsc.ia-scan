@@ -4,8 +4,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>BINANCE AGENT RADAR</title>
-  <meta name="title" content="BINANCE AGENT RADAR">
+  <title>BNB AGENT RADAR</title>
+  <meta name="title" content="BNB AGENT RADAR">
   <meta name="description"
     content="24/7 Autonomous Scanner for Binance .ai Agent ID drops, real-time smart wallet inflow (5,000 tracked wallets), instant honeypot/anti-rug audits, and fair-mint tracker on BNB Chain.">
   <meta name="theme-color" content="#03080c">
@@ -16,7 +16,7 @@
   <!-- Open Graph / Facebook / LinkedIn -->
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://agent-id-monitor.vercel.app">
-  <meta property="og:title" content="BINANCE AGENT RADAR | 175k+ Agentic Wallets">
+  <meta property="og:title" content="BNB AGENT RADAR | 175k+ Agentic Wallets">
   <meta property="og:description" content="Autonomous on-chain radar detecting 175,842+ Binance agentic wallets, stealth Block 0 fair-mints, and secondary DEX breakout multipliers.">
   <meta property="og:image" content="https://agent-id-monitor.vercel.app/og-preview.png?v=4">
   <meta property="og:image:secure_url" content="https://agent-id-monitor.vercel.app/og-preview.png?v=4">
@@ -27,7 +27,7 @@
   <!-- Twitter / X -->
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:url" content="https://agent-id-monitor.vercel.app">
-  <meta name="twitter:title" content="BINANCE AGENT RADAR | 175k+ Agentic Wallets">
+  <meta name="twitter:title" content="BNB AGENT RADAR | 175k+ Agentic Wallets">
   <meta name="twitter:description" content="Autonomous on-chain radar detecting 175,842+ Binance agentic wallets, stealth Block 0 fair-mints, and secondary DEX breakout multipliers.">
   <meta name="twitter:image" content="https://agent-id-monitor.vercel.app/og-preview.png?v=4">
 
@@ -207,7 +207,7 @@
             </svg>
           </span>
           <div class="suite-title-wrap">
-            <strong class="suite-title-text"><span class="desktop-only">BINANCE AGENT RADAR</span><span
+            <strong class="suite-title-text"><span class="desktop-only">BNB AGENT RADAR</span><span
                 class="mobile-only">AGENT RADAR</span></strong>
           </div>
         </div>
@@ -227,7 +227,7 @@
             <!-- Dynamically populated by app.js -->
           </div>
           <!-- Recently Inspected / Searched Chips -->
-          <div class="recent-search-chips-wrap" id="recentSearchChipsWrap" style="display: none;">
+          <div class="recent-search-chips-wrap" id="recentSearchChipsWrap">
             <span class="recent-chips-label">Recent:</span>
             <div class="recent-chips-list" id="recentChipsList">
               <!-- Injected by app.js: e.g. [Ptah], [TIMIS], [Chuffa] -->
@@ -238,11 +238,10 @@
 
         <div class="suite-meta">
           <div class="suite-telemetry">
-            <span class="meta-item live-pill" id="liveBlockBadge" title="Live BSC Block Height">📡 <span
+            <span class="meta-item live-pill" id="liveBlockBadge" style="display: none;" title="Live BSC Block Height">📡 <span
                 id="latestBlock">Loading...</span></span>
             <span class="meta-item ai-wallets-header-pill" id="headerAiWalletsPill"
-              title="Total Registered Binance Agentic Wallets on BNB Chain">🤖 <span class="desktop-only">BINANCE
-                AGENTIC WALLETS:</span>
+              title="Total Registered Binance Agentic Wallets on BNB Chain">🤖 <span class="desktop-only">AGENTIC WALLETS:</span>
               <strong id="headerAiWalletsCount"
                 style="color: #ffd600; text-shadow: 0 0 6px rgba(255,214,0,0.5);">178,001</strong></span>
             <span class="meta-item sync-time-item visually-hidden" id="syncTime">Synced just now</span>
@@ -252,6 +251,11 @@
               title="Toggle audio alerts">
               <span class="sound-icon">🔊</span>
               <span class="sound-label">SOUND</span>
+            </button>
+            <button id="dropAlertToggle" class="sound-toggle-btn alert-toggle-btn muted" type="button"
+              aria-pressed="false" aria-label="Drop alerts, off" title="Get a browser notification when a new drop matches your filter">
+              <span class="sound-icon">🔕</span>
+              <span class="sound-label">ALERTS OFF</span>
             </button>
             <span class="meta-sep">│</span>
             <button id="donateHeaderBtn" class="donate-btn" aria-label="Copy Donation Address"
@@ -621,29 +625,29 @@
       <div class="stats-macro-group">
         <div class="stat-card">
           <span class="stat-label">📊 MINT CAP FILL RATE:</span>
-          <span class="badge badge-green" id="fillRatePct">15.3%</span>
-          <span class="stat-sub" id="fillRateRatio">(11 / 72 Sold Out)</span>
+          <span class="badge badge-green" id="fillRatePct">—</span>
+          <span class="stat-sub" id="fillRateRatio"></span>
         </div>
         <div class="stat-sep">│</div>
         <div class="stat-card">
           <span class="stat-label">🔥 NEAR CAP (≥80%):</span>
-          <span class="badge badge-dim" id="nearCapCount">0</span>
+          <span class="badge badge-dim" id="nearCapCount">—</span>
         </div>
         <div class="stat-sep">│</div>
         <div class="stat-card">
           <span class="stat-label">⚡ MOMENTUM (≥50%):</span>
-          <span class="badge badge-yellow" id="momentumCount">2 ACTIVE</span>
-          <span class="stat-highlight" id="momentumNames">[Hallowed 60%, SOLVED 60%]</span>
+          <span class="badge badge-yellow" id="momentumCount">—</span>
+          <span class="stat-highlight" id="momentumNames"></span>
         </div>
       </div>
 
       <div class="stat-card gainer-card" id="topGainerBanner" role="button" tabindex="0"
         title="Click to view Top Post-Mint Profit Hall of Fame Leaderboard">
         <span class="stat-label gold">🏆 TOP POST-MINT PROFIT:</span>
-        <span class="badge badge-cyan" id="topGainerName">Hash21 (HASH)</span>
-        <span class="stat-text" id="topGainerDetails">Mint: FREE ➔ Secondary: $0.0148</span>
-        <span class="badge badge-green" id="topGainerNet">Net: +$0.0148 / token</span>
-        <span class="stat-runner" id="runnerUpDetails">│ 🥈 Runner-Up: Ptah (PTAH) [$0.0017]</span>
+        <span class="badge badge-cyan" id="topGainerName">—</span>
+        <span class="stat-text" id="topGainerDetails"></span>
+        <span class="badge badge-green" id="topGainerNet"></span>
+        <span class="stat-runner" id="runnerUpDetails"></span>
         <span class="stat-hof-badge">👑 Hall of Fame ↗</span>
       </div>
     </div>
@@ -711,7 +715,7 @@
 
     <!-- Main Table Viewport -->
     <main class="table-container">
-      <div tabindex="0" role="region" aria-label="Agent ID Launches" class="table-wrapper">
+      <div tabindex="0" role="region" aria-label="Agent ID Launches" class="table-wrapper table-reserve">
         <table id="dropsTable">
           <thead>
             <tr>
@@ -825,7 +829,7 @@
       <div class="footer-left">
         <span class="status-indicator">🟢 SYSTEM ONLINE</span>
         <span class="footer-sep">│</span>
-        <span id="footerCount">Showing 75 of 75 collections</span>
+        <span id="footerCount">—</span>
         <span class="footer-sep">│</span>
         <span class="dim">Space ID .ai Registry: <code>0x60B9...022F</code></span>
       </div>
@@ -908,6 +912,7 @@
       <div class="reorder-list" id="reorderPillsList">
         <!-- Rendered dynamically by app.js -->
       </div>
+      <p class="reorder-status" id="reorderPillsStatus" role="status" aria-live="polite"></p>
       <div
         style="display: flex; justify-content: space-between; align-items: center; margin-top: 16px; border-top: 1px solid var(--border-dim); padding-top: 12px;">
         <button class="btn-reset-order" onclick="resetPillSequence()">↺ Restore Default Order</button>

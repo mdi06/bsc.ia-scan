@@ -1,0 +1,44 @@
+# Refreshes feed_snapshot.json from the live backend and commits it when it changed; the push redeploys Vercel.
+#
+# The page paints this snapshot first and shows it until the Render backend answers, which takes ~35 s when the free
+# instance has gone to sleep. Without this job the snapshot only changed when someone ran scripts/refresh_snapshot.py
+# by hand, so a cold visit showed markets days old (and tokens since removed from the database).
+#
+# GitHub may start scheduled runs late or skip some under load, so the effective interval can be longer than the
+# cron below; a few hours old is still far better than days. The request itself also wakes the backend.
+name: refresh-snapshot
+
+on:
+  schedule:
+    - cron: "17 */3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: refresh-snapshot
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch the live feed
+        run: python3 scripts/refresh_snapshot.py --timeout 120
+
+      - name: Commit if it changed
+        run: |
+          if git diff --quiet -- feed_snapshot.json; then
+            echo "feed_snapshot.json unchanged"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add feed_snapshot.json
+          git commit -m "chore(snapshot): refresh feed_snapshot.json"
+          git pull --rebase origin "${GITHUB_REF_NAME}"
+          git push origin "HEAD:${GITHUB_REF_NAME}"

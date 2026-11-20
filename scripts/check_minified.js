@@ -9,6 +9,9 @@
 //    browser loads them) and checks that each name from 1 and 2 that exists in the original also exists,
 //    with the same type, in the minified one.
 // 4. Checks that the module.exports surface the Node tests use is identical.
+// 5. For the lazy feature modules (features/*.js): every function their inline handlers call must be global in the
+//    minified app.js, or set on window by a feature (window.<name> = ...). A handler calling a function that exists
+//    only inside a module would fail silently on click.
 //
 // Exits non-zero on any mismatch. Read-only: it never writes to the source files.
 
@@ -97,6 +100,19 @@ function main() {
   }
   const declared = topLevelNames(appSrc);
 
+  const featuresDir = path.join(ROOT, 'features');
+  const featureFiles = fs.existsSync(featuresDir)
+    ? fs.readdirSync(featuresDir, { recursive: true }).filter((f) => f.endsWith('.js')).map((f) => path.join('features', f))
+    : [];
+  const featureSrc = featureFiles.map((f) => read(f)).join('\n');
+  const featureHandlerNames = new Set();
+  let featureHandlerCount = 0;
+  for (const body of extractHandlers(featureSrc)) {
+    featureHandlerCount++;
+    for (const n of calledNames(body)) featureHandlerNames.add(n);
+  }
+  const setOnWindow = new Set([...featureSrc.matchAll(/\bwindow\.([A-Za-z_$][\w$]*)\s*=(?!=)/g)].map((m) => m[1]));
+
   const orig = load(srcFile);
   const mini = load(minFile);
 
@@ -109,6 +125,15 @@ function main() {
     const m = mini.typeOf(name);
     if (o === 'undefined' && m === 'undefined') { notAppGlobals.push(name); continue; }
     if (o !== m) failures.push(`handler function ${name}: original is ${o}, minified is ${m}`);
+  }
+  const BROWSER_GLOBALS = new Set(['setTimeout', 'clearTimeout', 'alert', 'confirm', 'open', 'fetch', 'encodeURIComponent', 'String', 'Number', 'parseInt', 'parseFloat', 'event']);
+  for (const name of featureHandlerNames) {
+    if (BROWSER_GLOBALS.has(name) || setOnWindow.has(name)) continue;
+    if (mini.typeOf(name) !== 'function') {
+      // Methods called on built-ins (navigator.clipboard.writeText, this.classList.toggle) never reach here: calledNames
+      // skips names after a dot.
+      failures.push(`feature handler calls ${name}, which is not a global function in the minified app.js`);
+    }
   }
   let declaredChecked = 0;
   for (const name of declared) {
@@ -128,6 +153,7 @@ function main() {
   console.log(`distinct function names called from handlers: ${handlerNames.size}`);
   console.log(`  defined at top level in the minified file: ${handlerNames.size - notAppGlobals.length - failures.filter((f) => f.startsWith('handler')).length}`);
   console.log(`  undefined in BOTH original and minified (browser built-ins, or functions that were already missing before minifying): ${notAppGlobals.sort().join(', ') || 'none'}`);
+  console.log(`feature modules: ${featureFiles.length}, inline handlers in them: ${featureHandlerCount}, distinct functions called: ${featureHandlerNames.size}`);
   console.log(`top-level declarations in app.js checked against the minified file: ${declaredChecked}`);
   console.log(`module.exports keys (original / minified): ${oExports.length} / ${mExports.length}`);
 

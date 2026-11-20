@@ -23,6 +23,8 @@ BOGUS_SCAM_CONTRACTS = [
     "0x5b1910eaad6450e50f816082aa078c41f10c292f",  # Tesla, Inc. (TSLAB)
     "0x431a6136ee1b2f76378c8a14b53ef11ba9099b7a",  # Apple (AAPLB)
     "0x360d0b00c3c3a9d70e6e7372cfbe85e68b95973c",  # DogeZilla (legacy meme clone with $0 mcap / sub-decimal display bug)
+    "0xb9e1fd5a02d3a33b25a14d661414e6ed6954a721",  # SOON Token (existing token; added via a smart wallet's transfer)
+    "0x2f8a339b5889ffac4c5a956787cda593b3c36867",  # CoinMarketCap 20 Index DTF (CMC20; index product, not an agent)
 ]
 BOGUS_SET = {c.lower() for c in BOGUS_SCAM_CONTRACTS}
 
@@ -45,6 +47,8 @@ PEG_SYMBOLS_CORE = {
 EXCLUDED_PEGS_SYMBOLS = PEG_SYMBOLS_CORE | {
     "SOL", "XRP", "ADA", "DOGE", "DOT", "AVAX", "MATIC", "POL", "LINK", "LTC", "SHIB", "UNI",
     "ZEC", "BCH", "XLM", "EOS", "ATOM", "TRX", "FIL", "NEAR", "XMR", "ETC", "APT", "SUI", "PEPE", "FLOKI", "DOGEZILLA",
+    # Other dollar stablecoins: not agent mints, and their multi-billion caps would top every valuation stat
+    "USD1", "USDE", "USDD", "USDS", "USD0", "FRAX", "LUSD", "PYUSD", "USDP", "GUSD",
 }
 
 EQUITY_SYMBOLS_CORE = {
@@ -68,7 +72,7 @@ EXCLUDED_CONTRACTS_ALL = frozenset(EXCLUDED_PEGS_CONTRACTS) | BOGUS_SET | {EXCLU
 EXCLUDED_NAME_PHRASES = (
     "ETF", "PROSHARES", "DIREXION", "BEAR 3X", "BULL 3X", "INVESQO", "INVESCO",
     "BSTOCKS", "TOKENIZED STOCK", "S&P 500", "NASDAQ", "ISHARES", "VANGUARD",
-    "PANCAKESWAP", "BINANCE-PEG", "WRAPPED BNB", "TETHER USD", "USD COIN", "ZCASH", "DOGEZILLA",
+    "PANCAKESWAP", "BINANCE-PEG", "WRAPPED BNB", "TETHER USD", "USD COIN", "WORLD LIBERTY", "ZCASH", "DOGEZILLA",
 )
 _EXCLUDED_NAME_RE = re.compile(
     "|".join("(?<![A-Z0-9])" + re.escape(p) + "(?![A-Z0-9])" for p in EXCLUDED_NAME_PHRASES)

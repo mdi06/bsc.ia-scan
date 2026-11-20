@@ -8,6 +8,7 @@ worker.py's job.
 """
 
 import bisect
+import gzip
 import json
 import math
 import os
@@ -16,6 +17,7 @@ import secrets
 import threading
 import time
 import traceback
+from collections import OrderedDict
 from typing import Dict, Optional
 from fastapi import FastAPI, Query, HTTPException, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
@@ -27,6 +29,7 @@ import uvicorn
 import filters
 import monitor
 from common.runtime import run_memory_guard_loop
+from compact import CompactRecord
 from db import db
 from filters import (
     BOGUS_SCAM_CONTRACTS,
@@ -83,7 +86,20 @@ app = FastAPI(
 )
 
 # Compress responses to stay under Render's 5 GB monthly bandwidth cap.
-app.add_middleware(GZipMiddleware, minimum_size=500)
+GZIP_MIN_SIZE = 500
+app.add_middleware(GZipMiddleware, minimum_size=GZIP_MIN_SIZE)
+
+# Finished responses (/api/feed, /api/stats, /api/market-data) are encoded and compressed once and reused until their
+# inputs change, instead of for every visitor (see _BodyCache). API_BODY_CACHE=0 switches it off (the code then
+# answers exactly as it did before); tests use that to compare the two.
+BODY_CACHE_ENABLED = os.environ.get("API_BODY_CACHE", "1") != "0"
+BODY_CACHE_MAX_BYTES = 6 * 1024 * 1024     # compressed bytes held per snapshot (one snapshot is current at a time)
+BODY_CACHE_GZIP_LEVEL = 6                  # the middleware used 9; 6 is ~3x cheaper for ~2% more bytes
+# A background thread rebuilds the heavy per-version lists right after the data changes, so the first visitor does not
+# wait for them. It only runs while the data endpoints have been used recently.
+SNAPSHOT_WARMER_ENABLED = os.environ.get("API_SNAPSHOT_WARMER", "1") != "0"
+SNAPSHOT_WARM_INTERVAL_SEC = float(os.environ.get("API_WARM_INTERVAL_SEC", "15"))
+SNAPSHOT_WARM_IDLE_AFTER_SEC = 300.0
 
 # In-memory rate limiting: fixed 60s window per client IP.
 RATE_LIMIT_WINDOW = 60
@@ -178,6 +194,8 @@ MAX_FAVORITES = 500
 def startup_event():
     t = threading.Thread(target=run_memory_guard_loop, daemon=True, name="ApiMemoryGuard")
     t.start()
+    if SNAPSHOT_WARMER_ENABLED:
+        threading.Thread(target=_snapshot_warmer_loop, daemon=True, name="SnapshotWarmer").start()
 
 
 @app.post("/api/admin/purge-bogus", dependencies=[Depends(require_admin)])
@@ -257,6 +275,7 @@ PULSE_WINDOW_SEC = 24 * 3600
 # ranks new NFT collections by how many were minted. Both use data the worker has for nearly every record; the
 # old "ATH from mint" / "NFT surge" cards needed a mint cost AND a market price, which almost no record has.
 PULSE_LAUNCH_MIN_LP_USD = 1000.0
+PULSE_LAUNCH_MAX_PAIR_AGE_SEC = 3 * 86400   # a token whose DEX pair is older than this is not a new launch
 PULSE_LAUNCH_MIN_VOLUME_USD = 1000.0
 PULSE_TOP_LAUNCHES = 6        # the browser shows 3, skipping any that card 1 already shows
 PULSE_TOP_NFT_MINTS = 3
@@ -278,10 +297,48 @@ def _smart_count(d: dict) -> int:
     return len(d.get("smart_wallets") or d.get("smart_minters") or [])
 
 
-def pulse_launch_row(d: dict) -> Optional[dict]:
+# Pulse card 1 ("Top 24h Runners"): every live token ranked with the rule app.js always used (a quality guard, then
+# the biggest 24h gainers first, otherwise the largest by market cap and volume), now over the FULL dataset.
+PULSE_RUNNER_MIN_MCAP = 500.0
+PULSE_RUNNER_MIN_LP_USD = 500.0
+PULSE_RUNNER_MIN_VOLUME_USD = 200.0
+PULSE_RUNNER_MIN_PRICE = 1e-8
+PULSE_TOP_RUNNERS = 3
+
+
+def pulse_runner_row(d: dict) -> Optional[tuple]:
+    """(score, row) for a token that qualifies for card 1, or None: live (not cleared as stale), a real market cap,
+    price, liquidity and volume, not flagged as a rug / honeypot."""
+    if d.get("market_stale") or _is_flagged_risky(d):
+        return None
+    mcap = get_sanitized_mcap(d) or 0.0
+    px = filters._num(d.get("token_price_usd") or d.get("market_price_usd"))
+    lp = filters._num(d.get("lp_usd"))
+    vol = filters._num(d.get("volume_24h"))
+    if (mcap < PULSE_RUNNER_MIN_MCAP or px <= PULSE_RUNNER_MIN_PRICE or lp < PULSE_RUNNER_MIN_LP_USD
+            or vol < PULSE_RUNNER_MIN_VOLUME_USD):
+        return None
+    chg = filters._num(d.get("price_change_24h"))
+    score = 1e8 + chg * 1e4 + min(vol, 500000.0) if chg > 0 else mcap + vol * 2.0
+    return score, {
+        "contract": d.get("contract"), "name": d.get("name") or "Unknown", "symbol": d.get("symbol") or "",
+        "standard": d.get("standard") or "", "token_price_usd": px,
+        "price_change_24h": chg if d.get("price_change_24h") is not None else None,
+        "market_cap": mcap, "fdv": filters._num(d.get("fdv")) or None, "lp_usd": lp, "volume_24h": vol,
+        "pair_url": d.get("pair_url") or "", "market_url": d.get("market_url") or "",
+        "risk_level": d.get("risk_level") or "", "risk_badge": d.get("risk_badge") or "", "_slim": True,
+    }
+
+
+def pulse_launch_row(d: dict, now: Optional[float] = None) -> Optional[dict]:
     """A new token for card 2, or None if it does not qualify: live (not cleared as stale), real liquidity and
-    volume, a price, not flagged as a rug / honeypot."""
+    volume, a price, not flagged as a rug / honeypot, and, when the worker knows it (`pair_created_at`), a DEX pair
+    created within PULSE_LAUNCH_MAX_PAIR_AGE_SEC. `detected_at` is only when the worker first saw the token: an
+    established one it just touched (Tether Gold, EVAA) looked new until the pair age was checked."""
     if _is_nft_record(d) or d.get("market_stale") or _is_flagged_risky(d):
+        return None
+    created = filters._num(d.get("pair_created_at"))
+    if created > 0 and (time.time() if now is None else now) - created > PULSE_LAUNCH_MAX_PAIR_AGE_SEC:
         return None
     lp = filters._num(d.get("lp_usd"))
     vol = filters._num(d.get("volume_24h"))
@@ -294,7 +351,7 @@ def pulse_launch_row(d: dict) -> Optional[dict]:
         "standard": d.get("standard") or "", "token_price_usd": px, "volume_24h": vol, "lp_usd": lp,
         "price_change_24h": None if chg is None else filters._num(chg),
         "market_cap": get_sanitized_mcap(d), "smart_count": _smart_count(d),
-        "pair_url": d.get("pair_url") or "", "detected_at": d.get("detected_at"),
+        "pair_url": d.get("pair_url") or "", "detected_at": d.get("detected_at"), "_slim": True,
     }
 
 
@@ -312,7 +369,7 @@ def pulse_nft_mint_row(d: dict) -> Optional[dict]:
         "standard": d.get("standard") or "", "total_minted": int(minted), "max_supply": int(cap) if cap else None,
         "fill_pct": round(min(100.0, minted / cap * 100.0), 1) if cap else None,
         "mint_price_str": d.get("mint_price_str") or "", "smart_count": _smart_count(d),
-        "market_url": d.get("market_url") or "", "detected_at": d.get("detected_at"),
+        "market_url": d.get("market_url") or "", "detected_at": d.get("detected_at"), "_slim": True,
     }
 
 
@@ -327,14 +384,17 @@ def compute_pulse_24h(projects, now=None) -> dict:
     new_drops = graduated = smart_inflows = clusters = clean = refunds = threats = 0
     dex_volume = 0.0
     hunters: Dict[str, int] = {}
-    launches, nft_mints = [], []
+    launches, nft_mints, runners = [], [], []
     for d in projects:
         if not isinstance(d, dict) or is_bogus_or_synthetic_asset(d):
             continue
+        runner = pulse_runner_row(d)      # any live token, whatever its age
+        if runner:
+            runners.append(runner)
         if str(d.get("detected_at") or "") < since:
             continue
         new_drops += 1
-        row = pulse_launch_row(d)
+        row = pulse_launch_row(d, now)
         if row:
             launches.append(row)
         row = pulse_nft_mint_row(d)
@@ -380,6 +440,7 @@ def compute_pulse_24h(projects, now=None) -> dict:
         "clean_mints": clean,
         "refunds": refunds,
         "threats_blocked": threats,
+        "top_runners": [row for _, row in sorted(runners, key=lambda x: x[0], reverse=True)[:PULSE_TOP_RUNNERS]],
         "top_launches": sorted(launches, key=lambda r: r["volume_24h"], reverse=True)[:PULSE_TOP_LAUNCHES],
         "top_nft_mints": sorted(nft_mints, key=lambda r: (r["total_minted"], r["smart_count"]),
                                 reverse=True)[:PULSE_TOP_NFT_MINTS],
@@ -485,6 +546,109 @@ def compute_global_overview_stats(all_projs=None) -> dict:
 PULSE_CACHE_TTL_SEC = 5.0
 
 
+class _Encoded:
+    """One finished JSON response body. Bodies the middleware would compress (>= GZIP_MIN_SIZE) are held only as gzip
+    bytes (about 1/9 of the plain size); a client that does not accept gzip gets them decompressed, which is cheap
+    and rare. Small bodies are held plain, as the middleware never compresses them."""
+    __slots__ = ("gz", "plain")
+
+    def __init__(self, plain: bytes):
+        if len(plain) >= GZIP_MIN_SIZE:
+            self.gz, self.plain = gzip.compress(plain, BODY_CACHE_GZIP_LEVEL), None
+        else:
+            self.gz, self.plain = None, plain
+
+    def size(self) -> int:
+        return len(self.gz if self.gz is not None else self.plain)
+
+    def plain_bytes(self) -> bytes:
+        return self.plain if self.plain is not None else gzip.decompress(self.gz)
+
+
+class _BodyCache:
+    """Finished response bodies of one snapshot (one content version), by key.
+
+    An entry also remembers the volatile inputs it was built from (BNB price, the agent-wallet counter, the pulse...):
+    it is served only while the caller's inputs compare equal, otherwise it is rebuilt and replaced, so a cached body
+    is always byte-for-byte what the uncached code would have produced from the same inputs. Total size is bounded
+    (least recently used entries go first) and the whole cache dies with its snapshot when the data changes. Builds
+    are serialised: concurrent first requests for a page wait for one build instead of each doing it."""
+
+    def __init__(self, max_bytes: int):
+        self.max_bytes = max_bytes
+        self._lock = threading.Lock()
+        self._build_lock = threading.Lock()
+        self._entries: "OrderedDict" = OrderedDict()   # key -> (inputs, _Encoded)
+        self._bytes = 0
+
+    def _get(self, key, inputs):
+        with self._lock:
+            hit = self._entries.get(key)
+            if hit is not None and hit[0] == inputs:
+                self._entries.move_to_end(key)
+                return hit[1]
+        return None
+
+    def _put(self, key, inputs, enc: _Encoded) -> None:
+        with self._lock:
+            old = self._entries.pop(key, None)
+            if old is not None:
+                self._bytes -= old[1].size()
+            self._entries[key] = (inputs, enc)
+            self._bytes += enc.size()
+            while self._bytes > self.max_bytes and len(self._entries) > 1:
+                _, (_, dropped) = self._entries.popitem(last=False)
+                self._bytes -= dropped.size()
+
+    def get_or_build(self, key, inputs, build) -> _Encoded:
+        """The cached body for `key` if it was built from equal `inputs`, else `build()` (plain bytes) encoded and stored."""
+        hit = self._get(key, inputs)
+        if hit is not None:
+            return hit
+        with self._build_lock:
+            hit = self._get(key, inputs)       # another thread may have built it while this one waited
+            if hit is not None:
+                return hit
+            enc = _Encoded(build())
+            self._put(key, inputs, enc)
+            return enc
+
+    def stats(self) -> dict:
+        with self._lock:
+            return {"entries": len(self._entries), "bytes": self._bytes}
+
+
+def _accepts_gzip(request: Request) -> bool:
+    return "gzip" in request.headers.get("accept-encoding", "")      # the same test GZipMiddleware makes
+
+
+def _encoded_response(request: Request, enc: _Encoded, headers: Optional[dict] = None) -> Response:
+    """The response for a cached body. A gzip-accepting client gets the stored compressed bytes with Content-Encoding
+    set, which makes GZipMiddleware pass them through untouched."""
+    headers = dict(headers or {})
+    if enc.gz is not None and _accepts_gzip(request):
+        headers["Content-Encoding"] = "gzip"
+        headers["Vary"] = "Accept-Encoding"
+        return Response(content=enc.gz, status_code=200, headers=headers, media_type="application/json")
+    return Response(content=enc.plain_bytes(), status_code=200, headers=headers, media_type="application/json")
+
+
+def _cached_json(request: Request, snapshot, key, inputs, headers: dict, content_fn) -> Response:
+    """A 200 JSON response whose body is `content_fn()` encoded as SafeJSONResponse does, cached on the snapshot."""
+    if not BODY_CACHE_ENABLED:
+        return SafeJSONResponse(status_code=200, headers=headers, content=content_fn())
+    enc = snapshot.bodies.get_or_build(key, inputs, lambda: SafeJSONResponse(content=content_fn()).body)
+    return _encoded_response(request, enc, headers)
+
+
+# Sort keys of /api/projects (`sort_by`); anything that is not holders / score / progress sorts by block.
+_PROJECT_SORT_KEYS = {
+    "holders": lambda p: int(filters._num(p.get("holders"))),
+    "score": lambda p: filters._num(p.get("score")),
+    "block": lambda p: int(filters._num(p.get("block"))),
+}
+
+
 class _FeedSnapshot:
     """Everything derived from one project list (one content version). Treat the lists it hands out as read-only."""
 
@@ -500,12 +664,19 @@ class _FeedSnapshot:
             print(f"[⚠️ Overview Stats Fallback Error] {e}", flush=True)
             self.counts = None
         self._lock = threading.Lock()
+        self._filter_lock = threading.Lock()   # one filter list is built at a time, outside self._lock
+        self._pulse_lock = threading.Lock()    # one pulse recomputation at a time, outside self._lock
         self._by_filter: Dict[str, list] = {}
         self._int_blocks = None           # (-block for each project) when the list is block-descending, else False
         self._pulse = None
         self._pulse_at = 0.0
         self._market_body = None
         self._top_gainers = None          # (bnb price it was computed with, rows)
+        self.bodies = _BodyCache(BODY_CACHE_MAX_BYTES)
+        self._index_lock = threading.Lock()    # one build of the /api/projects structures at a time, outside self._lock
+        self._search_index = None         # (names, symbols, contracts lowercased, {contract: [positions]}), see search_index()
+        self._rows = None                 # [(record, progress, status)] parallel to self.projects, see project_rows()
+        self._sort_keys: Dict[str, list] = {}
 
     def matches(self, database, version: int, raw_len: int) -> bool:
         # raw_len is a cheap guard for callers (tests, stubs) that swap the list without bumping the version
@@ -518,11 +689,19 @@ class _FeedSnapshot:
             return self.projects
         with self._lock:
             out = self._by_filter.get(name)
+        if out is not None:
+            return out
+        # Built outside self._lock (the secondary list takes ~100 ms locally, ~1 s on Render): feed pages, the delta
+        # poll and the pulse must not wait behind it. Concurrent requests for the same list wait for the one build.
+        with self._filter_lock:
+            with self._lock:
+                out = self._by_filter.get(name)
             if out is None:
                 out = [d for d in self.projects if predicate(d)]
                 if name == "secondary":
                     out.sort(key=lambda x: get_sanitized_mcap(x) or 0.0, reverse=True)
-                self._by_filter[name] = out
+                with self._lock:
+                    self._by_filter[name] = out
             return out
 
     def newer_than(self, since_block: int) -> list:
@@ -538,12 +717,29 @@ class _FeedSnapshot:
         return self.projects[:bisect.bisect_left(neg_blocks, -since_block)]
 
     def pulse(self):
+        """The 24h pulse, recomputed when its cached value is PULSE_CACHE_TTL_SEC old. The recomputation (~85 ms locally,
+        ~1 s on Render) runs outside self._lock and in one thread only: while it runs, other requests get the previous
+        value (at most one recomputation older than the TTL already allows); only the very first call waits for it."""
         with self._lock:
-            now = time.monotonic()
-            if self._pulse is None or now - self._pulse_at >= PULSE_CACHE_TTL_SEC:
-                self._pulse = compute_pulse_24h(self.projects)
-                self._pulse_at = now
-            return self._pulse
+            if self._pulse is not None and time.monotonic() - self._pulse_at < PULSE_CACHE_TTL_SEC:
+                return self._pulse
+            previous = self._pulse
+        if previous is not None:
+            if not self._pulse_lock.acquire(blocking=False):
+                return previous               # another thread is recomputing it
+        else:
+            self._pulse_lock.acquire()        # nothing to serve yet: wait for the first computation
+            with self._lock:
+                if self._pulse is not None:   # the thread we waited for finished it
+                    self._pulse_lock.release()
+                    return self._pulse
+        try:
+            pulse = compute_pulse_24h(self.projects)
+            with self._lock:
+                self._pulse, self._pulse_at = pulse, time.monotonic()
+            return pulse
+        finally:
+            self._pulse_lock.release()
 
     def stats(self) -> dict:
         """Same dict compute_global_overview_stats builds, from the cached counts; a new dict on every call."""
@@ -565,15 +761,109 @@ class _FeedSnapshot:
             self._top_gainers = (bnb_price_usd, rows)
         return rows
 
+    def warm(self, bnb_price_usd: float) -> None:
+        """Builds the heavy per-version parts now (counts are built with the snapshot): the pulse, the secondary list,
+        the top gainers, the market-data body and the search index. Called from a background thread right after the data changed, so
+        the first visitor does not wait for all of it."""
+        self.stats()
+        self.filtered("secondary")
+        self.top_gainers(bnb_price_usd)
+        self.market_body()
+        self.search_index()      # what /api/projects?search=<address> (every modal that needs a full record) looks up
+
+    # --- what /api/projects needs, built once per content version (it used to derive every record on every call) ---
+
+    def search_index(self):
+        """(names, symbols, contracts, {contract: [positions]}): the lowercased search fields of every project, parallel
+        to self.projects. About 2-3 MB; built on the first search of a version."""
+        with self._lock:
+            index = self._search_index
+        if index is not None:
+            return index
+        with self._index_lock:
+            with self._lock:
+                index = self._search_index
+            if index is None:
+                names = [(p.get("name") or "").lower() for p in self.projects]
+                symbols = [(p.get("symbol") or "").lower() for p in self.projects]
+                contracts = [(p.get("contract") or "").lower() for p in self.projects]
+                positions: Dict[str, list] = {}
+                for i, c in enumerate(contracts):
+                    positions.setdefault(c, []).append(i)
+                index = (names, symbols, contracts, positions)
+                with self._lock:
+                    self._search_index = index
+            return index
+
+    def project_rows(self) -> list:
+        """[(record, progress, status)] parallel to self.projects: the derived fields (derive_progress / derive_status)
+        for every project, without copying the records. About 1 MB; built once per version."""
+        with self._lock:
+            rows = self._rows
+        if rows is not None:
+            return rows
+        with self._index_lock:
+            with self._lock:
+                rows = self._rows
+            if rows is None:
+                rows = []
+                for p in self.projects:
+                    progress = derive_progress(p)
+                    rows.append((p, progress, derive_status(p, progress)))
+                with self._lock:
+                    self._rows = rows
+            return rows
+
+    def project_row(self, i: int):
+        """project_rows()[i], derived on the spot when the full list has not been built (a lookup by address needs
+        only the one or two records it matches)."""
+        with self._lock:
+            rows = self._rows
+        if rows is not None:
+            return rows[i]
+        p = self.projects[i]
+        progress = derive_progress(p)
+        return (p, progress, derive_status(p, progress))
+
+    def sort_keys(self, key_name: str) -> list:
+        """Sort keys of every project for `block`, `holders` or `score` (see _PROJECT_SORT_KEYS), parallel to self.projects."""
+        with self._lock:
+            keys = self._sort_keys.get(key_name)
+        if keys is not None:
+            return keys
+        fn = _PROJECT_SORT_KEYS[key_name]
+        with self._index_lock:
+            with self._lock:
+                keys = self._sort_keys.get(key_name)
+            if keys is None:
+                keys = [fn(p) for p in self.projects]
+                with self._lock:
+                    self._sort_keys[key_name] = keys
+            return keys
+
     def market_body(self) -> bytes:
-        """Encoded /api/market-data body (identical to what SafeJSONResponse renders)."""
+        """Encoded /api/market-data body (identical to what SafeJSONResponse renders): the live numbers of the contracts
+        in seeded_smart_drops.json (the only ones the page overlays them on), keyed by address with only the fields
+        that have a value, and `_stale`: those contracts whose market data the worker cleared as stale. Only a few
+        hundred of the ~9,000 tracked contracts are in the seed file, and the page ignored every other entry (the
+        unfiltered response was 62 KB compressed, about 8 KB now)."""
         with self._lock:
             if self._market_body is None:
-                out = {}
+                seed, _ = _load_seed("seeded_smart_drops.json")
+                wanted = None
+                if isinstance(seed, list):
+                    wanted = {str(d.get("contract") or "").lower() for d in seed if isinstance(d, dict)}
+                out: dict = {}
+                stale = []
                 for p in self.raw:
                     c = (p.get("contract") or "").lower()
-                    if c and (p.get("token_price_usd") or p.get("lp_usd") or p.get("market_stale")):
-                        out[c] = {k: p.get(k) for k in MARKET_FIELDS + MARKET_FRESHNESS_FIELDS}
+                    if not c or (wanted is not None and c not in wanted):
+                        continue
+                    if p.get("market_stale"):
+                        stale.append(c)
+                    elif p.get("token_price_usd") or p.get("lp_usd"):
+                        out[c] = {k: p[k] for k in MARKET_FIELDS + MARKET_FRESHNESS_FIELDS if p.get(k) is not None}
+                out["_stale"] = sorted(stale)
                 self._market_body = SafeJSONResponse(content=out).body
             return self._market_body
 
@@ -582,13 +872,18 @@ _snapshot_lock = threading.Lock()
 _current_snapshot: Optional[_FeedSnapshot] = None
 
 
-def _load_snapshot():
+_last_data_request = 0.0     # time.monotonic() of the last data-endpoint request (the warmer only runs after one)
+
+
+def _load_snapshot(touch: bool = True):
     """(snapshot, content_version) for the project list the database serves right now.
 
     The version is read before and after get_all_projects(): if it moved in between (the call refreshed the cache,
     or a write landed), the list may belong to either version, so the snapshot is built for this request only and
     not kept. The next request then caches normally."""
-    global _current_snapshot
+    global _current_snapshot, _last_data_request
+    if touch:
+        _last_data_request = time.monotonic()
     database = db
     v_before = database.content_version()
     raw = database.get_all_projects()
@@ -601,6 +896,23 @@ def _load_snapshot():
         if v_before == version:
             _current_snapshot = snap
         return snap, version
+
+
+def _snapshot_warmer_loop() -> None:
+    """Refreshes the project list and builds the heavy per-version parts in the background, so a visitor rarely
+    triggers it. Idle (no Supabase reads, no work) until a data endpoint was used in the last few minutes."""
+    warmed = None
+    while True:
+        time.sleep(SNAPSHOT_WARM_INTERVAL_SEC)
+        if time.monotonic() - _last_data_request > SNAPSHOT_WARM_IDLE_AFTER_SEC:
+            continue
+        try:
+            snap, _ = _load_snapshot(touch=False)
+            if snap is not warmed:
+                snap.warm(monitor.cached_bnb_price())
+                warmed = snap
+        except Exception as e:
+            print(f"[⚠️ Snapshot Warmer] {e}", flush=True)
 
 
 # Main route: /api/stats. /api/overview and /api/summary are aliases kept for external clients.
@@ -617,10 +929,10 @@ def get_overview_stats(request: Request):
     client_etag = request.headers.get("if-none-match")
     if _etag_matches(client_etag, stats_etag):
         return Response(status_code=304, headers={"ETag": stats_etag, "Cache-Control": "public, max-age=5"})
-    return SafeJSONResponse(
-        status_code=200,
-        headers={"ETag": stats_etag, "Cache-Control": "public, max-age=5"},
-        content={
+    return _cached_json(
+        request, snapshot, ("stats",), stats,
+        {"ETag": stats_etag, "Cache-Control": "public, max-age=5"},
+        lambda: {
             "success": True,
             "mode": "stats",
             "stats": stats,
@@ -628,8 +940,7 @@ def get_overview_stats(request: Request):
             "total_created_wallets": stats["total_created_wallets"],
             "agent_wallets_block": stats.get("agent_wallets_block", 0),
             "latest_block": stats.get("latest_block")
-        }
-    )
+        })
 
 
 @app.get("/api/bnb-price")
@@ -645,21 +956,24 @@ def get_bnb_price():
 
 MARKET_FIELDS = ("token_price_usd", "market_cap", "fdv", "lp_usd", "volume_24h", "price_change_24h",
                  "buys_24h", "sells_24h", "buys_1h")
-# Freshness of those numbers (worker: market_updated_at / market_stale / market_source).
-MARKET_FRESHNESS_FIELDS = ("market_stale", "market_updated_at", "market_source")
+# When the worker last confirmed those numbers (the page shows it as "· 2h ago" next to old data).
+MARKET_FRESHNESS_FIELDS = ("market_updated_at",)
 
 
 @app.get("/api/market-data")
-def get_market_data():
-    """Latest market numbers for every tracked contract that has a price or liquidity, keyed by address,
-    plus the contracts whose market data the worker cleared as stale (fields None, market_stale True).
+def get_market_data(request: Request):
+    """Latest market numbers for the contracts in seeded_smart_drops.json, keyed by address, plus `_stale`: the ones
+    whose market data the worker cleared as stale.
 
     Not filtered by the feed's exclusion lists on purpose: the frontend uses this to refresh the static
-    seeded files (seeded_smart_drops.json), which contain drops that /api/feed never returns. Stale
-    contracts are included so a seeded drop does not keep its frozen numbers once the live record is cleared."""
+    seeded file, which contains drops that /api/feed never returns. Stale contracts are listed so a seeded drop
+    does not keep its frozen numbers once the live record is cleared."""
     snapshot, _ = _load_snapshot()
-    return Response(content=snapshot.market_body(), media_type="application/json",
-                    headers={"Cache-Control": "public, max-age=60"})
+    headers = {"Cache-Control": "public, max-age=60"}
+    if not BODY_CACHE_ENABLED:
+        return Response(content=snapshot.market_body(), media_type="application/json", headers=headers)
+    enc = snapshot.bodies.get_or_build(("market",), None, snapshot.market_body)
+    return _encoded_response(request, enc, headers)
 
 
 @app.get("/agent_id_stats.json")
@@ -681,7 +995,8 @@ def get_feed(
     limit: int = Query(150, ge=1, le=500),
     offset: int = Query(0, ge=0),
     since_block: Optional[int] = Query(None),
-    filter: Optional[str] = Query(None)
+    filter: Optional[str] = Query(None),
+    view: Optional[str] = Query(None)
 ):
     """Paged feed for the UI, or only the drops newer than `since_block` (delta mode).
 
@@ -698,6 +1013,11 @@ def get_feed(
     agent_wallets_block = stats.get("agent_wallets_block", 0)
 
     client_etag = request.headers.get("if-none-match")
+    # What a cached body also depends on besides the data (which the snapshot / content version stands for): the
+    # BNB price and its liveness (server metrics of every record), and the stats dict (agent-wallet counter, pulse).
+    # They are read once here and passed down, so the body, its cache key and the check on a hit all use the same values.
+    bnb_price, bnb_live = monitor.cached_bnb_price(), monitor.bnb_price_is_live()
+    volatile = (bnb_price, bnb_live, stats)
 
     if since_block is not None:
         delta = snapshot.newer_than(since_block)
@@ -707,10 +1027,10 @@ def get_feed(
             if _etag_matches(client_etag, delta_etag):
                 return Response(status_code=304, headers={"ETag": delta_etag, "Cache-Control": "public, max-age=5"})
             # No new drops: send a minimal payload without the nested stats.
-            return SafeJSONResponse(
-                status_code=200,
-                headers={"ETag": delta_etag, "Cache-Control": "public, max-age=5"},
-                content={
+            return _cached_json(
+                request, snapshot, ("delta-empty",), (total_agent_wallets, agent_wallets_block),
+                {"ETag": delta_etag, "Cache-Control": "public, max-age=5"},
+                lambda: {
                     "success": True,
                     "mode": "delta",
                     "total": total,
@@ -719,14 +1039,13 @@ def get_feed(
                     "agent_wallets": total_agent_wallets,
                     "agent_wallets_block": agent_wallets_block,
                     "projects": []
-                }
-            )
+                })
 
         delta_etag = f'"v{content_version}-{latest_block}-{total}-{total_agent_wallets}-delta-{since_block}"'
-        return SafeJSONResponse(
-            status_code=200,
-            headers={"ETag": delta_etag, "Cache-Control": "public, max-age=5"},
-            content={
+        return _cached_json(
+            request, snapshot, ("delta", since_block), volatile,
+            {"ETag": delta_etag, "Cache-Control": "public, max-age=5"},
+            lambda: {
                 "success": True,
                 "mode": "delta",
                 "total": total,
@@ -734,24 +1053,30 @@ def get_feed(
                 "latest_block": latest_block,
                 "agent_wallets": total_agent_wallets,
                 "agent_wallets_block": agent_wallets_block,
-                "projects": serve_records(delta),
+                "projects": serve_records(delta, price=bnb_price, live=bnb_live),
                 "stats": stats
-            }
-        )
+            })
 
     target_list = snapshot.filtered(filter)
 
     target_total = len(target_list)
     paginated = target_list[offset : offset + limit]
 
-    feed_etag = f'"v{content_version}-{latest_block}-{total}-{total_agent_wallets}-{offset}-{limit}-{filter or ""}"'
+    list_view = view == "list"      # any other value (or none) is the full shape
+    feed_etag = (f'"v{content_version}-{latest_block}-{total}-{total_agent_wallets}-{offset}-{limit}-{filter or ""}'
+                 f'{"-list" if list_view else ""}"')
     if _etag_matches(client_etag, feed_etag):
         return Response(status_code=304, headers={"ETag": feed_etag, "Cache-Control": "public, max-age=5"})
 
-    return SafeJSONResponse(
-        status_code=200,
-        headers={"ETag": feed_etag, "Cache-Control": "public, max-age=5"},
-        content={
+    def feed_records():
+        records = serve_records(paginated, price=bnb_price, live=bnb_live)
+        return [slim_for_list_view(p) for p in records] if list_view else records
+
+    # an unknown filter name gives the whole list, so it shares the unfiltered entry instead of making its own
+    return _cached_json(
+        request, snapshot, ("feed", filter if filter in FEED_FILTERS else None, offset, limit, list_view), volatile,
+        {"ETag": feed_etag, "Cache-Control": "public, max-age=5"},
+        lambda: {
             "success": True,
             "mode": "feed",
             "total": total,
@@ -761,10 +1086,38 @@ def get_feed(
             "limit": limit,
             "has_more": (offset + limit) < target_total,
             "latest_block": latest_block,
-            "projects": serve_records(paginated),
-            "stats": stats
-        }
-    )
+            "projects": feed_records(),
+            "stats": stats,
+            **({"view": "list"} if list_view else {}),
+        })
+
+
+# `view=list` (used for the Secondary tab's list): a slimmer record for list views. It leaves out what only the token modal
+# reads or what no code reads at all, which is ~40% of a record (the secondary list went from 137 KB to 89 KB gzipped for
+# 300 records). A record is marked `_slim`; the page upgrades it with the full record (/api/projects) when its modal opens.
+# Dropped: sniper_checklist, tx_hash, token_price_bnb, sniper_status (nothing reads them), risk_flags, hold,
+# holder_distribution, dev_root (modal only), mint_calldata (replaced by has_mint_calldata), and from `security` every key
+# except the ones read outside the modal. Everything else, including every field a table row, a filter or a Pulse card
+# reads, stays. A request without `view=list` gets the unchanged shape.
+LIST_VIEW_DROP = frozenset({
+    "sniper_checklist", "tx_hash", "token_price_bnb", "sniper_status",
+    "risk_flags", "hold", "holder_distribution", "dev_root",
+})
+LIST_VIEW_SECURITY_KEEP = frozenset({"has_refund", "refund_methods", "is_serial_dev", "is_fund_drain", "is_fresh_dev", "serial_count"})
+
+
+def slim_for_list_view(p: dict) -> dict:
+    """The `view=list` shape of a served record (a copy; the stored record is never changed)."""
+    out = {k: v for k, v in p.items() if k not in LIST_VIEW_DROP}
+    calldata = out.get("mint_calldata")
+    if isinstance(calldata, str) and calldata not in ("", "0x"):
+        del out["mint_calldata"]
+        out["has_mint_calldata"] = True
+    security = out.get("security")
+    if isinstance(security, dict):
+        out["security"] = {k: v for k, v in security.items() if k in LIST_VIEW_SECURITY_KEEP}
+    out["_slim"] = True
+    return out
 
 
 # Calldata longer than this is left out of list responses (feed, top gainers): a few contracts carry up to ~98 KB
@@ -807,6 +1160,11 @@ def slim_for_list(p: dict) -> dict:
 SERVER_METRICS_KEY = "server_metrics"
 
 
+def _plain_copy(p: dict) -> dict:
+    """A new plain dict with every field of the record, in its key order (a CompactRecord is expanded)."""
+    return p.full() if isinstance(p, CompactRecord) else dict(p)
+
+
 def with_server_metrics(p: dict, bnb_price=None, bnb_live=None) -> dict:
     """A copy of the record with `server_metrics` and the refreshed profit fields. `bnb_price` / `bnb_live` default to
     the server's cached BNB/USD (pass them once per response so every record uses the same price)."""
@@ -816,7 +1174,7 @@ def with_server_metrics(p: dict, bnb_price=None, bnb_live=None) -> dict:
         bnb_live = monitor.bnb_price_is_live()
     if bnb_price is None:
         bnb_price = monitor.cached_bnb_price()
-    out = dict(p)
+    out = _plain_copy(p)
     excluded = filters.is_excluded_asset(p)
     metrics = {
         "excluded": excluded,
@@ -841,11 +1199,12 @@ def with_server_metrics(p: dict, bnb_price=None, bnb_live=None) -> dict:
     return out
 
 
-def serve_records(projects, slim: bool = True) -> list:
+def serve_records(projects, slim: bool = True, price=None, live=None) -> list:
     """Records as sent in responses: server-computed metrics added (the BNB/USD price is read once for the whole
-    batch) and, for list responses (`slim`), oversized calldata left out. /api/projects keeps the full record."""
-    live = monitor.bnb_price_is_live()
-    price = monitor.cached_bnb_price()
+    batch, or passed in by a caller that also keys a cache on it) and, for list responses (`slim`), oversized calldata
+    left out. /api/projects keeps the full record."""
+    live = monitor.bnb_price_is_live() if live is None else live
+    price = monitor.cached_bnb_price() if price is None else price
     out = [with_server_metrics(p, price, live) for p in projects]
     return [slim_for_list(p) for p in out] if slim else out
 
@@ -870,7 +1229,7 @@ def compute_live_top_gainers(projects, limit: int = TOP_GAINERS_LIMIT) -> list:
     for p in projects:
         if not isinstance(p, dict) or is_bogus_or_synthetic_asset(p):
             continue
-        d = dict(p)
+        d = p.hot() if isinstance(p, CompactRecord) else dict(p)    # the maths reads hot fields only: no blob is decoded
         try:
             info = monitor.update_post_mint_profit_metrics(d)
         except Exception:
@@ -894,7 +1253,7 @@ def compute_live_top_gainers(projects, limit: int = TOP_GAINERS_LIMIT) -> list:
             "isSold": bool(info["is_sold"]),
             "isFree": bool(info["is_free"]),
             "holders": int(filters._num(d.get("holders"))),
-            "item": slim_for_list({k: d[k] for k in TOP_GAINER_ITEM_FIELDS if k in d}),
+            "item": slim_for_list({k: (d[k] if k in d else p[k]) for k in TOP_GAINER_ITEM_FIELDS if k in d or k in p}),
         })
     rows.sort(key=lambda r: (r["multiplier"] is not None, r["multiplier"] or 0.0, r["athProfit"]), reverse=True)
     return rows[:limit]
@@ -1053,7 +1412,7 @@ def derive_status(p: dict, progress=None) -> str:
 def with_derived_fields(p: dict) -> dict:
     """A copy of the record with `progress` and `status` filled in from its own data."""
     progress = derive_progress(p)
-    out = dict(p)
+    out = _plain_copy(p)
     out["progress"] = progress
     out["status"] = derive_status(p, progress)
     return out
@@ -1074,33 +1433,56 @@ def get_projects(
 
     Bogus / pegged / synthetic assets are removed FIRST, so `total` and `count` describe the list that is
     actually returned. `status` and `progress` are derived from each record (see derive_status)."""
-    projs = [with_derived_fields(p) for p in db.get_all_projects() if isinstance(p, dict) and not is_bogus_or_synthetic_asset(p)]
+    snapshot, _ = _load_snapshot()
+    n = len(snapshot.projects)
+    q = search.lower().strip() if search else None
 
-    if search:
-        q = search.lower().strip()
-        projs = [p for p in projs if q in (p.get("name") or "").lower() or q in (p.get("symbol") or "").lower()
-                 or q in (p.get("contract") or "").lower()]
+    # Positions (in snapshot order, newest block first) of the projects that match the search. A full contract address
+    # is looked up directly: no scan over every record, and no derived fields for the records that do not match.
+    exact_address = bool(q) and ADDRESS_RE.fullmatch(q) is not None
+    if q:
+        names, symbols, contracts, by_contract = snapshot.search_index()
+        if exact_address:
+            hits = set(by_contract.get(q, ()))
+            hits.update(i for i, (a, b) in enumerate(zip(names, symbols)) if q in a or q in b)
+            idxs = sorted(hits)
+        else:
+            idxs = [i for i in range(n) if q in names[i] or q in symbols[i] or q in contracts[i]]
+        row_of = snapshot.project_row if exact_address else snapshot.project_rows().__getitem__
+    else:
+        idxs = list(range(n))
+        row_of = snapshot.project_rows().__getitem__
+
     if status:
         st = status.lower().strip()
-        projs = [p for p in projs if str(p.get("status") or "").lower() == st]
+        idxs = [i for i in idxs if str(row_of(i)[2] or "").lower() == st]
     if sniper_ready is not None:
-        projs = [p for p in projs if bool(p.get("sniper_ready")) == sniper_ready]
+        idxs = [i for i in idxs if bool(row_of(i)[0].get("sniper_ready")) == sniper_ready]
     if min_progress is not None:
-        projs = [p for p in projs if p["progress"] is not None and p["progress"] >= min_progress]
+        idxs = [i for i in idxs if row_of(i)[1] is not None and row_of(i)[1] >= min_progress]
 
     reverse = order.lower() == "desc"
     if sort_by == "progress":
-        known = sorted([p for p in projs if p["progress"] is not None], key=lambda x: x["progress"], reverse=reverse)
-        projs = known + [p for p in projs if p["progress"] is None]          # unknown progress always last
-    elif sort_by == "holders":
-        projs.sort(key=lambda x: int(filters._num(x.get("holders"))), reverse=reverse)
-    elif sort_by == "score":
-        projs.sort(key=lambda x: filters._num(x.get("score")), reverse=reverse)
+        known = sorted([i for i in idxs if row_of(i)[1] is not None], key=lambda i: row_of(i)[1], reverse=reverse)
+        idxs = known + [i for i in idxs if row_of(i)[1] is None]          # unknown progress always last
     else:
-        projs.sort(key=lambda x: int(filters._num(x.get("block"))), reverse=reverse)
+        key_name = sort_by if sort_by in ("holders", "score") else "block"
+        if exact_address:                       # a handful of matches: compute their keys directly
+            fn = _PROJECT_SORT_KEYS[key_name]
+            idxs.sort(key=lambda i: fn(snapshot.projects[i]), reverse=reverse)
+        else:
+            keys = snapshot.sort_keys(key_name)
+            idxs.sort(key=keys.__getitem__, reverse=reverse)
 
-    total = len(projs)
-    page = serve_records(projs[offset: offset + limit], slim=False)
+    total = len(idxs)
+    records = []
+    for i in idxs[offset: offset + limit]:     # the copies with progress / status filled in (with_derived_fields) are made for the page only
+        p, progress, derived_status = row_of(i)
+        d = _plain_copy(p)
+        d["progress"] = progress
+        d["status"] = derived_status
+        records.append(d)
+    page = serve_records(records, slim=False)
     return {"success": True, "total": total, "count": len(page), "offset": offset, "limit": limit, "projects": page}
 
 
@@ -1231,6 +1613,10 @@ def _local_frontend_route(filename: str):
 
 if not os.environ.get("RENDER") and os.path.exists(os.path.join(workspace_dir, "index.html")):
     app.mount("/static", StaticFiles(directory=workspace_dir, html=False), name="static")
+    # Lazy feature modules app.js imports by URL when there is no build (loadFeature in app.js).
+    _features_dir = os.path.join(workspace_dir, "features")
+    if os.path.isdir(_features_dir):
+        app.mount("/features", StaticFiles(directory=_features_dir, html=False), name="features")
     for _name in LOCAL_FRONTEND_FILES:
         app.add_api_route("/" + _name, _local_frontend_route(_name), methods=["GET"], include_in_schema=False)
 
@@ -1238,6 +1624,8 @@ if not os.environ.get("RENDER") and os.path.exists(os.path.join(workspace_dir, "
 def start_api(port=8080):
     """Runs the API under uvicorn."""
     print(f"[🌐 FastAPI & Uvicorn API Server] Serving on http://0.0.0.0:{port}...", flush=True)
+    if os.getenv("DB_COMPACT_CACHE", "1").strip().lower() not in ("0", "false", "no", "off"):
+        db.enable_compact_cache()      # the API keeps every record in RAM: cold fields stay compressed (compact.py)
     uvicorn.run(app, host="0.0.0.0", port=port, log_level="info")
 
 

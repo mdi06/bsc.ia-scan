@@ -14,6 +14,9 @@ import threading
 from typing import List, Dict, Any, Optional, Tuple
 from pathlib import Path
 
+from compact import compact_record
+from common.runtime import trim_memory
+
 # Supabase calls need httpx; without it everything falls back to SQLite.
 try:
     import httpx
@@ -72,6 +75,11 @@ class DatabaseManager:
         # In-memory cache: {contract_lower: project_dict}. The 60s TTL caps Supabase reads at one per minute;
         # upserts update the cache immediately so new drops show up without waiting for a refresh.
         self._projects_cache: Dict[str, Dict[str, Any]] = {}
+        # The cache sorted by block (newest first), kept until the cache changes: every request used to sort all
+        # records again (2 ms locally, ~22 ms on Render) even when nothing had changed. Keyed on (content version,
+        # record count); each mutation of the cache bumps one of them. Callers get a shallow copy.
+        self._sorted_items: Optional[List[Dict[str, Any]]] = None
+        self._sorted_key: Optional[tuple] = None
         self._p_fingerprints: Dict[str, str] = {}
         self._p_written_at: Dict[str, float] = {}  # contract -> when it was last durably written
         self._retry_queue: set = set()  # contracts whose last remote write failed; resent by the next upsert
@@ -86,6 +94,8 @@ class DatabaseManager:
         # sent only when they change: contract -> hash of what Supabase holds. Off if the column is missing.
         self._static_fp: Dict[str, str] = {}
         self._static_split = os.getenv("DB_STATIC_SPLIT", "1") != "0"
+        # API only (see enable_compact_cache): cached records keep their cold fields compressed, see compact.py
+        self.compact_cache = os.getenv("DB_COMPACT_CACHE", "0").strip().lower() in ("1", "true", "yes", "on")
         self._cache_initialized = False
         self._last_cache_time = 0.0
         self._last_synced_updated_at = 0
@@ -258,6 +268,12 @@ class DatabaseManager:
     # -------------------------------------------------------------------------
     def get_project_count(self) -> int:
         if self.mode == "supabase":
+            # A loaded cache already holds every row (it refreshes about once a minute), so /healthz (the keep-warm
+            # ping every 10 minutes, Render's health checks) answers from it. The count query took ~190 ms in Postgres
+            # plus a round trip, on every call. Only an empty / not yet loaded cache asks the database.
+            with self._cache_lock:
+                if self._cache_initialized and self._projects_cache:
+                    return len(self._projects_cache)
             try:
                 client = self.client
                 if HAS_HTTPX and client:
@@ -302,18 +318,30 @@ class DatabaseManager:
                 self._page_retry_sleep(1.5 * (attempt + 1))
         return None
 
-    def _fetch_rows_paged(self, client, path: str) -> Optional[List[Dict[str, Any]]]:
+    def enable_compact_cache(self, on: bool = True) -> None:
+        """Keep the cached records compact (cold fields compressed, decoded on read). Records already cached are
+        converted at the next refresh. The API turns it on; the worker, which mutates records, leaves it off."""
+        self.compact_cache = bool(on)
+
+    def _stored(self, rec: Dict[str, Any]) -> Dict[str, Any]:
+        """The form in which a record is kept in the cache."""
+        return compact_record(rec) if self.compact_cache else rec
+
+    def _fetch_rows_paged(self, client, path: str, sink=None) -> Optional[List[Dict[str, Any]]]:
         """Every row of a PostgREST query, a page at a time, or None if any page fails (never a partial list).
 
         A response is capped at the project's max-rows setting (1000 by default) whatever `limit=` says, so one
         request silently returned only the first 1000 rows of the table. `path` must carry a deterministic
         `order=` (unique tie-breaker) or the pages overlap / skip rows. The first page asks for the exact total,
-        so a server that caps below SUPABASE_PAGE_SIZE is still read to the end."""
+        so a server that caps below SUPABASE_PAGE_SIZE is still read to the end.
+
+        With `sink`, each page is handed to sink(batch) and dropped instead of collected, so a full table read holds
+        one page of raw rows at a time rather than all of them (the list returned then only counts the rows)."""
         rows: List[Dict[str, Any]] = []
+        count = 0
         total: Optional[int] = None
         while True:
-            start = len(rows)
-            headers = {"Range-Unit": "items", "Range": f"{start}-{start + self.SUPABASE_PAGE_SIZE - 1}"}
+            headers = {"Range-Unit": "items", "Range": f"{count}-{count + self.SUPABASE_PAGE_SIZE - 1}"}
             if total is None:
                 headers["Prefer"] = "count=exact"
             resp = self._get_page(client, path, headers)
@@ -322,13 +350,20 @@ class DatabaseManager:
             batch = resp.json()
             if not isinstance(batch, list):
                 return None
-            rows.extend(batch)
             if total is None:
                 cr = resp.headers.get("content-range", "")
                 if "/" in cr and cr.split("/")[-1].isdigit():
                     total = int(cr.split("/")[-1])
-            if not batch or (total is not None and len(rows) >= total) or (total is None and len(batch) < self.SUPABASE_PAGE_SIZE):
-                return rows
+            resp = None                        # the raw body is not needed once parsed
+            count += len(batch)
+            if sink is None:
+                rows.extend(batch)
+            else:
+                sink(batch)
+            batch_len = len(batch)
+            batch = None
+            if not batch_len or (total is not None and count >= total) or (total is None and batch_len < self.SUPABASE_PAGE_SIZE):
+                return rows if sink is None else [None] * count
 
     def load_all_strict(self) -> List[Dict[str, Any]]:
         """All projects, read fresh, or RuntimeError if the table could not be read completely. For one-off scripts
@@ -352,6 +387,17 @@ class DatabaseManager:
                 raise RuntimeError(f"incomplete read: got {len(items)} projects but the table has {total} rows")
         return items
 
+    def _sorted_projects(self) -> List[Dict[str, Any]]:
+        """All cached records, newest block first, as a new list (the caller may mutate it). The sort is redone
+        only when the cache changed. Takes the (re-entrant) cache lock itself."""
+        with self._cache_lock:
+            key = (self._content_version, len(self._projects_cache))
+            if self._sorted_items is None or self._sorted_key != key:
+                items = list(self._projects_cache.values())
+                items.sort(key=lambda x: x.get("block", 0) or 0, reverse=True)
+                self._sorted_items, self._sorted_key = items, key
+            return list(self._sorted_items)
+
     def get_all_projects(self, force_refresh: bool = False) -> List[Dict[str, Any]]:
         """Returns all projects as dictionaries, sorted by block descending.
         Uses in-memory cache with incremental delta sync to avoid memory churn and re-allocations.
@@ -359,8 +405,7 @@ class DatabaseManager:
         now = time.time()
         with self._cache_lock:
             if not force_refresh and self._cache_initialized and self._projects_cache and (now - self._last_cache_time < self._cache_ttl):
-                items = list(self._projects_cache.values())
-                items.sort(key=lambda x: x.get("block", 0) or 0, reverse=True)
+                items = self._sorted_projects()
                 return items
 
         # the full load just failed: every request retrying it would pile more multi-MB reads onto a database that is
@@ -368,8 +413,7 @@ class DatabaseManager:
         cooling = (self.mode == "supabase" and not force_refresh and not self._cache_initialized
                    and time.time() < self._load_failed_until)
         if cooling and self._projects_cache:
-            items = list(self._projects_cache.values())
-            items.sort(key=lambda x: x.get("block", 0) or 0, reverse=True)
+            items = self._sorted_projects()
             return items
         if self.mode == "supabase":
             # one load at a time: concurrent requests wait for it and then read the cache it filled
@@ -377,8 +421,7 @@ class DatabaseManager:
                 now = time.time()
                 with self._cache_lock:
                     if not force_refresh and self._cache_initialized and self._projects_cache and (now - self._last_cache_time < self._cache_ttl):
-                        items = list(self._projects_cache.values())
-                        items.sort(key=lambda x: x.get("block", 0) or 0, reverse=True)
+                        items = self._sorted_projects()
                         return items
                 try:
                     client = None if cooling else self.client
@@ -394,8 +437,7 @@ class DatabaseManager:
                                         # Zero new drops or updates: return existing in-memory cache with zero allocation
                                         with self._cache_lock:
                                             self._last_cache_time = now
-                                            items = list(self._projects_cache.values())
-                                            items.sort(key=lambda x: x.get("block", 0) or 0, reverse=True)
+                                            items = self._sorted_projects()
                                             return items
 
                         # 2. Only fetch delta (rows updated since last sync) or initial full load
@@ -409,43 +451,70 @@ class DatabaseManager:
                             query_path = (f"/rest/v1/projects?updated_at=gte.{self._last_synced_updated_at}"
                                           f"&select=contract,data,updated_at&order=updated_at.asc,contract.asc")
 
-                        records = self._fetch_rows_paged(client, query_path)
+                        staged: Dict[str, Dict[str, Any]] = {}
+                        held: set = set()
+                        stage_ts = [self._last_synced_updated_at]
+                        fp_backup = dict(self._static_fp) if full_load else None
+
+                        def stage(batch):
+                            # A full read turns each 500-row page into stored records as it arrives, so only one page of
+                            # raw rows is ever in memory (not the whole table next to the records built from it).
+                            need = [(r.get("contract") or "").lower() for r in batch if self._row_needs_static(r)]
+                            fetched = self._fetch_static_data(client, need) if need else {}
+                            for r in batch:
+                                held.add((r.get("contract") or "").lower())
+                                c, raw = self._record_from_row(r, fetched)
+                                if c:
+                                    staged[c] = self._stored(raw)
+                                ts = int(r.get("updated_at") or 0)
+                                if ts > stage_ts[0]:
+                                    stage_ts[0] = ts
+
+                        records = self._fetch_rows_paged(client, query_path, sink=stage if full_load else None)
                         if records is None:
                             print("[⚠️ Supabase Read Error] a page of the project read failed; keeping the cache as it is", flush=True)
                             if full_load:
+                                self._static_fp = fp_backup
                                 self._load_failed_until = time.time() + self.SUPABASE_FAILED_LOAD_COOLDOWN
                         else:
-                            need_static = [
-                                (r.get("contract") or "").lower() for r in records
-                                if self._row_needs_static(r)
-                            ]
-                            fetched_static = self._fetch_static_data(client, need_static) if need_static else {}
+                            if not full_load:
+                                need_static = [
+                                    (r.get("contract") or "").lower() for r in records
+                                    if self._row_needs_static(r)
+                                ]
+                                fetched_static = self._fetch_static_data(client, need_static) if need_static else {}
+                                for r in records:
+                                    stage_one = self._record_from_row(r, fetched_static)
+                                    if stage_one[0]:
+                                        staged[stage_one[0]] = self._stored(stage_one[1])
+                                    ts = int(r.get("updated_at") or 0)
+                                    if ts > stage_ts[0]:
+                                        stage_ts[0] = ts
+                                records = None
                             with self._cache_lock:
-                                max_ts = self._last_synced_updated_at
+                                max_ts = stage_ts[0]
                                 if full_load:
                                     # a full read is authoritative: drop what Supabase no longer has (e.g. rows the cache held
                                     # from an older snapshot), but keep records that only exist locally so far
-                                    held = {(r.get("contract") or "").lower() for r in records}
                                     for c in list(self._projects_cache):
                                         if c not in held and c not in self._pending_remote and c not in self._retry_queue:
                                             del self._projects_cache[c]
-                                for r in records:
-                                    c, raw = self._record_from_row(r, fetched_static)
+                                for c, rec in staged.items():
                                     # a queued local update is newer than what Supabase holds: keep it
-                                    if c and c not in self._pending_remote:
-                                        self._projects_cache[c] = raw
-                                    ts = int(r.get("updated_at") or 0)
-                                    if ts > max_ts:
-                                        max_ts = ts
+                                    if c not in self._pending_remote:
+                                        self._projects_cache[c] = rec
                                 self._last_synced_updated_at = max_ts
                                 self._cache_initialized = True
                                 self._load_failed_until = 0.0
                                 self._cache_dirty = True
                                 self._content_version += 1
                                 self._last_cache_time = now
-                                items = list(self._projects_cache.values())
-                                items.sort(key=lambda x: x.get("block", 0) or 0, reverse=True)
-                                return items
+                                items = self._sorted_projects()
+                            if full_load:
+                                staged.clear()
+                                held.clear()
+                                trim_memory()      # the page buffers of the full read are garbage now: hand them back
+                            return items
                 except Exception as e:
                     print(f"[⚠️ Supabase Read Error] {e}", flush=True)
                     if not self._cache_initialized:
@@ -462,8 +531,7 @@ class DatabaseManager:
                         print("[⚠️ DB Warning] Supabase unreachable on a cold start: serving the history.json snapshot until it answers", flush=True)
                     except Exception as e:
                         print(f"[⚠️ DB Warning] Could not read {HISTORY_FILE}: {e}", flush=True)
-                    items = list(self._projects_cache.values())
-                    items.sort(key=lambda x: x.get("block", 0) or 0, reverse=True)
+                    items = self._sorted_projects()
                     return items
 
         # Fallback / SQLite with incremental check
@@ -478,8 +546,7 @@ class DatabaseManager:
                     if latest_ts <= self._last_synced_updated_at:
                         with self._cache_lock:
                             self._last_cache_time = now
-                            items = list(self._projects_cache.values())
-                            items.sort(key=lambda x: x.get("block", 0) or 0, reverse=True)
+                            items = self._sorted_projects()
                             return items
 
                 if not self._cache_initialized or not self._projects_cache or force_refresh:
@@ -507,8 +574,7 @@ class DatabaseManager:
                     self._cache_dirty = True
                     self._content_version += 1
                     self._last_cache_time = now
-                    items = list(self._projects_cache.values())
-                    items.sort(key=lambda x: x.get("block", 0) or 0, reverse=True)
+                    items = self._sorted_projects()
                     return items
             finally:
                 conn.close()
@@ -523,8 +589,7 @@ class DatabaseManager:
         self.get_all_projects()
         with self._cache_lock:
             if not self._cached_json_bytes or self._cache_dirty:
-                items = list(self._projects_cache.values())
-                items.sort(key=lambda x: x.get("block", 0) or 0, reverse=True)
+                items = self._sorted_projects()
                 self._cached_json_bytes = json.dumps(items, separators=(',', ':')).encode("utf-8")
                 self._cached_json_etag = f'"{hashlib.md5(self._cached_json_bytes).hexdigest()}"'
                 self._cache_dirty = False

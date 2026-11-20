@@ -19,4 +19,4 @@ jobs:
     timeout-minutes: 3
     steps:
       - name: Ping /healthz
-        run: curl --silent --show-error --fail --max-time 90 --retry 2 --retry-delay 5 -o /dev/null -w "HTTP %{http_code} in %{time_total}s\n" https://bsc-ia-scan.onrender.com/healthz
+        run: curl --silent --show-error --fail --max-time 90 --retry 2 --retry-delay 5 -o /dev/null -w "HTTP %{http_code} in %{time_total}s\n" https://bsc-ia-scan-onrender-com.onrender.com/healthz

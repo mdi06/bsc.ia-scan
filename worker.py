@@ -104,6 +104,11 @@ def _process_smart_money_candidate(rpc, rcv, snd, aid, tx_h, b, tx_val, inp, wal
         if any(item.get("contract", "").lower() == rcv.lower() for item in history):
             return
     try:
+        # A tracked wallet approving or transferring an existing token (USD1, SOON, Tether Gold, ...) says nothing about
+        # a new drop. Calls that can mint, and plain value sends to payable mint contracts, still go through.
+        if monitor.is_non_mint_call(inp):
+            return
+
         det = monitor.analyze_contract(rpc, rcv, wallet)
         cls = det.get("classification", {})
         if monitor.is_system_infra({"contract": rcv, "classification": cls, "name": det.get("name"), "symbol": det.get("symbol"), "max_supply": det.get("max_supply"), "total_minted": det.get("total_minted")}):
@@ -907,6 +912,14 @@ def _apply_dex_pair(item: Dict[str, Any], pair: Dict[str, Any], now: Optional[fl
         item["pair_url"] = pair["url"]
 
     item["volume_24h"] = float((pair.get("volume", {}) or {}).get("h24") or 0.0)
+    # When the pair was created (unix seconds): the age of the market, which `detected_at` (when WE first saw the
+    # token) cannot tell. An established token the worker only just touched has a year-old pair (api.pulse_launch_row).
+    try:
+        created_s = int(float(pair.get("pairCreatedAt") or 0) / 1000)
+    except (TypeError, ValueError):
+        created_s = 0
+    if created_s > 0:
+        item["pair_created_at"] = created_s
 
     mcap = float(pair.get("marketCap") or 0.0)
     fdv = float(pair.get("fdv") or 0.0)
@@ -1496,11 +1509,8 @@ def run_proxy_factory_watcher_loop():
 def run_agent_id_counter_loop():
     """Counts new Binance .ai Agent ID mints (registry Transfer-from-zero logs) and persists the total."""
     print("[🤖 Agent ID Tracker] Starting live SPACE ID (.ai) mint counter loop...", flush=True)
-    # publicnode allows eth_getLogs over up to 50k blocks per call.
-    logs_rpc = monitor.BscRpcClient([
-        "https://bsc-rpc.publicnode.com",
-        "https://bsc.publicnode.com"
-    ])
+    # publicnode allows eth_getLogs over up to 50k blocks per call. A keyed BSC_RPC_URL goes first when set.
+    logs_rpc = monitor.BscRpcClient(monitor.LOG_RPC_ENDPOINTS)
     transfer_topic = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
     zero_from_topic = "0x0000000000000000000000000000000000000000000000000000000000000000"
     registry_addr = monitor.AGENT_ID_REGISTRY

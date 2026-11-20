@@ -23,6 +23,11 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setattr(api, "_current_snapshot", None)
     monkeypatch.setattr(api, "RATE_LIMIT_MAX", 10 ** 9)
     monkeypatch.setattr(monitor, "load_agent_id_stats", lambda: {"total_created_wallets": 178001, "last_block": 5})
+    # /api/market-data only lists the contracts of seeded_smart_drops.json: the test records are all "in the seed"
+    real_load_seed = api._load_seed
+    monkeypatch.setattr(api, "_load_seed", lambda name: (
+        ([{"contract": f"0x{i:040x}"} for i in range(0, 200)], None) if name == "seeded_smart_drops.json"
+        else real_load_seed(name)))
     c = TestClient(api.app)
     c.db = manager
     return c
@@ -228,10 +233,16 @@ def test_market_data_body_is_the_json_the_endpoint_always_sent(client):
     client.db.upsert_projects([rec(70, token_price_usd=float("nan"), lp_usd=5.0)])   # a non-finite float becomes null
     r = client.get("/api/market-data")
     assert r.headers["content-type"] == "application/json" and r.headers["cache-control"] == "public, max-age=60"
-    want = {}
+    want, stale = {}, []
     for p in client.db.get_all_projects():
         c = (p.get("contract") or "").lower()
-        if c and (p.get("token_price_usd") or p.get("lp_usd") or p.get("market_stale")):
-            want[c] = {k: p.get(k) for k in api.MARKET_FIELDS + api.MARKET_FRESHNESS_FIELDS}
+        if not c or int(c, 16) >= 200:
+            continue                                         # not in the (patched) seed file
+        if p.get("market_stale"):
+            stale.append(c)
+        elif p.get("token_price_usd") or p.get("lp_usd"):
+            want[c] = {k: p[k] for k in api.MARKET_FIELDS + api.MARKET_FRESHNESS_FIELDS if p.get(k) is not None}
+    want["_stale"] = sorted(stale)
     assert r.content == api.SafeJSONResponse(content=want).body
-    assert json.loads(r.content)[f"0x{70:040x}"]["token_price_usd"] is None
+    entry = json.loads(r.content)[f"0x{70:040x}"]
+    assert "token_price_usd" not in entry and entry["lp_usd"] == 5.0   # a non-finite price is left out, not sent as null
