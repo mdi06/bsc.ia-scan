@@ -7,6 +7,33 @@
 // onclick="..." handlers in the HTML built here may only call global functions (defined in app.js, or set on window by
 // a feature); scripts/check_minified.js checks that.
 
+// What a hunter checks before minting, as read by the worker (record.mint_terms). Unread values say "Unknown".
+function mintTermsModalHtml(item) {
+  if (String(item.mint_price_str || '').toUpperCase().includes('DEX')) return '';
+  const terms = getMintTerms(item);
+  const unknown = '<span class="dim">Unknown</span>';
+  const slots = terms.slotsLeft !== null
+    ? (terms.slotsLeft > 0 ? `<strong>${formatCount(terms.slotsLeft)}</strong>` : '<strong style="color: var(--color-red);">0 (sold out)</strong>')
+    : (terms.cap === 'unlimited' ? '<strong>Unlimited</strong>' : unknown);
+  const perWallet = terms.perWallet !== null ? `<strong>${formatCount(terms.perWallet)}</strong>` : unknown;
+  const fmt = (sec) => new Date(sec * 1000).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', timeZoneName: 'short' });
+  const startTxt = terms.start ? `${fmt(terms.start)}${terms.notStarted ? ` <span class="dim">(${mintTimingLabel(terms).replace('⏳ ', '')})</span>` : ''}` : unknown;
+  const endTxt = terms.end ? `${fmt(terms.end)}${terms.ended ? ' <span style="color: var(--color-red);">(ended)</span>' : ` <span class="dim">(in ${formatDurationShort(terms.end - Date.now() / 1000)})</span>`}` : unknown;
+  const gate = terms.gate
+    ? `<strong title="${MINT_GATE_LABELS[terms.gate].title}">${MINT_GATE_LABELS[terms.gate].chip}</strong>`
+    : (terms.checked ? '<span class="dim" title="Neither a fresh wallet nor an Agent ID wallet could mint in a simulation (ended, paused or unusual calldata)">Unknown</span>' : unknown);
+  const note = terms.checked ? '' : '<div class="dim" style="font-size: 10px; margin-top: 4px;">Not scanned yet: the radar reads these from the contract within a few minutes of discovery.</div>';
+  return `
+      <div class="mint-terms-box">
+        <div><span class="dim">Slots left:</span> ${slots}</div>
+        <div><span class="dim">Per wallet:</span> ${perWallet}</div>
+        <div><span class="dim">Who can mint:</span> ${gate}</div>
+        <div><span class="dim">Starts:</span> ${startTxt}</div>
+        <div><span class="dim">Ends:</span> ${endTxt}</div>
+        ${note}
+      </div>`;
+}
+
 export function openModal(item, source = 'direct') {
   const modal = document.getElementById('inspectModal');
   const content = document.getElementById('modalContent');
@@ -506,6 +533,8 @@ export function openModal(item, source = 'direct') {
         <div><span class="dim">Progress:</span> <strong>${formatCount(item.total_minted)}</strong> / ${ms > 0 ? formatCount(ms) : '∞'}</div>
         <div><span class="dim">Calldata:</span> <code>${calldata.slice(0, 10)}${calldata.length > 10 ? '...' : ''}</code></div>
       </div>
+
+      ${mintTermsModalHtml(item)}
 
       ${isRiskContract ? `
         <div class="mint-risk-warning" style="background: rgba(239, 68, 68, 0.12); border: 1px solid var(--color-red); border-radius: 6px; padding: 8px 12px; margin: 8px 0; font-size: 11px; color: #ff8888; display: flex; align-items: center; gap: 8px;">

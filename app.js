@@ -2824,6 +2824,69 @@ function isFreeMintDrop(d) {
   return Boolean(d.has_free_mint || pStr.includes('FREE') || (vWei === 0 && Number(d.mint_price_bnb || 0) === 0 && !pStr.includes('PAID') && !pStr.includes('DEX') && !pStr.includes('TBD')));
 }
 
+// Mint terms read by the worker (record.mint_terms, see monitor.probe_mint_terms): per-wallet limit, start / end
+// time, who may mint (gate) and whether the supply cap was actually read. Slots left come from the supply fields.
+// Anything not read stays null and is shown as unknown, never guessed.
+const MINT_GATE_LABELS = {
+  open: { chip: '🟢 Open to all', title: 'A wallet with no Agent ID and no whitelist could mint in a simulation' },
+  agent_id: { chip: '🪪 Agent ID needed', title: 'An Agent ID wallet could mint in a simulation; a wallet without one was refused' },
+  whitelist: { chip: '📝 Whitelist', title: 'Only allow-listed wallets (Merkle root set) could mint in a simulation' },
+};
+
+function getMintTerms(item, nowSec = Date.now() / 1000) {
+  const t = (item && item.mint_terms && typeof item.mint_terms === 'object') ? item.mint_terms : {};
+  const msRaw = Number(item && item.max_supply);
+  const ms = (Number.isFinite(msRaw) && msRaw > 0 && msRaw < 1e20) ? msRaw : 0;
+  const tm = Number((item && item.total_minted) || 0);
+  const num = (v) => (Number.isFinite(Number(v)) && Number(v) > 0 ? Number(v) : null);
+  const start = num(t.start);
+  const end = num(t.end);
+  return {
+    slotsLeft: ms > 0 ? Math.max(0, Math.floor(ms - tm)) : null,
+    perWallet: num(t.per_wallet),
+    start,
+    end,
+    notStarted: start !== null && start > nowSec,
+    ended: end !== null && end <= nowSec,
+    gate: MINT_GATE_LABELS[t.gate] ? t.gate : null,
+    cap: t.cap || (ms > 0 ? 'capped' : null),
+    checked: Boolean(item && item.mint_terms),
+  };
+}
+
+// "3m", "5h", "2d" for a number of seconds.
+function formatDurationShort(sec) {
+  const s = Math.max(0, Math.round(sec));
+  if (s < 3600) return `${Math.max(1, Math.round(s / 60))}m`;
+  if (s < 86400) return `${Math.round(s / 3600)}h`;
+  return `${Math.round(s / 86400)}d`;
+}
+
+// Timing chip text: "Starts in 2h" / "Ends in 5h" / "Ended", or '' if neither time is known.
+function mintTimingLabel(terms, nowSec = Date.now() / 1000) {
+  if (terms.notStarted) return `⏳ Starts in ${formatDurationShort(terms.start - nowSec)}`;
+  if (terms.ended) return '⌛ Ended';
+  if (terms.end) return `⌛ Ends in ${formatDurationShort(terms.end - nowSec)}`;
+  return '';
+}
+
+// The compact terms line under a row's mint price: slots left · per wallet · timing · gate.
+function mintTermsChipsHtml(item) {
+  if (!item || String(item.mint_price_str || '').toUpperCase().includes('DEX')) return '';
+  const terms = getMintTerms(item);
+  const chips = [];
+  if (terms.slotsLeft !== null) {
+    chips.push(terms.slotsLeft > 0
+      ? `<span class="mint-chip" title="Max supply minus minted">${formatCount(terms.slotsLeft)} left</span>`
+      : '<span class="mint-chip mint-chip-bad">Sold out</span>');
+  }
+  if (terms.perWallet !== null) chips.push(`<span class="mint-chip" title="Per-wallet limit read from the contract">Max ${formatCount(terms.perWallet)}/wallet</span>`);
+  const timing = mintTimingLabel(terms);
+  if (timing) chips.push(`<span class="mint-chip${terms.ended ? ' mint-chip-bad' : ''}" title="Mint window read from the contract">${timing}</span>`);
+  if (terms.gate) chips.push(`<span class="mint-chip mint-chip-gate-${terms.gate}" title="${MINT_GATE_LABELS[terms.gate].title}">${MINT_GATE_LABELS[terms.gate].chip}</span>`);
+  return chips.length ? `<div class="mint-chips">${chips.join('')}</div>` : '';
+}
+
 const UNCAPPED_MINT_TITLE = 'No max supply found: an open edition, or a cap the radar could not read';
 
 // Cap filled. Mirrors computeSniperReady: an ERC-20 whose whole supply was pre-minted (minted === supply with no
@@ -2849,9 +2912,11 @@ function isDropUnsafeToMint(d) {
     || Boolean(d.is_honeypot) || Boolean(d.security && d.security.is_fund_drain);
 }
 
-// The FREE pill: free, not sold out, not paused, and not flagged unsafe — i.e. mintable right now.
+// The FREE pill: free, not sold out, not paused, not flagged unsafe, and inside its mint window if one is known.
 function isFreeMintableNow(d) {
-  return isFreeMintDrop(d) && !isDropSoldOut(d) && !isDropUnsafeToMint(d) && !(d && d.is_paused);
+  if (!isFreeMintDrop(d) || isDropSoldOut(d) || isDropUnsafeToMint(d) || (d && d.is_paused)) return false;
+  const terms = getMintTerms(d);
+  return !terms.ended && !terms.notStarted;   // a known mint window that is closed or not open yet
 }
 
 // Back to the ALL pill, More Filters cleared. Used when the user switches tabs.
@@ -5915,8 +5980,14 @@ function renderTable(keepLimit = false) {
       // No max supply found: an open edition, or a cap the worker could not read. Drawn as a striped bar, never a
       // full one: a solid 100% bar next to "MINT 1%" rows read as sold out, the opposite of what it means.
       const mintsLabel = `${formatCount(tm)} minted`;
-      progBar = `
-        <div class="progress-cell" title="${UNCAPPED_MINT_TITLE}">
+      const isDexOnly = String(item.mint_price_str || '').toUpperCase().includes('DEX');
+      const capTitle = (item.mint_terms && item.mint_terms.cap === 'unlimited')
+        ? 'The contract reports an unlimited supply (open edition)' : UNCAPPED_MINT_TITLE;
+      if (isDexOnly) {
+        // A token with no mint function: its "minted" is just the total supply, not progress of anything.
+        progBar = `<div class="progress-cell" title="No mint function: this token trades on DEX"><span class="prog-tag dim">ON DEX</span><span class="prog-ratio dim">${formatCount(tm)} supply</span></div>`;
+      } else progBar = `
+        <div class="progress-cell" title="${capTitle}">
           <span class="prog-tag" style="color: var(--color-cyan); font-weight:700;">NO CAP</span>
           <div class="prog-bar-container">
             <div class="prog-bar-fill prog-bar-uncapped" style="width: 100%;"></div>
@@ -5997,7 +6068,7 @@ function renderTable(keepLimit = false) {
     let cellHolders = hbStr;
     let cellLp = lpStr;
     let cellProg = progBar;
-    let cellPrice = priceStr;
+    let cellPrice = priceStr + ((!isSec && !isPort) ? mintTermsChipsHtml(item) : '');
     let cellFloor = floorStr;
 
     const tokenSym = item.symbol || item.name || item.contract || '';
@@ -6242,11 +6313,14 @@ function appendNextTableBatch() {
     } else if (ms > 0) {
       progPct = Math.min(100, Math.max(0, (tm / ms) * 100));
       progLabel = `TOKEN ${progPct.toFixed(0)}%`;
+    } else if (String(item.mint_price_str || '').toUpperCase().includes('DEX')) {
+      progLabel = `ON DEX · ${formatCount(tm)} supply`;   // no mint function: no progress to show
+      progPct = 0;
     } else {
       progLabel = `NO CAP · ${formatCount(tm)} minted`;   // striped bar below, not a full "100%" one
       progPct = 100;
     }
-    const uncapped = !(ms > 0);
+    const uncapped = !(ms > 0) && !String(item.mint_price_str || '').toUpperCase().includes('DEX');
     if (ms > 0 && tm >= ms) {
       progLabel = 'SOLD 100%';
       progPct = 100;
@@ -6356,7 +6430,7 @@ function appendNextTableBatch() {
     const isSec = (activeTab === 'SECONDARY');
     let cellLp = lpStr;
     let cellProg = progBar;
-    let cellPrice = priceStr;
+    let cellPrice = priceStr + ((!isSec && activeTab !== 'PORTFOLIO') ? mintTermsChipsHtml(item) : '');
 
     const tokenSym = item.symbol || item.name || item.contract || '';
     const tokenHash = '#token=' + encodeURIComponent(tokenSym);
@@ -11093,6 +11167,9 @@ if (typeof module !== 'undefined' && module.exports) {
     isDropSoldOut,
     isDropUnsafeToMint,
     isFreeMintableNow,
-    parseServerUtc
+    parseServerUtc,
+    getMintTerms,
+    mintTermsChipsHtml,
+    mintTimingLabel
   };
 }
