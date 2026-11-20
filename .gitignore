@@ -35,6 +35,8 @@ REFACTOR_PROMPT.md
 
 # Daily Pulse card generator: a local marketing tool, kept out of the repo
 scripts/daily_card.py
+scripts/run_daily_card.sh
+template-daily.html
 
 # Local marketing screenshots / logo exports in the repo root
 binance_agent_radar_logo_transparent.png
