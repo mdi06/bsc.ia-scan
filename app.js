@@ -119,6 +119,24 @@ async function apiFetch(path, options) {
   return fetch(BACKEND_URL + path, options);
 }
 
+// Lazy features (see scripts/build.js): features/<name>.js modules loaded on first use. The build compiles
+// __FEATURE_MANIFEST__ into this file as { name: '/assets/features/<name>.<hash>.js' }; without a build (local
+// development) it is undefined and the module is imported straight from /features/<name>.js. Each feature is fetched
+// once; a failed load (offline, a deploy replaced the file) is forgotten so the next call tries again.
+const FEATURE_MANIFEST = typeof __FEATURE_MANIFEST__ !== 'undefined' ? __FEATURE_MANIFEST__ : null;
+const featureLoads = {};
+function loadFeature(name) {
+  if (!featureLoads[name]) {
+    const url = FEATURE_MANIFEST ? FEATURE_MANIFEST[name] : `/features/${name}.js`;
+    if (!url) return Promise.reject(new Error(`Unknown feature: ${name}`));
+    featureLoads[name] = import(url).catch((err) => {
+      delete featureLoads[name];
+      throw err;
+    });
+  }
+  return featureLoads[name];
+}
+
 // Live BNB/USD from the backend. Keeps the previous value if the lookup fails, and redraws the table when the
 // price moves by 1% or more or when it flips between live and stale. A price the server has never fetched
 // (live=false and no as_of: its static fallback) is not used at all.

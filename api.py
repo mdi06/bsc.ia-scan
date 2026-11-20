@@ -1613,6 +1613,10 @@ def _local_frontend_route(filename: str):
 
 if not os.environ.get("RENDER") and os.path.exists(os.path.join(workspace_dir, "index.html")):
     app.mount("/static", StaticFiles(directory=workspace_dir, html=False), name="static")
+    # Lazy feature modules app.js imports by URL when there is no build (loadFeature in app.js).
+    _features_dir = os.path.join(workspace_dir, "features")
+    if os.path.isdir(_features_dir):
+        app.mount("/features", StaticFiles(directory=_features_dir, html=False), name="features")
     for _name in LOCAL_FRONTEND_FILES:
         app.add_api_route("/" + _name, _local_frontend_route(_name), methods=["GET"], include_in_schema=False)
 
