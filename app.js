@@ -5790,11 +5790,17 @@ function renderTable(keepLimit = false) {
 
   const dropsTable = document.getElementById('dropsTable');
   if (dropsTable && dropsTable.classList) {
+    // FREE & MINTABLE NOW: no HOLDERS / BUYS, LP / VOL or FLOOR / TRADE columns. A free mint has no market yet
+    // (those cells only ever held discovery placeholders), and once it trades it is no longer a free mint.
+    const freeMode = activeFilter === 'FREE' && activeTab !== 'SECONDARY' && activeTab !== 'PORTFOLIO';
     if (typeof dropsTable.classList.toggle === 'function') {
       dropsTable.classList.toggle('secondary-mode', activeTab === 'SECONDARY');
+      dropsTable.classList.toggle('free-mode', freeMode);
     } else {
       if (activeTab === 'SECONDARY') dropsTable.classList.add('secondary-mode');
       else dropsTable.classList.remove('secondary-mode');
+      if (freeMode) dropsTable.classList.add('free-mode');
+      else dropsTable.classList.remove('free-mode');
     }
   }
 
