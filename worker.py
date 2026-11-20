@@ -104,6 +104,14 @@ def _process_smart_money_candidate(rpc, rcv, snd, aid, tx_h, b, tx_val, inp, wal
         if any(item.get("contract", "").lower() == rcv.lower() for item in history):
             return
     try:
+        # Only agent mints belong in the feed. A tracked wallet approving or transferring an existing token (USD1,
+        # SOON, Tether Gold, ...) says nothing about a new drop, and neither does a contract with no link to the
+        # Agent ID registry / launchpads in its bytecode (or its proxy implementation's).
+        if monitor.is_non_mint_call(inp):
+            return
+        if not monitor.contract_links_to_registry(rpc, rcv):
+            return
+
         det = monitor.analyze_contract(rpc, rcv, wallet)
         cls = det.get("classification", {})
         if monitor.is_system_infra({"contract": rcv, "classification": cls, "name": det.get("name"), "symbol": det.get("symbol"), "max_supply": det.get("max_supply"), "total_minted": det.get("total_minted")}):
