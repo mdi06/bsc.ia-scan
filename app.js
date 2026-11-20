@@ -2824,6 +2824,45 @@ function isFreeMintDrop(d) {
   return Boolean(d.has_free_mint || pStr.includes('FREE') || (vWei === 0 && Number(d.mint_price_bnb || 0) === 0 && !pStr.includes('PAID') && !pStr.includes('DEX') && !pStr.includes('TBD')));
 }
 
+// The HOLDERS / BUYS cell. The worker stores holders: 1 and buys_24h: 1 as placeholders when it discovers a drop,
+// and only market data (DexScreener, for drops with a pair) replaces the buy count, so a fresh NFT with 0 minted
+// read "1 / 1". Holders never exceed the items minted (an NFT or fair-mint count), and buys without market data
+// show "—" instead of the placeholder.
+function holdersBuysDisplay(item) {
+  const d = item || {};
+  const holdersKnown = d.holders !== null && d.holders !== undefined && d.holders !== '';
+  let holders = holdersKnown ? Number(d.holders) : null;   // unknown stays unknown ("—" via formatCount)
+  let holdersTitle = '';
+  const std = String(d.standard || '').toUpperCase();
+  const countsItems = /721|1155|NFT|FAIR-MINT|CUSTOM/.test(std);
+  const minted = Number(d.total_minted);
+  if (holders !== null && countsItems && Number.isFinite(minted) && minted >= 0 && holders > minted) {
+    holders = minted;
+    holdersTitle = 'Capped at the number minted (the stored holder count was a placeholder)';
+  }
+  const hasMarket = Boolean(d.market_updated_at || d.pair_url || Number(d.lp_usd || 0) > 0 || Number(d.volume_24h || 0) > 0);
+  const buysKnown = d.buys_24h !== null && d.buys_24h !== undefined && d.buys_24h !== '';
+  const buysRaw = buysKnown ? Number(d.buys_24h) : null;
+  const noBuyData = !hasMarket && (buysRaw === null || buysRaw <= 1);
+  return {
+    holders: formatCount(holders),
+    holdersTitle,
+    buys: noBuyData ? '—' : formatCount(buysRaw),
+    buysTitle: noBuyData ? 'No market data for this drop yet' : '',
+  };
+}
+
+// A BEP-20 whose whole supply was minted up front (minted === supply, no mint-cap markers): that supply is the
+// token's, not a filled mint, so it is never "sold out" / "SOLD 100%" and has no slots left. Same rule as
+// isDropSoldOut and computeSniperReady.
+function isPreMintedToken(item) {
+  if (!item) return false;
+  const msRaw = Number(item.max_supply);
+  const ms = (Number.isFinite(msRaw) && msRaw > 0 && msRaw < 1e20) ? msRaw : 0;
+  const tm = Number(item.total_minted || 0);
+  return ms > 0 && tm === ms && !/721|1155|NFT/.test(String(item.standard || '').toUpperCase()) && !item.sold_sel && !item.cap;
+}
+
 // Mint terms read by the worker (record.mint_terms, see monitor.probe_mint_terms): per-wallet limit, start / end
 // time, who may mint (gate) and whether the supply cap was actually read. Slots left come from the supply fields.
 // Anything not read stays null and is shown as unknown, never guessed.
@@ -2841,8 +2880,10 @@ function getMintTerms(item, nowSec = Date.now() / 1000) {
   const num = (v) => (Number.isFinite(Number(v)) && Number(v) > 0 ? Number(v) : null);
   const start = num(t.start);
   const end = num(t.end);
+  // A pre-minted token has no "slots": its supply is not a filled mint (isPreMintedToken).
+  const preMinted = isPreMintedToken(item);
   return {
-    slotsLeft: ms > 0 ? Math.max(0, Math.floor(ms - tm)) : null,
+    slotsLeft: (ms > 0 && !preMinted) ? Math.max(0, Math.floor(ms - tm)) : null,
     perWallet: num(t.per_wallet),
     start,
     end,
@@ -2957,10 +2998,7 @@ function isDropSoldOut(d) {
   if (!d) return false;
   const ms = Number(d.max_supply || 0);
   const tm = Number(d.total_minted || 0);
-  if (!(ms > 0)) return false;
-  const std = String(d.standard || '').toUpperCase();
-  const isNft = /721|1155|NFT/.test(std);
-  if (!isNft && tm === ms && !d.sold_sel && !d.cap) return false;
+  if (!(ms > 0) || isPreMintedToken(d)) return false;
   return tm / ms >= 0.999;
 }
 
@@ -5998,7 +6036,8 @@ function renderTable(keepLimit = false) {
 
     // Holders / Buys
     // Unknown counts are "—" and real zeros are "0"; the total supply is never shown as a holder / buy count
-    const hbStr = `<span class="hld">${formatCount(item.holders)}</span> <span class="dim">/</span> <span class="buy">${formatCount(item.buys_24h)}</span>`;
+    const hb = holdersBuysDisplay(item);
+    const hbStr = `<span class="hld"${hb.holdersTitle ? ` title="${hb.holdersTitle}"` : ''}>${hb.holders}</span> <span class="dim">/</span> <span class="buy"${hb.buysTitle ? ` title="${hb.buysTitle}"` : ''}>${hb.buys}</span>`;
 
     // LP / Vol & Market Cap
     const lpUsd = Number(item.lp_usd || 0);
@@ -6034,7 +6073,9 @@ function renderTable(keepLimit = false) {
     const tm = Number(item.total_minted || 0);
 
     let progBar = '';
-    if (ms > 0) {
+    if (ms > 0 && isPreMintedToken(item)) {
+      progBar = `<div class="progress-cell" title="The whole supply was minted up front: this is the token's supply, not a mint that sold out"><span class="prog-tag dim">PRE-MINTED</span><span class="prog-ratio dim">${formatCount(tm)} supply</span></div>`;
+    } else if (ms > 0) {
       let pct = (tm / ms) * 100;
       pct = Math.min(100, Math.max(0, pct));
       let progTag = 'MINT';
@@ -6407,7 +6448,10 @@ function appendNextTableBatch() {
       progPct = 100;
     }
     const uncapped = !(ms > 0) && !String(item.mint_price_str || '').toUpperCase().includes('DEX');
-    if (ms > 0 && tm >= ms) {
+    if (ms > 0 && isPreMintedToken(item)) {
+      progLabel = `PRE-MINTED · ${formatCount(tm)} supply`;   // the token's supply, not a sold-out mint
+      progPct = 0;
+    } else if (ms > 0 && tm >= ms) {
       progLabel = 'SOLD 100%';
       progPct = 100;
     }
@@ -6476,7 +6520,8 @@ function appendNextTableBatch() {
 
     const exitSignal = evaluatePortfolioExit(item, bnbPrice);
     const isPort = (activeTab === 'PORTFOLIO');
-    let cellHolders = `${formatCount(item.holders)} / ${formatCount(item.buys_24h)}`;
+    const hbBatch = holdersBuysDisplay(item);
+    let cellHolders = `${hbBatch.holders} / ${hbBatch.buys}`;
     if (isPort && item.user_balance > 0) {
       const balVal = isNft ? `${item.user_balance} NFT` : formatCount(item.user_balance);
       const usdVal = exitSignal.holding_usd > 0 ? ` (~${formatCryptoPrice(exitSignal.holding_usd)})` : '';
@@ -11255,6 +11300,8 @@ if (typeof module !== 'undefined' && module.exports) {
     smartWalletCount,
     canMintFromCard,
     cardTermsCellHtml,
-    gateBadgeHtml
+    gateBadgeHtml,
+    holdersBuysDisplay,
+    isPreMintedToken
   };
 }

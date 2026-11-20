@@ -124,3 +124,25 @@ assert.match(app.gateBadgeHtml({ mint_terms: { gate: 'whitelist' } }), /Whitelis
 assert.strictEqual(app.gateBadgeHtml({ mint_terms: { gate: 'open' } }), '');
 assert.strictEqual(app.gateBadgeHtml({}), '');
 console.log('✔ Agent ID badge next to the drop name: PASS');
+
+// Holders / buys: no placeholder "1 / 1"
+let hbv = app.holdersBuysDisplay({ standard: 'ERC-721 (NFT Collection)', holders: 1, buys_24h: 1, total_minted: 0 });
+assert.strictEqual(hbv.holders, '0', 'an NFT with 0 minted has 0 holders');
+assert.strictEqual(hbv.buys, '—', 'no market data: no placeholder buy count');
+hbv = app.holdersBuysDisplay({ standard: 'BEP-20 Token', holders: 76, buys_24h: 12, pair_url: 'https://dexscreener.com/x', total_minted: 1e10 });
+assert.strictEqual(hbv.holders, '76');
+assert.strictEqual(hbv.buys, '12', 'market data: real buy count');
+hbv = app.holdersBuysDisplay({ standard: 'ERC-721', holders: 40, buys_24h: 1, total_minted: 61 });
+assert.strictEqual(hbv.holders, '40', 'holders below minted stay as they are');
+console.log('✔ Holders / buys without placeholders: PASS');
+
+// Slots left: a fully pre-minted token is not "sold out"
+assert.strictEqual(app.getMintTerms({ standard: 'BEP-20 Token (18 decimals)', max_supply: 1e10, total_minted: 1e10 }).slotsLeft, null);
+assert.ok(!/Sold out/.test(app.mintTermsChipsHtml({ mint_price_str: '⭐ FREE', standard: 'BEP-20 Token', max_supply: 1e10, total_minted: 1e10, mint_terms: { gate: 'agent_id' } })));
+assert.strictEqual(app.getMintTerms({ standard: 'ERC-721', max_supply: 100, total_minted: 100 }).slotsLeft, 0, 'an NFT at its cap is sold out');
+assert.strictEqual(app.getMintTerms({ standard: 'BEP-20 Token', max_supply: 1e10, total_minted: 1e10, cap: true }).slotsLeft, 0, 'a token with a mint cap at its cap is sold out');
+console.log('✔ Slots left respects pre-minted tokens: PASS');
+assert.strictEqual(app.isPreMintedToken({ standard: 'BEP-20 Token', max_supply: 1e10, total_minted: 1e10 }), true);
+assert.strictEqual(app.isPreMintedToken({ standard: 'ERC-721', max_supply: 100, total_minted: 100 }), false);
+assert.strictEqual(app.isPreMintedToken({ standard: 'BEP-20 Token', max_supply: 1e10, total_minted: 5e9 }), false);
+console.log('✔ One pre-minted rule for chips, filter and progress: PASS');

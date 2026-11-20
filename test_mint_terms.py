@@ -251,3 +251,17 @@ def test_backfill_covers_every_drop_with_a_mint_of_any_age():
     worker._mint_terms_tried.clear()
     assert [x["contract"][2] for x in worker._mint_terms_backfill_candidates(history, now)] == ["2", "1"]
     worker._mint_terms_tried.clear()
+
+
+def test_backfill_puts_the_newest_drops_first_even_if_older_ones_have_no_terms():
+    now = time.time()
+    ts = lambda sec_ago: time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(now - sec_ago))
+    base = {"name": "X", "standard": "ERC-721", "mint_price_str": "⭐ FREE"}
+    history = [
+        {**base, "contract": "0x" + "a" * 40, "block": 100, "detected_at": ts(40 * 86400)},                              # old, no terms
+        {**base, "contract": "0x" + "b" * 40, "block": 900, "detected_at": ts(3600), "mint_terms": {"gate": "open"}},  # newest, v1 terms
+        {**base, "contract": "0x" + "c" * 40, "block": 500, "detected_at": ts(20 * 86400)},                           # older, no terms
+    ]
+    worker._mint_terms_tried.clear()
+    assert [x["contract"][2] for x in worker._mint_terms_backfill_candidates(history, now)] == ["b", "c", "a"]
+    worker._mint_terms_tried.clear()
