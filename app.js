@@ -1424,20 +1424,34 @@ if (typeof window !== 'undefined') window.toggleFollowWallet = toggleFollowWalle
 let hasLoadedSmartDrops = false;
 let isLoadingSmartDrops = false;
 
+// A drop already on screen (often from the bundled snapshot, built every 3 h) gets the newer mint terms of a fresher
+// copy from the API (the later checked_at wins), with the repaired mint call that goes with them. Without this the
+// table kept the snapshot's copy and showed no Agent ID badge for drops the worker had already checked.
+function refreshDropTerms(existing, fresh) {
+  if (!existing || !fresh || existing === fresh) return false;
+  const ft = fresh.mint_terms;
+  if (!ft || typeof ft !== 'object') return false;
+  const et = existing.mint_terms;
+  if (et && Number(et.checked_at || 0) >= Number(ft.checked_at || 0)) return false;
+  existing.mint_terms = ft;
+  if (ft.mint_call === 'repaired' && fresh.mint_calldata) existing.mint_calldata = fresh.mint_calldata;
+  return true;
+}
+
 // Appends drops that are not already in allDrops (matched by lowercase contract). Returns how many were added.
 // Used by "Load Older Drops" so overlapping pages never produce duplicate rows.
 function appendUniqueDrops(drops) {
   markDropsDataChanged();
   if (!Array.isArray(drops)) return 0;
-  const present = new Set(allDrops.map(d => (d.contract || '').toLowerCase()));
+  const present = new Map(allDrops.map(d => [(d.contract || '').toLowerCase(), d]));
   let added = 0;
   drops.forEach(p => {
     const c = (p.contract || '').toLowerCase();
     if (c) {
       knownContracts.add(c);
       if (isSniperReady(p)) knownSniperReady.add(c);
-      if (present.has(c)) return;
-      present.add(c);
+      if (present.has(c)) { refreshDropTerms(present.get(c), p); return; }
+      present.set(c, p);
     }
     allDrops.push(p);
     added++;
@@ -1524,6 +1538,7 @@ function mergeDropsIntoAllDrops(newDrops) {
     } else {
       const existing = allDrops.find(d => (d.contract || '').toLowerCase() === c);
       if (existing) {
+        refreshDropTerms(existing, drop);
         if ((!existing.smart_wallets || existing.smart_wallets.length === 0) && drop.smart_wallets && drop.smart_wallets.length > 0) {
           existing.smart_wallets = drop.smart_wallets;
         }
@@ -2987,7 +3002,9 @@ function mintTermsChipsHtml(item) {
   if (terms.perWallet !== null) chips.push(`<span class="mint-chip" title="Per-wallet limit read from the contract">Max ${formatCount(terms.perWallet)}/wallet</span>`);
   const timing = mintTimingLabel(terms);
   if (timing) chips.push(`<span class="mint-chip${(terms.ended || terms.stateEnded || terms.closed) ? ' mint-chip-bad' : ''}" title="Mint window read from the contract">${timing}</span>`);
-  if (terms.gate) chips.push(`<span class="mint-chip mint-chip-gate-${terms.gate}" title="${MINT_GATE_LABELS[terms.gate].title}">${MINT_GATE_LABELS[terms.gate].chip}</span>`);
+  // Agent ID / Whitelist are shown once, as the badge next to the drop's name (gateBadgeHtml); "Open to all" has no
+  // badge, so it stays here.
+  if (terms.gate === 'open') chips.push(`<span class="mint-chip mint-chip-gate-open" title="${MINT_GATE_LABELS.open.title}">${MINT_GATE_LABELS.open.chip}</span>`);
   return chips.length ? `<div class="mint-chips">${chips.join('')}</div>` : '';
 }
 
@@ -11309,6 +11326,7 @@ if (typeof module !== 'undefined' && module.exports) {
     cardTermsCellHtml,
     gateBadgeHtml,
     holdersBuysDisplay,
-    isPreMintedToken
+    isPreMintedToken,
+    refreshDropTerms
   };
 }

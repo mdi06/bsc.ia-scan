@@ -114,7 +114,8 @@ const badCall = free({ mint_calldata: '0x6080', mint_terms: { gate: 'unknown', m
 assert.strictEqual(app.canMintFromCard(badCall), false, 'no Mint button for an unusable mint call');
 const paidTbd = { mint_price_str: 'TBD', mint_calldata: '0x1249c58b', mint_terms: { gate: 'agent_id', paid: true } };
 assert.match(app.mintTermsChipsHtml(paidTbd), /💎 Paid/);
-assert.match(app.mintTermsChipsHtml(paidTbd), /Agent ID needed/);
+assert.ok(!/Agent ID needed/.test(app.mintTermsChipsHtml(paidTbd)), 'Agent ID is the badge next to the name, not a second chip');
+assert.match(app.gateBadgeHtml(paidTbd), /Agent ID/);
 console.log('✔ Probe v2 states (closed, ended, sold out, unusable call, paid): PASS');
 
 // Agent ID badge next to the name, on every row
@@ -148,3 +149,16 @@ assert.strictEqual(app.isPreMintedToken({ standard: 'BEP-20 Token', max_supply: 
 console.log('✔ One pre-minted rule for chips, filter and progress: PASS');
 assert.match(app.gateBadgeHtml({ mint_terms: { gate: 'agent_id', gate_from: 'earlier_check' } }), /earlier check/);
 console.log('✔ Badge explains a gate kept from an earlier check: PASS');
+
+// Fresher copies of a drop refresh its mint terms (snapshot rows used to keep none)
+const snapRow = { contract: '0xs1', mint_calldata: '0x6080' };
+assert.strictEqual(app.refreshDropTerms(snapRow, { contract: '0xs1', mint_terms: { gate: 'agent_id', checked_at: 200, mint_call: 'repaired' }, mint_calldata: '0x1249c58b' }), true);
+assert.strictEqual(snapRow.mint_terms.gate, 'agent_id');
+assert.strictEqual(snapRow.mint_calldata, '0x1249c58b', 'the repaired call comes along');
+assert.strictEqual(app.refreshDropTerms(snapRow, { contract: '0xs1', mint_terms: { gate: 'unknown', checked_at: 100 } }), false, 'an older check never replaces a newer one');
+assert.strictEqual(snapRow.mint_terms.gate, 'agent_id');
+app.setAllDrops([{ contract: '0xS2', block: 1 }]);
+app.appendUniqueDrops([{ contract: '0xs2', block: 1, mint_terms: { gate: 'open', checked_at: 5 } }]);
+assert.strictEqual(app.getAllDrops().length, 1, 'still no duplicate row');
+assert.strictEqual(app.getAllDrops()[0].mint_terms.gate, 'open', 'Load Older Drops refreshes terms of rows already shown');
+console.log('✔ Mint terms refresh from fresher copies; no duplicate Agent ID chip: PASS');
