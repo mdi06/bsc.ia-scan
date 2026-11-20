@@ -1,177 +1,237 @@
-# Binance .ai Agent ID Real-Time Contract Monitor
+<div align="center">
 
-Monitors the BNB Smart Chain (BSC) block-by-block to catch new fair-mints, NFT drops, and token projects that integrate with the official Space ID / Binance Agent ecosystem and launchpads:
-- **Space ID Agent ID Registry (`.ai`)**: `0x60B9262456dE011F7d15a54CdD8c48bAaa8B022F`
-- **Space ID Master Registry (`.bnb`)**: `0x08CEd32a7f3eeC915Ba84415e9C07a7286977956`
-- **Four.meme Agent ID Factory**: `0x5c952063c7fc8610FFDB798152D69F0B9550762b`
-- **Four.meme Router**: `0xF251F83e40a78868FcfA3FA4599Dad6494E46034`
+# BNB Agent Radar
 
----
+**Real-time discovery and analytics for the BNB Chain Agent ID ecosystem.**
 
-## Why This Works
+[Live App](https://agent-id-monitor.vercel.app/) · [Features](#features) · [Architecture](#architecture) · [Getting Started](#getting-started) · [API](#http-api)
 
-Projects like **Jager ($JAGENT)** and **Oathbots ($OATH)** are not launched on standard meme launchpads. They are deployed as independent smart contracts that gate access to Binance Agentic Wallets by reading `0x60B9...022F`.
-
-This monitor inspects the bytecode of every new contract deployment on BSC at **Block 0**. When a deployment references the `.ai` registry, the monitor:
-1. Sounds an audio alert (chime on macOS).
-2. Extracts the contract address, deployer, and block.
-3. Checks if the contract offers a free mint for your wallet (`nimus.ai`).
-4. Generates an instant `baw contract-call` command ready to simulate and snipe the mint.
+</div>
 
 ---
 
-## Installation
+## Overview
 
+BNB Agent Radar watches BNB Smart Chain block by block and surfaces every new project built for **Agent ID** (`.ai`) holders: fair-mints, NFT collections and tokens that read the Agent ID registry or launch through Agent ID launchpads.
+
+For each project it detects, the radar adds the context a holder needs to decide whether it is worth attention: mint progress, DEX liquidity and price, NFT floor and volume, holder distribution, a contract safety audit, and inflows from a curated set of smart wallets. It also tracks the growth of the Agent ID ecosystem itself, with a live count of Agent IDs minted on-chain.
+
+### The problem
+
+Projects that gate access to Agent ID holders are usually deployed as standalone contracts, not on standard meme launchpads. They do not appear on launchpad feeds or token lists, so holders find out about them late, through social media, after the mint is over. There is no single place that shows what has been built for Agent ID and how it is performing.
+
+### The solution
+
+The radar inspects the bytecode of every new BSC contract deployment and flags those that reference the Agent ID registry, often in the same block they are deployed. It combines that discovery feed with on-chain and market data in one dashboard, available on the web and in a terminal UI.
+
+---
+
+## Agent ID integration
+
+The radar reads these BNB Smart Chain contracts:
+
+| Contract | Address | Used for |
+| :--- | :--- | :--- |
+| Agent ID Registry (`.ai`) | [`0x60B9262456dE011F7d15a54CdD8c48bAaa8B022F`](https://bscscan.com/address/0x60B9262456dE011F7d15a54CdD8c48bAaa8B022F) | Detecting contracts that gate on Agent ID; counting Agent ID mints (`Transfer` from the zero address) |
+| SPACE ID Master Registry (`.bnb`) | [`0x08CEd32a7f3eeC915Ba84415e9C07a7286977956`](https://bscscan.com/address/0x08CEd32a7f3eeC915Ba84415e9C07a7286977956) | Name resolution |
+| Four.meme Agent ID Factory | [`0x5c952063c7fc8610FFDB798152D69F0B9550762b`](https://bscscan.com/address/0x5c952063c7fc8610FFDB798152D69F0B9550762b) | Tracking Agent ID launchpad deployments |
+| Four.meme Router | [`0xF251F83e40a78868FcfA3FA4599Dad6494E46034`](https://bscscan.com/address/0xF251F83e40a78868FcfA3FA4599Dad6494E46034) | Tracking launchpad trading activity |
+
+BNB Agent Radar is an independent project and is not affiliated with Binance, SPACE ID or Four.meme.
+
+---
+
+## Features
+
+### Live discovery feed
+- Scans every new BSC block and flags contract deployments that reference the Agent ID registry.
+- Tracks Agent ID launchpad drops and clone-style deployments from proxy factories.
+- Classifies each contract on-chain:
+  - **ERC-721** via ERC-165 interface `0x80ac58cd` or `tokenURI(uint256)`
+  - **ERC-1155** via ERC-165 interface `0xd9b67a26`
+  - **BEP-20** via a valid `decimals()` return value
+  - **Fair-mint contracts** that dispense an underlying BEP-20 through `token()`
+
+### Project analytics
+| Signal | Source |
+| :--- | :--- |
+| Mint progress | `totalMinted()` vs `MAX_SUPPLY()`, refreshed every 15 seconds for active drops |
+| DEX liquidity and price | PancakeSwap V2 pools and DexScreener, refreshed every 2 minutes |
+| NFT floor and volume | Element Market |
+| Holders | GoPlus Security and contract state |
+| Buy pressure | 1h and 24h buy counts and net flow |
+| Deployer profile | Deployer BNB balance and transaction count |
+| Safety audit | Honeypot check, buy/sell taxes, pause state |
+
+Each project gets a 0–100 traction score, shown as **Cold**, **Warming Up**, **High Traction** or **Viral Rush**.
+
+### Smart-wallet intelligence
+- Monitors roughly 5,000 curated wallets and highlights projects they are minting or buying, separating free (gas-only) mints from paid accumulation.
+- A leaderboard ranks the wallets by realised performance.
+
+### Ecosystem metrics
+- Live count of Agent IDs minted on the registry.
+- **24h Pulse**: a daily summary of top launches, top NFT mints and ecosystem activity.
+
+### Web app
+- Wallet connection for MetaMask, Binance Web3 Wallet and Rabby (EIP-1193 / EIP-6963), plus a watch-only mode for any public address.
+- Portfolio view across all tracked contracts using batched JSON-RPC, with BNB balance, USD value and price-based alerts.
+- Favourites bound to the connected wallet and synced across devices, with a QR code for mobile.
+- Customisable filter tabs (drag-and-drop or the Reorder dialog), saved in the browser.
+
+### Terminal UI
+A keyboard-driven terminal dashboard with the same data: live radar, launchpads, smart-wallet activity, leaderboard and portfolio.
+
+### Safety by design
+The radar never signs transactions or spends funds on its own. Any on-chain action is generated as a preview command (`baw contract-call preview`) for the user to simulate first, and needs explicit confirmation.
+
+---
+
+## Architecture
+
+```
+               BNB Smart Chain (RPC)          DexScreener · PancakeSwap · Element · GoPlus
+                       │                                        │
+                       ▼                                        ▼
+            ┌──────────────────────────────────────────────────────────┐
+            │  worker.py  (ingestion)                                  │
+            │  block scanner · progress sweeper · market updater ·     │
+            │  NFT sweeper · factory watcher · Agent ID mint counter   │
+            └──────────────────────────────┬───────────────────────────┘
+                                           │ db.py
+                                           ▼
+                           Supabase (Postgres) · SQLite fallback
+                                           │
+                                           ▼
+            ┌──────────────────────────────────────────────────────────┐
+            │  api.py / server.py  (FastAPI, read side)                │
+            └───────────────┬──────────────────────────┬───────────────┘
+                            ▼                          ▼
+                  Web app (Vercel)              Terminal UI (tui.py)
+                  index.html · app.js
+```
+
+| Component | Role | Hosting |
+| :--- | :--- | :--- |
+| `worker.py` | Scans blocks and persists drops, market data and Agent ID counts | Dedicated host (see [`DEPLOY_WORKER.md`](DEPLOY_WORKER.md)) |
+| `api.py`, `server.py` | FastAPI read API with ETag caching and delta feeds | Render |
+| `db.py` | Storage layer: Supabase with a local SQLite fallback | — |
+| `index.html`, `app.js`, `style.css` | Web client, built and fingerprinted by `scripts/build.js` | Vercel |
+| `tui.py`, `monitor.py` | Terminal UI and shared on-chain logic | Local |
+
+---
+
+## Getting started
+
+### Requirements
+- Python 3.10+
+- Node.js 24 (only for building the web frontend)
+
+### Install
 ```bash
 git clone https://github.com/mdi06/bsc.ia-scan.git
 cd bsc.ia-scan
-pip install -r requirements.txt
+pip install -r requirements-cli.txt   # API + terminal UI
 ```
+
+### Run everything locally
+Starts the scanner and the API, and serves the web app at `http://localhost:8080`:
+```bash
+./start_local.sh
+```
+
+### Configuration
+All variables are optional for local use; without Supabase the app uses SQLite.
+
+| Variable | Purpose |
+| :--- | :--- |
+| `SUPABASE_URL`, `SUPABASE_KEY` | Supabase project used for storage |
+| `RUN_WORKER` | `1` to run the scanner in the same process as the API, `0` for API only |
+| `PORT` | API port (default `8080`) |
+| `ADMIN_TOKEN` | Protects admin endpoints |
+| `DB_PATH` | Location of the SQLite fallback database |
 
 ---
 
-## Usage
+## Terminal UI
 
-### 1. Interactive Explorer & Live Radar
-Launches an interactive TUI dashboard. Navigate through detected drops, view full on-chain metrics, and trigger instant snipes:
 ```bash
-# Explore and navigate existing tracked projects:
-python3 tui.py explore
-
-# Or run the live block-by-block listener with interactive dashboard:
-python3 tui.py live
+python3 tui.py live       # live block listener with the interactive dashboard
+python3 tui.py explore    # browse projects already tracked
 ```
 
-#### ⌨️ Interactive Controls:
-| Key | Action | Description |
-| :--- | :--- | :--- |
-| **`TAB`** or **`p`** | **Switch Tabs** | Cycle through **[1: 📡 Live Radar]** ➔ **[2: 🚀 Launchpads]** ➔ **[3: 🧠 Smart Alpha]** ➔ **[4: 🏆 Wallet Leaderboard]** ➔ **[5: 🎒 My Portfolio]** |
-| **`1`** / **`2`** / **`3`** / **`4`** | **Direct Tab Jump** | Jump directly to tab 1, 2, 3, or 4 |
-| **`↑` / `↓`** or **`k` / `j`** | **Navigate Rows** | Move the `▶` cursor up/down with dynamic sliding-window viewport scrolling |
-| **`PgUp` / `PgDn`** or **`[` / `]`** | **Fast Page Scroll** | Scroll an entire screen of drops up or down |
-| **`Home` / `End`** | **Jump to Ends** | Jump instantly to the very top or bottom of the project list |
-| **`s`** | **1-Click Sniper** | Instant on-chain dry-run simulation & 1-click broadcast gate (`[Y/Enter]` confirm) |
-| **`Enter`** or **`Space`** | **Deep-Dive Modal** | Expands full inspection card with Dev Root tracing, syndicate clusters, holder distribution & audit |
-| **`m`** | **Open Market** | Opens the collection on **Element NFT Market** or token on **PancakeSwap** in your browser |
-| **`b`** | **Open in BscScan** | Opens the selected contract address or your holdings token page directly in BscScan |
-| **`w`** / **`x`** | **Website / Twitter** | Opens the official website or Twitter/X page for the selected project |
-| **`r`** | **Instant Refresh** | Re-queries BSC on-chain for DEX LP reserves, prices, minted supply & wallet balances |
-| **`g`** | **Smart Money Filter** | Toggle filtering by drops with verified Smart Wallet inflow (`🧠 5k Tracked Wallets`) |
-| **`f` / `l` / `a` / `c`** | **Filters** | Filter by Free mints (`f`), DEX LP (`l`), Active (`a`), or Reset all (`c`) |
-| **`o`** | **Cycle Sort** | Toggle sorting between Newest, Smart Money, Heat Score, Velocity, Progress, and Safety |
-| **`q`** or **`ESC`** | **Exit / Close Modal** | Closes the modal or exits the monitor |
+| Command | Description |
+| :--- | :--- |
+| `python3 tui.py scan-wallets [--blocks N]` | Scan recent blocks for smart-wallet activity (default 200 blocks) |
+| `python3 tui.py sync-wallets` | Refresh the tracked wallet list |
+| `python3 tui.py holdings` | Show your NFT and token balances across tracked contracts |
+| `python3 tui.py refresh` | Refresh on-chain metrics for all projects |
+| `python3 tui.py list` | Print a snapshot table without starting the listener |
+| `python3 tui.py inspect <address>` | Analyse any contract: type, liquidity, price, mint velocity, score |
 
-*(Tip: Pass `--plain` if you prefer scrolling raw logs instead of the interactive table).*
+Add `--plain` for scrolling logs instead of the interactive table.
 
-### 2. 🔀 Manual Tab Sequence Customization (Drag-and-Drop & Mobile Reorder)
-In the Web UI, you can fully rearrange the filter tabs/pills (`ALL`, `LAUNCHPAD`, `SNIPER READY`, `NFT SURGE`, `PROXY`, `FAVORITES`, `FOLLOWED`, `FREE MINTS`, `SMART ALPHA`, `SMART LEADERBOARD`, `DEX LP`, `ACTIVE MINTS`):
-- **Native Drag-and-Drop**: Drag any pill left or right in the toolbar. A yellow indicator highlights the drop target, and positions re-order smoothly.
-- **Accidental Click Prevention**: Moving pills will never trigger unintended filter changes during drag operations.
-- **Accessible / Mobile "⚙️ Reorder" Modal**: Click `⚙️ Reorder` to open the sequence management dialog with 1-click `⬆ Top`, `▲ Up`, and `▼ Down` buttons for any screen size.
-- **Auto-Persistence**: Customized tab sequences are automatically saved to `localStorage` (`agent_id_pills_sequence`) and persist across page refreshes.
-- **1-Click Reset**: When a sequence is customized, a `↺ Reset Sequence` button automatically appears to restore default order in 1 click.
+<details>
+<summary>Keyboard shortcuts</summary>
 
-### 3. 🧠 Smart Money Alpha Scanner (5,000 Tracked Wallets)
-Scans recent blocks on BSC across ~5,000 verified smart agent wallets (curated by @OGlamozda) to detect early mints, insider accumulation, and alpha trends before they hit secondary markets:
-```bash
-# Scan recent 200 blocks (~10 minutes of BSC history):
-python3 tui.py scan-wallets
+| Key | Action |
+| :--- | :--- |
+| `Tab` / `p`, `1`–`4` | Switch tabs |
+| `↑` `↓` / `k` `j` | Move between rows |
+| `PgUp` `PgDn` / `[` `]`, `Home` `End` | Scroll by page, jump to top or bottom |
+| `Enter` / `Space` | Open the project detail view (deployer trace, holders, audit) |
+| `s` | Simulate a mint, then confirm before anything is broadcast |
+| `m` / `b` | Open the market page / BscScan |
+| `w` / `x` | Open the project website / X profile |
+| `r` | Refresh on-chain data |
+| `g` | Show only projects with smart-wallet inflow |
+| `f` `l` `a` `c` | Filter: free mints, DEX liquidity, active, clear |
+| `o` | Cycle sort: newest, smart money, score, velocity, progress, safety |
+| `q` / `Esc` | Close the detail view or exit |
 
-# Scan custom block depth (e.g. last 500 blocks / ~25 minutes):
-python3 tui.py scan-wallets --blocks 500
-
-# Sync / refresh tracked wallet registry from Google Sheets:
-python3 tui.py sync-wallets
-```
-
-#### What It Detects:
-- ⭐ **FREE MINTS (Gas Only - 0 BNB)**: Detects when smart wallets call mint functions with 0 BNB value (e.g. *Gondolux*, *Cometra*, *Drone Atlas*).
-- 💎 **PAID TRENDS (>0 BNB - Heavy Inflow)**: Detects smart wallets spending real BNB to accumulate newly deployed tokens or fair-mint allocations (e.g. *TOSH*, *Hash21*, *Hallowed Agents*).
-- **Automatic Audit**: Verifies honeypot status, buy/sell taxes, contract pause state, and current mint progress.
-- 🛡️ **STRICT NO-AUTO-MINT POLICY**: The scanner **never automatically spends user funds or signs transactions**. All detected drops provide an exact `baw contract-call preview` simulation command, and are automatically indexed into your Live Radar table where you can review them and snipe with 1-click explicit confirmation (`[s]`).
-
-### 3. View Wallet Portfolio & Holdings
-Check your wallet's NFT & token balances across all tracked contracts directly via CLI:
-```bash
-python3 tui.py holdings
-# or alias:
-python3 tui.py my-nfts
-```
-
-### 4. Refresh Metrics via CLI
-Updates on-chain state for all tracked projects directly from the terminal:
-```bash
-python3 tui.py refresh
-```
-
-### 5. View Snapshot Table
-Prints the current table of tracked projects without launching the live block listener:
-```bash
-python3 tui.py list
-```
-
-### 6. Deep-Inspect Any Contract Address
-Reverse-engineers any contract, calculating DEX liquidity, implied token price, mint velocity, and interest score:
-```bash
-python3 tui.py inspect <contract_address>
-```
-
-### 7. 👛 Web3 "Connect Wallet" & Live Portfolio Sync (Web Application)
-The web client (`index.html` + `app.js`) features multi-wallet Web3 connectivity and live on-chain BSC portfolio scanning:
-- **👛 Multi-Wallet Support**: Connect **MetaMask**, **Binance Web3 Wallet**, or **Rabby** with 1-click automatic detection via EIP-1193 and EIP-6963.
-- **👁️ Watch-Only Auditor Mode**: Enter any public BSC address to audit token holdings, gas reserves, and exit recommendations without connecting a private key.
-- **🎒 100% Dynamic Tab 3 (My Portfolio)**:
-  - Scans all 348+ tracked .ai contracts via high-throughput JSON-RPC batching (~250ms).
-  - Live native BNB gas balance and USD valuation.
-  - Live automated take-profit & exit conviction triggers:
-    - **🚀 10x MOON**: Lock 80% Profit on PancakeSwap.
-    - **🚀 5x MOON**: Scale out 50% into BNB.
-    - **🟢 2x RECOUP**: Recoup initial principal (play risk-free with house money).
-    - **⚠️ -40% CRASH**: Trailing stop exit from peak valuation.
-    - **🦋 ELEMENT SURGE**: Element Market NFT volume spike exit.
-- **📱 Cross-Device Favorites Sync**:
-  - Starred watchlists are bound to the connected wallet address (`agent_id_favorites_0x...`).
-  - Automatically synchronizes between desktop and mobile browsers via the 24/7 cloud API (`GET /api/favorites` & `POST /api/favorites`).
-  - Includes a **Mobile QR Code & Shareable Watchlist URL** for instant scanning and sync on phones.
+</details>
 
 ---
 
-### 4. Asset Classification (NFT vs. Token)
-The monitor automatically analyzes contract interfaces on-chain to determine whether a newly detected project is an **NFT** or a **Fungible Token**:
-- **🎨 ERC-721 (NFT Collection)**: Verified via ERC-165 interface id `0x80ac58cd` or `tokenURI(uint256)`. (e.g. *Oathbots*)
-- **🖼️ ERC-1155 (Multi-Token NFT)**: Verified via ERC-165 interface id `0xd9b67a26`.
-- **🪙 BEP-20 (Fungible Token)**: Verified via `decimals()` return value `0 <= dec <= 36`. (e.g. *$JAGENT token*)
-- **⚡ Fair-Mint Contract**: Detects mint contracts that dispense an underlying BEP-20 token via `token()` (e.g. *Jager Mint Contract*).
+## HTTP API
 
-### 5. On-Chain Interest & Traction Engine
-To measure market interest and distinguish between empty hype and real commitment, the monitor runs multi-dimensional reverse-engineering checks:
-1. **On-Chain Holders Base**: Resolves verified on-chain wallet holder count via GoPlus Security API (`holder_count`) and smart contract state.
-2. **Real-Time Purchase Velocity**: Resolves 24h & 1h buy transaction volume (`buys_24h` / `buys_1h`) and net buy pressure via DexScreener DEX feeds.
-3. **DEX Liquidity & Collection Trading Volume (`LP / Vol`)**:
-   - **BEP-20 Tokens**: Automatically resolves PancakeSwap V2 pools for associated tokens, extracting pool depth (WBNB/USD) and live implied token price (e.g. `$14,105`).
-   - **NFT Collections**: Displays real-time secondary marketplace trading volume denominated in BNB (e.g. `0.74 BNB` for *Oathbots* on Element Market). Unlisted / non-traded NFT mints cleanly display `—`.
-4. **Secondary Market & Floor Price Engine**: Tracks secondary trading prices in real-time under the **`Floor / Trade`** column:
-   - **NFT Floor Prices**: Displays live secondary market floor prices in BNB and USD (e.g. `0.00016 BNB ($0.11)` on Element Market).
-   - **DEX Token Prices**: Displays real-time PancakeSwap DEX prices (e.g. `$0.000071` for $BNBS, `$0.0517` for $MARSID).
-   - **Pre-Market / Primary Mints**: Displays `—` for projects still minting that haven't established secondary liquidity yet.
-5. **Mint Velocity & Supply Depletion**: Tracks `totalMinted()` vs. `MAX_SUPPLY()`, calculating the % claimed.
-6. **Deployer Skin-in-the-Game**: Inspects the deployer wallet's BNB balance and transaction count (nonce).
-- **Hype Tiers**: `❄️ COLD` (0-24) | `🌱 WARMING UP` (25-49) | `🔥 HIGH TRACTION` (50-74) | `🚀 VIRAL RUSH` (75-100)
+| Endpoint | Description |
+| :--- | :--- |
+| `GET /api/feed` | Paginated project feed, with filters and delta updates (`since_block`) |
+| `GET /api/stats` | Totals, Agent ID mint count and latest block |
+| `GET /api/projects` | Project list with sorting |
+| `GET /api/top-gainers` | Best-performing projects |
+| `GET /api/smart-drops` | Projects with smart-wallet activity |
+| `GET /api/smart-hunters` | Smart-wallet leaderboard |
+| `GET /api/market-data`, `GET /api/bnb-price` | Market data and BNB price |
+| `GET`/`POST /api/favorites` | Wallet-bound watchlists |
+| `GET /health` | Health check |
 
+---
 
-
-
-## Web Frontend Maintenance
+## Frontend maintenance
 
 ### Refresh the bundled feed snapshot
-The web app paints `feed_snapshot.json` first and falls back to it while the Render backend is cold-starting, then keeps retrying the live feed (after 5 s, 15 s and 30 s) until it answers. Refresh the snapshot before a frontend deploy so the first paint is recent:
+The web app renders `feed_snapshot.json` first, and falls back to it while the backend is cold-starting, retrying the live feed after 5, 15 and 30 seconds. Refresh the snapshot before a frontend deploy so the first paint is recent:
 ```bash
 python3 scripts/refresh_snapshot.py
 ```
 It fetches `/api/feed?limit=150` from the production backend (`--base http://localhost:8080` for a local one) and writes the `projects` array to `feed_snapshot.json`. Commit the updated file with the deploy.
 
-### Frontend build and caching
-Vercel runs `npm run build` (`scripts/build.js`) and serves `dist/`: `app.js` and `style.css` are minified with esbuild and written as content-hashed `assets/app.<hash>.js` / `assets/style.<hash>.css`, which `dist/index.html` loads. `vercel.json` caches `/assets/*` for a year (`immutable`) and keeps `index.html` revalidating, so each deploy is picked up on the next page load. `package.json` pins Node 24 for that build. Local development (`start_local.sh` / `server.py`) serves the unminified root files and needs no build. To check a build locally:
+### Build and caching
+Vercel runs `npm run build` (`scripts/build.js`) and serves `dist/`. `app.js` and `style.css` are minified with esbuild and written as content-hashed `assets/app.<hash>.js` and `assets/style.<hash>.css`, which `dist/index.html` loads. `vercel.json` caches `/assets/*` for a year (`immutable`) and keeps `index.html` revalidating, so each deploy is picked up on the next page load. Local development (`start_local.sh` / `server.py`) serves the unminified files and needs no build. To check a build locally:
 ```bash
 npm run build && npm run check:minified
 ```
+
+---
+
+## Testing
+```bash
+python3 -m pytest
+```
+
+---
+
+## Disclaimer
+BNB Agent Radar is an informational tool. Nothing it shows is financial advice. New contracts can be malicious even when an automated audit passes, so always check a contract yourself before interacting with it.
