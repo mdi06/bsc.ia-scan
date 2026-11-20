@@ -33,12 +33,13 @@ Never run two workers at once: both would scan and write the same records.
 2. **Set up the host** (Linux example, as root):
    ```bash
    useradd -r -m -d /opt/agent-id-monitor agentid
-   sudo -u agentid git clone https://github.com/mdi06/bsc.ia-scan.git /opt/agent-id-monitor
-   cd /opt/agent-id-monitor
+   # /opt/agent-id-monitor is the agentid user's home (it already holds dotfiles), so the code goes in app/
+   sudo -u agentid git clone https://github.com/mdi06/bsc.ia-scan.git /opt/agent-id-monitor/app
+   cd /opt/agent-id-monitor/app
    sudo -u agentid python3 -m venv .venv
    sudo -u agentid .venv/bin/pip install -r requirements.txt
    ```
-3. **Credentials.** Create `/opt/agent-id-monitor/.env.worker` (readable by `agentid` only, `chmod 600`) with the
+3. **Credentials.** Create `/opt/agent-id-monitor/app/.env.worker` (readable by `agentid` only, `chmod 600`) with the
    same values the Render service has:
    ```
    SUPABASE_URL=...
@@ -59,9 +60,14 @@ Never run two workers at once: both would scan and write the same records.
 ## Updating
 
 ```bash
-cd /opt/agent-id-monitor && sudo -u agentid git pull && sudo -u agentid .venv/bin/pip install -r requirements.txt
-systemctl restart agent-id-worker
+cd /opt/agent-id-monitor/app && sudo -u agentid git pull && sudo -u agentid .venv/bin/pip install -q -r requirements.txt
+sudo systemctl restart agent-id-worker
+sudo journalctl -u agent-id-worker --since "3 min ago" --no-pager | grep -E "BSC Block|Error|Traceback" | tail
 ```
+`git status` on the host always shows `agent_id_stats.json` as modified: the worker writes its Agent ID counter there.
+Keep that copy (the pull leaves it alone unless the file changed upstream; if `git pull` refuses, copy it aside, `git
+checkout agent_id_stats.json`, pull, and copy it back). A pull alone changes nothing that is running: restart the
+service.
 Render redeploys the API on its own from `main`; the worker host does not, so pull there after merging worker
 changes.
 
