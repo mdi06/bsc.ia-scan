@@ -1,6 +1,7 @@
 """Two small back-end fixes: /healthz answers from the in-memory cache (no Supabase call), and /api/feed?view=list serves
 a slimmer record for list views (the Secondary tab). A request without view=list must keep getting today's shape."""
 import gzip
+import glob
 import os
 import re
 
@@ -201,10 +202,10 @@ def test_the_stored_records_are_not_changed_and_the_body_is_much_smaller(client)
 # ------------------------------------------------- the frontend does not read what the list view leaves out
 
 def top_level_owner_lines(src):
-    """[(enclosing top-level function, line)] for every line of app.js."""
+    """[(enclosing top-level function, line)] for every line of app.js (and of the feature modules app.js loads)."""
     owner, out = None, []
     for line in src.split("\n"):
-        m = re.match(r"^(?:async\s+)?function\s+([A-Za-z0-9_]+)\s*\(", line)
+        m = re.match(r"^(?:export\s+)?(?:async\s+)?function\s+([A-Za-z0-9_]+)\s*\(", line)
         if m:
             owner = m.group(1)
         out.append((owner, line))
@@ -217,7 +218,9 @@ MODAL_ONLY = {"openModal", "computeHolderDistribution"}
 def test_nothing_outside_the_modal_reads_a_field_the_list_view_drops():
     """If a table row, filter or Pulse card ever starts reading one of these, a slim record would silently lack it:
     this fails first. (They are read only by the token modal; the page loads the full record when it opens.)"""
-    src = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "app.js"), encoding="utf-8").read()
+    here = os.path.dirname(os.path.abspath(__file__))
+    files = [os.path.join(here, "app.js")] + sorted(glob.glob(os.path.join(here, "features", "**", "*.js"), recursive=True))
+    src = "\n".join(open(f, encoding="utf-8").read() for f in files)
     lines = top_level_owner_lines(src)
     for field in api.LIST_VIEW_DROP:
         pat = re.compile(r"(\.|\[['\"])" + re.escape(field) + r"\b")

@@ -15,6 +15,15 @@
 // scripts/check_minified.js and for any index.html cached before a deploy). The repository's own
 // index.html keeps loading the plain app.js / style.css, so local development needs no build.
 //
+// Lazy features: each features/<name>.js is an ES module that app.js loads on first use with loadFeature('<name>')
+// (a dynamic import(), which works from app.js's classic script). They are bundled with code splitting into
+// assets/features/<name>.<hash>.js. Only files directly in features/ are entries; code they share lives in
+// features/lib/ and is emitted once as chunk.<hash>.js. The name -> URL
+// map is compiled into app.js as __FEATURE_MANIFEST__. app.js itself stays a classic, unbundled script, so its
+// top-level names stay global: a feature module reads and assigns them (allDrops, escapeHtml, ...) by plain name, and
+// sets window.<fn> for any function that inline onclick="..." handlers call. Locally, without a build, app.js finds
+// no manifest and imports /features/<name>.js straight from the repository (api.py serves that folder).
+//
 // The copy list is derived from what is served today: .vercelignore removes the Python/backend files,
 // and of what is left, index.html, app.js and style.css reference only the files listed below
 // (index.html: style.css, app.js, icon.svg, /thumbnail-square.png, og-preview.png via the og:image tags;
@@ -68,6 +77,39 @@ function writeSlimSnapshot() {
 const COPY_OPTIONAL = ['data/agent_id_stats.json'];
 
 const ASSETS_DIR = 'assets';
+const FEATURES_DIR = 'features';
+
+// Bundle features/*.js and return { name: '/assets/features/<name>.<hash>.js' }. Empty when there are none yet.
+function buildFeatures() {
+  const srcDir = path.join(ROOT, FEATURES_DIR);
+  const entries = fs.existsSync(srcDir)
+    ? fs.readdirSync(srcDir).filter((f) => f.endsWith('.js')).sort().map((f) => path.join(srcDir, f))
+    : [];
+  if (!entries.length) return {};
+  const outdir = path.join(DIST, ASSETS_DIR, FEATURES_DIR);
+  const result = esbuild.buildSync({
+    entryPoints: entries,
+    outdir,
+    bundle: true,
+    splitting: true,
+    format: 'esm',
+    entryNames: '[name].[hash]',
+    chunkNames: 'chunk.[hash]',
+    minify: true,
+    target: 'es2020',
+    legalComments: 'none',
+    logLevel: 'warning',
+    metafile: true,
+  });
+  const manifest = {};
+  for (const [outPath, info] of Object.entries(result.metafile.outputs)) {
+    if (!info.entryPoint) continue;
+    const name = path.basename(info.entryPoint, '.js');
+    manifest[name] = '/' + path.relative(DIST, path.resolve(ROOT, outPath)).split(path.sep).join('/');
+  }
+  console.log(`features: ${Object.keys(manifest).length} (${Object.keys(manifest).join(', ')})`);
+  return manifest;
+}
 
 function contentHash(buf) {
   return crypto.createHash('sha256').update(buf).digest('hex').slice(0, 10);
@@ -85,9 +127,13 @@ function main() {
   fs.rmSync(DIST, { recursive: true, force: true });
   fs.mkdirSync(DIST, { recursive: true });
 
+  // Features first: their hashed URLs are compiled into app.js, so a changed feature also changes app.js's hash.
+  const featureManifest = buildFeatures();
+
   for (const name of MINIFY) {
     esbuild.buildSync({
       entryPoints: [path.join(ROOT, name)],
+      define: name.endsWith('.js') ? { __FEATURE_MANIFEST__: JSON.stringify(featureManifest) } : undefined,
       outfile: path.join(DIST, name),
       minify: true,
       bundle: false,
