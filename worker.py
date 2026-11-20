@@ -1618,8 +1618,10 @@ def _has_mint(item: dict) -> bool:
 
 def _mint_terms_backfill_candidates(history: list, now: float, batch: int = MINT_TERMS_BACKFILL_BATCH) -> list:
     """Drops with a mint, of any age, whose mint_terms are missing or from an older probe version; and drops from
-    the last 3 days whose terms are older than 2 hours (windows are often set after deploying). Missing first,
-    newest first; nothing tried in the last 6 hours (2 hours for a refresh)."""
+    the last 3 days whose terms are older than 2 hours (windows are often set after deploying). Newest first,
+    whether missing or stale: the rows people see are the newest, so they must not wait behind thousands of old
+    drops with no terms (after the v3 rollout the newest page waited ~2.5 h). Nothing tried in the last 6 hours
+    (2 hours for a refresh)."""
     recent = time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(now - MINT_TERMS_REFRESH_MAX_AGE_DAYS * 86400))
     missing, stale = [], []
     for it in history:
@@ -1640,10 +1642,7 @@ def _mint_terms_backfill_candidates(history: list, now: float, batch: int = MINT
         if now - _mint_terms_tried.get(c, 0.0) < retry_after:
             continue
         bucket.append(it)
-    newest = lambda x: int(x.get("block") or 0)
-    missing.sort(key=newest, reverse=True)
-    stale.sort(key=newest, reverse=True)
-    return (missing + stale)[:batch]
+    return sorted(missing + stale, key=lambda x: int(x.get("block") or 0), reverse=True)[:batch]
 
 
 def run_mint_terms_backfill_loop():
