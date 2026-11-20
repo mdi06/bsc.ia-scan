@@ -10,12 +10,12 @@ Wants=network-online.target
 [Service]
 Type=simple
 User=agentid
-WorkingDirectory=/opt/agent-id-monitor
-EnvironmentFile=/opt/agent-id-monitor/.env.worker
+WorkingDirectory=/opt/agent-id-monitor/app
+EnvironmentFile=/opt/agent-id-monitor/app/.env.worker
 Environment=PYTHONUNBUFFERED=1
 # detected_at is written in UTC (time.gmtime); pin the zone anyway so logs and any localtime call agree.
 Environment=TZ=UTC
-ExecStart=/opt/agent-id-monitor/.venv/bin/python server.py --worker-only
+ExecStart=/opt/agent-id-monitor/app/.venv/bin/python server.py --worker-only
 Restart=always
 RestartSec=10
 
