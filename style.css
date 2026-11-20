@@ -2448,6 +2448,57 @@ th.sortable-th:hover .sort-indicator.dim-hint {
   box-shadow: 0 0 8px rgba(0, 245, 140, 0.4);
 }
 
+/* Mint terms under a row's mint price: slots left, per-wallet limit, timing, who can mint. */
+.mint-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  margin-top: 3px;
+  max-width: 100%;
+}
+
+.mint-chip {
+  font-size: 9.5px;
+  line-height: 1.3;
+  padding: 1px 5px;
+  border-radius: 4px;
+  white-space: nowrap;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: #cbd5e1;
+  background: rgba(148, 163, 184, 0.12);
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  font-weight: 600;
+}
+
+.mint-chip-bad { color: #fca5a5; background: rgba(239, 68, 68, 0.12); border-color: rgba(239, 68, 68, 0.4); }
+.mint-chip-gate-open { color: #86efac; background: rgba(74, 222, 128, 0.12); border-color: rgba(74, 222, 128, 0.4); }
+.mint-chip-gate-agent_id { color: #fde68a; background: rgba(250, 204, 21, 0.12); border-color: rgba(250, 204, 21, 0.4); }
+.mint-chip-gate-whitelist { color: #f0abfc; background: rgba(217, 70, 239, 0.12); border-color: rgba(217, 70, 239, 0.4); }
+
+.mint-terms-box {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 4px 12px;
+  margin: 6px 0 8px;
+  padding: 8px 10px;
+  font-size: 12px;
+  border-radius: 6px;
+  background: rgba(0, 240, 255, 0.04);
+  border: 1px solid rgba(0, 240, 255, 0.18);
+}
+
+.mint-terms-box > .dim:last-child { grid-column: 1 / -1; }
+
+/* No supply cap: a striped "no end" track instead of a solid full bar that reads as sold out. */
+.prog-bar-fill.prog-bar-uncapped,
+.progress-bar-fill.prog-bar-uncapped {
+  background: repeating-linear-gradient(135deg, rgba(56, 189, 248, 0.5) 0 5px, rgba(56, 189, 248, 0.12) 5px 10px);
+  box-shadow: none;
+  opacity: 0.85;
+}
+
 .prog-ratio {
   font-size: 11px;
   color: #94a3b8;
@@ -4426,6 +4477,25 @@ a.inspect-btn:hover {
   .col-price {
     grid-column: 1 / 5;
     grid-row: 4;
+  }
+
+  /* Mint-terms chips: stack under the price and wrap inside the narrow cell instead of being clipped. */
+  .col-price .cell-val {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .col-price .mint-chips {
+    max-width: 100%;
+  }
+
+  .col-price .mint-chip {
+    white-space: normal;
+    font-size: 9px;
+    padding: 1px 4px;
   }
 
   .col-holders {

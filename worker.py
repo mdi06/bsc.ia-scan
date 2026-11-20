@@ -97,6 +97,34 @@ def _enrich_contract_background(rpc: monitor.BscRpcClient, contract_addr: str, d
         print(f"[⚠️ Background Enrichment Notice {contract_addr}] {e}", flush=True)
 
 
+def _has_mint_to_probe(item: dict) -> bool:
+    """A drop whose mint terms are worth reading: it has a mint (not a DEX-traded token) and is not sold out."""
+    if str(item.get("mint_price_str") or "").upper().startswith("DEX"):
+        return False
+    ms, tm = item.get("max_supply"), item.get("total_minted")
+    try:
+        if ms and tm is not None and float(tm) >= float(ms):
+            return False
+    except (TypeError, ValueError):
+        pass
+    return True
+
+
+def _attach_mint_terms(rpc, entry: dict, det: dict, holder: Optional[str] = None) -> None:
+    """Sets entry["mint_terms"] (per-wallet limit, start/end, gate, cap status; see monitor.probe_mint_terms).
+    A failure leaves the field out: the backfill loop retries it later."""
+    if not _has_mint_to_probe(entry):
+        return
+    try:
+        entry["mint_terms"] = monitor.probe_mint_terms(
+            rpc, entry["contract"], entry.get("mint_calldata"), entry.get("mint_value_wei"),
+            code=det.get("_code"), cap_status=det.get("cap_status"),
+            holder_wallets=[holder] if holder else (),
+        )
+    except Exception as exc:
+        print(f"[⚠️ Mint Terms] probe failed for {entry.get('contract')}: {exc}", flush=True)
+
+
 def _process_smart_money_candidate(rpc, rcv, snd, aid, tx_h, b, tx_val, inp, wallet):
     """Analyzes a contract that a tracked smart wallet called, and records it as a new drop."""
     with history_lock:
@@ -175,6 +203,7 @@ def _process_smart_money_candidate(rpc, rcv, snd, aid, tx_h, b, tx_val, inp, wal
             "sniper_badge": "⏳ Tracking",
             "sniper_checklist": []
         }
+        _attach_mint_terms(rpc, new_entry, det, holder=snd)
         with history_lock:
             history = get_shared_history()
             if not any(item.get("contract", "").lower() == rcv.lower() for item in history):
@@ -272,6 +301,7 @@ def _process_registry_candidate(rpc, tx_h, b, snd, tx_val, inp, wallet, known_in
             "sniper_badge": "⏳ Tracking",
             "sniper_checklist": []
         }
+        _attach_mint_terms(rpc, new_entry, det)
         with history_lock:
             history = get_shared_history()
             if not any(x.get("contract", "").lower() == dep_addr for x in history):
@@ -1490,6 +1520,7 @@ def run_proxy_factory_watcher_loop():
                                         "is_factory": is_fac,
                                         "factory_badge": fac_badge
                                     }
+                                    _attach_mint_terms(rpc, new_entry, det)
                                     with history_lock:
                                         history = get_shared_history()
                                         if not any(x.get("contract", "").lower() == cand.lower() for x in history):
@@ -1582,9 +1613,68 @@ def run_agent_id_counter_loop():
         time.sleep(12)
 
 
+MINT_TERMS_BACKFILL_INTERVAL_SEC = 60.0
+MINT_TERMS_BACKFILL_BATCH = 6               # drops probed per cycle (~3 eth_calls + 1 getCode each)
+MINT_TERMS_BACKFILL_MAX_AGE_DAYS = 14       # older drops are rarely still minting
+MINT_TERMS_RETRY_SEC = 6 * 3600
+_mint_terms_tried: Dict[str, float] = {}
+
+
+def _mint_terms_backfill_candidates(history: list, now: float, batch: int = MINT_TERMS_BACKFILL_BATCH) -> list:
+    """Newest drops still mintable that have no mint_terms yet (and were not tried in the last 6 h)."""
+    cutoff = time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(now - MINT_TERMS_BACKFILL_MAX_AGE_DAYS * 86400))
+    out = []
+    for it in history:
+        c = (it.get("contract") or "").lower()
+        if not c or it.get("mint_terms") or not _has_mint_to_probe(it) or monitor.is_system_infra(it):
+            continue
+        if str(it.get("detected_at") or "") < cutoff:
+            continue
+        if now - _mint_terms_tried.get(c, 0.0) < MINT_TERMS_RETRY_SEC:
+            continue
+        out.append(it)
+    out.sort(key=lambda x: int(x.get("block") or 0), reverse=True)
+    return out[:batch]
+
+
+def run_mint_terms_backfill_loop():
+    """Fills mint_terms for drops discovered before the probe existed (or whose probe failed), a few per minute."""
+    time.sleep(20)
+    rpc = monitor.BscRpcClient(monitor.RPC_ENDPOINTS)
+    while True:
+        try:
+            now = time.time()
+            with history_lock:
+                todo = [dict(x) for x in _mint_terms_backfill_candidates(get_shared_history(), now)]
+            for item in todo:
+                c = item["contract"]
+                _mint_terms_tried[c.lower()] = now
+                cap_status = "capped" if item.get("max_supply") else None
+                if cap_status is None:
+                    meta: Dict[str, Any] = {}
+                    monitor.read_supply(rpc, _supply_targets(rpc, c), None, meta=meta)
+                    cap_status = meta.get("cap_status")
+                try:
+                    terms = monitor.probe_mint_terms(rpc, c, item.get("mint_calldata"), item.get("mint_value_wei"),
+                                                     cap_status=cap_status)
+                except Exception as exc:
+                    print(f"[⚠️ Mint Terms Backfill] {c}: {exc}", flush=True)
+                    continue
+                with history_lock:
+                    history = get_shared_history()
+                    for it in history:
+                        if (it.get("contract") or "").lower() == c.lower():
+                            it["mint_terms"] = terms
+                            monitor.save_history(history, delta=it)
+                            break
+        except Exception as exc:
+            print(f"[⚠️ Mint Terms Backfill] cycle failed: {exc}", flush=True)
+        time.sleep(MINT_TERMS_BACKFILL_INTERVAL_SEC)
+
+
 def start_worker():
     """Starts every worker loop in its own thread and restarts any thread that dies."""
-    print("[⚙️ Worker Process] Starting all 6 autonomous discovery & sweeper loops...", flush=True)
+    print("[⚙️ Worker Process] Starting all autonomous discovery & sweeper loops...", flush=True)
     task_specs = [
         (run_discovery_loop, "DiscoveryLoop"),
         (run_market_dynamics_updater_loop, "MarketUpdater"),
@@ -1592,6 +1682,7 @@ def start_worker():
         (run_element_nft_volume_sweeper_loop, "ElementSweeper"),
         (run_proxy_factory_watcher_loop, "ProxyWatcher"),
         (run_agent_id_counter_loop, "AgentIdCounter"),
+        (run_mint_terms_backfill_loop, "MintTermsBackfill"),
         (run_memory_guard_loop, "MemoryGuard")
     ]
     threads = []

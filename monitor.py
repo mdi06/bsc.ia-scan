@@ -837,7 +837,9 @@ def analyze_contract(rpc: BscRpcClient, contract_addr: str, wallet_addr: str) ->
 
     # Check supply (max supply and current minted/total supply)
     token_decimals = classification.get("decimals", 18) if classification.get("category") == "TOKEN" else None
-    info["max_supply"], info["total_minted"] = read_supply(rpc, target_addrs, token_decimals)
+    supply_meta: Dict[str, Any] = {}
+    info["max_supply"], info["total_minted"] = read_supply(rpc, target_addrs, token_decimals, meta=supply_meta)
+    info["cap_status"] = supply_meta.get("cap_status", "unknown")
     # decimals of the token itself (BEP-20) or of the token a Fair-Mint dispenser hands out
     if classification.get("decimals") is not None:
         info["token_decimals"] = classification["decimals"]
@@ -848,6 +850,7 @@ def analyze_contract(rpc: BscRpcClient, contract_addr: str, wallet_addr: str) ->
             t_codes = "".join(rpc.get_code(a) for a in target_addrs).lower()
             if "615f7c" in t_codes:
                 info["max_supply"] = 24444
+                info["cap_status"] = "capped"
         except Exception as exc:
             _log.debug("bytecode max-supply scan failed for %s: %s", contract_addr, exc)
 
@@ -866,6 +869,7 @@ def analyze_contract(rpc: BscRpcClient, contract_addr: str, wallet_addr: str) ->
     info["factory_badge"] = fac_badge
     if full_code and len(full_code) > len(code or ""):
         code = full_code
+    info["_code"] = code   # for probe_mint_terms; not stored (records are built field by field)
     param_wallet = wallet_addr[2:].lower().zfill(64)
 
     # Resolve marketplace URL
@@ -1170,6 +1174,7 @@ def read_supply(
     target_addrs: List[str],
     token_decimals: Optional[int] = None,
     need_max: bool = True,
+    meta: Optional[Dict[str, Any]] = None,
 ) -> Tuple[Optional[float], Optional[float]]:
     """(max_supply, total_minted) read from the first getters that answer on `target_addrs`
     (the contract itself, then its core() companion if it has one).
@@ -1182,7 +1187,9 @@ def read_supply(
       mix item counts and raw token amounts, so this is NOT a token supply and must never feed a market cap.
     For a BEP-20 token totalSupply() is read first: counter-style getters (totalMinted, tokenCount, ...) can
     answer with something that is not the supply.
-    need_max=False skips the cap probes (about 8 calls) when the cap is already known."""
+    need_max=False skips the cap probes (about 8 calls) when the cap is already known.
+    `meta`, if given, gets "cap_status": "capped" (a cap was read), "unlimited" (a cap getter answered with an
+    effectively infinite value) or "unknown" (no cap getter answered), so "no cap" can be told apart from "not read"."""
     def scale(raw: int):
         if token_decimals is None:
             return raw
@@ -1194,8 +1201,9 @@ def read_supply(
 
     max_supply = None
     total_minted = None
+    cap_status = "unknown"
     for t_addr in target_addrs:
-        if need_max and max_supply is None:
+        if need_max and max_supply is None and cap_status != "unlimited":
             for sel_name in MAX_SUPPLY_GETTERS:
                 s_res = rpc.call_contract(t_addr, keccak_selector(sel_name))
                 if s_res and len(s_res) >= 66:
@@ -1203,8 +1211,10 @@ def read_supply(
                         raw_s = int(s_res[:66], 16)
                         if raw_s >= 2**128 or raw_s == (2**256 - 1) or raw_s >= 10**30:
                             max_supply = None  # effectively unlimited
+                            cap_status = "unlimited"
                             break
                         max_supply = scale(raw_s)
+                        cap_status = "capped"
                         break
                     except Exception as exc:
                         _log.debug("could not parse max supply %r for %s: %s", s_res, t_addr, exc)
@@ -1221,7 +1231,131 @@ def read_supply(
                         break
                     except Exception as exc:
                         _log.debug("could not parse total minted %r for %s: %s", m_res, t_addr, exc)
+    if meta is not None:
+        meta["cap_status"] = cap_status
     return max_supply, total_minted
+
+
+# ---------------------------------------------------------------------------------------------- mint terms
+# What a free-mint hunter checks before minting: slots left (from supply), the per-wallet limit, when the mint
+# opens / closes, and who may mint. Read once per drop (probe_mint_terms) and stored as record["mint_terms"]:
+#
+#   {"cap": "capped"|"unlimited"|"unknown", "per_wallet": 10, "per_wallet_getter": "MAX_PER_WALLET()",
+#    "start": 1795000000, "end": 1795600000, "gate": "open"|"agent_id"|"whitelist"|"unknown", "checked_at": ...}
+#
+# Keys with no answer are left out: the UI shows "unknown" rather than a guess. A getter is only called when its
+# selector is in the bytecode (PUSH4 <selector>), so a contract without these functions costs no extra calls.
+
+PER_WALLET_GETTERS = (
+    ("MAX_PER_WALLET()", "0f2cdd6c"), ("maxPerWallet()", "453c2310"), ("maxMintPerWallet()", "b228d925"),
+    ("MAX_MINT_PER_WALLET()", "b19960e6"), ("maxMintsPerWallet()", "f516a2e6"), ("MAX_MINTS_PER_WALLET()", "e78fba22"),
+    ("mintLimitPerWallet()", "e0f9b479"), ("walletLimit()", "3c8463a1"), ("maxPerAddress()", "639814e0"),
+    ("MAX_PER_ADDRESS()", "0aaef285"), ("maxMintPerAddress()", "572849c4"), ("perWalletLimit()", "de42c69e"),
+    ("FREE_PER_WALLET()", "cd90e5af"), ("maxFreePerWallet()", "a7027357"), ("MAX_FREE_PER_WALLET()", "98710d1e"),
+    ("freePerWallet()", "5b74efcf"),
+)
+MINT_START_GETTERS = (
+    ("mintStart()", "255e4685"), ("mintStartTime()", "931e2e49"), ("startTime()", "78e97925"),
+    ("saleStartTime()", "1cbaee2d"), ("publicSaleStart()", "3360caa0"), ("publicSaleStartTime()", "6bb7b1d9"),
+    ("startTimestamp()", "e6fd48bc"), ("mintStartTimestamp()", "a0e389de"), ("saleStart()", "ab0bcc41"),
+)
+MINT_END_GETTERS = (
+    ("mintEnd()", "ea2b4ab2"), ("mintEndTime()", "717a002b"), ("endTime()", "3197cbb6"),
+    ("saleEndTime()", "ed338ff1"), ("publicSaleEnd()", "ec9b5cb2"), ("publicSaleEndTime()", "1e4d185f"),
+    ("endTimestamp()", "a85adeab"), ("mintEndTimestamp()", "cc6ac2f5"), ("saleEnd()", "c10b9358"),
+)
+MERKLE_ROOT_GETTERS = (
+    ("merkleRoot()", "2eb4a7ab"), ("whitelistMerkleRoot()", "aa98e0c6"), ("allowlistMerkleRoot()", "293108e0"),
+    ("whitelistRoot()", "386bfc98"), ("allowlistRoot()", "9c9c6669"), ("presaleMerkleRoot()", "22212e2b"),
+)
+# A wallet with no Agent ID, no whitelist entry and no history: if it can mint, anyone can.
+MINT_PROBE_ADDRESS = "0x000000000000000000000000000000000000c0de"
+_PER_WALLET_MAX = 100_000             # above this a "limit" is a sentinel for "no limit"
+_TS_MIN, _TS_MAX = 1_500_000_000, 4_000_000_000   # plausible unix seconds (2017 .. 2096)
+
+
+def _first_uint_getter(rpc: BscRpcClient, contract: str, code: str, getters, accept) -> Optional[Tuple[str, int]]:
+    """(name, value) of the first getter present in `code` whose answer passes `accept`, else None."""
+    for name, sel in getters:
+        if ("63" + sel) not in code:
+            continue
+        res = rpc.call_contract(contract, "0x" + sel)
+        if not res or len(res) < 66:
+            continue
+        try:
+            val = int(res[:66], 16)
+        except ValueError:
+            continue
+        if accept(val):
+            return name, val
+    return None
+
+
+def simulate_mint(rpc: BscRpcClient, contract: str, calldata: Optional[str], value_wei: Any, sender: str) -> bool:
+    """True if a mint from `sender` would go through right now (eth_call, sender given a large balance by a
+    state override so the price never fails it). False for a revert or when no RPC endpoint could answer."""
+    data = replace_calldata_recipient(calldata, sender) if calldata else "0x"
+    try:
+        value = int(value_wei or 0)
+    except (TypeError, ValueError):
+        value = 0
+    tx = {"from": sender, "to": contract, "data": data or "0x", "value": hex(value)}
+    try:
+        res = rpc.call("eth_call", [tx, "latest", {sender: {"balance": hex(10**21)}}])
+    except Exception:
+        return False
+    return res is not None
+
+
+def probe_mint_terms(
+    rpc: BscRpcClient,
+    contract: str,
+    calldata: Optional[str],
+    value_wei: Any,
+    code: Optional[str] = None,
+    cap_status: Optional[str] = None,
+    holder_wallets: Iterable[str] = (),
+    now: Optional[float] = None,
+) -> Dict[str, Any]:
+    """The mint terms of one drop (see the block comment above). `code` is the (proxy-resolved) bytecode if the
+    caller already has it; `holder_wallets` are Agent ID holders to test the mint from (DEFAULT_WALLET first).
+
+    Gate, from two simulated mints:
+      - a fresh wallet can mint                         -> "open"
+      - a fresh wallet can't, an Agent ID holder can   -> "whitelist" if a Merkle root is set, else "agent_id"
+      - neither can (ended, paused, wrong calldata ...)-> "unknown"
+    A holder's success also shows the RPC answered, so the fresh wallet's failure is a real refusal."""
+    now = time.time() if now is None else now
+    terms: Dict[str, Any] = {"checked_at": int(now)}
+    if cap_status in ("capped", "unlimited", "unknown"):
+        terms["cap"] = cap_status
+    if code is None:
+        code = rpc.get_code(contract)
+    code = (code or "").lower()
+
+    pw = _first_uint_getter(rpc, contract, code, PER_WALLET_GETTERS, lambda v: 0 < v <= _PER_WALLET_MAX)
+    if pw:
+        terms["per_wallet_getter"], terms["per_wallet"] = pw[0], int(pw[1])
+    start = _first_uint_getter(rpc, contract, code, MINT_START_GETTERS, lambda v: _TS_MIN <= v <= _TS_MAX)
+    if start:
+        terms["start"] = int(start[1])
+    end = _first_uint_getter(rpc, contract, code, MINT_END_GETTERS, lambda v: _TS_MIN <= v <= _TS_MAX)
+    if end and (not start or end[1] > start[1]):
+        terms["end"] = int(end[1])
+    merkle = _first_uint_getter(rpc, contract, code, MERKLE_ROOT_GETTERS, lambda v: v != 0)
+
+    gate = "unknown"
+    if simulate_mint(rpc, contract, calldata, value_wei, MINT_PROBE_ADDRESS):
+        gate = "open"
+    else:
+        holders = []
+        for w in [DEFAULT_WALLET, *holder_wallets]:
+            if isinstance(w, str) and len(w) == 42 and w.startswith("0x") and w.lower() not in (h.lower() for h in holders):
+                holders.append(w)
+        if any(simulate_mint(rpc, contract, calldata, value_wei, w) for w in holders[:2]):
+            gate = "whitelist" if merkle else "agent_id"
+    terms["gate"] = gate
+    return terms
 
 
 def supply_for_market_cap(standard: Any, total_minted: Any, max_supply: Any = None) -> Optional[float]:

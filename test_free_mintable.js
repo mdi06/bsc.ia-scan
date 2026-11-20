@@ -34,3 +34,30 @@ assert.strictEqual(app.parseServerUtc('2026-11-14 02:11:57').toISOString(), '202
 assert.strictEqual(app.parseServerUtc('2026-11-14T02:11:57+01:00').toISOString(), '2026-11-14T01:11:57.000Z');
 assert.strictEqual(app.parseServerUtc('LIVE'), null);
 console.log('✔ Server timestamps parse as UTC: PASS');
+
+// Mint terms (record.mint_terms from the worker)
+const now = Date.now() / 1000;
+const t = app.getMintTerms({ max_supply: 1000, total_minted: 11, mint_terms: { per_wallet: 10, gate: 'agent_id', end: now + 7200 } });
+assert.strictEqual(t.slotsLeft, 989);
+assert.strictEqual(t.perWallet, 10);
+assert.strictEqual(t.gate, 'agent_id');
+assert.strictEqual(t.ended, false);
+assert.strictEqual(app.getMintTerms({ max_supply: 0, total_minted: 5 }).slotsLeft, null, 'no cap: slots unknown, not 0');
+assert.strictEqual(app.getMintTerms({ mint_terms: { gate: 'bogus' } }).gate, null, 'unknown gate values are dropped');
+assert.match(app.mintTimingLabel(app.getMintTerms({ mint_terms: { start: now + 7200 } })), /Starts in 2h/);
+assert.strictEqual(app.mintTimingLabel(app.getMintTerms({ mint_terms: { end: now - 10 } })), '⌛ Ended');
+console.log('✔ Mint terms: slots left, limit, gate, timing: PASS');
+
+const chips = app.mintTermsChipsHtml({ mint_price_str: '⭐ FREE', max_supply: 1000, total_minted: 11, mint_terms: { per_wallet: 10, gate: 'open' } });
+assert.match(chips, /989 left/);
+assert.match(chips, /Max 10\/wallet/);
+assert.match(chips, /Open to all/);
+assert.strictEqual(app.mintTermsChipsHtml({ mint_price_str: 'DEX Traded', max_supply: 1000, total_minted: 1 }), '', 'no chips for DEX tokens');
+assert.strictEqual(app.mintTermsChipsHtml({ mint_price_str: '⭐ FREE' }), '', 'nothing known: no chips');
+console.log('✔ Mint terms chips: PASS');
+
+// FREE & MINTABLE NOW honours a known mint window
+assert.strictEqual(app.isFreeMintableNow(free({ mint_terms: { end: now - 60 } })), false, 'ended mint excluded');
+assert.strictEqual(app.isFreeMintableNow(free({ mint_terms: { start: now + 3600 } })), false, 'not started yet excluded');
+assert.strictEqual(app.isFreeMintableNow(free({ mint_terms: { start: now - 60, end: now + 3600 } })), true, 'inside window kept');
+console.log('✔ FREE pill respects the mint window: PASS');
