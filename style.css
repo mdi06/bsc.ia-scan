@@ -2004,6 +2004,14 @@ table {
 
   #dropsTable { min-width: 1760px; }
   #dropsTable.secondary-mode { min-width: 1720px; }
+  /* FREE & MINTABLE NOW: holders/buys, LP/vol and floor/trade are hidden (free mints have no market), so the
+     table is narrower and the mint price column gets room for its terms chips. */
+  #dropsTable.free-mode { min-width: 0; }   /* the 11 visible columns add up to ~1,490 px */
+  #dropsTable.free-mode .col-holders,
+  #dropsTable.free-mode .col-lp,
+  #dropsTable.free-mode .col-floor { display: none; }
+  #dropsTable.free-mode th:nth-child(12),
+  #dropsTable.free-mode td:nth-child(12) { width: 230px; }
 
   #dropsTable th:nth-child(1),
   #dropsTable td:nth-child(1) { width: 34px; max-width: 34px; text-align: center; padding-left: 4px; padding-right: 4px; }
@@ -4499,6 +4507,16 @@ a.inspect-btn:hover {
   .col-price {
     grid-column: 1 / 5;
     grid-row: 4;
+  }
+
+  /* FREE & MINTABLE NOW cards: no holders / status pills (no market for a free mint); the price takes the row. */
+  #dropsTable.free-mode .col-holders,
+  #dropsTable.free-mode .col-floor {
+    display: none !important;
+  }
+
+  #dropsTable.free-mode .col-price {
+    grid-column: 1 / 13;
   }
 
   /* Mint terms: on a card they get their own full-width row (.col-terms), not the narrow price box. */
