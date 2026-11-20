@@ -232,3 +232,29 @@ def test_nothing_outside_the_modal_reads_a_field_the_list_view_drops():
             continue
         for key in sec_pat.findall(line):
             assert key in api.LIST_VIEW_SECURITY_KEEP, (owner, key)
+
+
+# ------------------------------------------------- tokens that are not agent mints never reach the browser
+
+NON_AGENT_TOKENS = {
+    "0xb9e1fd5a02d3a33b25a14d661414e6ed6954a721": ("SOON Token", "SOON"),   # added via a smart wallet's transfer
+    "0x2f8a339b5889ffac4c5a956787cda593b3c36867": ("CoinMarketCap 20 Index DTF", "CMC20"),
+}
+
+
+def test_soon_and_cmc20_are_dropped_from_feed_secondary_and_search(manager):
+    rows = [full_record(i) for i in range(1, 6)]
+    for n, (contract, (name, sym)) in enumerate(NON_AGENT_TOKENS.items()):
+        rows.append(full_record(100 + n, contract=contract, name=name, symbol=sym, lp_usd=550_000.0, holders=20_000,
+                                pair_url="https://dexscreener.com/bsc/0x" + "ee" * 20, secondary_price_usd=0.5))
+    manager.upsert_projects(rows)
+    client = TestClient(api.app)
+    for path in ("/api/feed?limit=150", "/api/feed?filter=secondary&limit=300", "/api/feed?view=list&limit=150",
+                 "/api/projects?search=SOON", "/api/projects?search=CMC20",
+                 *(f"/api/projects?search={c}" for c in NON_AGENT_TOKENS)):
+        r = client.get(path)
+        assert r.status_code == 200, path
+        body = r.json()
+        items = body if isinstance(body, list) else body.get("projects", [])
+        found = {str(p.get("contract", "")).lower() for p in items} & set(NON_AGENT_TOKENS)
+        assert not found, (path, found)

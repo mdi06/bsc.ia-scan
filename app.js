@@ -932,7 +932,9 @@ const BOGUS_SCAM_CONTRACTS = new Set([
   '0x80106cb3ead06659a5ad19df39d9b4733863b9b0', // MSFTB
   '0x5b1910eaad6450e50f816082aa078c41f10c292f', // TSLAB
   '0x431a6136ee1b2f76378c8a14b53ef11ba9099b7a', // AAPLB
-  '0x360d0b00c3c3a9d70e6e7372cfbe85e68b95973c'  // DogeZilla legacy clone
+  '0x360d0b00c3c3a9d70e6e7372cfbe85e68b95973c', // DogeZilla legacy clone
+  '0xb9e1fd5a02d3a33b25a14d661414e6ed6954a721', // SOON Token
+  '0x2f8a339b5889ffac4c5a956787cda593b3c36867'  // CMC20 (CoinMarketCap 20 Index DTF)
 ]);
 const EXCLUDED_NATIVE_PLACEHOLDER = '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee';
 
