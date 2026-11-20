@@ -1333,15 +1333,22 @@ def _sels(names) -> Dict[str, str]:
 _REVERT_KINDS = (
     ("agent_id", ("agent id", "agentid", "agent required", "not agent", "no agent", "not an agent", "agent only",
                   "only agent", "requires agent", "need agent", "must hold", "not registered")),
+    # an admin-only function: the stored call is not a public mint (seen: "not owner" on MACHINES)
+    ("owner_only", ("not owner", "not the owner", "caller is not the owner", "ownable", "only owner", "onlyowner",
+                    "not authorized", "unauthorized", "access denied", "forbidden", "not minter", "caller is not a minter")),
     ("whitelist", ("whitelist", "allowlist", "allow list", "allow-list", "merkle", "invalid proof", "not eligible",
                    "ineligible", "no tokens to claim", "nothing to claim", "not allowed")),
     ("not_open", ("not started", "not yet started", "hasn't started", "has not started", "not open", "not live",
+                  "not on sale", "not for sale", "sale not", "sale is not",
                   "mint closed", "sale closed", "not active", "inactive", "paused")),
     ("ended", ("ended", "has ended", "is over", "expired", "finished")),
     ("sold_out", ("sold out", "max supply", "exceeds supply", "supply exceeded", "exceeds max supply", "minted out")),
-    ("payment", ("fee", "price", "payment", "insufficient", "value", "bnb", "cost", "funds", "pay")),
+    ("payment", ("fee", "price", "payment", "insufficient", "value", "bnb", "cost", "funds", "pay",
+                 "exceeds balance", "exceeds allowance")),
 )
 _REVERT_ERROR_SELECTORS = {
+    **{k: "owner_only" for k in _sels(["OwnableUnauthorizedAccount(address)", "Unauthorized()", "NotOwner()",
+                                       "OnlyOwner()", "NotMinter()", "CallerNotOwner()", "NotAuthorized()"])},
     **{k: "agent_id" for k in _sels(["AgentIdRequired()", "NoAgent()", "NotAgent()", "NotAnAgent()", "NoAgentId()",
                                      "NotAgentHolder()", "AgentRequired()", "MissingAgentId()", "NotRegistered()",
                                      "OnlyAgents()"])},
@@ -1438,7 +1445,7 @@ MINT_OPEN_GETTERS = tuple((n, sel) for sel, n in _sels([
     "saleActive()", "isSaleActive()", "saleIsActive()", "publicSaleActive()", "isPublicSaleActive()",
     "mintIsActive()", "publicMintOpen()", "claimOpen()", "isClaimOpen()",
 ]).items())
-MINT_TERMS_VERSION = 3
+MINT_TERMS_VERSION = 4
 
 # Agent ID checks written into the drop's own bytecode: an agent custom error (PUSH4 <selector>) or the
 # "Agent ID" revert text. On 53 live drops of known gate this matched none of the 20 open ones (no false alarm)
@@ -1503,38 +1510,46 @@ def probe_mint_terms(
     merkle = _first_uint_getter(rpc, contract, code, MERKLE_ROOT_GETTERS, lambda v: v != 0)
 
     agent_in_code = has_agent_id_check(code)
-    if not mint_call_is_usable(calldata, code):
-        terms["mint_call"] = "invalid"
-        terms["gate"] = "agent_id" if agent_in_code else "unknown"
-        if agent_in_code:
-            terms["gate_from"] = "bytecode"
-        return terms
+    holders = []
+    for w in [DEFAULT_WALLET, *holder_wallets]:
+        if isinstance(w, str) and len(w) == 42 and w.startswith("0x") and w.lower() not in (h.lower() for h in holders):
+            holders.append(w)
+    holders = holders[:2]
 
+    reasons: List[Optional[str]] = []
     gate = "unknown"
-    reasons = []
-    ok, why = simulate_mint_detail(rpc, contract, calldata, value_wei, MINT_PROBE_ADDRESS)
-    if ok:
-        gate = "open"
+    stored_ok = mint_call_is_usable(calldata, code)
+    if stored_ok:
+        gate, why, worked = _gate_for_call(rpc, contract, calldata, value_wei, holders, merkle)
+        reasons += why
     else:
-        reasons.append(why)
-        if why in ("agent_id", "whitelist"):
-            gate = why
-        holders = []
-        for w in [DEFAULT_WALLET, *holder_wallets]:
-            if isinstance(w, str) and len(w) == 42 and w.startswith("0x") and w.lower() not in (h.lower() for h in holders):
-                holders.append(w)
-        for w in holders[:2]:
-            h_ok, h_why = simulate_mint_detail(rpc, contract, calldata, value_wei, w)
-            if h_ok:
-                if gate == "unknown" and ok is False:
-                    gate = "whitelist" if merkle else "agent_id"
+        terms["mint_call"] = "invalid"
+
+    # The stored call gave no verdict (unusable, admin-only, or refused for a reason that says nothing about who may
+    # mint): try the contract's own public mint functions. On the live "unknown" drops this settled 12 of 42 (the
+    # stored call was often the deployment bytecode or an owner-only function).
+    if gate == "unknown":
+        tried = 0
+        stored_sel = str(calldata or "").lower()[2:10]
+        for sig, sel, build in ALT_MINT_CALLS:
+            if tried >= _ALT_MINT_MAX or sel == stored_sel or ("63" + sel) not in code:
+                continue
+            tried += 1
+            alt = "0x" + sel + build(DEFAULT_WALLET)
+            alt_gate, why, worked = _gate_for_call(rpc, contract, alt, value_wei, holders, merkle)
+            reasons += why
+            if alt_gate != "unknown":
+                gate = alt_gate
+                terms["alt_call"] = sig
+                if worked:
+                    terms["working_call"] = alt   # a public mint that went through: the worker repairs the stored call
                 break
-            reasons.append(h_why)
-        if gate == "unknown" and "whitelist" in reasons:
-            gate = "whitelist"             # e.g. a claim contract: no allocation for either wallet
-        if gate == "unknown" and agent_in_code:
-            gate = "agent_id"              # the simulation could not decide; the bytecode carries an Agent ID check
-            terms["gate_from"] = "bytecode"
+
+    if gate == "unknown" and "whitelist" in reasons:
+        gate = "whitelist"                 # e.g. a claim contract: no allocation for either wallet
+    if gate == "unknown" and agent_in_code:
+        gate = "agent_id"                  # no simulation decided; the bytecode carries an Agent ID check
+        terms["gate_from"] = "bytecode"
     terms["gate"] = gate
     for state in ("sold_out", "ended", "not_open"):
         if state in reasons:
@@ -1543,6 +1558,56 @@ def probe_mint_terms(
     if "payment" in reasons and gate != "open":
         terms["paid"] = True               # refused for the price: a paid mint whose price was not read
     return terms
+
+
+def _gate_for_call(rpc: BscRpcClient, contract: str, calldata: Optional[str], value_wei: Any, holders: List[str],
+                   merkle: Any) -> Tuple[str, List[Optional[str]], bool]:
+    """(gate, refusal kinds, whether any wallet's mint went through) for one mint call, from a fresh wallet and up
+    to two Agent ID wallets. A refusal for the price, timing, supply or an admin-only function never sets the gate."""
+    reasons: List[Optional[str]] = []
+    ok, why = simulate_mint_detail(rpc, contract, calldata, value_wei, MINT_PROBE_ADDRESS)
+    if ok:
+        return "open", reasons, True
+    reasons.append(why)
+    gate = why if why in ("agent_id", "whitelist") else "unknown"
+    for w in holders:
+        h_ok, h_why = simulate_mint_detail(rpc, contract, calldata, value_wei, w)
+        if h_ok:
+            if gate == "unknown" and ok is False:
+                gate = "whitelist" if merkle else "agent_id"
+            return gate, reasons, True
+        reasons.append(h_why)
+    return gate, reasons, False
+
+
+_QTY = "1".zfill(64)
+_to = lambda w: w[2:].lower().zfill(64)
+# Public mint entry points tried when the stored call gives no verdict, most common first. A recipient argument is
+# DEFAULT_WALLET (replace_calldata_recipient swaps it for the user's wallet at mint time). Only functions present in
+# the bytecode are tried, at most _ALT_MINT_MAX per drop.
+ALT_MINT_CALLS = tuple((sig, keccak_selector(sig)[2:], build) for sig, build in (
+    ("mint()", lambda w: ""),
+    ("mint(uint256)", lambda w: _QTY),
+    ("freeMint()", lambda w: ""),
+    ("mintFree()", lambda w: ""),
+    ("publicMint()", lambda w: ""),
+    ("publicMint(uint256)", lambda w: _QTY),
+    ("freeMint(uint256)", lambda w: _QTY),
+    ("mintPass()", lambda w: ""),
+    ("claim()", lambda w: ""),
+    ("claim(uint256)", lambda w: _QTY),
+    ("mint(uint256,address)", lambda w: _QTY + _to(w)),
+    ("mint(address)", lambda w: _to(w)),
+    ("mintTo(address)", lambda w: _to(w)),
+    ("mint(uint8)", lambda w: _QTY),
+    ("mintNFT()", lambda w: ""),
+    ("buy(uint256)", lambda w: _QTY),
+    ("buy(uint256,address)", lambda w: _QTY + _to(w)),
+    ("purchase(uint256)", lambda w: _QTY),
+    ("join()", lambda w: ""),
+    ("participate()", lambda w: ""),
+) if keccak_selector(sig))
+_ALT_MINT_MAX = 4
 
 
 def supply_for_market_cap(standard: Any, total_minted: Any, max_supply: Any = None) -> Optional[float]:

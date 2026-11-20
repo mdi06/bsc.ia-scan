@@ -2923,9 +2923,10 @@ function mintTimingLabel(terms, nowSec = Date.now() / 1000) {
 function gateBadgeHtml(item) {
   const gate = getMintTerms(item).gate;
   if (gate === 'agent_id') {
-    const how = item.mint_terms && item.mint_terms.gate_from === 'bytecode'
-      ? 'The contract code checks for an Agent ID'
-      : 'A test mint from a wallet without an Agent ID was refused';
+    const from = item.mint_terms && item.mint_terms.gate_from;
+    const how = from === 'bytecode' ? 'The contract code checks for an Agent ID'
+      : from === 'earlier_check' ? 'Seen in an earlier check; the mint is paused or closed now'
+        : 'A test mint from a wallet without an Agent ID was refused';
     return `<span class="gate-badge gate-badge-agent" title="Agent ID needed to mint. ${how}.">🪪 Agent ID</span>`;
   }
   if (gate === 'whitelist') {

@@ -146,3 +146,5 @@ assert.strictEqual(app.isPreMintedToken({ standard: 'BEP-20 Token', max_supply: 
 assert.strictEqual(app.isPreMintedToken({ standard: 'ERC-721', max_supply: 100, total_minted: 100 }), false);
 assert.strictEqual(app.isPreMintedToken({ standard: 'BEP-20 Token', max_supply: 1e10, total_minted: 5e9 }), false);
 console.log('✔ One pre-minted rule for chips, filter and progress: PASS');
+assert.match(app.gateBadgeHtml({ mint_terms: { gate: 'agent_id', gate_from: 'earlier_check' } }), /earlier check/);
+console.log('✔ Badge explains a gate kept from an earlier check: PASS');
