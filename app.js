@@ -2830,7 +2830,7 @@ function isFreeMintDrop(d) {
 const MINT_GATE_LABELS = {
   open: { chip: '🟢 Open to all', title: 'A wallet with no Agent ID and no whitelist could mint in a simulation' },
   agent_id: { chip: '🪪 Agent ID needed', title: 'An Agent ID wallet could mint in a simulation; a wallet without one was refused' },
-  whitelist: { chip: '📝 Whitelist', title: 'Only allow-listed wallets (Merkle root set) could mint in a simulation' },
+  whitelist: { chip: '📝 Whitelist', title: 'Only eligible wallets (allow list or claim allocation) could mint in a simulation' },
 };
 
 function getMintTerms(item, nowSec = Date.now() / 1000) {
@@ -2851,6 +2851,11 @@ function getMintTerms(item, nowSec = Date.now() / 1000) {
     gate: MINT_GATE_LABELS[t.gate] ? t.gate : null,
     cap: t.cap || (ms > 0 ? 'capped' : null),
     checked: Boolean(item && item.mint_terms),
+    closed: t.open === false || t.state === 'not_open',   // mintOpen()-style switch off, or refused as "not open"
+    stateEnded: t.state === 'ended',
+    stateSoldOut: t.state === 'sold_out',
+    invalidCall: t.mint_call === 'invalid',                // the stored call can't mint (e.g. deployment bytecode)
+    paidUnknown: Boolean(t.paid),                          // refused for the price: paid, price not read
   };
 }
 
@@ -2864,6 +2869,8 @@ function formatDurationShort(sec) {
 
 // Timing chip text: "Starts in 2h" / "Ends in 5h" / "Ended", or '' if neither time is known.
 function mintTimingLabel(terms, nowSec = Date.now() / 1000) {
+  if (terms.stateEnded) return '⌛ Ended';
+  if (terms.closed && !terms.notStarted) return '⏸ Mint closed';
   if (terms.notStarted) return `⏳ Starts in ${formatDurationShort(terms.start - nowSec)}`;
   if (terms.ended) return '⌛ Ended';
   if (terms.end) return `⌛ Ends in ${formatDurationShort(terms.end - nowSec)}`;
@@ -2877,7 +2884,7 @@ function canMintFromCard(item) {
   if (!item || String(item.mint_price_str || '').toUpperCase().includes('DEX')) return false;
   if (isDropSoldOut(item) || isDropUnsafeToMint(item) || item.is_paused) return false;
   const terms = getMintTerms(item);
-  if (terms.ended || terms.slotsLeft === 0) return false;
+  if (terms.ended || terms.stateEnded || terms.stateSoldOut || terms.slotsLeft === 0 || terms.invalidCall) return false;
   return Boolean(item.mint_calldata || item.has_mint_calldata || isFreeMintDrop(item));
 }
 
@@ -2886,7 +2893,7 @@ function cardTermsCellHtml(item) {
   const terms = getMintTerms(item);
   let btn = '';
   if (canMintFromCard(item)) {
-    const label = terms.notStarted ? '⏳ Mint soon' : (isFreeMintDrop(item) ? '⚡ Mint free' : '⚡ Mint');
+    const label = (terms.notStarted || terms.closed) ? '⏳ Mint soon' : (isFreeMintDrop(item) ? '⚡ Mint free' : '⚡ Mint');
     btn = `<button type="button" class="card-mint-btn" onclick="openMintFromCard('${item.contract}', event)" title="Open the mint panel for this drop">${label}</button>`;
   }
   return (chips || btn) ? `<td class="col-terms">${chips}${btn}</td>` : '<td class="col-terms"></td>';
@@ -2910,14 +2917,18 @@ function mintTermsChipsHtml(item) {
   if (!item || String(item.mint_price_str || '').toUpperCase().includes('DEX')) return '';
   const terms = getMintTerms(item);
   const chips = [];
-  if (terms.slotsLeft !== null) {
+  if (terms.paidUnknown && String(item.mint_price_str || '').toUpperCase().includes('TBD')) {
+    chips.push('<span class="mint-chip" title="The contract refused a free mint for its price; the price itself could not be read">💎 Paid</span>');
+  }
+  if (terms.stateSoldOut) chips.push('<span class="mint-chip mint-chip-bad">Sold out</span>');
+  else if (terms.slotsLeft !== null) {
     chips.push(terms.slotsLeft > 0
       ? `<span class="mint-chip" title="Max supply minus minted">${formatCount(terms.slotsLeft)} left</span>`
       : '<span class="mint-chip mint-chip-bad">Sold out</span>');
   }
   if (terms.perWallet !== null) chips.push(`<span class="mint-chip" title="Per-wallet limit read from the contract">Max ${formatCount(terms.perWallet)}/wallet</span>`);
   const timing = mintTimingLabel(terms);
-  if (timing) chips.push(`<span class="mint-chip${terms.ended ? ' mint-chip-bad' : ''}" title="Mint window read from the contract">${timing}</span>`);
+  if (timing) chips.push(`<span class="mint-chip${(terms.ended || terms.stateEnded || terms.closed) ? ' mint-chip-bad' : ''}" title="Mint window read from the contract">${timing}</span>`);
   if (terms.gate) chips.push(`<span class="mint-chip mint-chip-gate-${terms.gate}" title="${MINT_GATE_LABELS[terms.gate].title}">${MINT_GATE_LABELS[terms.gate].chip}</span>`);
   return chips.length ? `<div class="mint-chips">${chips.join('')}</div>` : '';
 }
@@ -2951,7 +2962,8 @@ function isDropUnsafeToMint(d) {
 function isFreeMintableNow(d) {
   if (!isFreeMintDrop(d) || isDropSoldOut(d) || isDropUnsafeToMint(d) || (d && d.is_paused)) return false;
   const terms = getMintTerms(d);
-  return !terms.ended && !terms.notStarted;   // a known mint window that is closed or not open yet
+  // a known mint window that is closed or not open yet, a switched-off mint, or one the contract says is over / full
+  return !terms.ended && !terms.notStarted && !terms.closed && !terms.stateEnded && !terms.stateSoldOut;
 }
 
 // Back to the ALL pill, More Filters cleared. Used when the user switches tabs.

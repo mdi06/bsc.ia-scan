@@ -2494,7 +2494,7 @@ th.sortable-th:hover .sort-indicator.dim-hint {
   border: 1px solid rgba(0, 240, 255, 0.18);
 }
 
-.mint-terms-box > .dim:last-child { grid-column: 1 / -1; }
+.mint-terms-box > .dim { grid-column: 1 / -1; }
 
 /* No supply cap: a striped "no end" track instead of a solid full bar that reads as sold out. */
 .prog-bar-fill.prog-bar-uncapped,

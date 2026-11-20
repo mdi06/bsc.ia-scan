@@ -1617,24 +1617,43 @@ MINT_TERMS_BACKFILL_INTERVAL_SEC = 60.0
 MINT_TERMS_BACKFILL_BATCH = 6               # drops probed per cycle (~3 eth_calls + 1 getCode each)
 MINT_TERMS_BACKFILL_MAX_AGE_DAYS = 14       # older drops are rarely still minting
 MINT_TERMS_RETRY_SEC = 6 * 3600
+# Creators often set the mint window / switch after deploying (seen: saleStart() set minutes after discovery), so
+# drops from the last 3 days are re-read every 2 hours. Terms from an older probe version are re-read once.
+MINT_TERMS_REFRESH_SEC = 2 * 3600
+MINT_TERMS_REFRESH_MAX_AGE_DAYS = 3
 _mint_terms_tried: Dict[str, float] = {}
 
 
 def _mint_terms_backfill_candidates(history: list, now: float, batch: int = MINT_TERMS_BACKFILL_BATCH) -> list:
-    """Newest drops still mintable that have no mint_terms yet (and were not tried in the last 6 h)."""
+    """Drops still mintable whose mint_terms are missing, from an older probe version, or (for drops from the last
+    3 days) older than 2 hours. Missing first, newest first; nothing tried in the last 6 hours."""
     cutoff = time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(now - MINT_TERMS_BACKFILL_MAX_AGE_DAYS * 86400))
-    out = []
+    recent = time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(now - MINT_TERMS_REFRESH_MAX_AGE_DAYS * 86400))
+    missing, stale = [], []
     for it in history:
         c = (it.get("contract") or "").lower()
-        if not c or it.get("mint_terms") or not _has_mint_to_probe(it) or monitor.is_system_infra(it):
+        if not c or not _has_mint_to_probe(it) or monitor.is_system_infra(it):
             continue
-        if str(it.get("detected_at") or "") < cutoff:
+        detected = str(it.get("detected_at") or "")
+        if detected < cutoff:
             continue
-        if now - _mint_terms_tried.get(c, 0.0) < MINT_TERMS_RETRY_SEC:
+        terms = it.get("mint_terms") if isinstance(it.get("mint_terms"), dict) else None
+        if terms is None:
+            bucket = missing
+        elif int(terms.get("v") or 1) < monitor.MINT_TERMS_VERSION:
+            bucket = stale
+        elif detected >= recent and now - float(terms.get("checked_at") or 0) >= MINT_TERMS_REFRESH_SEC:
+            bucket = stale
+        else:
             continue
-        out.append(it)
-    out.sort(key=lambda x: int(x.get("block") or 0), reverse=True)
-    return out[:batch]
+        retry_after = MINT_TERMS_RETRY_SEC if bucket is missing else MINT_TERMS_REFRESH_SEC
+        if now - _mint_terms_tried.get(c, 0.0) < retry_after:
+            continue
+        bucket.append(it)
+    newest = lambda x: int(x.get("block") or 0)
+    missing.sort(key=newest, reverse=True)
+    stale.sort(key=newest, reverse=True)
+    return (missing + stale)[:batch]
 
 
 def run_mint_terms_backfill_loop():
@@ -1649,7 +1668,8 @@ def run_mint_terms_backfill_loop():
             for item in todo:
                 c = item["contract"]
                 _mint_terms_tried[c.lower()] = now
-                cap_status = "capped" if item.get("max_supply") else None
+                prev = item.get("mint_terms") if isinstance(item.get("mint_terms"), dict) else {}
+                cap_status = "capped" if item.get("max_supply") else prev.get("cap")
                 if cap_status is None:
                     meta: Dict[str, Any] = {}
                     monitor.read_supply(rpc, _supply_targets(rpc, c), None, meta=meta)

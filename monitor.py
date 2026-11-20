@@ -384,6 +384,32 @@ class BscRpcClient:
                 continue
         return None
 
+    def call_with_revert(self, method: str, params: list) -> Tuple[Optional[bool], Any]:
+        """Like call(), but tells a revert apart from "no endpoint answered":
+        (True, result) on success, (False, {"message": ..., "data": ...}) on a revert, (None, None) if every
+        endpoint failed. Used to read why a simulated mint is refused (an Error(string) or a custom error)."""
+        payload_dict = {"jsonrpc": "2.0", "id": 1, "method": method, "params": params}
+        headers = {"Content-Type": "application/json", "User-Agent": "Mozilla/5.0"}
+        for _ in range(len(self.endpoints)):
+            rpc_url = self.endpoints[self.current_idx]
+            try:
+                if self._http_client is not None:
+                    data = self._http_client.post(rpc_url, json=payload_dict, headers=headers).json()
+                else:
+                    req = urllib.request.Request(rpc_url, data=json.dumps(payload_dict).encode("utf-8"), headers=headers)
+                    with urllib.request.urlopen(req, timeout=4) as resp:
+                        data = json.loads(resp.read().decode("utf-8"))
+                if "error" in data:
+                    err = data["error"] if isinstance(data["error"], dict) else {"message": str(data["error"])}
+                    msg = str(err.get("message") or "")
+                    if "revert" in msg.lower():
+                        return False, {"message": msg, "data": err.get("data")}
+                    raise RuntimeError(msg)
+                return True, data.get("result")
+            except Exception:
+                self.current_idx = (self.current_idx + 1) % len(self.endpoints)
+        return None, None
+
     def get_block_number(self) -> Optional[int]:
         res = self.call("eth_blockNumber", [])
         if res:
@@ -1291,20 +1317,124 @@ def _first_uint_getter(rpc: BscRpcClient, contract: str, code: str, getters, acc
     return None
 
 
-def simulate_mint(rpc: BscRpcClient, contract: str, calldata: Optional[str], value_wei: Any, sender: str) -> bool:
-    """True if a mint from `sender` would go through right now (eth_call, sender given a large balance by a
-    state override so the price never fails it). False for a revert or when no RPC endpoint could answer."""
+def _sels(names) -> Dict[str, str]:
+    """{selector hex without 0x: name} for custom-error / getter names (keccak; empty if unavailable)."""
+    out = {}
+    for n in names:
+        sel = keccak_selector(n)
+        if sel:
+            out[sel[2:].lower()] = n
+    return out
+
+
+# Why a simulated mint was refused, from its revert: an Error(string) message or a custom error selector.
+# Seen on live drops: "Agent ID required", AgentIdRequired(), NoAgent(); "No tokens to claim", NothingToClaim();
+# "wrong fee", InsufficientBNB(), OverMaxCost() (the price, not who may mint).
+_REVERT_KINDS = (
+    ("agent_id", ("agent id", "agentid", "agent required", "not agent", "no agent", "not an agent", "agent only",
+                  "only agent", "requires agent", "need agent", "must hold", "not registered")),
+    ("whitelist", ("whitelist", "allowlist", "allow list", "allow-list", "merkle", "invalid proof", "not eligible",
+                   "ineligible", "no tokens to claim", "nothing to claim", "not allowed")),
+    ("not_open", ("not started", "not yet started", "hasn't started", "has not started", "not open", "not live",
+                  "mint closed", "sale closed", "not active", "inactive", "paused")),
+    ("ended", ("ended", "has ended", "is over", "expired", "finished")),
+    ("sold_out", ("sold out", "max supply", "exceeds supply", "supply exceeded", "exceeds max supply", "minted out")),
+    ("payment", ("fee", "price", "payment", "insufficient", "value", "bnb", "cost", "funds", "pay")),
+)
+_REVERT_ERROR_SELECTORS = {
+    **{k: "agent_id" for k in _sels(["AgentIdRequired()", "NoAgent()", "NotAgent()", "NotAnAgent()", "NoAgentId()",
+                                     "NotAgentHolder()", "AgentRequired()", "MissingAgentId()", "NotRegistered()",
+                                     "OnlyAgents()"])},
+    **{k: "whitelist" for k in _sels(["NotWhitelisted()", "NotAllowlisted()", "NotAllowListed()", "InvalidProof()",
+                                      "InvalidMerkleProof()", "NotEligible()", "NothingToClaim()", "NoTokensToClaim()"])},
+    **{k: "not_open" for k in _sels(["MintNotStarted()", "SaleNotStarted()", "MintNotActive()", "MintNotOpen()",
+                                     "SaleNotActive()", "NotStarted()", "NotActive()", "EnforcedPause()", "Paused()"])},
+    **{k: "ended" for k in _sels(["MintEnded()", "SaleEnded()", "MintClosed()", "Ended()"])},
+    **{k: "sold_out" for k in _sels(["SoldOut()", "MaxSupplyReached()", "MaxSupplyExceeded()", "ExceedsMaxSupply()"])},
+    **{k: "payment" for k in _sels(["InsufficientBNB()", "OverMaxCost()", "InsufficientPayment()", "WrongPrice()",
+                                    "IncorrectPayment()", "InvalidPayment()", "InsufficientFunds()", "WrongValue()",
+                                    "InsufficientValue()", "IncorrectPrice()", "InsufficientFee()", "WrongFee()"])},
+}
+
+
+def classify_revert(revert: Any) -> Optional[str]:
+    """"agent_id" / "whitelist" / "not_open" / "ended" / "sold_out" / "payment" for a revert from
+    BscRpcClient.call_with_revert, or None when it says nothing we recognise. Agent / whitelist phrases are checked
+    before payment ones: "Agent ID required" must not read as a price problem."""
+    if not isinstance(revert, dict):
+        return None
+    data = revert.get("data")
+    if isinstance(data, dict):            # some nodes nest it: {"data": {"data": "0x..."}}
+        data = data.get("data")
+    text = str(revert.get("message") or "")
+    if isinstance(data, str) and data.startswith("0x") and len(data) >= 10:
+        sel = data[2:10].lower()
+        if sel == "08c379a0":             # Error(string)
+            try:
+                text += " " + bytes.fromhex(data[138:]).rstrip(b"\0").decode("utf-8", "ignore")
+            except ValueError:
+                pass
+        elif sel in _REVERT_ERROR_SELECTORS:
+            return _REVERT_ERROR_SELECTORS[sel]
+    low = text.lower()
+    for kind, phrases in _REVERT_KINDS:
+        if any(p in low for p in phrases):
+            return kind
+    return None
+
+
+def simulate_mint_detail(rpc: BscRpcClient, contract: str, calldata: Optional[str], value_wei: Any,
+                         sender: str) -> Tuple[Optional[bool], Optional[str]]:
+    """(True, None) if a mint from `sender` would go through right now; (False, kind) for a refusal, with kind
+    from classify_revert (None if unrecognised); (None, None) when no RPC endpoint answered. eth_call with a state
+    override giving the sender a large balance, so a known price never fails it."""
     data = replace_calldata_recipient(calldata, sender) if calldata else "0x"
     try:
         value = int(value_wei or 0)
     except (TypeError, ValueError):
         value = 0
-    tx = {"from": sender, "to": contract, "data": data or "0x", "value": hex(value)}
+    params = [{"from": sender, "to": contract, "data": data or "0x", "value": hex(value)}, "latest",
+              {sender: {"balance": hex(10**21)}}]
     try:
-        res = rpc.call("eth_call", [tx, "latest", {sender: {"balance": hex(10**21)}}])
+        if hasattr(rpc, "call_with_revert"):
+            ok, res = rpc.call_with_revert("eth_call", params)
+            if ok is None:
+                return None, None
+            return (True, None) if ok else (False, classify_revert(res))
+        return (True, None) if rpc.call("eth_call", params) is not None else (False, None)
     except Exception:
+        return None, None
+
+
+def simulate_mint(rpc: BscRpcClient, contract: str, calldata: Optional[str], value_wei: Any, sender: str) -> bool:
+    """True if a mint from `sender` would go through right now (see simulate_mint_detail)."""
+    return simulate_mint_detail(rpc, contract, calldata, value_wei, sender)[0] is True
+
+
+def mint_call_is_usable(calldata: Optional[str], code: str) -> bool:
+    """False when the stored mint call cannot be a call to this contract: contract creation bytecode (a deploy
+    transaction's input, 0x6080... / 0x6101..., kilobytes long), or a function selector absent from the contract's
+    (proxy-resolved) bytecode. A plain value transfer ("0x") is fine. Unknown bytecode is given the benefit of the doubt."""
+    cd = str(calldata or "").lower()
+    if cd in ("", "0x", "recv", "receive", "none"):
+        return True
+    if not cd.startswith("0x") or len(cd) < 10:
+        return True
+    if len(cd) > 2000 and cd[2:4] in ("60", "61") and "6040" in cd[2:20]:
         return False
-    return res is not None
+    sel = cd[2:10]
+    if not code:
+        return True
+    return ("63" + sel) in code or (sel.startswith("00") and ("62" + sel[2:]) in code)
+
+
+# A boolean "is the mint switched on" getter (seen: mintOpen() on 8 of 29 live drops). 0 = closed, 1 = open.
+MINT_OPEN_GETTERS = tuple((n, sel) for sel, n in _sels([
+    "mintOpen()", "isMintOpen()", "mintActive()", "isMintActive()", "mintEnabled()", "mintingEnabled()",
+    "saleActive()", "isSaleActive()", "saleIsActive()", "publicSaleActive()", "isPublicSaleActive()",
+    "mintIsActive()", "publicMintOpen()", "claimOpen()", "isClaimOpen()",
+]).items())
+MINT_TERMS_VERSION = 2
 
 
 def probe_mint_terms(
@@ -1320,17 +1450,24 @@ def probe_mint_terms(
     """The mint terms of one drop (see the block comment above). `code` is the (proxy-resolved) bytecode if the
     caller already has it; `holder_wallets` are Agent ID holders to test the mint from (DEFAULT_WALLET first).
 
-    Gate, from two simulated mints:
-      - a fresh wallet can mint                         -> "open"
-      - a fresh wallet can't, an Agent ID holder can   -> "whitelist" if a Merkle root is set, else "agent_id"
-      - neither can (ended, paused, wrong calldata ...)-> "unknown"
-    A holder's success also shows the RPC answered, so the fresh wallet's failure is a real refusal."""
+    Gate, from simulated mints and why they were refused:
+      - a fresh wallet can mint                                   -> "open"
+      - a fresh wallet is refused for its Agent ID / allow list   -> "agent_id" / "whitelist" (from the revert)
+      - a fresh wallet can't, an Agent ID holder can             -> "whitelist" if a Merkle root is set, else "agent_id"
+      - otherwise                                                 -> "unknown"
+    A refusal for the price, timing or supply says nothing about who may mint, so it never sets the gate; timing
+    and supply refusals are recorded as "state" ("not_open" / "ended" / "sold_out").
+    "open": False when a mintOpen()-style switch reads 0. "mint_call": "invalid" when the stored call can't work."""
     now = time.time() if now is None else now
-    terms: Dict[str, Any] = {"checked_at": int(now)}
+    terms: Dict[str, Any] = {"checked_at": int(now), "v": MINT_TERMS_VERSION}
     if cap_status in ("capped", "unlimited", "unknown"):
         terms["cap"] = cap_status
     if code is None:
-        code = rpc.get_code(contract)
+        raw = rpc.get_code(contract)
+        try:
+            code = resolve_full_bytecode(rpc, contract, raw)[0] or raw
+        except Exception:
+            code = raw
     code = (code or "").lower()
 
     pw = _first_uint_getter(rpc, contract, code, PER_WALLET_GETTERS, lambda v: 0 < v <= _PER_WALLET_MAX)
@@ -1342,19 +1479,45 @@ def probe_mint_terms(
     end = _first_uint_getter(rpc, contract, code, MINT_END_GETTERS, lambda v: _TS_MIN <= v <= _TS_MAX)
     if end and (not start or end[1] > start[1]):
         terms["end"] = int(end[1])
+    switch = _first_uint_getter(rpc, contract, code, MINT_OPEN_GETTERS, lambda v: v in (0, 1))
+    if switch:
+        terms["open"] = bool(switch[1])
     merkle = _first_uint_getter(rpc, contract, code, MERKLE_ROOT_GETTERS, lambda v: v != 0)
 
+    if not mint_call_is_usable(calldata, code):
+        terms["mint_call"] = "invalid"
+        terms["gate"] = "unknown"
+        return terms
+
     gate = "unknown"
-    if simulate_mint(rpc, contract, calldata, value_wei, MINT_PROBE_ADDRESS):
+    reasons = []
+    ok, why = simulate_mint_detail(rpc, contract, calldata, value_wei, MINT_PROBE_ADDRESS)
+    if ok:
         gate = "open"
     else:
+        reasons.append(why)
+        if why in ("agent_id", "whitelist"):
+            gate = why
         holders = []
         for w in [DEFAULT_WALLET, *holder_wallets]:
             if isinstance(w, str) and len(w) == 42 and w.startswith("0x") and w.lower() not in (h.lower() for h in holders):
                 holders.append(w)
-        if any(simulate_mint(rpc, contract, calldata, value_wei, w) for w in holders[:2]):
-            gate = "whitelist" if merkle else "agent_id"
+        for w in holders[:2]:
+            h_ok, h_why = simulate_mint_detail(rpc, contract, calldata, value_wei, w)
+            if h_ok:
+                if gate == "unknown" and ok is False:
+                    gate = "whitelist" if merkle else "agent_id"
+                break
+            reasons.append(h_why)
+        if gate == "unknown" and "whitelist" in reasons:
+            gate = "whitelist"             # e.g. a claim contract: no allocation for either wallet
     terms["gate"] = gate
+    for state in ("sold_out", "ended", "not_open"):
+        if state in reasons:
+            terms["state"] = state
+            break
+    if "payment" in reasons and gate != "open":
+        terms["paid"] = True               # refused for the price: a paid mint whose price was not read
     return terms
 
 
