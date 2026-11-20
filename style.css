@@ -2448,6 +2448,11 @@ th.sortable-th:hover .sort-indicator.dim-hint {
   box-shadow: 0 0 8px rgba(0, 245, 140, 0.4);
 }
 
+/* The card-only terms row (see @media max-width 768px): not part of the desktop table. */
+.col-terms {
+  display: none;
+}
+
 /* Mint terms under a row's mint price: slots left, per-wallet limit, timing, who can mint. */
 .mint-chips {
   display: flex;
@@ -4479,23 +4484,54 @@ a.inspect-btn:hover {
     grid-row: 4;
   }
 
-  /* Mint-terms chips: stack under the price and wrap inside the narrow cell instead of being clipped. */
-  .col-price .cell-val {
-    display: flex;
-    flex-direction: column;
-    align-items: flex-start;
-    min-width: 0;
-    max-width: 100%;
-  }
-
+  /* Mint terms: on a card they get their own full-width row (.col-terms), not the narrow price box. */
   .col-price .mint-chips {
-    max-width: 100%;
+    display: none;
   }
 
-  .col-price .mint-chip {
-    white-space: normal;
-    font-size: 9px;
-    padding: 1px 4px;
+  .col-terms {
+    display: flex !important;
+    grid-column: 1 / -1;
+    grid-row: 5;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+    min-width: 0;
+  }
+
+  .col-terms:empty {
+    display: none !important;
+  }
+
+  .col-terms .mint-chips {
+    margin-top: 0;
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  .col-terms .mint-chip {
+    font-size: 10.5px;
+    padding: 2px 6px;
+  }
+
+  .card-mint-btn {
+    flex: 0 0 auto;
+    margin-left: auto;
+    min-height: 34px;
+    padding: 6px 14px;
+    border-radius: 6px;
+    border: 1px solid var(--color-green);
+    background: rgba(0, 245, 140, 0.12);
+    color: var(--color-green);
+    font-weight: 800;
+    font-size: 12.5px;
+    letter-spacing: 0.3px;
+    white-space: nowrap;
+    cursor: pointer;
+  }
+
+  .card-mint-btn:active {
+    background: rgba(0, 245, 140, 0.25);
   }
 
   .col-holders {

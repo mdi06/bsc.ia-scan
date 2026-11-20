@@ -2870,6 +2870,41 @@ function mintTimingLabel(terms, nowSec = Date.now() / 1000) {
   return '';
 }
 
+// Mobile card only (hidden on desktop, where the chips sit under the mint price): a full-width row with the mint
+// terms chips and a one-tap Mint button that opens the token modal at its Mint section. No button for drops that
+// cannot be minted (DEX-only, sold out, ended) or that are flagged unsafe (honeypot / rug / drain / high risk).
+function canMintFromCard(item) {
+  if (!item || String(item.mint_price_str || '').toUpperCase().includes('DEX')) return false;
+  if (isDropSoldOut(item) || isDropUnsafeToMint(item) || item.is_paused) return false;
+  const terms = getMintTerms(item);
+  if (terms.ended || terms.slotsLeft === 0) return false;
+  return Boolean(item.mint_calldata || item.has_mint_calldata || isFreeMintDrop(item));
+}
+
+function cardTermsCellHtml(item) {
+  const chips = mintTermsChipsHtml(item);
+  const terms = getMintTerms(item);
+  let btn = '';
+  if (canMintFromCard(item)) {
+    const label = terms.notStarted ? '⏳ Mint soon' : (isFreeMintDrop(item) ? '⚡ Mint free' : '⚡ Mint');
+    btn = `<button type="button" class="card-mint-btn" onclick="openMintFromCard('${item.contract}', event)" title="Open the mint panel for this drop">${label}</button>`;
+  }
+  return (chips || btn) ? `<td class="col-terms">${chips}${btn}</td>` : '<td class="col-terms"></td>';
+}
+
+// Card Mint button: open the token modal and jump straight to its Mint section.
+function openMintFromCard(contract, ev) {
+  if (ev) { ev.stopPropagation(); if (typeof ev.preventDefault === 'function') ev.preventDefault(); }
+  const c = String(contract || '').toLowerCase();
+  const item = allDrops.find(d => String((d && d.contract) || '').toLowerCase() === c);
+  if (!item) return;
+  trackAnalytics('card_mint_clicked', { token_symbol: item.symbol || '', is_free: isFreeMintDrop(item) });
+  Promise.resolve(openModal(item, 'card_mint')).then(() => {
+    setTimeout(() => jumpToModalSection('mint_action', item.symbol || '', isFreeMintDrop(item), false, isDropSoldOut(item)), 60);
+  });
+}
+if (typeof window !== 'undefined') window.openMintFromCard = openMintFromCard;
+
 // The compact terms line under a row's mint price: slots left · per wallet · timing · gate.
 function mintTermsChipsHtml(item) {
   if (!item || String(item.mint_price_str || '').toUpperCase().includes('DEX')) return '';
@@ -6199,6 +6234,7 @@ function renderTable(keepLimit = false) {
         <td class="col-price" data-label="MINT PRICE"><span class="cell-val">${cellPrice}</span></td>
         <td class="col-floor" data-label="${isSec ? 'DEX PRICE' : (isPort ? 'RECOMMEND' : 'STATUS')}"><span class="cell-val">${cellFloor}</span></td>
         <td class="col-action">${actBtn}</td>
+        ${(!isSec && !isPort) ? cardTermsCellHtml(item) : ''}
       `;
     }
     // Unchanged row: keep the <tr> already in the DOM (its click handler and cell listeners stay attached).
@@ -6559,6 +6595,7 @@ function appendNextTableBatch() {
         <td class="col-price" data-label="MINT PRICE"><span class="cell-val">${cellPrice}</span></td>
         <td class="col-floor" data-label="${isSec ? 'DEX PRICE' : (isPort ? 'RECOMMEND' : 'STATUS')}"><span class="cell-val">${cellFloor}</span></td>
         <td class="col-action">${actBtn}</td>
+        ${(!isSec && !isPort) ? cardTermsCellHtml(item) : ''}
       `;
     }
     fragment.appendChild(tr);
@@ -11194,6 +11231,8 @@ if (typeof module !== 'undefined' && module.exports) {
     getMintTerms,
     mintTermsChipsHtml,
     mintTimingLabel,
-    smartWalletCount
+    smartWalletCount,
+    canMintFromCard,
+    cardTermsCellHtml
   };
 }

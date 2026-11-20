@@ -81,3 +81,19 @@ assert.deepStrictEqual(app.getFilteredDrops().map(d => d.contract), ['0xe', '0xa
 app.setSortMode('NEWEST');
 app.setActiveFilter('ALL');
 console.log('✔ Sort by smart-wallet mints: PASS');
+
+// Mobile card: terms row + one-tap Mint button
+const mintable = free({ contract: '0xm1', mint_calldata: '0x1249c58b', max_supply: 100, total_minted: 10, mint_terms: { gate: 'open', per_wallet: 2 } });
+assert.strictEqual(app.canMintFromCard(mintable), true);
+assert.strictEqual(app.canMintFromCard(free({ mint_calldata: '0x1249c58b', risk_level: 'RUG' })), false, 'no button on a rug');
+assert.strictEqual(app.canMintFromCard(free({ mint_calldata: '0x1249c58b', standard: 'ERC721', max_supply: 5, total_minted: 5 })), false, 'no button when sold out');
+assert.strictEqual(app.canMintFromCard(free({ mint_calldata: '0x1249c58b', mint_terms: { end: now - 5 } })), false, 'no button after the window');
+assert.strictEqual(app.canMintFromCard({ mint_price_str: 'DEX Traded', mint_calldata: '0x' }), false, 'no button on a DEX-only token');
+const cell = app.cardTermsCellHtml(mintable);
+assert.match(cell, /class="col-terms"/);
+assert.match(cell, /90 left/);
+assert.match(cell, /openMintFromCard\('0xm1', event\)/);
+assert.match(cell, /Mint free/);
+assert.match(app.cardTermsCellHtml(free({ mint_calldata: '0x1249c58b', mint_terms: { start: now + 3600 } })), /Mint soon/);
+assert.strictEqual(app.cardTermsCellHtml({ mint_price_str: 'DEX Traded' }), '<td class="col-terms"></td>', 'empty cell (hidden by :empty)');
+console.log('✔ Mobile card terms row and Mint button: PASS');
