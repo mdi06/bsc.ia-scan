@@ -4,8 +4,10 @@ unrelated contract: USD1, SOON, Tether Gold and the like.
 
 Selection, all of which must hold:
   1. the record's signals say "Discovered via smart wallet ..." (so it did not come from the registry/deploy path);
-  2. the contract is NOT linked to the Agent ID registry or a tracked launchpad on-chain
-     (monitor.contract_links_to_registry, the same test the worker now applies before creating such a record).
+  2. the transaction that created the record (its `tx_hash`) was a plain approve / transfer-style call
+     (monitor.is_non_mint_call, the same test the worker now applies before creating such a record);
+  3. the contract is NOT linked to the Agent ID registry or a tracked launchpad on-chain
+     (monitor.contract_links_to_registry). This is an extra safety net: anything linked is kept.
 
 Dry run by default: nothing is deleted, the candidates are printed and written to a CSV for review.
 
@@ -47,18 +49,33 @@ def smart_wallet_discovered(rec: dict) -> bool:
     return any(MARKER in str(s).lower() for s in (rec.get("signals") or []))
 
 
+def trigger_was_non_mint(rpc, rec: dict) -> bool:
+    """True when the record's creating transaction was an approve/transfer-style call."""
+    tx_hash = rec.get("tx_hash")
+    if not tx_hash:
+        return False
+    tx = rpc.call("eth_getTransactionByHash", [tx_hash])
+    return bool(tx) and monitor.is_non_mint_call(tx.get("input"))
+
+
 def find_candidates(records: list, rpc, workers: int = 8, limit: int = 0) -> list:
     pool = [r for r in records if smart_wallet_discovered(r) and str(r.get("contract") or "").startswith("0x")]
     if limit:
         pool = pool[:limit]
 
     def check(rec):
-        return rec, monitor.contract_links_to_registry(rpc, rec["contract"])
+        """True when the record would not be created today and nothing links it to the registry."""
+        try:
+            if not trigger_was_non_mint(rpc, rec):
+                return rec, False
+            return rec, not monitor.contract_links_to_registry(rpc, rec["contract"])
+        except Exception:
+            return rec, False   # when in doubt, keep the record
 
     out = []
     with ThreadPoolExecutor(max_workers=workers) as ex:
-        for i, (rec, linked) in enumerate(ex.map(check, pool), 1):
-            if not linked:
+        for i, (rec, flagged) in enumerate(ex.map(check, pool), 1):
+            if flagged:
                 out.append(rec)
             if i % 200 == 0:
                 print(f"  checked {i}/{len(pool)} (candidates so far: {len(out)})", file=sys.stderr, flush=True)
@@ -105,7 +122,7 @@ def main(argv=None) -> int:
     rpc = monitor.BscRpcClient(monitor.RPC_ENDPOINTS)
     cands = find_candidates(records, rpc, args.workers, args.limit)
     write_csv(args.csv, cands)
-    print(f"{len(cands)} candidates (not linked to the registry) -> {args.csv}")
+    print(f"{len(cands)} candidates (approve/transfer-triggered, not registry-linked) -> {args.csv}")
     for r in cands[:25]:
         print(f"  {r.get('contract')}  {str(r.get('symbol') or '')[:12]:12}  {str(r.get('name') or '')[:34]}")
     if len(cands) > 25:
