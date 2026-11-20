@@ -2824,6 +2824,8 @@ function isFreeMintDrop(d) {
   return Boolean(d.has_free_mint || pStr.includes('FREE') || (vWei === 0 && Number(d.mint_price_bnb || 0) === 0 && !pStr.includes('PAID') && !pStr.includes('DEX') && !pStr.includes('TBD')));
 }
 
+const UNCAPPED_MINT_TITLE = 'No max supply found: an open edition, or a cap the radar could not read';
+
 // Cap filled. Mirrors computeSniperReady: an ERC-20 whose whole supply was pre-minted (minted === supply with no
 // mint-cap markers) is NOT sold out — that is the token's supply, not a filled mint.
 function isDropSoldOut(d) {
@@ -5910,16 +5912,14 @@ function renderTable(keepLimit = false) {
         </div>
       `;
     } else {
-      // Uncapped Open Edition / Fair Mint (No fixed supply cap)
-      let tag = std.includes('BEP-20') ? 'TOKEN' : 'OPEN';
-      let color = std.includes('BEP-20') ? 'var(--color-green)' : 'var(--color-cyan)';
-      let fillWidth = tm > 0 ? '100%' : '0%';
-      let mintsLabel = tm > 0 ? `${formatCount(tm)} (Open)` : '0 (Open)';
+      // No max supply found: an open edition, or a cap the worker could not read. Drawn as a striped bar, never a
+      // full one: a solid 100% bar next to "MINT 1%" rows read as sold out, the opposite of what it means.
+      const mintsLabel = `${formatCount(tm)} minted`;
       progBar = `
-        <div class="progress-cell">
-          <span class="prog-tag" style="color: ${color}; font-weight:700;">${tag} FAIR</span>
+        <div class="progress-cell" title="${UNCAPPED_MINT_TITLE}">
+          <span class="prog-tag" style="color: var(--color-cyan); font-weight:700;">NO CAP</span>
           <div class="prog-bar-container">
-            <div class="prog-bar-fill" style="width: ${fillWidth}; background: linear-gradient(90deg, ${color}, rgba(56, 189, 248, 0.4));"></div>
+            <div class="prog-bar-fill prog-bar-uncapped" style="width: 100%;"></div>
           </div>
           <span class="prog-ratio" style="color: var(--text-white); font-weight: 600;">${mintsLabel}</span>
         </div>
@@ -6242,19 +6242,20 @@ function appendNextTableBatch() {
     } else if (ms > 0) {
       progPct = Math.min(100, Math.max(0, (tm / ms) * 100));
       progLabel = `TOKEN ${progPct.toFixed(0)}%`;
-    } else if (tm > 0) {
-      progLabel = 'OPEN FAIR';
+    } else {
+      progLabel = `NO CAP · ${formatCount(tm)} minted`;   // striped bar below, not a full "100%" one
       progPct = 100;
     }
+    const uncapped = !(ms > 0);
     if (ms > 0 && tm >= ms) {
       progLabel = 'SOLD 100%';
       progPct = 100;
     }
-    const progColor = progPct >= 99 ? 'var(--color-magenta)' : (progPct >= 50 ? 'var(--color-green)' : 'var(--color-cyan)');
+    const progColor = uncapped ? 'var(--color-cyan)' : progPct >= 99 ? 'var(--color-magenta)' : (progPct >= 50 ? 'var(--color-green)' : 'var(--color-cyan)');
     const progBar = `
       <div style="font-size: 10px; color: ${progColor}; font-weight: 700; margin-bottom: 2px;">${progLabel}</div>
-      <div class="progress-bar-wrap">
-        <div class="progress-bar-fill" style="width: ${progPct}%; background: ${progColor};"></div>
+      <div class="progress-bar-wrap"${uncapped ? ` title="${UNCAPPED_MINT_TITLE}"` : ''}>
+        <div class="progress-bar-fill${uncapped ? ' prog-bar-uncapped' : ''}" style="width: ${progPct}%;${uncapped ? '' : ` background: ${progColor};`}"></div>
       </div>
     `;
 

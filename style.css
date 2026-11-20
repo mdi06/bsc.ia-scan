@@ -2448,6 +2448,14 @@ th.sortable-th:hover .sort-indicator.dim-hint {
   box-shadow: 0 0 8px rgba(0, 245, 140, 0.4);
 }
 
+/* No supply cap: a striped "no end" track instead of a solid full bar that reads as sold out. */
+.prog-bar-fill.prog-bar-uncapped,
+.progress-bar-fill.prog-bar-uncapped {
+  background: repeating-linear-gradient(135deg, rgba(56, 189, 248, 0.5) 0 5px, rgba(56, 189, 248, 0.12) 5px 10px);
+  box-shadow: none;
+  opacity: 0.85;
+}
+
 .prog-ratio {
   font-size: 11px;
   color: #94a3b8;
