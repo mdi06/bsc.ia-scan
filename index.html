@@ -383,6 +383,10 @@
                     <span>LP Depth ($)</span>
                     <span class="opt-check">✓</span>
                   </li>
+                  <li class="custom-option" data-value="SMART_DESC" role="option" aria-selected="false">
+                    <span>🧠 Smart Wallet Mints</span>
+                    <span class="opt-check">✓</span>
+                  </li>
                 </ul>
                 <!-- Hidden native select for fallback & state management -->
                 <select id="sortSelect" class="visually-hidden" aria-hidden="true" tabindex="-1">
@@ -396,6 +400,7 @@
                   <option value="HOLDERS">Holders Count</option>
                   <option value="PROGRESS">Mint Progress %</option>
                   <option value="LP">LP Depth ($)</option>
+                  <option value="SMART_DESC">🧠 Smart Wallet Mints</option>
                 </select>
               </div>
             </div>
@@ -722,7 +727,7 @@
               <th class="col-fav" title="Favorites">⭐</th>
               <th class="col-num">#</th>
               <th class="col-block" id="thColBlock">BLOCK</th>
-              <th class="col-sm">🧠</th>
+              <th class="col-sm" id="thColSm">🧠</th>
               <th class="col-project" id="thColProject">PROJECT</th>
               <th class="col-type">TYPE</th>
               <th class="col-safety">SAFETY</th>

@@ -61,3 +61,23 @@ assert.strictEqual(app.isFreeMintableNow(free({ mint_terms: { end: now - 60 } })
 assert.strictEqual(app.isFreeMintableNow(free({ mint_terms: { start: now + 3600 } })), false, 'not started yet excluded');
 assert.strictEqual(app.isFreeMintableNow(free({ mint_terms: { start: now - 60, end: now + 3600 } })), true, 'inside window kept');
 console.log('✔ FREE pill respects the mint window: PASS');
+
+// Sort by smart-wallet mints (🧠 column), inside the FREE filter
+assert.strictEqual(app.smartWalletCount({ smart_wallets: ['a', 'b'], smart_minters: ['x'] }), 2);
+assert.strictEqual(app.smartWalletCount({ smart_minters: ['x', 'y', 'z'] }), 3);
+assert.strictEqual(app.smartWalletCount({}), 0);
+app.setAllDrops([
+  free({ contract: '0xa', block: 3, smart_wallets: ['w1'] }),
+  free({ contract: '0xb', block: 2, smart_wallets: ['w1', 'w2', 'w3', 'w4', 'w5'] }),
+  free({ contract: '0xc', block: 5 }),
+  free({ contract: '0xd', block: 1, smart_minters: ['w1', 'w2', 'w3'] }),
+  free({ contract: '0xe', block: 4, smart_wallets: ['w1'] }),
+]);
+app.setActiveFilter('FREE');
+app.setSortMode('SMART_DESC');
+assert.deepStrictEqual(app.getFilteredDrops().map(d => d.contract), ['0xb', '0xd', '0xe', '0xa', '0xc'], 'most smart wallets first, ties newest first, none last');
+app.setSortMode('SMART_ASC');
+assert.deepStrictEqual(app.getFilteredDrops().map(d => d.contract), ['0xe', '0xa', '0xd', '0xb', '0xc'], 'fewest first, none still last');
+app.setSortMode('NEWEST');
+app.setActiveFilter('ALL');
+console.log('✔ Sort by smart-wallet mints: PASS');

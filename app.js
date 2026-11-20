@@ -4801,6 +4801,19 @@ function getFilteredDrops() {
     list.sort((a, b) => String(b.name || b.symbol || '').localeCompare(String(a.name || a.symbol || '')));
   } else if (sortMode === 'BLOCK_ASC') {
     list.sort((a, b) => Number(a.block || 0) - Number(b.block || 0));
+  } else if (sortMode === 'SMART_DESC' || sortMode === 'SMART_ASC') {
+    // Smart-wallet mints (the 🧠 / 🔥N column). Ties: newest first. Ascending keeps drops with none at the bottom.
+    const dir = sortMode === 'SMART_DESC' ? -1 : 1;
+    list.sort((a, b) => {
+      const sa = smartWalletCount(a);
+      const sb = smartWalletCount(b);
+      if (sa !== sb) {
+        if (!sa) return 1;
+        if (!sb) return -1;
+        return dir * (sa - sb);
+      }
+      return Number(b.block || 0) - Number(a.block || 0);
+    });
   } else {
     // NEWEST / Default
     if (activeTab === 'SECONDARY' && sortMode === 'NEWEST') {
@@ -5513,6 +5526,13 @@ if (typeof window !== 'undefined') {
 const TABLE_RENDER_CHUNK = 60;
 let tableRenderLimit = 60;
 
+// How many smart wallets minted a drop: the count the 🧠 / 🔥N badge shows (smart_wallets, else smart_minters).
+function smartWalletCount(d) {
+  if (!d) return 0;
+  if (Array.isArray(d.smart_wallets) && d.smart_wallets.length > 0) return d.smart_wallets.length;
+  return Array.isArray(d.smart_minters) ? d.smart_minters.length : 0;
+}
+
 // Universal Table Header Sorter with Bi-Directional Indicator
 function makeHeaderSortable(el, baseLabel, descMode, ascMode, customToggle) {
   if (!el) return;
@@ -5664,6 +5684,8 @@ function renderTable(keepLimit = false) {
   if (thColBlock) makeHeaderSortable(thColBlock, 'BLOCK', 'NEWEST', 'BLOCK_ASC');
   if (thColProject) makeHeaderSortable(thColProject, 'PROJECT', 'NAME_ASC', 'NAME_DESC');
   if (thColInterest) makeHeaderSortable(thColInterest, 'INTEREST', 'INTEREST_DESC', 'INTEREST_ASC');
+  const thColSm = document.getElementById('thColSm');
+  if (thColSm) makeHeaderSortable(thColSm, '🧠', 'SMART_DESC', 'SMART_ASC');
 
   const dropsTable = document.getElementById('dropsTable');
   if (dropsTable && dropsTable.classList) {
@@ -10114,6 +10136,7 @@ if (typeof window !== 'undefined') {
 
 function setSortMode(val) {
   sortMode = val;
+  if (typeof document === 'undefined') return;
   const nativeSelect = document.getElementById('sortSelect');
   if (nativeSelect) nativeSelect.value = val;
 
@@ -11170,6 +11193,7 @@ if (typeof module !== 'undefined' && module.exports) {
     parseServerUtc,
     getMintTerms,
     mintTermsChipsHtml,
-    mintTimingLabel
+    mintTimingLabel,
+    smartWalletCount
   };
 }
