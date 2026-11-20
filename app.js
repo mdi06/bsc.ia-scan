@@ -9396,12 +9396,36 @@ let hasLoadedLiveFeed = false;
 let liveFeedRetryIndex = 0;
 let liveFeedRetryTimer = null;
 function scheduleLiveFeedRetry() {
-  if (hasLoadedLiveFeed || liveFeedRetryTimer || liveFeedRetryIndex >= LIVE_FEED_RETRY_DELAYS_MS.length) return;
+  if (hasLoadedLiveFeed) return;
+  watchForBackendWake();
+  if (liveFeedRetryTimer || liveFeedRetryIndex >= LIVE_FEED_RETRY_DELAYS_MS.length) return;
   const delay = LIVE_FEED_RETRY_DELAYS_MS[liveFeedRetryIndex++];
   liveFeedRetryTimer = setTimeout(() => {
     liveFeedRetryTimer = null;
     fetchDrops().catch(() => {});
   }, delay);
+}
+
+// Render's free instance sleeps after 15 minutes without traffic and takes ~35 s to answer again; the failed live-feed
+// request has already woken it. Rather than guess when it is up (the back-off above can land just before it is, then
+// wait 15-30 s more), hold one long /healthz request open and reload the live data the moment it answers. Once per
+// page: if the feed still fails after that, the back-off carries on as before.
+const BACKEND_WAKE_TIMEOUT_MS = 90000;
+let backendWakeWatchStarted = false;
+function watchForBackendWake() {
+  if (backendWakeWatchStarted || hasLoadedLiveFeed) return;
+  backendWakeWatchStarted = true;
+  fetchWithTimeout(`${BACKEND_URL}/healthz`, { cache: 'no-store' }, BACKEND_WAKE_TIMEOUT_MS)
+    .then((res) => {
+      if (!res || !res.ok || hasLoadedLiveFeed) return;
+      if (liveFeedRetryTimer) {
+        clearTimeout(liveFeedRetryTimer);
+        liveFeedRetryTimer = null;
+      }
+      fetchDrops().catch(() => {});
+      fetchOverviewStats().catch(() => {});
+    })
+    .catch(() => {});
 }
 
 // Fetch drops from 24/7 Render cloud scanner using lightweight initial feed (/api/feed?limit=150)
