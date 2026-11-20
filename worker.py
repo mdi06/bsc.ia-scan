@@ -104,6 +104,11 @@ def _process_smart_money_candidate(rpc, rcv, snd, aid, tx_h, b, tx_val, inp, wal
         if any(item.get("contract", "").lower() == rcv.lower() for item in history):
             return
     try:
+        # A tracked wallet approving or transferring an existing token (USD1, SOON, Tether Gold, ...) says nothing about
+        # a new drop. Calls that can mint, and plain value sends to payable mint contracts, still go through.
+        if monitor.is_non_mint_call(inp):
+            return
+
         det = monitor.analyze_contract(rpc, rcv, wallet)
         cls = det.get("classification", {})
         if monitor.is_system_infra({"contract": rcv, "classification": cls, "name": det.get("name"), "symbol": det.get("symbol"), "max_supply": det.get("max_supply"), "total_minted": det.get("total_minted")}):
