@@ -22,7 +22,13 @@ function mintTermsModalHtml(item) {
   const gate = terms.gate
     ? `<strong title="${MINT_GATE_LABELS[terms.gate].title}">${MINT_GATE_LABELS[terms.gate].chip}</strong>`
     : (terms.checked ? '<span class="dim" title="Neither a fresh wallet nor an Agent ID wallet could mint in a simulation (ended, paused or unusual calldata)">Unknown</span>' : unknown);
-  const note = terms.checked ? '' : '<div class="dim" style="font-size: 10px; margin-top: 4px;">Not scanned yet: the radar reads these from the contract within a few minutes of discovery.</div>';
+  const notes = [];
+  if (!terms.checked) notes.push('Not scanned yet: the radar reads these from the contract within a few minutes of discovery.');
+  if (terms.invalidCall) notes.push('⚠️ The recorded mint call is not a function of this contract (it looks like deployment code): mint from the project\'s own site.');
+  if (terms.closed) notes.push('⏸ The contract reports its mint as closed right now.');
+  if (terms.stateEnded) notes.push('⌛ The contract refused a test mint because the mint has ended.');
+  if (terms.paidUnknown && String(item.mint_price_str || '').toUpperCase().includes('TBD')) notes.push('💎 Not free: the contract refused a test mint for its price, but the price could not be read.');
+  const note = notes.map(n => `<div class="dim" style="font-size: 10px; margin-top: 4px;">${n}</div>`).join('');
   return `
       <div class="mint-terms-box">
         <div><span class="dim">Slots left:</span> ${slots}</div>

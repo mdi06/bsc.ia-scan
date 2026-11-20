@@ -97,3 +97,30 @@ assert.match(cell, /Mint free/);
 assert.match(app.cardTermsCellHtml(free({ mint_calldata: '0x1249c58b', mint_terms: { start: now + 3600 } })), /Mint soon/);
 assert.strictEqual(app.cardTermsCellHtml({ mint_price_str: 'DEX Traded' }), '<td class="col-terms"></td>', 'empty cell (hidden by :empty)');
 console.log('✔ Mobile card terms row and Mint button: PASS');
+
+// Probe v2 states: switched-off mint, refused as ended / sold out, unusable mint call, paid with unread price
+const closedDrop = free({ mint_calldata: '0x1249c58b', mint_terms: { gate: 'open', open: false } });
+assert.strictEqual(app.isFreeMintableNow(closedDrop), false, 'switched-off mint is not mintable now');
+assert.match(app.mintTermsChipsHtml(closedDrop), /Mint closed/);
+assert.match(app.cardTermsCellHtml(closedDrop), /Mint soon/);
+const endedDrop = free({ mint_calldata: '0x1249c58b', mint_terms: { gate: 'unknown', state: 'ended' } });
+assert.strictEqual(app.isFreeMintableNow(endedDrop), false);
+assert.strictEqual(app.canMintFromCard(endedDrop), false);
+assert.match(app.mintTermsChipsHtml(endedDrop), /Ended/);
+const soldDrop = free({ mint_calldata: '0x1249c58b', mint_terms: { gate: 'unknown', state: 'sold_out' } });
+assert.strictEqual(app.isFreeMintableNow(soldDrop), false);
+assert.match(app.mintTermsChipsHtml(soldDrop), /Sold out/);
+const badCall = free({ mint_calldata: '0x6080', mint_terms: { gate: 'unknown', mint_call: 'invalid' } });
+assert.strictEqual(app.canMintFromCard(badCall), false, 'no Mint button for an unusable mint call');
+const paidTbd = { mint_price_str: 'TBD', mint_calldata: '0x1249c58b', mint_terms: { gate: 'agent_id', paid: true } };
+assert.match(app.mintTermsChipsHtml(paidTbd), /💎 Paid/);
+assert.match(app.mintTermsChipsHtml(paidTbd), /Agent ID needed/);
+console.log('✔ Probe v2 states (closed, ended, sold out, unusable call, paid): PASS');
+
+// Agent ID badge next to the name, on every row
+assert.match(app.gateBadgeHtml({ mint_terms: { gate: 'agent_id' } }), /🪪 Agent ID/);
+assert.match(app.gateBadgeHtml({ mint_terms: { gate: 'agent_id', gate_from: 'bytecode' } }), /contract code checks/);
+assert.match(app.gateBadgeHtml({ mint_terms: { gate: 'whitelist' } }), /Whitelist/);
+assert.strictEqual(app.gateBadgeHtml({ mint_terms: { gate: 'open' } }), '');
+assert.strictEqual(app.gateBadgeHtml({}), '');
+console.log('✔ Agent ID badge next to the drop name: PASS');

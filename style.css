@@ -2448,6 +2448,23 @@ th.sortable-th:hover .sort-indicator.dim-hint {
   box-shadow: 0 0 8px rgba(0, 245, 140, 0.4);
 }
 
+/* Who may mint, next to the drop's name (gateBadgeHtml). Never shrinks: the name truncates first. */
+.gate-badge {
+  display: inline-block;
+  flex: 0 0 auto;
+  margin-left: 6px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.35;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+.gate-badge-agent { color: #fde68a; background: rgba(250, 204, 21, 0.12); border: 1px solid rgba(250, 204, 21, 0.45); }
+.gate-badge-wl { color: #f0abfc; background: rgba(217, 70, 239, 0.12); border: 1px solid rgba(217, 70, 239, 0.45); }
+
 /* The card-only terms row (see @media max-width 768px): not part of the desktop table. */
 .col-terms {
   display: none;
@@ -2494,7 +2511,7 @@ th.sortable-th:hover .sort-indicator.dim-hint {
   border: 1px solid rgba(0, 240, 255, 0.18);
 }
 
-.mint-terms-box > .dim:last-child { grid-column: 1 / -1; }
+.mint-terms-box > .dim { grid-column: 1 / -1; }
 
 /* No supply cap: a striped "no end" track instead of a solid full bar that reads as sold out. */
 .prog-bar-fill.prog-bar-uncapped,
