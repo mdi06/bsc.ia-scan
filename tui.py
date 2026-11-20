@@ -2127,7 +2127,7 @@ def run_live_monitor(rpc: BscRpcClient, wallet: str, plain: bool = False):
                                             **linked_market_fields(mkt),
                                             "mint_calldata": mint_cd,
                                             "signals": mkt.get("signals", [f"Discovered via smart wallet {aid}"]),
-                                            "detected_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+                                            "detected_at": time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime()),
                                             "smart_wallets": [aid],
                                             "smart_minters": [aid]
                                         }
@@ -2217,7 +2217,7 @@ def run_live_monitor(rpc: BscRpcClient, wallet: str, plain: bool = False):
                                     **linked_market_fields(mkt),
                                     "mint_calldata": det.get("mint_calldata", "0x1249c58b"),
                                     "signals": mkt.get("signals", []),
-                                    "detected_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+                                    "detected_at": time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime()),
                                     "is_proxy_clone": det.get("is_proxy_clone", False),
                                     "proxy_type": det.get("proxy_type"),
                                     "master_implementation": det.get("master_implementation"),
@@ -3568,7 +3568,7 @@ def scan_smart_wallets(rpc: BscRpcClient, wallet: str, blocks: int = 200):
                 "pair_url": "",
                 "mint_calldata": c_data["mint_calldata"],
                 "signals": [f"Discovered via {w_cnt} tracked smart wallets ({', '.join(list(c_data['agent_ids'])[:3])})"],
-                "detected_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+                "detected_at": time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime()),
                 "smart_wallets": list(c_data["agent_ids"]),
                 "smart_minters": list(c_data["agent_ids"])
             }

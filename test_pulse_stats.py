@@ -11,7 +11,7 @@ NOW = 1_800_000_000.0
 
 
 def stamp(seconds_ago):
-    return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(NOW - seconds_ago))
+    return time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(NOW - seconds_ago))
 
 
 def drop(i, ago, **kw):

@@ -67,12 +67,11 @@ export function openModal(item, source = 'direct') {
   const sellCalldata = !isNft ? buildPancakeSwapSellCalldata(cAddr, rawHeldWei, userWallet) : '';
   const sellCliSnippet = !isNft ? `baw contract-call preview --binanceChainId 56 --from ${userWallet} --to ${PANCAKE_ROUTER_V2} --value 0 --inputData ${sellCalldata} --json` : '';
 
-  // Same rule as computeItemProfit / the table: free = has_free_mint or a "FREE" price string. A zero price alone
-  // is NOT "free": DEX-traded records have no mint, and TBD records have an unknown cost.
+  // Same rule as the table and the FREE pill (isFreeMintDrop). DEX-traded records have no mint at all.
   const mintBnbNum = Number(item.mint_price_bnb || 0);
   const mintPriceUpper = String(item.mint_price_str || '').toUpperCase();
   const isDexTraded = mintPriceUpper.includes('DEX');
-  const isFree = !isDexTraded && (Boolean(item.has_free_mint) || mintPriceUpper.includes('FREE'));
+  const isFree = !isDexTraded && isFreeMintDrop(item);
   const hasPaidMint = !isDexTraded && !isFree && (mintBnbNum > 0 || Number(valWei) > 0);
   const paidBnb = mintBnbNum > 0 ? mintBnbNum : Number(valWei) / 1e18;
   const mintCostLabel = isDexTraded ? 'DEX TRADED'
@@ -96,14 +95,33 @@ export function openModal(item, source = 'direct') {
   }
 
   const holdersCount = Number(item.holders || 0);
-  let whaleConcentrationBadge = '<span class="whale-alert-pill" style="background: rgba(74, 222, 128, 0.15); border: 1px solid var(--color-green); color: var(--color-green);" title="Distributed holder base across unique wallets">🟢 Distributed</span>';
-  let whaleConcentrationDesc = `Clean holder distribution across ${formatCount(holdersCount)} agent wallets. Low single-holder dump risk.`;
-  if (holdersCount > 0 && holdersCount < 30) {
-    whaleConcentrationBadge = '<span class="whale-alert-pill" style="background: rgba(239, 68, 68, 0.15); border: 1px solid var(--color-red); color: var(--color-red);" title="Extreme Whale Concentration (>50% Top 10 wallets)">🚨 Extreme (>50%)</span>';
-    whaleConcentrationDesc = `High dump risk: Supply is concentrated in only ${holdersCount} wallets. Early snipers hold outsized control.`;
-  } else if (holdersCount >= 30 && holdersCount < 100) {
-    whaleConcentrationBadge = '<span class="whale-alert-pill" style="background: rgba(250, 204, 21, 0.15); border: 1px solid var(--color-yellow); color: var(--color-yellow);" title="Moderate Distribution (25%-49% Top 10 wallets)">🟡 Moderate (25-49%)</span>';
-    whaleConcentrationDesc = `Medium wallet clustering across ${holdersCount} wallets. Monitor large seller outflows.`;
+  // Real top-10 share from the security scan (security.top10_pct). Holder count alone says nothing about
+  // concentration: a fresh drop with 1 holder at 0 minted used to read "Extreme (>50%)", a false alarm.
+  const top10Raw = item.security ? Number(item.security.top10_pct) : NaN;
+  const hasTop10 = Number.isFinite(top10Raw) && top10Raw > 0;
+  const tooEarly = tm === 0 || holdersCount < 10;
+  const neutralPill = (label, title) => `<span class="whale-alert-pill" style="background: rgba(148, 163, 184, 0.12); border: 1px solid rgba(148, 163, 184, 0.5); color: var(--text-secondary, #94a3b8);" title="${title}">${label}</span>`;
+  let whaleConcentrationBadge;
+  let whaleConcentrationDesc;
+  if (tooEarly) {
+    whaleConcentrationBadge = neutralPill('⏳ Too early', 'Not enough mints or holders yet to judge concentration');
+    whaleConcentrationDesc = `Only ${formatCount(holdersCount)} holder${holdersCount === 1 ? '' : 's'} so far${tm === 0 ? ' and nothing minted yet' : ''} — normal for a fresh drop, not a whale signal.`;
+  } else if (!hasTop10) {
+    whaleConcentrationBadge = neutralPill('— Not measured', 'No top-holder scan for this contract yet');
+    whaleConcentrationDesc = `Spread across ${formatCount(holdersCount)} wallets; top-10 holder share not scanned yet.`;
+  } else {
+    const pct = Math.min(100, top10Raw);
+    const pctLabel = `${pct.toFixed(pct >= 10 ? 0 : 1)}%`;
+    if (pct > 50) {
+      whaleConcentrationBadge = `<span class="whale-alert-pill" style="background: rgba(239, 68, 68, 0.15); border: 1px solid var(--color-red); color: var(--color-red);" title="Top 10 wallets hold ${pctLabel} of supply">🚨 Extreme (top 10: ${pctLabel})</span>`;
+      whaleConcentrationDesc = `High dump risk: the top 10 wallets hold ${pctLabel} of supply across ${formatCount(holdersCount)} holders.`;
+    } else if (pct >= 25) {
+      whaleConcentrationBadge = `<span class="whale-alert-pill" style="background: rgba(250, 204, 21, 0.15); border: 1px solid var(--color-yellow); color: var(--color-yellow);" title="Top 10 wallets hold ${pctLabel} of supply">🟡 Moderate (top 10: ${pctLabel})</span>`;
+      whaleConcentrationDesc = `Medium clustering: the top 10 wallets hold ${pctLabel} across ${formatCount(holdersCount)} holders. Watch large sellers.`;
+    } else {
+      whaleConcentrationBadge = `<span class="whale-alert-pill" style="background: rgba(74, 222, 128, 0.15); border: 1px solid var(--color-green); color: var(--color-green);" title="Top 10 wallets hold ${pctLabel} of supply">🟢 Distributed (top 10: ${pctLabel})</span>`;
+      whaleConcentrationDesc = `Clean distribution: the top 10 wallets hold ${pctLabel} across ${formatCount(holdersCount)} holders.`;
+    }
   }
 
   // Feature 1: Dev Funding Root & Cluster Metrics (Exclude zero / burn address from ever being a dev root)
