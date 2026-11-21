@@ -216,6 +216,14 @@ class DatabaseManager:
                         updated_at INTEGER DEFAULT 0
                     );
                 """)
+                # Real NFT holder counts (holders.py), written by the API only
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS holder_counts (
+                        contract TEXT PRIMARY KEY,
+                        holders INTEGER NOT NULL,
+                        counted_at REAL NOT NULL
+                    );
+                """)
                 conn.commit()
                 self._sqlite_ready = True
             finally:
@@ -1275,6 +1283,89 @@ class DatabaseManager:
                 conn.close()
 
         return {"wallet": w, "favorites": clean_favs, "updated_at": ts}
+
+    # -------------------------------------------------------------------------
+    # Real NFT holder counts (holders.py / GET /api/holders)
+    # -------------------------------------------------------------------------
+    # A table of its own (holder_counts), never a field of a project record: the worker rewrites a record's whole
+    # `data` from its own copy, which would put the discovery placeholder back. In Supabase mode a missing table
+    # (migration 003 not run yet) is reported once and the counts then live in SQLite on this machine only.
+    HOLDER_COUNTS_PAGE = 1000
+
+    def _holder_counts_cloud(self) -> bool:
+        return self.mode == "supabase" and HAS_HTTPX and bool(self.client) and not getattr(self, "_holder_counts_off", False)
+
+    def _holder_counts_unavailable(self, resp_or_exc) -> None:
+        if not getattr(self, "_holder_counts_off", False):
+            self._holder_counts_off = True
+            print(f"[⚠️ Supabase holder_counts] unavailable ({resp_or_exc}); run supabase_migrations/003_holder_counts.sql."
+                  " Holder counts are kept in SQLite on this machine until then.", flush=True)
+
+    def save_holder_count(self, contract: str, holders: int, counted_at: float) -> bool:
+        """Stores one count (insert or replace). Returns True when it was written somewhere."""
+        c = (contract or "").lower().strip()
+        if not c:
+            return False
+        row = {"contract": c, "holders": int(holders), "counted_at": float(counted_at)}
+        if self._holder_counts_cloud():
+            try:
+                resp = self.client.post("/rest/v1/holder_counts?on_conflict=contract", json=row,
+                                        headers={"Prefer": "resolution=merge-duplicates"})
+                if resp.status_code in (200, 201, 204):
+                    return True
+                if resp.status_code in (400, 404):            # no such table / column: migration not run
+                    self._holder_counts_unavailable(resp.status_code)
+            except Exception as e:
+                print(f"[⚠️ Supabase Save Holder Count Error] {e}", flush=True)
+        with self._lock:
+            conn = self._get_sqlite_connection()
+            try:
+                conn.execute("""
+                    INSERT INTO holder_counts (contract, holders, counted_at) VALUES (?, ?, ?)
+                    ON CONFLICT(contract) DO UPDATE SET holders=excluded.holders, counted_at=excluded.counted_at;
+                """, (row["contract"], row["holders"], row["counted_at"]))
+                conn.commit()
+                return True
+            except Exception as e:
+                print(f"[⚠️ SQLite Save Holder Count Error] {e}", flush=True)
+                return False
+            finally:
+                conn.close()
+
+    def load_holder_counts(self) -> Dict[str, Dict[str, float]]:
+        """Every stored count: {contract: {"holders": n, "counted_at": t}}."""
+        if self._holder_counts_cloud():
+            try:
+                out: Dict[str, Dict[str, float]] = {}
+                offset = 0
+                while True:
+                    resp = self.client.get(
+                        f"/rest/v1/holder_counts?select=contract,holders,counted_at&order=contract"
+                        f"&limit={self.HOLDER_COUNTS_PAGE}&offset={offset}")
+                    if resp.status_code != 200:
+                        if resp.status_code in (400, 404):
+                            self._holder_counts_unavailable(resp.status_code)
+                        break
+                    rows = resp.json() or []
+                    for r in rows:
+                        if r.get("contract") and r.get("holders") is not None:
+                            out[str(r["contract"]).lower()] = {"holders": int(r["holders"]),
+                                                               "counted_at": float(r.get("counted_at") or 0)}
+                    if len(rows) < self.HOLDER_COUNTS_PAGE:
+                        return out
+                    offset += len(rows)
+            except Exception as e:
+                print(f"[⚠️ Supabase Load Holder Counts Error] {e}", flush=True)
+        with self._lock:
+            conn = self._get_sqlite_connection()
+            try:
+                rows = conn.execute("SELECT contract, holders, counted_at FROM holder_counts").fetchall()
+                return {r["contract"]: {"holders": int(r["holders"]), "counted_at": float(r["counted_at"])} for r in rows}
+            except Exception as e:
+                print(f"[⚠️ SQLite Load Holder Counts Error] {e}", flush=True)
+                return {}
+            finally:
+                conn.close()
 
     # -------------------------------------------------------------------------
     # Persistent .ai Agent ID Telemetry Counter

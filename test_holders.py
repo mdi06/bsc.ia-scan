@@ -171,3 +171,101 @@ def test_api_refuses_what_it_cannot_count(client):
     assert client.rpc.calls == 0
     assert client.get("/api/holders?contract=0x123").status_code == 400
     assert client.get(f"/api/holders?contract={wallet(0xC3)}").status_code == 404
+
+
+# ------------------------------------------------------------------------------------------------ saved counts
+def sqlite_db(tmp_path, monkeypatch):
+    for var in ("SUPABASE_URL", "SUPABASE_KEY", "SUPABASE_SERVICE_ROLE_KEY", "SUPABASE_ANON_KEY"):
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.setattr(db_module, "HISTORY_FILE", str(tmp_path / "no_history.json"))
+    monkeypatch.setattr(db_module, "FAVORITES_FILE", str(tmp_path / "no_favorites.json"))
+    return db_module.DatabaseManager(db_path=str(tmp_path / "t.db"))
+
+
+def test_sqlite_saves_and_loads_counts(tmp_path, monkeypatch):
+    d = sqlite_db(tmp_path, monkeypatch)
+    assert d.load_holder_counts() == {}
+    assert d.save_holder_count(wallet(0xA1).upper().replace("0X", "0x"), 949, 1000.5)
+    d.save_holder_count(wallet(0xA1), 950, 2000.0)                       # replaces
+    d.save_holder_count(wallet(0xB2), 12, 1500.0)
+    assert d.load_holder_counts() == {wallet(0xA1): {"holders": 950, "counted_at": 2000.0},
+                                      wallet(0xB2): {"holders": 12, "counted_at": 1500.0}}
+
+
+class FakeSupabase:
+    def __init__(self, status):
+        self.status = status
+        self.posts = []
+
+    def post(self, url, json=None, headers=None):
+        self.posts.append((url, json))
+        return type("R", (), {"status_code": self.status})()
+
+    def get(self, url):
+        return type("R", (), {"status_code": self.status, "json": lambda self: []})()
+
+
+def test_supabase_without_the_table_falls_back_to_sqlite_and_warns_once(tmp_path, monkeypatch, capsys):
+    import os
+    d = sqlite_db(tmp_path, monkeypatch)
+    fake = FakeSupabase(404)
+    d.mode, d._client_pid, d._client_instance = "supabase", os.getpid(), fake
+    assert d.save_holder_count(wallet(0xA1), 949, 1000.0)
+    assert d.save_holder_count(wallet(0xA1), 950, 1001.0)
+    assert len(fake.posts) == 1                                          # not retried after the 404
+    assert capsys.readouterr().out.count("003_holder_counts.sql") == 1
+    assert d.load_holder_counts() == {wallet(0xA1): {"holders": 950, "counted_at": 1001.0}}
+
+
+def test_supabase_write_goes_to_its_own_table(tmp_path, monkeypatch):
+    import os
+    d = sqlite_db(tmp_path, monkeypatch)
+    fake = FakeSupabase(201)
+    d.mode, d._client_pid, d._client_instance = "supabase", os.getpid(), fake
+    assert d.save_holder_count(wallet(0xA1), 949, 1000.0)
+    assert fake.posts == [("/rest/v1/holder_counts?on_conflict=contract",
+                           {"contract": wallet(0xA1), "holders": 949, "counted_at": 1000.0})]
+
+
+class MemStore:
+    def __init__(self, rows=None):
+        self.rows = dict(rows or {})
+
+    def save_holder_count(self, c, n, at):
+        self.rows[c] = {"holders": n, "counted_at": at}
+
+    def load_holder_counts(self):
+        return dict(self.rows)
+
+
+def test_counts_are_saved_and_come_back_after_a_restart():
+    now = [5000.0]
+    store = MemStore()
+    rpc = FakeRpc({i: wallet(i % 7 + 1) for i in range(1, 30)})
+    hc = holders.HolderCounts(lambda: rpc, now=lambda: now[0], store=store)
+    hc.get(wallet(1), 29)
+    assert store.rows == {wallet(1): {"holders": 7, "counted_at": 5000.0}}
+    # a new process: loads the saved count, serves it at once, no RPC
+    rpc2 = FakeRpc({})
+    restarted = holders.HolderCounts(lambda: rpc2, now=lambda: now[0] + 60, store=store)
+    assert restarted.load_saved() == 1 and restarted.version == 1
+    assert restarted.overlay(wallet(1)) == {"holders": 7, "at": 5000.0}
+    assert restarted.get(wallet(1), 29)["holders"] == 7 and rpc2.calls == 0
+    # a count made before the load finished is not replaced by an older saved one
+    late = holders.HolderCounts(lambda: rpc, now=lambda: 9000.0, store=MemStore({wallet(1): {"holders": 3, "counted_at": 1.0}}))
+    late.get(wallet(1), 29)
+    late.load_saved()
+    assert late.overlay(wallet(1))["holders"] == 7
+
+
+def test_a_failing_store_does_not_break_counting():
+    class Broken:
+        def save_holder_count(self, *a):
+            raise RuntimeError("db down")
+
+        def load_holder_counts(self):
+            raise RuntimeError("db down")
+
+    hc = holders.HolderCounts(lambda: FakeRpc({1: wallet(5)}), store=Broken())
+    assert hc.load_saved() == 0
+    assert hc.get(wallet(1), 1)["holders"] == 1

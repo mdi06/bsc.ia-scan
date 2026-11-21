@@ -197,6 +197,7 @@ def startup_event():
     t.start()
     if SNAPSHOT_WARMER_ENABLED:
         threading.Thread(target=_snapshot_warmer_loop, daemon=True, name="SnapshotWarmer").start()
+    threading.Thread(target=_load_saved_holder_counts, daemon=True, name="HolderCountsLoad").start()
 
 
 @app.post("/api/admin/purge-bogus", dependencies=[Depends(require_admin)])
@@ -1173,7 +1174,22 @@ def _plain_copy(p: dict) -> dict:
 
 # Real NFT holder counts, counted when a token card is opened (/api/holders, see holders.py). Served records carry the
 # last count as `holders_onchain` (+ `holders_counted_at`), or `holders_uncountable` when the contract cannot be counted.
-HOLDER_COUNTS = holders.HolderCounts(lambda: monitor.BscRpcClient(monitor.RPC_ENDPOINTS))
+class _HolderCountStore:
+    """holder_counts in the database (`db` is looked up at call time, so tests can swap it)."""
+
+    def save_holder_count(self, contract, holders_n, counted_at):
+        return db.save_holder_count(contract, holders_n, counted_at)
+
+    def load_holder_counts(self):
+        return db.load_holder_counts()
+
+
+HOLDER_COUNTS = holders.HolderCounts(lambda: monitor.BscRpcClient(monitor.RPC_ENDPOINTS), store=_HolderCountStore())
+
+
+def _load_saved_holder_counts():
+    n = HOLDER_COUNTS.load_saved()
+    print(f"[holders] {n} saved NFT holder counts loaded", flush=True)
 
 
 def _with_holder_count(out: dict) -> None:

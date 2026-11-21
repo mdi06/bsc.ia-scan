@@ -11,7 +11,8 @@ collection share one count, at most MAX_CONCURRENT counts run at once, and colle
 (FairSharesDailyNFT, 1.59M minted, would be ~3,200 calls). Contracts that do not answer ownerOf for sequential ids
 (ERC-1155, scattered ids, no ownerOf) are remembered as unsupported and not tried again for UNSUPPORTED_RETRY_SEC.
 
-Counts live in memory on the API process: they are lost on a restart and counted again on the next open.
+Counts are kept in memory and saved to the holder_counts table (db.save_holder_count); the API loads them back when
+it starts (load_saved), so a restart or redeploy does not lose them.
 """
 import re
 import threading
@@ -139,8 +140,9 @@ def count_holders(rpc, contract: str, minted: int) -> int:
 class HolderCounts:
     """The counts in memory, shared by every request of the API process."""
 
-    def __init__(self, rpc_factory, now=time.time):
+    def __init__(self, rpc_factory, now=time.time, store=None):
         self._rpc_factory = rpc_factory
+        self._store = store            # save_holder_count(contract, holders, counted_at) / load_holder_counts()
         self._rpc = None
         self._now = now
         self._lock = threading.Lock()
@@ -148,6 +150,27 @@ class HolderCounts:
         self._inflight: Dict[str, threading.Event] = {}
         self._slots = threading.BoundedSemaphore(MAX_CONCURRENT)
         self.version = 0                                   # bumped when a served count changes (feed caches key on it)
+
+    def load_saved(self) -> int:
+        """Fills the counts saved by earlier runs (a count made since start-up wins). Returns how many were loaded."""
+        if self._store is None:
+            return 0
+        try:
+            rows = self._store.load_holder_counts() or {}
+        except Exception:
+            return 0
+        loaded = 0
+        with self._lock:
+            for c, r in rows.items():
+                c = str(c).lower()
+                if c in self._entries or r.get("holders") is None:
+                    continue
+                at = float(r.get("counted_at") or 0)
+                self._entries[c] = {"status": "ok", "holders": int(r["holders"]), "at": at, "counted_at": at}
+                loaded += 1
+            if loaded:
+                self.version += 1
+        return loaded
 
     def _rpc_client(self):
         if self._rpc is None:
@@ -238,4 +261,9 @@ class HolderCounts:
                 self._entries.pop(oldest, None)
             if self._served_key(c) != served_before:
                 self.version += 1
+        if entry["status"] == "ok" and self._store is not None:
+            try:
+                self._store.save_holder_count(c, entry["holders"], entry["counted_at"])
+            except Exception:
+                pass                    # the count is still served from memory; it is saved again on the next recount
         return self._answer(entry)
