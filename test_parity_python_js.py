@@ -156,6 +156,29 @@ case("secondary_element_sales_only", rec(standard="ERC-721 (NFT Collection)", se
 case("secondary_price_and_volume", rec(token_price_usd=0.001, volume_24h=3.0, lp_usd=10.0))
 case("secondary_excluded_even_with_pair", rec(symbol="USDT", pair_url="https://dexscreener.com/bsc/0x1", lp_usd=9e8))
 
+# --- FREE tab (isFreeMintableNow / filters.is_free_mintable_now). Times are far from now so the test never flips.
+FAR_PAST, FAR_FUTURE = 1_000_000_000, 4_000_000_000
+case("free_open_agent_gate", rec(has_free_mint=True, mint_price_str="⭐ FREE", total_minted=2, max_supply=2000,
+                                 mint_terms={"v": 5, "gate": "agent_id", "cap": "capped"}))
+case("free_by_zero_price_only", rec(mint_value_wei="0", mint_price_bnb=0))
+case("free_but_tbd_price", rec(mint_price_str="TBD", mint_value_wei="0"))
+case("free_sold_out_nft", rec(standard="ERC-721 (NFT Collection)", has_free_mint=True, total_minted=999,
+                              max_supply=1000))
+case("free_pre_minted_token_not_sold_out", rec(has_free_mint=True, total_minted=1000, max_supply=1000))
+case("free_pre_minted_with_cap_is_sold_out", rec(has_free_mint=True, total_minted=1000, max_supply=1000, cap=True))
+case("free_rug", rec(has_free_mint=True, risk_level="rug"))
+case("free_honeypot_badge", rec(has_free_mint=True, risk_badge="🚨 Honeypot"))
+case("free_fund_drain", rec(has_free_mint=True, security={"is_fund_drain": True}))
+case("free_paused", rec(has_free_mint=True, is_paused=True))
+case("free_ended_window", rec(has_free_mint=True, mint_terms={"end": FAR_PAST}))
+case("free_not_started", rec(has_free_mint=True, mint_terms={"start": FAR_FUTURE}))
+case("free_window_open", rec(has_free_mint=True, mint_terms={"start": FAR_PAST, "end": FAR_FUTURE}))
+case("free_switched_off", rec(has_free_mint=True, mint_terms={"open": False}))
+case("free_state_ended", rec(has_free_mint=True, mint_terms={"state": "ended"}))
+case("free_state_sold_out", rec(has_free_mint=True, mint_terms={"state": "sold_out"}))
+case("free_supply_as_string", rec(has_free_mint=True, total_minted="500", max_supply="500",
+                                  standard="ERC-721 (NFT Collection)"))
+
 SCORES = [0, 1, 19, 20, 24, 24.9, 25, 49, 49.9, 50, 69, 70, 74, 75, 79, 79.9, 80, 99, 100]
 
 NODE = r"""
@@ -181,7 +204,7 @@ for (const [name, c] of Object.entries(spec.cases)) {
   for (const upd of c.then) { Object.assign(item, upd); record(); }
   const fresh = JSON.parse(JSON.stringify(c.item));
   out[name] = { steps, excluded: app.isExcludedMajorAsset(fresh), mcap: app.getSanitizedMcap(fresh),
-                secondary: app.isSecondaryMarketAsset(fresh) };
+                secondary: app.isSecondaryMarketAsset(fresh), free: app.isFreeMintableNow(fresh) };
 }
 out.__tiers = spec.scores.map(s => app.interestTier(s));
 out.__consts = {
@@ -214,7 +237,8 @@ def run_python():
             record()
         fresh = copy.deepcopy(c["item"])
         out[name] = {"steps": steps, "excluded": filters.is_excluded_asset(fresh),
-                     "mcap": filters.sanitized_mcap(fresh), "secondary": filters.is_secondary_market(fresh)}
+                     "mcap": filters.sanitized_mcap(fresh), "secondary": filters.is_secondary_market(fresh),
+                     "free": filters.is_free_mintable_now(fresh)}
     return out
 
 
@@ -246,6 +270,7 @@ def test_python_and_javascript_agree(both, name):
     assert py["excluded"] == js["excluded"], f"{name} excluded"
     assert same(py["mcap"], js["mcap"]), f"{name} mcap: py={py['mcap']!r} js={js['mcap']!r}"
     assert py["secondary"] == js["secondary"], f"{name} secondary"
+    assert py["free"] == js["free"], f"{name} free: py={py['free']!r} js={js['free']!r}"
 
 
 def test_interest_tiers_agree(both):

@@ -40,6 +40,14 @@ CREATE TABLE IF NOT EXISTS user_favorites (
     updated_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW())::BIGINT
 );
 
+-- Real NFT holder counts, written by the API (supabase_migrations/003_holder_counts.sql)
+CREATE TABLE IF NOT EXISTS holder_counts (
+    contract TEXT PRIMARY KEY,
+    holders INTEGER NOT NULL,
+    counted_at DOUBLE PRECISION NOT NULL
+);
+ALTER TABLE holder_counts ENABLE ROW LEVEL SECURITY;
+
 -- 3. Row Level Security (RLS) Policies
 ALTER TABLE projects ENABLE ROW LEVEL SECURITY;
 ALTER TABLE user_favorites ENABLE ROW LEVEL SECURITY;

@@ -27,6 +27,7 @@ from fastapi.staticfiles import StaticFiles
 import uvicorn
 
 import filters
+import holders
 import monitor
 from common.runtime import run_memory_guard_loop
 from compact import CompactRecord
@@ -196,6 +197,7 @@ def startup_event():
     t.start()
     if SNAPSHOT_WARMER_ENABLED:
         threading.Thread(target=_snapshot_warmer_loop, daemon=True, name="SnapshotWarmer").start()
+    threading.Thread(target=_load_saved_holder_counts, daemon=True, name="HolderCountsLoad").start()
 
 
 @app.post("/api/admin/purge-bogus", dependencies=[Depends(require_admin)])
@@ -265,6 +267,7 @@ FEED_FILTERS = {
     "sniper_ready": lambda d: d.get("sniper_ready"),
     "proxy": lambda d: d.get("is_proxy_clone"),
     "nft_surge": lambda d: d.get("is_nft_surge"),
+    "free_mintable": filters.is_free_mintable_now,
 }
 
 
@@ -489,6 +492,7 @@ def _overview_stats(all_projs, counts, pulse) -> dict:
         "proxy": counts["proxy"],
         "nft_surge": counts["nft_surge"],
         "secondary": counts["secondary"],
+        "free_mintable": counts["free_mintable"],
         "latest_block": all_projs[0].get("block") if all_projs else None,
         "agent_wallets": total_agent_wallets,
         "total_created_wallets": total_agent_wallets,
@@ -505,6 +509,7 @@ def _overview_stats_fallback(all_projs) -> dict:
         "proxy": 0,
         "nft_surge": 0,
         "secondary": 0,
+        "free_mintable": 0,
         "latest_block": None,
         "agent_wallets": monitor.DEFAULT_AGENT_WALLET_COUNT,
         "total_created_wallets": monitor.DEFAULT_AGENT_WALLET_COUNT,
@@ -1017,7 +1022,9 @@ def get_feed(
     # BNB price and its liveness (server metrics of every record), and the stats dict (agent-wallet counter, pulse).
     # They are read once here and passed down, so the body, its cache key and the check on a hit all use the same values.
     bnb_price, bnb_live = monitor.cached_bnb_price(), monitor.bnb_price_is_live()
-    volatile = (bnb_price, bnb_live, stats)
+    # ...and the holder counts (a new count changes the served records: holders_onchain)
+    holders_v = HOLDER_COUNTS.version
+    volatile = (bnb_price, bnb_live, stats, holders_v)
 
     if since_block is not None:
         delta = snapshot.newer_than(since_block)
@@ -1041,7 +1048,7 @@ def get_feed(
                     "projects": []
                 })
 
-        delta_etag = f'"v{content_version}-{latest_block}-{total}-{total_agent_wallets}-delta-{since_block}"'
+        delta_etag = f'"v{content_version}-{latest_block}-{total}-{total_agent_wallets}-delta-{since_block}-h{holders_v}"'
         return _cached_json(
             request, snapshot, ("delta", since_block), volatile,
             {"ETag": delta_etag, "Cache-Control": "public, max-age=5"},
@@ -1063,7 +1070,7 @@ def get_feed(
     paginated = target_list[offset : offset + limit]
 
     list_view = view == "list"      # any other value (or none) is the full shape
-    feed_etag = (f'"v{content_version}-{latest_block}-{total}-{total_agent_wallets}-{offset}-{limit}-{filter or ""}'
+    feed_etag = (f'"v{content_version}-{latest_block}-{total}-{total_agent_wallets}-{offset}-{limit}-{filter or ""}-h{holders_v}'
                  f'{"-list" if list_view else ""}"')
     if _etag_matches(client_etag, feed_etag):
         return Response(status_code=304, headers={"ETag": feed_etag, "Cache-Control": "public, max-age=5"})
@@ -1165,6 +1172,37 @@ def _plain_copy(p: dict) -> dict:
     return p.full() if isinstance(p, CompactRecord) else dict(p)
 
 
+# Real NFT holder counts, counted when a token card is opened (/api/holders, see holders.py). Served records carry the
+# last count as `holders_onchain` (+ `holders_counted_at`), or `holders_uncountable` when the contract cannot be counted.
+class _HolderCountStore:
+    """holder_counts in the database (`db` is looked up at call time, so tests can swap it)."""
+
+    def save_holder_count(self, contract, holders_n, counted_at):
+        return db.save_holder_count(contract, holders_n, counted_at)
+
+    def load_holder_counts(self):
+        return db.load_holder_counts()
+
+
+HOLDER_COUNTS = holders.HolderCounts(lambda: monitor.BscRpcClient(monitor.RPC_ENDPOINTS), store=_HolderCountStore())
+
+
+def _load_saved_holder_counts():
+    n = HOLDER_COUNTS.load_saved()
+    print(f"[holders] {n} saved NFT holder counts loaded", flush=True)
+
+
+def _with_holder_count(out: dict) -> None:
+    hc = HOLDER_COUNTS.overlay(out.get("contract"))
+    if not hc:
+        return
+    if hc.get("unsupported"):
+        out["holders_uncountable"] = True
+    else:
+        out["holders_onchain"] = hc["holders"]
+        out["holders_counted_at"] = hc["at"]
+
+
 def with_server_metrics(p: dict, bnb_price=None, bnb_live=None) -> dict:
     """A copy of the record with `server_metrics` and the refreshed profit fields. `bnb_price` / `bnb_live` default to
     the server's cached BNB/USD (pass them once per response so every record uses the same price)."""
@@ -1196,6 +1234,7 @@ def with_server_metrics(p: dict, bnb_price=None, bnb_live=None) -> dict:
                 "sec_usd", "mint_usd", "profit", "ath_price_usd", "ath_profit_usd", "ath_multiplier",
                 "current_multiplier", "is_sold", "is_free")}
     out[SERVER_METRICS_KEY] = metrics
+    _with_holder_count(out)
     return out
 
 
@@ -1484,6 +1523,25 @@ def get_projects(
         records.append(d)
     page = serve_records(records, slim=False)
     return {"success": True, "total": total, "count": len(page), "offset": offset, "limit": limit, "projects": page}
+
+
+@app.get("/api/holders")
+def get_holders(contract: str = Query(..., description="0x... NFT collection address")):
+    """The real holder count of an NFT collection, counted on demand (the token card asks when it opens; see
+    holders.py for the request budget). status: ok (holders), unsupported (not countable here), busy (every counting
+    slot taken: ask again later) or error (the RPC did not answer; holders = the last good count, if any)."""
+    c = (contract or "").lower().strip()
+    if not ADDRESS_RE.fullmatch(c):
+        raise HTTPException(status_code=400, detail="Valid 0x... contract address required in ?contract=")
+    snapshot, _ = _load_snapshot()
+    _, _, _, by_contract = snapshot.search_index()
+    positions = by_contract.get(c)
+    if not positions:
+        raise HTTPException(status_code=404, detail="Unknown contract")
+    minted = holders.countable_minted(snapshot.projects[positions[0]])
+    result = {"status": "unsupported"} if minted is None else HOLDER_COUNTS.get(c, minted)
+    headers = {"Cache-Control": "no-store" if result["status"] in ("busy", "error") else "public, max-age=30"}
+    return JSONResponse(content={"success": True, "contract": c, **result}, headers=headers)
 
 
 # Main route: /api/favorites. /favorites is an alias kept for older clients.

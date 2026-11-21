@@ -95,6 +95,24 @@ def test_the_filtered_and_sorted_list_per_filter_matches_the_direct_computation(
         assert got["filter_total"] == len(want)
 
 
+def test_free_mintable_filter_serves_every_open_free_mint_newest_first(client):
+    rows = [rec(i, mint_price_str="0.0100 BNB", mint_value_wei="10000000000000000", mint_price_bnb=0.01)
+            for i in range(1, 301)]                                       # 300 newer paid mints
+    rows += [rec(400 + i, has_free_mint=True, mint_price_str="⭐ FREE") for i in range(5)]
+    rows[0:0] = [rec(500, has_free_mint=True, risk_level="RUG"),          # free but not mintable
+                 rec(501, has_free_mint=True, standard="ERC-721 (NFT Collection)", max_supply=10, total_minted=10),
+                 rec(502, has_free_mint=True, mint_terms={"state": "ended"})]
+    rows += [rec(1000 + i, has_free_mint=True, mint_price_str="⭐ FREE") for i in range(3)]   # the newest ones
+    client.db.upsert_projects(rows)
+    first = client.get("/api/feed?filter=free_mintable&limit=4&view=list").json()
+    assert first["filter_total"] == 8 and first["has_more"] is True
+    blocks = [p["block"] for p in first["projects"]]
+    assert blocks == sorted(blocks, reverse=True) and blocks[0] == 1000 + 1002
+    rest = client.get("/api/feed?filter=free_mintable&limit=4&offset=4&view=list").json()
+    assert len(rest["projects"]) == 4 and rest["has_more"] is False
+    assert first["stats"]["free_mintable"] == 8
+
+
 def test_repeated_requests_reuse_the_snapshot_and_a_new_content_version_rebuilds_it(client, monkeypatch):
     seed(client)
     built = []
