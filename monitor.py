@@ -3780,7 +3780,7 @@ def evaluate_portfolio_exit(item: Dict[str, Any], bnb_price: Optional[float] = N
 
 
 # Cloud backend the CLI pulls from / pushes to. Override with CLOUD_API_URL (e.g. a staging service).
-CLOUD_API_URL = os.environ.get("CLOUD_API_URL", "https://bsc-ia-scan-onrender-com.onrender.com").strip().rstrip("/")
+CLOUD_API_URL = os.environ.get("CLOUD_API_URL", "https://agent-id-backend-production.up.railway.app").strip().rstrip("/")
 
 
 def sync_cloud_history() -> List[Dict[str, Any]]:
