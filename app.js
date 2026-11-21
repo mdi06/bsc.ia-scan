@@ -2910,7 +2910,8 @@ function getMintTerms(item, nowSec = Date.now() / 1000) {
     closed: t.open === false || t.state === 'not_open',   // mintOpen()-style switch off, or refused as "not open"
     stateEnded: t.state === 'ended',
     stateSoldOut: t.state === 'sold_out',
-    invalidCall: t.mint_call === 'invalid',                // the stored call can't mint (e.g. deployment bytecode)
+    invalidCall: t.mint_call === 'invalid' || t.mint_call === 'none', // the stored call can't mint (e.g. deployment bytecode)
+    noMintFunction: t.mint_call === 'none',                // no public mint function found at all (e.g. a registry contract)
     paidUnknown: Boolean(t.paid),                          // refused for the price: paid, price not read
   };
 }
@@ -2934,7 +2935,7 @@ function mintTimingLabel(terms, nowSec = Date.now() / 1000) {
 }
 
 // Who may mint, next to the drop's name on every row (desktop and cards), so it is seen before anything else.
-// From record.mint_terms.gate (see monitor.probe_mint_terms); "open" is shown in the mint chips instead.
+// From record.mint_terms.gate (see monitor.probe_mint_terms). Unknown gates get no badge (never guessed).
 function gateBadgeHtml(item) {
   const gate = getMintTerms(item).gate;
   if (gate === 'agent_id') {
@@ -2945,7 +2946,12 @@ function gateBadgeHtml(item) {
     return `<span class="gate-badge gate-badge-agent" title="Agent ID needed to mint. ${how}.">🪪 Agent ID</span>`;
   }
   if (gate === 'whitelist') {
-    return `<span class="gate-badge gate-badge-wl" title="${MINT_GATE_LABELS.whitelist.title}">📝 Whitelist</span>`;
+    const title = item.mint_terms && item.mint_terms.gate_from === 'holders'
+      ? 'Only holders of the project\'s own NFT or token can claim' : MINT_GATE_LABELS.whitelist.title;
+    return `<span class="gate-badge gate-badge-wl" title="${title}">📝 Whitelist</span>`;
+  }
+  if (gate === 'open') {
+    return `<span class="gate-badge gate-badge-open" title="${MINT_GATE_LABELS.open.title}">🟢 Open to all</span>`;
   }
   return '';
 }
@@ -3002,9 +3008,8 @@ function mintTermsChipsHtml(item) {
   if (terms.perWallet !== null) chips.push(`<span class="mint-chip" title="Per-wallet limit read from the contract">Max ${formatCount(terms.perWallet)}/wallet</span>`);
   const timing = mintTimingLabel(terms);
   if (timing) chips.push(`<span class="mint-chip${(terms.ended || terms.stateEnded || terms.closed) ? ' mint-chip-bad' : ''}" title="Mint window read from the contract">${timing}</span>`);
-  // Agent ID / Whitelist are shown once, as the badge next to the drop's name (gateBadgeHtml); "Open to all" has no
-  // badge, so it stays here.
-  if (terms.gate === 'open') chips.push(`<span class="mint-chip mint-chip-gate-open" title="${MINT_GATE_LABELS.open.title}">${MINT_GATE_LABELS.open.chip}</span>`);
+  // Who may mint (Agent ID / Whitelist / Open to all) is shown once, as the badge next to the drop's name
+  // (gateBadgeHtml), not as a chip here.
   return chips.length ? `<div class="mint-chips">${chips.join('')}</div>` : '';
 }
 

@@ -330,3 +330,107 @@ def test_a_proven_gate_survives_a_recheck_that_cannot_decide():
     item = {"mint_terms": {"gate": "unknown"}}
     worker._apply_mint_terms(item, {"gate": "unknown"})
     assert item["mint_terms"]["gate"] == "unknown"
+
+
+# --- probe v5: what the remaining "unknown" drops showed on the live chain ---
+
+def _err_args(sig, *args):
+    return {"message": "execution reverted", "data": monitor.keccak_selector(sig) + "".join(format(a, "064x") for a in args)}
+
+
+class ValueRpc(RevertRpc):
+    """Mints go through only for `can_mint` senders who send at least `price` wei; below it, `low` is the refusal."""
+
+    def __init__(self, *a, price=0, low=None, others=None, **kw):
+        super().__init__(*a, **kw)
+        self.price, self.low, self.others, self.values = price, low, others, []
+
+    def call_with_revert(self, method, params):
+        tx = params[0]
+        v = int(tx["value"], 16)
+        self.values.append(v)
+        if v < self.price:
+            return False, self.low
+        if tx["from"].lower() in self.can_mint:
+            return True, "0x"
+        return False, self.others or {"message": "execution reverted"}
+
+
+def test_price_named_in_the_refusal_is_retried():
+    # Cinnavault: EitherPrice(low, high, sent) for 0 BNB; with the price only the Agent ID wallet mints
+    price = 10**15
+    rpc = ValueRpc(code=code_with("a0712d68"), can_mint=[HOLDER], price=price,
+                   low=_err_args("EitherPrice(uint256,uint256,uint256)", 10**14, price, 0),
+                   others=_err("AgentIdRequired()"))
+    t = monitor.probe_mint_terms(rpc, "0xabc", "0xa0712d68" + "1".zfill(64), "0")
+    assert t["gate"] == "agent_id" and t["price_wei"] == price
+    assert price in rpc.values
+
+
+def test_payment_refusal_without_a_price_is_not_retried():
+    rpc = ValueRpc(code=code_with("a0712d68"), price=10**30, low=_err("InsufficientBNB()"))
+    t = monitor.probe_mint_terms(rpc, "0xabc", "0xa0712d68" + "1".zfill(64), "0")
+    assert t["gate"] == "unknown" and "price_wei" not in t and set(rpc.values) == {0}
+
+
+def test_free_mint_refusing_bnb_is_retried_without_value():
+    # RUMBLE: mintFree() is not payable, so the stored 0.001 BNB is refused with a bare revert
+    class R(RevertRpc):
+        def call_with_revert(self, method, params):
+            tx = params[0]
+            if int(tx["value"], 16) > 0:
+                return False, {"message": "execution reverted"}
+            if tx["from"].lower() == HOLDER:
+                return True, "0x"
+            return False, {"message": "execution reverted: Agent ID required"}
+    t = monitor.probe_mint_terms(R(code=code_with("8ab53447")), "0xabc", "0x8ab53447", str(10**15))
+    assert t["gate"] == "agent_id"
+
+
+def test_has_agent_id_function_in_bytecode():
+    sel = monitor.keccak_selector("hasAgentId(address)")[2:]
+    assert monitor.has_agent_id_check(code_with(sel))
+    rpc = RevertRpc(code=code_with(sel, "a0712d68"), reverts={PROBE: _err("SoldOut()"), HOLDER: _err("SoldOut()")})
+    t = monitor.probe_mint_terms(rpc, "0xabc", "0xa0712d68" + "1".zfill(64), "0")
+    assert t["gate"] == "agent_id" and t["gate_from"] == "bytecode"
+
+
+def test_claim_by_token_id_is_holders_only():
+    # Vitaliq: claim(tokenId) on a contract with claimedById(uint256); NotOwner() means "not that NFT's owner"
+    claim = monitor.keccak_selector("claim(uint256)")[2:]
+    marker = monitor.keccak_selector("claimedById(uint256)")[2:]
+    rpc = RevertRpc(code=code_with(claim, marker), reverts={PROBE: _err("NotOwner()"), HOLDER: _err("NotOwner()")})
+    t = monitor.probe_mint_terms(rpc, "0xabc", "0x" + claim + "1".zfill(64), "0")
+    assert t["gate"] == "whitelist" and t["gate_from"] == "holders"
+
+
+def test_owner_only_claim_without_per_id_tracking_stays_admin():
+    claim = monitor.keccak_selector("claim(uint256)")[2:]
+    rpc = RevertRpc(code=code_with(claim), reverts={PROBE: _err("NotOwner()"), HOLDER: _err("NotOwner()")})
+    assert monitor.probe_mint_terms(rpc, "0xabc", "0x" + claim + "1".zfill(64), "0")["gate"] == "unknown"
+
+
+def test_holder_required_and_not_token_owner_errors():
+    assert monitor.classify_revert(_err("NotTokenOwner()")) == "holder_only"
+    assert monitor.classify_revert(_err("HolderRequired()")) == "holder_only"
+    assert monitor.classify_revert({"message": "execution reverted: mint over"}) == "ended"
+    assert monitor.classify_revert(_err("GameNotSet()")) == "not_open"
+    assert monitor.classify_revert(_err_args("PayRequired(uint256,uint256,uint256)", 1, 2, 0)) == "payment"
+
+
+def test_start_time_named_in_a_not_open_refusal():
+    start = 1_800_000_000
+    rpc = RevertRpc(code=code_with("a0712d68"), reverts={PROBE: _err_args("NotOpenYet(uint256)", start),
+                                                         HOLDER: _err_args("NotOpenYet(uint256)", start)})
+    t = monitor.probe_mint_terms(rpc, "0xabc", "0xa0712d68" + "1".zfill(64), "0")
+    assert t["gate"] == "unknown" and t["state"] == "not_open" and t["start"] == start
+
+
+def test_no_public_mint_function():
+    # the Agent ID registry contracts: no stored call, a plain transfer refused, no mint function in the code
+    rpc = RevertRpc(code=code_with("12345678"))
+    t = monitor.probe_mint_terms(rpc, "0xabc", "", "0")
+    assert t["gate"] == "unknown" and t["mint_call"] == "none"
+    # with a mint function present it is tried instead, and never marked "none"
+    t2 = monitor.probe_mint_terms(RevertRpc(code=code_with("1249c58b")), "0xabc", "", "0")
+    assert t2.get("mint_call") != "none"

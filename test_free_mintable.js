@@ -51,7 +51,7 @@ console.log('✔ Mint terms: slots left, limit, gate, timing: PASS');
 const chips = app.mintTermsChipsHtml({ mint_price_str: '⭐ FREE', max_supply: 1000, total_minted: 11, mint_terms: { per_wallet: 10, gate: 'open' } });
 assert.match(chips, /989 left/);
 assert.match(chips, /Max 10\/wallet/);
-assert.match(chips, /Open to all/);
+assert.doesNotMatch(chips, /Open to all/, 'open gate is the name badge, not a chip');
 assert.strictEqual(app.mintTermsChipsHtml({ mint_price_str: 'DEX Traded', max_supply: 1000, total_minted: 1 }), '', 'no chips for DEX tokens');
 assert.strictEqual(app.mintTermsChipsHtml({ mint_price_str: '⭐ FREE' }), '', 'nothing known: no chips');
 console.log('✔ Mint terms chips: PASS');
@@ -122,7 +122,10 @@ console.log('✔ Probe v2 states (closed, ended, sold out, unusable call, paid):
 assert.match(app.gateBadgeHtml({ mint_terms: { gate: 'agent_id' } }), /🪪 Agent ID/);
 assert.match(app.gateBadgeHtml({ mint_terms: { gate: 'agent_id', gate_from: 'bytecode' } }), /contract code checks/);
 assert.match(app.gateBadgeHtml({ mint_terms: { gate: 'whitelist' } }), /Whitelist/);
-assert.strictEqual(app.gateBadgeHtml({ mint_terms: { gate: 'open' } }), '');
+assert.match(app.gateBadgeHtml({ mint_terms: { gate: 'open' } }), /gate-badge-open[^>]*>🟢 Open to all/);
+assert.match(app.gateBadgeHtml({ mint_terms: { gate: 'whitelist', gate_from: 'holders' } }), /Only holders of the project/);
+assert.strictEqual(app.getMintTerms({ mint_terms: { mint_call: 'none' } }).noMintFunction, true);
+assert.strictEqual(app.getMintTerms({ mint_terms: { mint_call: 'none' } }).invalidCall, true, 'no mint function: no Mint button');
 assert.strictEqual(app.gateBadgeHtml({}), '');
 console.log('✔ Agent ID badge next to the drop name: PASS');
 

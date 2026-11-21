@@ -25,7 +25,8 @@ function mintTermsModalHtml(item) {
   const notes = [];
   if (!terms.checked) notes.push('Not scanned yet: the radar reads these from the contract within a few minutes of discovery.');
   if (item.mint_terms && item.mint_terms.mint_call === 'repaired') notes.push(`ℹ️ The recorded mint call did not work; the radar found this contract's own <code>${escapeHtml(String(item.mint_terms.alt_call || 'mint'))}</code> and the Mint button uses it.`);
-  if (terms.invalidCall) notes.push('⚠️ The recorded mint call is not a function of this contract (it looks like deployment code): mint from the project\'s own site.');
+  if (terms.noMintFunction) notes.push('⚠️ The radar found no mint function it recognises in this contract: mint from the project\'s own site, if it has one.');
+  else if (terms.invalidCall) notes.push('⚠️ The recorded mint call is not a function of this contract (it looks like deployment code): mint from the project\'s own site.');
   if (terms.closed) notes.push('⏸ The contract reports its mint as closed right now.');
   if (terms.stateEnded) notes.push('⌛ The contract refused a test mint because the mint has ended.');
   if (terms.paidUnknown && String(item.mint_price_str || '').toUpperCase().includes('TBD')) notes.push('💎 Not free: the contract refused a test mint for its price, but the price could not be read.');

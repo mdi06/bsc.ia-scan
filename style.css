@@ -2472,6 +2472,7 @@ th.sortable-th:hover .sort-indicator.dim-hint {
 
 .gate-badge-agent { color: #fde68a; background: rgba(250, 204, 21, 0.12); border: 1px solid rgba(250, 204, 21, 0.45); }
 .gate-badge-wl { color: #f0abfc; background: rgba(217, 70, 239, 0.12); border: 1px solid rgba(217, 70, 239, 0.45); }
+.gate-badge-open { color: #86efac; background: rgba(74, 222, 128, 0.12); border: 1px solid rgba(74, 222, 128, 0.4); }
 
 /* The card-only terms row (see @media max-width 768px): not part of the desktop table. */
 .col-terms {
@@ -2503,7 +2504,6 @@ th.sortable-th:hover .sort-indicator.dim-hint {
 }
 
 .mint-chip-bad { color: #fca5a5; background: rgba(239, 68, 68, 0.12); border-color: rgba(239, 68, 68, 0.4); }
-.mint-chip-gate-open { color: #86efac; background: rgba(74, 222, 128, 0.12); border-color: rgba(74, 222, 128, 0.4); }
 .mint-chip-gate-agent_id { color: #fde68a; background: rgba(250, 204, 21, 0.12); border-color: rgba(250, 204, 21, 0.4); }
 .mint-chip-gate-whitelist { color: #f0abfc; background: rgba(217, 70, 239, 0.12); border-color: rgba(217, 70, 239, 0.4); }
 
