@@ -2848,15 +2848,60 @@ function isFreeMintDrop(d) {
 // and only market data (DexScreener, for drops with a pair) replaces the buy count, so a fresh NFT with 0 minted
 // read "1 / 1". Holders never exceed the items minted (an NFT or fair-mint count), and buys without market data
 // show "—" instead of the placeholder.
+// Real NFT holder counts: GoPlus (the only holder source) does not answer for NFT collections, so their `holders` stays
+// at the discovery placeholder (1). The token card asks /api/holders when it opens (api.py / holders.py: ownerOf of
+// every token through Multicall3, counted only on demand); the result is served to everyone as `holders_onchain`.
+const HOLDER_COUNT_MAX_MINTED = 10000;   // holders.MAX_MINTED
+const HOLDER_COUNT_TTL_SEC = 600;        // holders.TTL_SEC: a card opened later asks again
+
+// Same rule as holders.countable_minted: an ERC-721 style collection with 1..10,000 minted.
+function holderCountable(item) {
+  if (!item || item.holders_uncountable) return false;
+  const std = String(item.standard || '').toUpperCase();
+  if (!/721|NFT/.test(std) || std.includes('1155')) return false;
+  const minted = Math.floor(Number(item.total_minted || 0));
+  return minted >= 1 && minted <= HOLDER_COUNT_MAX_MINTED;
+}
+
+// The holder count to show: { count, source }. source: 'onchain' (counted), 'stored' (a measured or market number),
+// 'tap' (an NFT whose stored value is the placeholder and that the card can count), 'unknown'.
+function effectiveHolders(item) {
+  const d = item || {};
+  if (d.holders_onchain !== null && d.holders_onchain !== undefined && Number.isFinite(Number(d.holders_onchain))) {
+    return { count: Number(d.holders_onchain), source: 'onchain' };
+  }
+  const known = d.holders !== null && d.holders !== undefined && d.holders !== '';
+  const stored = known ? Number(d.holders) : null;
+  const std = String(d.standard || '').toUpperCase();
+  const isNft = /721|1155|NFT/.test(std);
+  const minted = Number(d.total_minted || 0);
+  // the discovery placeholder on an NFT that has more than one item minted: not a measurement
+  if (isNft && minted >= 2 && (stored === null || !Number.isFinite(stored) || stored <= 1)) {
+    return { count: null, source: holderCountable(d) ? 'tap' : 'unknown' };
+  }
+  return { count: stored, source: known ? 'stored' : 'unknown' };
+}
+
 function holdersBuysDisplay(item) {
   const d = item || {};
-  const holdersKnown = d.holders !== null && d.holders !== undefined && d.holders !== '';
-  let holders = holdersKnown ? Number(d.holders) : null;   // unknown stays unknown ("—" via formatCount)
-  let holdersTitle = '';
+  const eff = effectiveHolders(d);
+  if (eff.source === 'tap' || (eff.source === 'unknown' && d.holders_uncountable)) {
+    const hasMarket0 = Boolean(d.market_updated_at || d.pair_url || Number(d.lp_usd || 0) > 0 || Number(d.volume_24h || 0) > 0);
+    const b0 = (d.buys_24h !== null && d.buys_24h !== undefined && d.buys_24h !== '') ? Number(d.buys_24h) : null;
+    const noBuy0 = !hasMarket0 && (b0 === null || b0 <= 1);
+    return {
+      holders: eff.source === 'tap' ? 'Tap to see' : '—',
+      holdersTitle: eff.source === 'tap' ? 'Open the card to count the holders on-chain' : 'Holder count not available for this collection',
+      buys: noBuy0 ? '—' : formatCount(b0),
+      buysTitle: noBuy0 ? 'No market data for this drop yet' : '',
+    };
+  }
+  let holders = eff.count;   // unknown stays unknown ("—" via formatCount)
+  let holdersTitle = eff.source === 'onchain' ? 'Counted on-chain when the card was opened' : '';
   const std = String(d.standard || '').toUpperCase();
   const countsItems = /721|1155|NFT|FAIR-MINT|CUSTOM/.test(std);
   const minted = Number(d.total_minted);
-  if (holders !== null && countsItems && Number.isFinite(minted) && minted >= 0 && holders > minted) {
+  if (eff.source !== 'onchain' && holders !== null && countsItems && Number.isFinite(minted) && minted >= 0 && holders > minted) {
     holders = minted;
     holdersTitle = 'Capped at the number minted (the stored holder count was a placeholder)';
   }
@@ -7539,6 +7584,56 @@ function upgradeSlimItem(item) {
   });
 }
 
+// The token card asks for the real holder count of an NFT collection whose stored count is a placeholder (or whose
+// last count is over HOLDER_COUNT_TTL_SEC old). One request per open card at most; the answer is copied into every
+// object the page holds for that contract, then the card and the table are redrawn.
+const holderCountRequested = new Map();   // contract -> time of the request (ms)
+function holderCountWanted(item) {
+  if (!holderCountable(item)) return false;
+  const eff = effectiveHolders(item);
+  if (eff.source === 'onchain') {
+    return Date.now() / 1000 - Number(item.holders_counted_at || 0) > HOLDER_COUNT_TTL_SEC;
+  }
+  return eff.source === 'tap';
+}
+
+function loadHolderCount(item) {
+  const c = String((item && item.contract) || '').toLowerCase();
+  if (!c || !holderCountWanted(item)) return false;
+  const last = holderCountRequested.get(c) || 0;
+  if (Date.now() - last < 30000) return Boolean(item._holdersCounting);   // asked moments ago: no second request
+  holderCountRequested.set(c, Date.now());
+  item._holdersCounting = true;
+  const apply = (fields) => {
+    const set = (obj) => {
+      if (!obj || String(obj.contract || '').toLowerCase() !== c) return;
+      Object.assign(obj, fields);
+      delete obj._holdersCounting;
+    };
+    allDrops.forEach(set);
+    set(item);
+    if (typeof pulseItemsMap !== 'undefined' && pulseItemsMap.get(c)) set(pulseItemsMap.get(c));
+  };
+  fetchWithTimeout(`${BACKEND_URL}/api/holders?contract=${c}`, { cache: 'default' }, 30000)
+    .then(res => (res && res.ok) ? res.json() : null)
+    .then(data => {
+      if (data && data.holders !== undefined && data.holders !== null) {
+        apply({ holders_onchain: Number(data.holders), holders_counted_at: Number(data.counted_at || Date.now() / 1000) });
+      } else if (data && data.status === 'unsupported') {
+        apply({ holders_uncountable: true });
+      } else {
+        apply({});            // busy / error: a card opened 30 s or more later tries again (no retry loop on redraw)
+      }
+    })
+    .catch(() => apply({}))
+    .finally(() => {
+      if (typeof markDropsDataChanged === 'function') markDropsDataChanged();
+      if (currentInspectItem && String(currentInspectItem.contract || '').toLowerCase() === c) openModal(currentInspectItem, 'redraw');
+      if (typeof renderTable === 'function') renderTable(true);
+    });
+  return true;
+}
+
 // Pinned "Mint / Snipe" shortcut at the bottom of the token modal. Replay analysis: only ~17% of sessions that opened a
 // token reached the Mint action / Sniper CLI sections far down the modal. The bar jumps straight there (and is tracked),
 // then hides itself while either target section is on screen.
@@ -11387,6 +11482,10 @@ if (typeof module !== 'undefined' && module.exports) {
     isDropSoldOut,
     isDropUnsafeToMint,
     isFreeMintableNow,
+    holderCountable,
+    effectiveHolders,
+    holdersBuysDisplay,
+    loadHolderCount,
     parseServerUtc,
     getMintTerms,
     mintTermsChipsHtml,

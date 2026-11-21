@@ -57,6 +57,7 @@ export function openModal(item, source = 'direct') {
     setupModalTelemetry(item, source);
   }
   if (item._slim) upgradeSlimItem(item);
+  loadHolderCount(item);   // an NFT whose holder count is a placeholder: count it now ("Counting…" until it answers)
   // (a slim record's upgrade above fetches the whole record, calldata included: no second request for it)
   if (item.has_mint_calldata && !item.mint_calldata && !item._calldataRequested && !item._slim) {
     item._calldataRequested = true;
@@ -129,16 +130,26 @@ export function openModal(item, source = 'direct') {
     bondingPct = Math.min(99, Math.max(10, Math.log10(tm + 1) * 20));
   }
 
-  const holdersCount = Number(item.holders || 0);
+  // the real count when there is one; null while it is being counted or when the stored value is only a placeholder
+  const effHolders = effectiveHolders(item);
+  const holdersKnown = effHolders.count !== null && Number.isFinite(effHolders.count);
+  const holdersCount = holdersKnown ? effHolders.count : 0;
+  const holdersCounting = Boolean(item._holdersCounting) && !holdersKnown;
   // Real top-10 share from the security scan (security.top10_pct). Holder count alone says nothing about
   // concentration: a fresh drop with 1 holder at 0 minted used to read "Extreme (>50%)", a false alarm.
   const top10Raw = item.security ? Number(item.security.top10_pct) : NaN;
   const hasTop10 = Number.isFinite(top10Raw) && top10Raw > 0;
-  const tooEarly = tm === 0 || holdersCount < 10;
+  const tooEarly = tm === 0 || (holdersKnown && holdersCount < 10);
   const neutralPill = (label, title) => `<span class="whale-alert-pill" style="background: rgba(148, 163, 184, 0.12); border: 1px solid rgba(148, 163, 184, 0.5); color: var(--text-secondary, #94a3b8);" title="${title}">${label}</span>`;
   let whaleConcentrationBadge;
   let whaleConcentrationDesc;
-  if (tooEarly) {
+  if (holdersCounting && tm > 0) {
+    whaleConcentrationBadge = neutralPill('⏳ Counting…', 'Counting the holders on-chain');
+    whaleConcentrationDesc = 'Counting the holders of this collection on-chain…';
+  } else if (!holdersKnown && tm > 0) {
+    whaleConcentrationBadge = neutralPill('— Not measured', 'No holder count for this collection');
+    whaleConcentrationDesc = 'Holder count not available for this collection.';
+  } else if (tooEarly) {
     whaleConcentrationBadge = neutralPill('⏳ Too early', 'Not enough mints or holders yet to judge concentration');
     whaleConcentrationDesc = `Only ${formatCount(holdersCount)} holder${holdersCount === 1 ? '' : 's'} so far${tm === 0 ? ' and nothing minted yet' : ''} — normal for a fresh drop, not a whale signal.`;
   } else if (!hasTop10) {
@@ -278,7 +289,7 @@ export function openModal(item, source = 'direct') {
         <div><span class="dim">Standard:</span> <strong>${std}</strong></div>
         <div><span class="dim">Deployment Block:</span> <code>#${item.block || 'N/A'}</code></div>
         <div><span class="dim">Total Minted:</span> <strong>${mintedStr}</strong> ${supplyStr}</div>
-        <div><span class="dim">Holders:</span> <strong>${formatCount(item.holders)} unique wallets</strong></div>
+        <div><span class="dim">Holders:</span> <strong>${holdersKnown ? `${formatCount(holdersCount)} unique wallets` : (holdersCounting ? 'Counting…' : '—')}</strong>${effHolders.source === 'onchain' ? ' <span class="dim" title="Counted on-chain when this card was opened">(on-chain)</span>' : ''}</div>
       </div>
     </div>
 
