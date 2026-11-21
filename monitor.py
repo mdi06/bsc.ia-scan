@@ -29,7 +29,7 @@ from typing import Optional, Dict, Any, List, Tuple, Iterable
 import filters
 from filters import EQUITY_SYMBOLS_CORE, EXCLUDED_PEGS_CONTRACTS, PEG_SYMBOLS_CORE
 
-# Swallowed best-effort failures are logged at DEBUG: printing would corrupt the Rich TUI.
+# Swallowed best-effort failures are logged at DEBUG: printing would flood the worker's output.
 _log = logging.getLogger(__name__)
 
 # Official Binance .ai Agent ID Registry on BSC
@@ -3779,75 +3779,10 @@ def evaluate_portfolio_exit(item: Dict[str, Any], bnb_price: Optional[float] = N
         }
 
 
-# Cloud backend the CLI pulls from / pushes to. Override with CLOUD_API_URL (e.g. a staging service).
-CLOUD_API_URL = os.environ.get("CLOUD_API_URL", "https://agent-id-backend-production.up.railway.app").strip().rstrip("/")
-
-
-def sync_cloud_history() -> List[Dict[str, Any]]:
-    """Pulls latest discoveries from the 24/7 cloud scanner and merges into local cache."""
-    try:
-        req = urllib.request.Request(
-            f"{CLOUD_API_URL}/history.json?_t={int(time.time())}",
-            headers={"User-Agent": "Mozilla/5.0"}
-        )
-        with urllib.request.urlopen(req, timeout=3.0) as resp:
-            if resp.status == 200:
-                cloud_data = json.loads(resp.read().decode("utf-8"))
-                if isinstance(cloud_data, list) and len(cloud_data) > 0:
-                    local_data = []
-                    if os.path.exists(HISTORY_FILE):
-                        try:
-                            with open(HISTORY_FILE, "r") as f:
-                                local_data = json.load(f)
-                        except Exception:
-                            local_data = []
-                    
-                    merged = {x.get("contract", "").lower(): x for x in local_data if x.get("contract")}
-                    for item in cloud_data:
-                        c = (item.get("contract") or "").lower()
-                        if not c:
-                            continue
-                        if c not in merged:
-                            merged[c] = item
-                        else:
-                            sw = list(set((merged[c].get("smart_wallets") or []) + (item.get("smart_wallets") or [])))
-                            merged[c].update(item)
-                            merged[c]["smart_wallets"] = sw
-                            merged[c]["smart_minters"] = sw
-                    
-                    res_list = [x for x in merged.values() if not is_system_infra(x)]
-                    res_list.sort(key=lambda x: x.get("block", 0) or 0, reverse=True)
-                    save_history(res_list)
-
-                    # Push local discoveries and owned tokens to Cloud Engine
-                    if len(res_list) > len(cloud_data) or any(x.get("user_balance", 0) > 0 for x in res_list):
-                        admin_token = os.environ.get("ADMIN_TOKEN", "").strip()
-                        if admin_token:
-                            try:
-                                sync_req = urllib.request.Request(
-                                    f"{CLOUD_API_URL}/api/sync",
-                                    data=json.dumps(res_list).encode("utf-8"),
-                                    headers={
-                                        "Content-Type": "application/json",
-                                        "User-Agent": "Mozilla/5.0",
-                                        "Authorization": f"Bearer {admin_token}",
-                                    },
-                                    method="POST"
-                                )
-                                urllib.request.urlopen(sync_req, timeout=4.0)
-                            except Exception as exc:
-                                _log.debug("cloud /api/sync push failed: %s", exc)
-
-                    return res_list
-    except Exception as exc:
-        _log.debug("cloud history pull failed: %s", exc)
-    return []
-
-
 def load_history() -> List[Dict[str, Any]]:
     items = []
     try:
-        from db import db  # imported lazily: db.py opens the database on import, which CLI start-up shouldn't pay for
+        from db import db  # imported lazily: db.py opens the database on import
         db_items = db.get_all_projects()
         if db_items:
             items = db_items
@@ -3855,10 +3790,7 @@ def load_history() -> List[Dict[str, Any]]:
         items = []
 
     if not items:
-        cloud_items = sync_cloud_history()
-        if cloud_items:
-            items = cloud_items
-        elif os.path.exists(HISTORY_FILE):
+        if os.path.exists(HISTORY_FILE):
             try:
                 with open(HISTORY_FILE, "r") as f:
                     items = json.load(f)
