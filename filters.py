@@ -11,6 +11,8 @@ Two tiers exist for historical reasons:
   pegged/blue-chip/synthetic assets (is_excluded_asset).
 """
 import re
+import time
+from typing import Optional
 
 # Contracts removed from the API outright (also the default targets of POST /api/admin/purge-bogus).
 BOGUS_SCAM_CONTRACTS = [
@@ -139,6 +141,121 @@ def is_secondary_market(d) -> bool:
     sec_vol = _num(d.get("secondary_vol_bnb"))
     has_pair = bool(d.get("pair_address") or d.get("pair_url"))
     return lp > 50 or mc > 500 or (px > 0 and vol > 0) or sec_vol > 0 or has_pair or bool(d.get("is_graduated"))
+
+
+# --- FREE tab: free, not sold out, not paused, not unsafe, mint window open. Mirrors app.js isFreeMintableNow and
+# its helpers (isFreeMintDrop, isPreMintedToken, isDropSoldOut, isDropUnsafeToMint, getMintTerms); the parity test
+# runs both. The browser shows only the newest feed page, so the server picks these out of the whole list.
+_NFT_STANDARD_RE = re.compile(r"721|1155|NFT")
+
+
+def _js_number(v) -> float:
+    """JavaScript's Number(v) for a JSON value: null -> 0, booleans -> 0 / 1, numeric strings parsed, else NaN."""
+    if v is None:
+        return 0.0
+    if isinstance(v, bool):
+        return float(v)
+    if isinstance(v, (int, float)):
+        return float(v)
+    if isinstance(v, str):
+        s = v.strip()
+        if not s:
+            return 0.0
+        low = s.lower()
+        try:
+            if low.startswith("0x"):
+                return float(int(s, 16))
+            if "inf" in low or "nan" in low or "_" in s:
+                return float("nan")
+            return float(s)
+        except ValueError:
+            return float("nan")
+    return float("nan")
+
+
+def _uncompressed(d, key):
+    """d[key] without unpacking a compact record's compressed fields (compact.CompactRecord.hot_get): `security`,
+    `is_paused` and `sold_sel` are cold there, and decoding every record on each snapshot build is what compact.py
+    exists to avoid. A cold field reads as None, which only ever lets a drop through; the browser applies the full
+    rule (isFreeMintableNow) to every row it shows, and the list view keeps those three fields. Plain dicts read
+    normally."""
+    hot_get = getattr(d, "hot_get", None)
+    return hot_get(key) if hot_get else d.get(key)
+
+
+def _js_or0(v):
+    """JavaScript's `v || 0`."""
+    return v if v else 0
+
+
+def is_free_mint(d) -> bool:
+    if not d:
+        return False
+    p_str = str(d.get("mint_price_str") or "").upper()
+    if d.get("has_free_mint") or "FREE" in p_str:
+        return True
+    return (_js_number(_js_or0(d.get("mint_value_wei"))) == 0 and _js_number(_js_or0(d.get("mint_price_bnb"))) == 0
+            and "PAID" not in p_str and "DEX" not in p_str and "TBD" not in p_str)
+
+
+def _max_supply(d) -> float:
+    ms = _js_number(d.get("max_supply"))
+    return ms if (ms == ms and 0 < ms < 1e20) else 0.0
+
+
+def is_pre_minted_token(d) -> bool:
+    if not d:
+        return False
+    ms = _max_supply(d)
+    tm = _js_number(_js_or0(d.get("total_minted")))
+    return (ms > 0 and tm == ms and not _NFT_STANDARD_RE.search(str(d.get("standard") or "").upper())
+            and not _uncompressed(d, "sold_sel") and not d.get("cap"))
+
+
+def is_sold_out(d) -> bool:
+    if not d:
+        return False
+    ms = _js_number(_js_or0(d.get("max_supply")))
+    tm = _js_number(_js_or0(d.get("total_minted")))
+    if not (ms > 0) or is_pre_minted_token(d):
+        return False
+    return tm / ms >= 0.999
+
+
+def is_unsafe_to_mint(d) -> bool:
+    if not d:
+        return False
+    level = str(d.get("risk_level") or "").upper()
+    badge = str(d.get("risk_badge") or "").upper()
+    if level in ("RUG", "HIGH") or "HONEYPOT" in badge or "DRAIN" in badge or d.get("is_honeypot"):
+        return True
+    security = _uncompressed(d, "security")
+    return bool(isinstance(security, dict) and security.get("is_fund_drain"))
+
+
+def _mint_window_open(d, now: float) -> bool:
+    t = d.get("mint_terms") if isinstance(d.get("mint_terms"), dict) else {}
+
+    def pos(v):
+        n = _js_number(v)
+        return n if (n == n and n not in (float("inf"), float("-inf")) and n > 0) else None
+
+    start, end = pos(t.get("start")), pos(t.get("end"))
+    if end is not None and end <= now:
+        return False                       # ended
+    if start is not None and start > now:
+        return False                       # not started yet
+    state = t.get("state")
+    return not (t.get("open") is False or state in ("not_open", "ended", "sold_out"))
+
+
+def is_free_mintable_now(d, now: Optional[float] = None) -> bool:
+    """The FREE tab and /api/feed?filter=free_mintable."""
+    if not d or not isinstance(d, dict):
+        return False
+    if not is_free_mint(d) or is_sold_out(d) or is_unsafe_to_mint(d) or _uncompressed(d, "is_paused"):
+        return False
+    return _mint_window_open(d, time.time() if now is None else now)
 
 
 # Interest score bands (the worker's formula; analyze_market_interest calls the same function).

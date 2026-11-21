@@ -165,3 +165,41 @@ app.appendUniqueDrops([{ contract: '0xs2', block: 1, mint_terms: { gate: 'open',
 assert.strictEqual(app.getAllDrops().length, 1, 'still no duplicate row');
 assert.strictEqual(app.getAllDrops()[0].mint_terms.gate, 'open', 'Load Older Drops refreshes terms of rows already shown');
 console.log('✔ Mint terms refresh from fresher copies; no duplicate Agent ID chip: PASS');
+
+// FREE tab loads its own list from the server (/api/feed?filter=free_mintable) and pages through it
+(async () => {
+  const pages = {
+    0: { projects: [free({ block: 50 }), free({ block: 40 })], has_more: true, filter_total: 3 },
+    2: { projects: [free({ block: 30 })], has_more: false, filter_total: 3 },
+  };
+  const urls = [];
+  global.fetch = async (url) => {
+    urls.push(url);
+    const off = Number(new URL(url).searchParams.get('offset'));
+    return { ok: true, status: 200, json: async () => pages[off] };
+  };
+  app.setAllDrops([]);
+  app.setActiveTab('RADAR');
+  app.setActiveFilter('FREE');
+  await app.loadFreeMintsPage();
+  assert.ok(urls[0].includes('filter=free_mintable') && urls[0].includes('offset=0') && urls[0].includes('view=list'), urls[0]);
+  assert.strictEqual(app.getAllDrops().length, 2);
+  let paged = app.serverPagedList();
+  assert.strictEqual(paged.hasMore, true);
+  assert.strictEqual(paged.total, 3);
+  await paged.load();
+  assert.ok(urls[1].includes('offset=2'), urls[1]);
+  assert.strictEqual(app.getAllDrops().length, 3);
+  assert.strictEqual(app.serverPagedList().hasMore, false);
+  await app.loadFreeMintsPage();                       // nothing left: no request
+  assert.strictEqual(urls.length, 2);
+  app.setActiveFilter('LP');
+  assert.strictEqual(app.serverPagedList(), null, 'other filters only page what is loaded');
+  app.setActiveFilter('ALL');
+  console.log('✔ FREE tab pages the server free-mint list: PASS');
+
+  // badge: the server total, never below what is loaded
+  assert.strictEqual(app.countDropsByFilter([free()], { free_mintable: 1217 }).freeMints, 1217);
+  assert.strictEqual(app.countDropsByFilter([free(), free()], { free_mintable: 0 }).freeMints, 2);
+  console.log('✔ FREE badge uses the server count: PASS');
+})().catch(e => { console.error(e); process.exit(1); });

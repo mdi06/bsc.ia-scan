@@ -265,6 +265,7 @@ FEED_FILTERS = {
     "sniper_ready": lambda d: d.get("sniper_ready"),
     "proxy": lambda d: d.get("is_proxy_clone"),
     "nft_surge": lambda d: d.get("is_nft_surge"),
+    "free_mintable": filters.is_free_mintable_now,
 }
 
 
@@ -489,6 +490,7 @@ def _overview_stats(all_projs, counts, pulse) -> dict:
         "proxy": counts["proxy"],
         "nft_surge": counts["nft_surge"],
         "secondary": counts["secondary"],
+        "free_mintable": counts["free_mintable"],
         "latest_block": all_projs[0].get("block") if all_projs else None,
         "agent_wallets": total_agent_wallets,
         "total_created_wallets": total_agent_wallets,
@@ -505,6 +507,7 @@ def _overview_stats_fallback(all_projs) -> dict:
         "proxy": 0,
         "nft_surge": 0,
         "secondary": 0,
+        "free_mintable": 0,
         "latest_block": None,
         "agent_wallets": monitor.DEFAULT_AGENT_WALLET_COUNT,
         "total_created_wallets": monitor.DEFAULT_AGENT_WALLET_COUNT,
