@@ -1570,10 +1570,10 @@ async def post_sync(request: Request):
 
 @app.get("/")
 def root_handler(request: Request):
-    """On Render, send browsers and crawlers to the Vercel frontend so page loads don't use Render's bandwidth."""
+    """On the hosted API (Render or Railway), send browsers and crawlers to the Vercel frontend so page loads don't use the API host's bandwidth."""
     accept = request.headers.get("accept", "")
     host = request.headers.get("host", "")
-    if os.environ.get("RENDER") or "onrender.com" in host:
+    if os.environ.get("RENDER") or os.environ.get("RAILWAY_ENVIRONMENT") or "onrender.com" in host or "railway.app" in host:
         if "application/json" in accept and "text/html" not in accept:
             return {"status": "ok", "service": "agent-id-backend", "frontend": "https://agent-id-monitor.vercel.app"}
         return RedirectResponse(url="https://agent-id-monitor.vercel.app", status_code=302)

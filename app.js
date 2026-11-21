@@ -110,7 +110,7 @@ function scheduleCloudFavoritesSync(wallet) {
 // When running locally (http://localhost:8080), use local backend seamlessly with 0 cloud bandwidth
 const BACKEND_URL = (typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'))
   ? ''
-  : 'https://bsc-ia-scan-onrender-com.onrender.com';
+  : 'https://agent-id-backend-production.up.railway.app';
 
 // Calls the backend (BACKEND_URL is '' on localhost, so that is the local API there). No same-origin retry: in
 // production the page is served by Vercel, which has no /api, so a second attempt could only 404 and add console noise.
