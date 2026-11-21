@@ -1486,6 +1486,9 @@ function countDropsByFilter(drops = allDrops, stats = globalStats) {
   if (!needSniper) counts.sniperReady = stats.sniper_ready;
   if (!needSurge) counts.nftSurge = stats.nft_surge;
   if (!needProxy) counts.proxy = stats.proxy;
+  // FREE MINTS: the server's count over the whole list (the tab pages through it, loadFreeMintsPage), never below
+  // what is loaded here (delta-polled drops can be newer than the server's snapshot).
+  if (stats && Number(stats.free_mintable) > 0) counts.freeMints = Math.max(counts.freeMints, Number(stats.free_mintable));
   // Secondary = pairs actually loaded (what the table can show), not the server's total: a 2,809 badge over an
   // empty table read as broken. The server total stays in globalStats.secondary for the overview stats.
   return counts;
@@ -1551,12 +1554,12 @@ function mergeDropsIntoAllDrops(newDrops) {
 
   if (added > 0) {
     allDrops.sort((a, b) => Number(b.block || 0) - Number(a.block || 0));
-    const sEl = document.getElementById('smartCount');
+    const sEl = typeof document !== 'undefined' ? document.getElementById('smartCount') : null;
     if (sEl) {
       const count = allDrops.filter(d => (d.smart_wallets && d.smart_wallets.length > 0) || (d.smart_minters && d.smart_minters.length > 0)).length;
       sEl.textContent = count > 0 ? count : (globalStats ? globalStats.smart : 0);
     }
-    const rEl = document.getElementById('radarCount');
+    const rEl = typeof document !== 'undefined' ? document.getElementById('radarCount') : null;
     if (rEl) {
       rEl.textContent = Math.max(allDrops.length, globalStats ? globalStats.total : 0);
     }
@@ -2562,6 +2565,7 @@ function applyOverviewStats(data, persist = true) {
       proxy: Number(s.proxy !== undefined ? s.proxy : 0),
       nft_surge: Number(s.nft_surge !== undefined ? s.nft_surge : 0),
       secondary: Number(s.secondary !== undefined ? s.secondary : 0),
+      free_mintable: Number(s.free_mintable !== undefined ? s.free_mintable : 0),
       latest_block: s.latest_block || latestKnownBlock || 0,
       agent_wallets: Number(s.agent_wallets || s.total_created_wallets || currentAgentWalletsCount)
     };
@@ -2615,6 +2619,7 @@ function applyOverviewStatsFallback() {
     proxy: (globalStats && globalStats.proxy) ? globalStats.proxy : localProxy,
     nft_surge: (globalStats && globalStats.nft_surge) ? globalStats.nft_surge : localNft,
     secondary: (globalStats && globalStats.secondary) ? globalStats.secondary : localSecondary,
+    free_mintable: (globalStats && globalStats.free_mintable) ? globalStats.free_mintable : 0,
     latest_block: latestKnownBlock || (allDrops[0] ? allDrops[0].block : 0),
     agent_wallets: currentAgentWalletsCount
   };
@@ -5769,6 +5774,8 @@ function renderTable(keepLimit = false) {
   if (!keepLimit) {
     tableRenderLimit = TABLE_RENDER_CHUNK;
   }
+  // not during the first load: the bundled snapshot replaces allDrops then, and would drop a free list that came first
+  if (!isInitialLoad && activeTab === 'RADAR' && activeFilter === 'FREE' && !freeMintsFeed.requested) loadFreeMintsPage();
   const filtered = getFilteredDrops();
 
   // The table's reserved height (style.css .table-reserve) only covers the wait for the first feed render; after that,
@@ -6360,12 +6367,13 @@ function renderTable(keepLimit = false) {
 
   // Update pagination button visibility and progress
   if (loadMoreWrap) {
-    if (tableRenderLimit < filtered.length || (activeTab === 'RADAR' && activeFilter === 'ALL' && !searchQuery && hasMoreDrops)) {
+    const paged = serverPagedList();
+    if (tableRenderLimit < filtered.length || (paged && paged.hasMore)) {
       loadMoreWrap.style.display = 'block';
       const loadedCountEl = document.getElementById('loadedCount');
       const totalAvailEl = document.getElementById('totalAvailableCount');
       if (loadedCountEl) loadedCountEl.textContent = Math.min(filtered.length, tableRenderLimit);
-      if (totalAvailEl) totalAvailEl.textContent = (activeTab === 'RADAR' && activeFilter === 'ALL' && !searchQuery && globalStats) ? globalStats.total : filtered.length;
+      if (totalAvailEl) totalAvailEl.textContent = (paged && paged.total) ? Math.max(paged.total, filtered.length) : filtered.length;
     } else {
       loadMoreWrap.style.display = 'none';
     }
@@ -6716,7 +6724,8 @@ function appendNextTableBatch() {
   if (loadMoreWrap) {
     const loadedCountEl = document.getElementById('loadedCount');
     if (loadedCountEl) loadedCountEl.textContent = Math.min(filtered.length, tableRenderLimit);
-    if (tableRenderLimit >= filtered.length && !hasMoreDrops) {
+    const paged = serverPagedList();
+    if (tableRenderLimit >= filtered.length && !(paged && paged.hasMore)) {
       loadMoreWrap.style.display = 'none';
     }
   }
@@ -6728,8 +6737,11 @@ if (typeof window !== 'undefined') window.appendNextTableBatch = appendNextTable
 
 function handleLoadMoreClick() {
   const filtered = getFilteredDrops();
+  const paged = serverPagedList();
   if (tableRenderLimit < filtered.length) {
     appendNextTableBatch();
+  } else if (paged && paged.hasMore && !paged.busy) {
+    paged.load();
   } else if (hasMoreDrops && !isLoadingMore) {
     loadMoreDrops();
   }
@@ -9677,6 +9689,53 @@ async function loadMoreDrops() {
 }
 if (typeof window !== 'undefined') window.loadMoreDrops = loadMoreDrops;
 
+// FREE tab: the feed's first page holds only the newest drops (a handful of them free), so the tab asks the server
+// for its own list (/api/feed?filter=free_mintable, the same rule as isFreeMintableNow) and pages through that one.
+// Slim records (view=list): the modal upgrades them to the full record when it opens.
+const FREE_MINTS_PAGE = 150;
+const freeMintsFeed = { offset: 0, hasMore: true, loading: false, requested: false, total: null };
+async function loadFreeMintsPage() {
+  if (freeMintsFeed.loading || !freeMintsFeed.hasMore) return;
+  freeMintsFeed.loading = true;
+  freeMintsFeed.requested = true;
+  const btn = typeof document !== 'undefined' ? document.getElementById('loadMoreBtn') : null;
+  if (btn) btn.innerHTML = '<span>⏳ Loading Free Mints...</span>';
+  try {
+    const res = await fetchWithTimeout(
+      `${BACKEND_URL}/api/feed?filter=free_mintable&limit=${FREE_MINTS_PAGE}&offset=${freeMintsFeed.offset}&view=list`,
+      { cache: 'default' }, 8000);
+    if (!res || !res.ok) throw new Error('free mints list failed');
+    const data = await res.json();
+    const drops = (data && Array.isArray(data.projects)) ? data.projects : [];
+    freeMintsFeed.offset += drops.length;
+    freeMintsFeed.hasMore = Boolean(data && data.has_more) && drops.length > 0;
+    if (data && data.filter_total !== undefined) freeMintsFeed.total = Number(data.filter_total);
+    // appendUniqueDrops, not mergeDropsIntoAllDrops: that one skips every contract in knownContracts, which also
+    // holds drops seen earlier but not in allDrops now, so most of the free list would be dropped.
+    if (drops.length > 0 && appendUniqueDrops(drops) > 0) {
+      allDrops.sort((a, b) => Number(b.block || 0) - Number(a.block || 0));
+      refreshFilterPillCounts();
+    }
+  } catch (err) {
+    console.warn('Free mints list:', err);   // hasMore stays true: the Load more button retries
+  } finally {
+    freeMintsFeed.loading = false;
+    // the button's usual label (shared with ALL); renderTable fills in the two counts
+    if (btn) btn.innerHTML = '<span>⬇️ Load Older Drops (<span id="loadedCount"></span> of <span id="totalAvailableCount"></span>)</span>';
+    if (activeTab === 'RADAR' && activeFilter === 'FREE') renderTable(true);
+  }
+}
+if (typeof window !== 'undefined') window.loadFreeMintsPage = loadFreeMintsPage;
+
+// The server list that "Load more" / infinite scroll pages for the current view: the feed on ALL, the free list on
+// FREE, none elsewhere (other views only page what is already loaded).
+function serverPagedList() {
+  if (activeTab !== 'RADAR' || searchQuery) return null;
+  if (activeFilter === 'ALL') return { hasMore: hasMoreDrops, busy: isLoadingMore, load: loadMoreDrops, total: globalStats ? globalStats.total : null };
+  if (activeFilter === 'FREE') return { hasMore: freeMintsFeed.hasMore, busy: freeMintsFeed.loading, load: loadFreeMintsPage, total: freeMintsFeed.total };
+  return null;
+}
+
 // While the page shows the bundled snapshot (backend asleep / cold-starting), retry the live feed on a short
 // back-off instead of waiting for the 5-minute refresh, so the page goes live as soon as Render wakes up.
 const LIVE_FEED_RETRY_DELAYS_MS = [5000, 15000, 30000];
@@ -9794,6 +9853,7 @@ async function fetchDrops() {
         );
       }
       hasMoreDrops = Boolean(payload.has_more);
+      if (loadMoreOffset === null) loadMoreOffset = payload.projects.length;
       if (payload.latest_block) latestKnownBlock = payload.latest_block;
     }
 
@@ -9868,6 +9928,7 @@ async function fetchDrops() {
     }
     isInitialLoad = false;
     if (!isLiveSource) scheduleLiveFeedRetry();
+    if (activeTab === 'RADAR' && activeFilter === 'FREE' && !freeMintsFeed.requested) loadFreeMintsPage();   // ?filter=free / remembered FREE
 
     // Header Counters with Global Pre-Calculated Stats
     const rEl = document.getElementById('radarCount');
@@ -10599,8 +10660,9 @@ async function init() {
           const filtered = getFilteredDrops();
           if (tableRenderLimit < filtered.length) {
             appendNextTableBatch();
-          } else if (activeTab === 'RADAR' && activeFilter === 'ALL' && !searchQuery && hasMoreDrops && !isLoadingMore) {
-            loadMoreDrops();
+          } else {
+            const paged = serverPagedList();
+            if (paged && paged.hasMore && !paged.busy) paged.load();
           }
         } finally {
           isScrollTicking = false;
@@ -11172,6 +11234,9 @@ if (typeof module !== 'undefined' && module.exports) {
     encodeMulticall3Aggregate3,
     decodeMulticall3Aggregate3,
     loadMoreDrops,
+    loadFreeMintsPage,
+    serverPagedList,
+    freeMintsFeed,
     requestNotificationPermission,
     sendDesktopNotification,
     buildMintTxParams,
