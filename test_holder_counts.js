@@ -16,7 +16,10 @@ assert.strictEqual(app.holdersBuysDisplay(nft({ holders_onchain: 949 })).holders
 assert.deepStrictEqual(app.effectiveHolders(nft({ holders_onchain: 949 })), { count: 949, source: 'onchain' });
 // a real stored count, a token, a 1-item NFT: unchanged
 assert.deepStrictEqual(app.effectiveHolders(nft({ holders: 81, total_minted: 154 })), { count: 81, source: 'stored' });
-assert.deepStrictEqual(app.effectiveHolders({ standard: 'BEP-20 Token (18 decimals)', holders: 1, total_minted: 1e9 }), { count: 1, source: 'stored' });
+// a token's 1 is the discovery seed, not a count: unknown ("—"); a real count stays
+assert.deepStrictEqual(app.effectiveHolders({ standard: 'BEP-20 Token (18 decimals)', holders: 1, total_minted: 1e9 }), { count: null, source: 'unknown' });
+assert.strictEqual(app.holdersBuysDisplay({ standard: 'BEP-20 Token (18 decimals)', holders: 1, total_minted: 1e9 }).holders, '—');
+assert.deepStrictEqual(app.effectiveHolders({ standard: 'BEP-20 Token (18 decimals)', holders: 37, total_minted: 1e9 }), { count: 37, source: 'stored' });
 assert.deepStrictEqual(app.effectiveHolders(nft({ total_minted: 1 })), { count: 1, source: 'stored' });
 console.log('✔ Holders cell: Tap to see / — / the on-chain count: PASS');
 

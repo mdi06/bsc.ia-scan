@@ -42,7 +42,9 @@ const allBannerText = () => BANNER_IDS.map(txt).join(' | ');
 
 const mk = (n, extra) => ({
   contract: '0x' + n.toString(16).padStart(40, '0'), name: 'Token ' + n, symbol: 'T' + n,
-  standard: 'ERC-721 (NFT Collection)', max_supply: 100, total_minted: 10, ...extra,
+  standard: 'ERC-721 (NFT Collection)', max_supply: 100, total_minted: 10,
+  last_mint_at: Math.floor(Date.now() / 1000) - 600,   // minted 10 minutes ago: still being minted
+  ...extra,
 });
 
 // ------------------------------------------------------------------------------------------ 1. the HTML placeholders
@@ -70,7 +72,7 @@ assert.strictEqual(txt('momentumNames'), '—', 'no momentum tokens: dash, not t
 assert.strictEqual(txt('momentumCount'), '0 ACTIVE');
 assert.strictEqual(txt('fillRatePct'), '—', 'no capped collections: the ratio is undefined, not "0.0%"');
 assert.strictEqual(txt('fillRateRatio'), '', 'no capped collections: no "(0 / 0 Sold Out)"');
-assert.strictEqual(txt('nearCapCount'), '0');
+assert.strictEqual(txt('nearCapCount'), '0 ACTIVE / 0');
 assert.strictEqual(txt('topGainerName'), '—', 'no top gainer: dash, not "Hash21 (HASH)"');
 assert.strictEqual(txt('topGainerDetails'), '');
 assert.strictEqual(txt('topGainerNet'), '');
@@ -111,7 +113,7 @@ assert.deepStrictEqual(stats.warmCapItems.map(t => t.name), ['Alpha', 'Bravo', '
 app.renderStats([...notWarm, ...warm]);
 assert.strictEqual(txt('momentumCount'), '5 ACTIVE');
 assert.strictEqual(txt('momentumNames'), '[Alpha 78%, Bravo 65%, Charlie 60%]', 'top 3 by progress, never the old sample');
-assert.strictEqual(txt('nearCapCount'), '1');
+assert.strictEqual(txt('nearCapCount'), '1 ACTIVE / 1');
 assert.strictEqual(els.get('momentumNames').attrs.title, 'Alpha 78%, Bravo 65%, Charlie 60%, Delta 55%, Echo 50%',
   'the tooltip lists every momentum token');
 assert(!FAKE.test(allBannerText()), 'real data replaced every sample string');
@@ -137,8 +139,45 @@ console.log('✔ renderStats: label fallbacks and truncation: PASS');
 resetDom();
 app.renderStats([mk(34, { name: 'Edge', max_supply: 1000, total_minted: 796 }), mk(35, { name: 'Floor', max_supply: 1000, total_minted: 500 })]);
 assert.strictEqual(txt('momentumNames'), '[Edge 79%, Floor 50%]');
-assert.strictEqual(txt('nearCapCount'), '0');
+assert.strictEqual(txt('nearCapCount'), '0 ACTIVE / 0');
 console.log('✔ renderStats: percentages stay inside the 50-79% bucket: PASS');
+
+// ------------------------------------------------ 3b. stalled mints, pre-minted tokens and the server's numbers
+{
+  const stalled = mk(40, { name: 'Stalled', total_minted: 60, last_mint_at: Math.floor(Date.now() / 1000) - 3 * 86400 });
+  const neverSeen = mk(41, { name: 'NoStamp', total_minted: 85, last_mint_at: undefined });
+  const preMinted = { contract: '0x' + '9'.repeat(40), name: 'PreMinted', standard: 'BEP-20 Token (18 decimals)', max_supply: 1e9, total_minted: 1e9 };
+  const st = app.computeStats([stalled, neverSeen, preMinted]);
+  assert.strictEqual(st.warmCapCount, 0, 'a mint stalled at 60% for 3 days is not momentum');
+  assert.strictEqual(st.momentumTotal, 1, '...but it is in the 50-79% total');
+  assert.strictEqual(st.nearCapCount, 1);
+  assert.strictEqual(st.nearCapActive, 0, 'no mint seen since the worker started stamping: not active');
+  assert.strictEqual(st.cappedTotal, 2, 'a token minted in full up front is not a capped mint');
+  assert.strictEqual(st.soldOutCount, 0, '...and never counts as sold out');
+  assert.strictEqual(app.mintProgressBucket(preMinted), null);
+
+  // The server's numbers (every drop) win over the loaded drops.
+  app.setGlobalStats({ total: 12683, mint_progress: { capped: 6583, sold_out: 3082, near_cap: 632, near_cap_active: 4,
+    momentum: 236, momentum_active: 2, active_top: [{ name: 'Zeta', pct: 71.4 }, { name: 'Eta', pct: 55 }] } });
+  resetDom();
+  app.renderStats([stalled]);
+  assert.strictEqual(txt('fillRatePct'), '46.8%');
+  assert.strictEqual(txt('fillRateRatio'), '(3,082 / 6,583 Sold Out)');
+  assert.strictEqual(txt('nearCapCount'), '4 ACTIVE / 632');
+  assert.strictEqual(txt('momentumCount'), '2 ACTIVE');
+  assert.strictEqual(txt('momentumNames'), '[Zeta 71%, Eta 55%]');
+  assert(els.get('momentumCount').attrs.title.includes('236'), 'the tooltip gives the 50-79% total');
+  app.setGlobalStats(null);
+  console.log('✔ Stats bar: stalled and pre-minted drops left out; server numbers used when present: PASS');
+}
+
+// One order for top gainers: by multiplier, then (free mints, no multiplier) by ATH profit
+{
+  const g = (name, multiplier, athProfit) => ({ name, multiplier, athProfit, profit: 0 });
+  const order = [g('FreeBig', null, 35), g('Paid2x', 2, 1), g('Paid10x', 10, 0.5), g('FreeSmall', 0, 1.8)].sort(app.compareGainers).map(x => x.name);
+  assert.deepStrictEqual(order, ['Paid10x', 'Paid2x', 'FreeBig', 'FreeSmall']);
+  console.log('✔ Top gainers ranked like the server (multiplier, then ATH profit): PASS');
+}
 
 // ---------------------------------------------------------------- 4. top gainer / runner-up fill, then clear again
 const freeItem = {

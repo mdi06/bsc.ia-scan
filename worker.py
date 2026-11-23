@@ -708,6 +708,10 @@ def run_fast_track_progress_sweeper_loop():
                             old_prog = (old_minted / old_sup * 100.0) if old_sup > 0 else 0.0
 
                             if minted is not None:
+                                if minted > old_minted:
+                                    # When minting last moved: the stats bar's "momentum" / "active near cap"
+                                    # count only drops that are still being minted, not ones stalled at 60%.
+                                    it["last_mint_at"] = int(time.time())
                                 it["total_minted"] = minted
                             if supply is not None:
                                 it["max_supply"] = supply

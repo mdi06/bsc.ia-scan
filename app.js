@@ -1287,7 +1287,7 @@ function mergeTopGainersList(externalList) {
   });
 
   if (updated) {
-    savedTopGainers.sort((a, b) => Math.max(b.athProfit, b.profit) - Math.max(a.athProfit, a.profit));
+    savedTopGainers.sort(compareGainers);
     if (savedTopGainers.length > 50) savedTopGainers = savedTopGainers.slice(0, 50);
     saveSavedTopGainers();
   }
@@ -1352,7 +1352,7 @@ function updateSavedTopMarkets(incomingDrops) {
   });
 
   if (changed) {
-    savedTopGainers.sort((a, b) => Math.max(b.athProfit, b.profit) - Math.max(a.athProfit, a.profit));
+    savedTopGainers.sort(compareGainers);
     if (savedTopGainers.length > 50) savedTopGainers = savedTopGainers.slice(0, 50);
     saveSavedTopGainers();
   }
@@ -2303,61 +2303,104 @@ function bannerTokenName(item) {
   return contract.length > 10 ? `${contract.slice(0, 6)}…${contract.slice(-4)}` : (contract || 'Unnamed');
 }
 
-// Compute Macro Stats
-function computeStats(drops) {
-  let cappedTotal = 0;
-  let soldOutCount = 0;
-  let nearCapCount = 0;
-  let warmCapCount = 0;
-  const warmCapItems = [];   // the tokens behind warmCapCount, so the banner can name them
+// Stats bar mint buckets. Same rule as filters.mint_progress_bucket: a capped mint 50-79.9% filled is "momentum",
+// 80-99.9% "near cap"; a token whose whole supply was minted up front is not a mint (isPreMintedToken) and is left out.
+const NEAR_CAP_PCT = 80;
+const MOMENTUM_PCT = 50;
+const MINT_ACTIVE_WINDOW_SEC = 6 * 3600;
 
-  drops.forEach(item => {
-    let rawMs = item.max_supply;
-    if (rawMs !== null && rawMs !== undefined && (Number(rawMs) >= 1e20 || !isFinite(Number(rawMs)))) {
-      rawMs = null;
+function mintProgressBucket(item) {
+  if (!item) return null;
+  const msRaw = Number(item.max_supply);
+  const ms = (Number.isFinite(msRaw) && msRaw > 0 && msRaw < 1e20) ? msRaw : 0;
+  if (!ms || isPreMintedToken(item)) return null;
+  const pct = (Number(item.total_minted || 0) / ms) * 100;
+  if (pct >= 99.9) return 'sold_out';
+  if (pct >= NEAR_CAP_PCT) return 'near_cap';
+  if (pct >= MOMENTUM_PCT) return 'momentum';
+  return 'open';
+}
+
+// Still being minted: the worker stamps last_mint_at whenever the minted count goes up.
+function isMintingRecently(item, nowSec = Date.now() / 1000) {
+  const at = Number(item && item.last_mint_at);
+  return Number.isFinite(at) && at > 0 && nowSec - at <= MINT_ACTIVE_WINDOW_SEC;
+}
+
+// The mint numbers of the stats bar. The server's (stats.mint_progress) cover every drop; the browser holds only the
+// newest few hundred, so counting allDrops here is the fallback for when the server has not answered.
+function computeMintProgress(drops, serverMp) {
+  if (serverMp && Number(serverMp.capped) >= 0 && serverMp.capped !== null && serverMp.capped !== undefined) {
+    const items = (Array.isArray(serverMp.active_top) ? serverMp.active_top : []).map(r => ({
+      name: bannerTokenName(r), pct: Math.min(79, Math.round(Number(r.pct) || 0)), exactPct: Number(r.pct) || 0,
+    }));
+    return {
+      source: 'server',
+      cappedTotal: Number(serverMp.capped) || 0,
+      soldOutCount: Number(serverMp.sold_out) || 0,
+      nearCapCount: Number(serverMp.near_cap) || 0,
+      nearCapActive: Number(serverMp.near_cap_active) || 0,
+      momentumTotal: Number(serverMp.momentum) || 0,
+      warmCapCount: Number(serverMp.momentum_active) || 0,
+      warmCapItems: items,
+    };
+  }
+  const nowSec = Date.now() / 1000;
+  const out = { source: 'loaded', cappedTotal: 0, soldOutCount: 0, nearCapCount: 0, nearCapActive: 0, momentumTotal: 0, warmCapCount: 0, warmCapItems: [] };
+  (drops || []).forEach(item => {
+    const bucket = mintProgressBucket(item);
+    if (!bucket) return;
+    out.cappedTotal++;
+    if (bucket === 'sold_out') { out.soldOutCount++; return; }
+    if (bucket === 'open') return;
+    const active = isMintingRecently(item, nowSec);
+    if (bucket === 'near_cap') {
+      out.nearCapCount++;
+      if (active) out.nearCapActive++;
+      return;
     }
-    const ms = Number(rawMs || 0);
-    const tm = Number(item.total_minted || 0);
-
-    if (ms > 0) {
-      cappedTotal++;
-      const pct = (tm / ms) * 100;
-      if (pct >= 99.9 || tm >= ms) {
-        soldOutCount++;
-      } else if (pct >= 80) {
-        nearCapCount++;
-      } else if (pct >= 50) {
-        warmCapCount++;
-        // Rounded for display but kept inside this bucket: 79.6% must not read "80%" while it is not counted as near cap.
-        warmCapItems.push({ name: bannerTokenName(item), pct: Math.min(79, Math.round(pct)), exactPct: pct });
-      }
+    out.momentumTotal++;
+    if (active) {
+      out.warmCapCount++;
+      const pct = (Number(item.total_minted || 0) / Number(item.max_supply)) * 100;
+      // Rounded for display but kept inside this bucket: 79.6% must not read "80%" while it is not counted as near cap.
+      out.warmCapItems.push({ name: bannerTokenName(item), pct: Math.min(79, Math.round(pct)), exactPct: pct });
     }
   });
-  warmCapItems.sort((a, b) => (b.exactPct - a.exactPct) || a.name.localeCompare(b.name));
+  out.warmCapItems.sort((a, b) => (b.exactPct - a.exactPct) || a.name.localeCompare(b.name));
+  return out;
+}
+
+// One order for top gainers, the server's (compute_live_top_gainers): by ATH multiplier, then a free mint (no
+// multiplier) by ATH profit. Ranking by dollars per token compared a $35 NFT with a $0.00001 token.
+function compareGainers(a, b) {
+  const ma = Number(a && a.multiplier) > 0 ? Number(a.multiplier) : null;
+  const mb = Number(b && b.multiplier) > 0 ? Number(b.multiplier) : null;
+  if ((ma !== null) !== (mb !== null)) return ma !== null ? -1 : 1;
+  if (ma !== null && mb !== null && ma !== mb) return mb - ma;
+  return Math.max(Number(b.athProfit) || 0, Number(b.profit) || 0) - Math.max(Number(a.athProfit) || 0, Number(a.profit) || 0);
+}
+
+// Compute Macro Stats
+function computeStats(drops) {
+  const mp = computeMintProgress(drops, globalStats && globalStats.mint_progress);
 
   // Incrementally update our saved top markets memory from incoming recent drops
   updateSavedTopMarkets(drops);
 
-  const fillRatePct = cappedTotal > 0 ? (soldOutCount / cappedTotal) * 100 : 0;
+  const fillRatePct = mp.cappedTotal > 0 ? (mp.soldOutCount / mp.cappedTotal) * 100 : 0;
   const allGainers = [...savedTopGainers]
     .filter(g => isValidTopMarketItem(g.item || g))
-    .sort((a, b) => Math.max(b.athProfit, b.profit) - Math.max(a.athProfit, a.profit));
+    .sort(compareGainers);
   const soldGainers = allGainers.filter(g => g.isSold);
   const majorGainers = allGainers.filter(g => Math.max(g.athProfit, g.profit) >= 0.001);
 
-  const topGainer = soldGainers[0] || allGainers[0] || null;
-  let runnerUp = null;
-  if (topGainer) {
-    runnerUp = allGainers.find(g => (g.contract || '').toLowerCase() !== (topGainer.contract || '').toLowerCase()) || null;
-  }
+  const topGainer = allGainers[0] || null;
+  const runnerUp = allGainers[1] || null;
 
   return {
-    cappedTotal,
-    soldOutCount,
+    ...mp,
     fillRatePct,
-    nearCapCount,
-    warmCapCount,
-    warmCapItems,
     topGainer,
     runnerUp,
     allGainers,
@@ -2488,9 +2531,18 @@ function renderStats(drops) {
   // Fill rate is a ratio: with no capped collections it is undefined, not "0.0% (0 / 0 Sold Out)".
   const hasCapped = stats.cappedTotal > 0;
   setBannerText('fillRatePct', hasCapped ? `${stats.fillRatePct.toFixed(1)}%` : '—');
-  setBannerText('fillRateRatio', hasCapped ? `(${stats.soldOutCount} / ${stats.cappedTotal} Sold Out)` : '');
-  setBannerText('nearCapCount', stats.nearCapCount);
-  setBannerText('momentumCount', `${stats.warmCapCount} ACTIVE`);
+  const fmtN = n => Number(n || 0).toLocaleString('en-US');
+  const winH = MINT_ACTIVE_WINDOW_SEC / 3600;
+  const scope = stats.source === 'server' ? 'all tracked drops' : 'the drops loaded so far';
+  setBannerText('fillRateRatio', hasCapped ? `(${fmtN(stats.soldOutCount)} / ${fmtN(stats.cappedTotal)} Sold Out)` : '');
+  const elNear = setBannerText('nearCapCount', `${fmtN(stats.nearCapActive)} ACTIVE / ${fmtN(stats.nearCapCount)}`);
+  if (elNear && typeof elNear.setAttribute === 'function') {
+    elNear.setAttribute('title', `${fmtN(stats.nearCapCount)} capped mints are 80-99% filled (${scope}); ${fmtN(stats.nearCapActive)} of them minted in the last ${winH}h`);
+  }
+  const elMom = setBannerText('momentumCount', `${fmtN(stats.warmCapCount)} ACTIVE`);
+  if (elMom && typeof elMom.setAttribute === 'function') {
+    elMom.setAttribute('title', `Capped mints 50-79% filled that minted in the last ${winH}h. ${fmtN(stats.momentumTotal)} sit in that range in total (${scope}).`);
+  }
 
   // Momentum names come from the same list as the count above: the top few tokens at 50-79% of their cap.
   const momentum = (stats.warmCapItems || []).slice(0, MOMENTUM_NAMES_SHOWN);
@@ -2567,7 +2619,8 @@ function applyOverviewStats(data, persist = true) {
       secondary: Number(s.secondary !== undefined ? s.secondary : 0),
       free_mintable: Number(s.free_mintable !== undefined ? s.free_mintable : 0),
       latest_block: s.latest_block || latestKnownBlock || 0,
-      agent_wallets: Number(s.agent_wallets || s.total_created_wallets || currentAgentWalletsCount)
+      agent_wallets: Number(s.agent_wallets || s.total_created_wallets || currentAgentWalletsCount),
+      mint_progress: (s.mint_progress && typeof s.mint_progress === 'object') ? s.mint_progress : null,
     };
 
     if (persist && typeof localStorage !== 'undefined') {
@@ -2621,7 +2674,8 @@ function applyOverviewStatsFallback() {
     secondary: (globalStats && globalStats.secondary) ? globalStats.secondary : localSecondary,
     free_mintable: (globalStats && globalStats.free_mintable) ? globalStats.free_mintable : 0,
     latest_block: latestKnownBlock || (allDrops[0] ? allDrops[0].block : 0),
-    agent_wallets: currentAgentWalletsCount
+    agent_wallets: currentAgentWalletsCount,
+    mint_progress: (globalStats && globalStats.mint_progress) || null,
   };
 
   if (typeof document !== 'undefined') {
@@ -2879,6 +2933,10 @@ function effectiveHolders(item) {
   if (isNft && minted >= 2 && (stored === null || !Number.isFinite(stored) || stored <= 1)) {
     return { count: null, source: holderCountable(d) ? 'tap' : 'unknown' };
   }
+  // A token's 1 is the discovery seed too (worker.py seeds holders = 1): the market source never sent a count.
+  if (!isNft && stored === 1) {
+    return { count: null, source: 'unknown' };
+  }
   return { count: stored, source: known ? 'stored' : 'unknown' };
 }
 
@@ -2897,7 +2955,8 @@ function holdersBuysDisplay(item) {
     };
   }
   let holders = eff.count;   // unknown stays unknown ("—" via formatCount)
-  let holdersTitle = eff.source === 'onchain' ? 'Counted on-chain when the card was opened' : '';
+  let holdersTitle = eff.source === 'onchain' ? 'Counted on-chain when the card was opened'
+    : (eff.source === 'unknown' ? 'No holder count from the market source yet' : '');
   const std = String(d.standard || '').toUpperCase();
   const countsItems = /721|1155|NFT|FAIR-MINT|CUSTOM/.test(std);
   const minted = Number(d.total_minted);
@@ -11347,6 +11406,9 @@ if (typeof module !== 'undefined' && module.exports) {
     loadMoreDrops,
     loadFreeMintsPage,
     serverPagedList,
+    mintProgressBucket,
+    computeMintProgress,
+    compareGainers,
     tableShowingCounts,
     freeMintsFeed,
     requestNotificationPermission,
