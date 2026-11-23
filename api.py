@@ -1318,11 +1318,11 @@ TOP_GAINER_ITEM_FIELDS = (
 
 
 def compute_live_top_gainers(projects, limit: int = TOP_GAINERS_LIMIT) -> list:
-    """Top post-mint gainers from the CURRENT records, ranked by the ATH multiplier.
+    """Top post-mint gainers from the CURRENT records, ranked by peak (ATH) profit per mint; the multiplier breaks ties.
 
     Only records whose mint cost is known (a paid mint, or a verified free one) and whose ATH profit is positive
-    qualify (monitor.update_post_mint_profit_metrics decides, the same rules app.js uses). A free mint has no
-    multiplier, so it ranks after every paid one, by ATH profit."""
+    qualify (monitor.update_post_mint_profit_metrics decides, the same rules app.js uses). Profit is per mint (one NFT,
+    or the tokens one mint gave), so it compares across drops; app.js compareGainers uses the same order."""
     rows = []
     for p in projects:
         if not isinstance(p, dict) or is_bogus_or_synthetic_asset(p):
@@ -1364,7 +1364,7 @@ def compute_live_top_gainers(projects, limit: int = TOP_GAINERS_LIMIT) -> list:
             "athLpUsd": info.get("ath_lp_usd"),
             "item": slim_for_list({k: (d[k] if k in d else p[k]) for k in TOP_GAINER_ITEM_FIELDS if k in d or k in p}),
         })
-    rows.sort(key=lambda r: (r["multiplier"] is not None, r["multiplier"] or 0.0, r["athProfit"]), reverse=True)
+    rows.sort(key=lambda r: (r["athProfit"], r["multiplier"] or 0.0), reverse=True)
     return rows[:limit]
 
 

@@ -45,7 +45,7 @@ def paid(n, price, lp=20000.0, mint_bnb=0.01, **kw):
 
 
 # ----------------------------------------------------------------------------------------- M9: top gainers
-def test_top_gainers_are_computed_live_and_ranked_by_ath_multiplier(client):
+def test_top_gainers_are_computed_live_and_ranked_by_peak_profit_per_mint(client):
     client.db.upsert_projects([
         paid(1, 14.1, standard=NFT),                     # 14.1 / 7.0 = 2.01x
         paid(2, 35.25, standard=NFT),                    # 5.04x
@@ -56,15 +56,19 @@ def test_top_gainers_are_computed_live_and_ranked_by_ath_multiplier(client):
         paid(7, 40.0, lp=300.0, standard=NFT),           # thin pool: no trustworthy ATH
         rec(8, symbol="SOL", token_price_usd=150.0, lp_usd=9e6, has_free_mint=True, standard=NFT),  # excluded asset
         paid(9, 99.0),                                   # a token: one mint gives many tokens, not comparable
+        paid(10, 3.0, mint_bnb=0.0001, standard=NFT),    # 42.86x on a $0.07 mint: the top multiplier, but +$2.93
     ])
     body = client.get("/api/top-gainers").json()
     assert body["seeded"] is False and isinstance(body["as_of"], int)
     names = [g["name"] for g in body["gainers"]]
-    assert names == ["Token 2", "Token 1", "Token 3"]
-    assert [g["multiplier"] for g in body["gainers"]] == [5.04, 2.01, None]
-    assert body["gainers"][2]["isFree"] is True and body["gainers"][0]["isFree"] is False
+    # by peak profit per mint (+$28.25, +$7.10, +$2.93, +$0.30), not by multiplier (Token 10's 42.86x is the largest)
+    assert names == ["Token 2", "Token 1", "Token 10", "Token 3"]
+    assert [g["multiplier"] for g in body["gainers"]] == [5.04, 2.01, 42.86, None]
+    profits = [g["athProfit"] for g in body["gainers"]]
+    assert profits == sorted(profits, reverse=True)
+    assert body["gainers"][3]["isFree"] is True and body["gainers"][0]["isFree"] is False
     assert body["gainers"][0]["item"]["mint_price_str"] == "0.0100 BNB"
-    assert body["count"] == 3
+    assert body["count"] == 4
     assert "Token 9" not in names, "tokens are not in the Hall of Fame"
 
 
@@ -226,3 +230,11 @@ def test_content_version_counts_changes_and_deletes(client):
     assert client.db.content_version() == v1
     client.db.delete_projects([f"0x{1:040x}"])
     assert client.db.content_version() > v1
+
+
+def test_hall_of_fame_display_tests_in_node():
+    """test_hall_of_fame.js: ranked by peak profit per mint, unknown mint cost left out, counts = table rows."""
+    import subprocess
+    res = subprocess.run(["node", "test_hall_of_fame.js"], capture_output=True, text=True,
+                         cwd=os.path.dirname(os.path.abspath(__file__)))
+    assert res.returncode == 0, res.stdout + res.stderr
