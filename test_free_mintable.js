@@ -166,6 +166,21 @@ assert.strictEqual(app.getAllDrops().length, 1, 'still no duplicate row');
 assert.strictEqual(app.getAllDrops()[0].mint_terms.gate, 'open', 'Load Older Drops refreshes terms of rows already shown');
 console.log('✔ Mint terms refresh from fresher copies; no duplicate Agent ID chip: PASS');
 
+// "Showing X of Y" above the table: Y is the view's server total when it pages from the server, else the filtered rows
+{
+  const rows = n => Array.from({ length: n }, () => free());
+  app.setActiveTab('RADAR');
+  app.setActiveFilter('ALL');
+  app.setGlobalStats({ total: 12647 });
+  assert.deepStrictEqual(app.tableShowingCounts(rows(150)), { shown: 60, total: 12647, more: true }, 'whole feed: server total');
+  app.setActiveFilter('SNIPER');
+  assert.deepStrictEqual(app.tableShowingCounts(rows(10)), { shown: 10, total: 10, more: false }, 'local filter: filtered rows');
+  assert.deepStrictEqual(app.tableShowingCounts(rows(150)), { shown: 60, total: 150, more: true }, 'local filter, more rows than one batch');
+  app.setActiveFilter('ALL');
+  app.setGlobalStats(null);
+  console.log('✔ Table "Showing X of Y" uses the current view\'s total: PASS');
+}
+
 // FREE tab loads its own list from the server (/api/feed?filter=free_mintable) and pages through it
 (async () => {
   const pages = {

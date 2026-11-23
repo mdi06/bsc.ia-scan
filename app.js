@@ -5700,6 +5700,30 @@ if (typeof window !== 'undefined') {
 const TABLE_RENDER_CHUNK = 60;
 let tableRenderLimit = 60;
 
+// "Showing X of Y" for the current view, above the table and in the footer. Y is what this view can list: the
+// server's total for the paged lists (whole feed, free list), else the rows matching the filter. The tab badge alone
+// (every drop ever tracked) read as "12k promised, 60 shown".
+function tableShowingCounts(filtered) {
+  const shown = Math.min(filtered.length, tableRenderLimit);
+  const paged = serverPagedList();
+  const total = (paged && Number(paged.total) > 0) ? Math.max(Number(paged.total), filtered.length) : filtered.length;
+  return { shown, total, more: shown < total };
+}
+
+function updateTableShowingCount(filtered) {
+  if (typeof document === 'undefined') return;
+  const { shown, total, more } = tableShowingCounts(filtered);
+  const fmt = n => Number(n).toLocaleString();
+  const footerCountEl = document.getElementById('footerCount');
+  if (footerCountEl) footerCountEl.textContent = `Showing ${fmt(shown)} of ${fmt(total)} collections`;
+  const topEl = document.getElementById('tableShowingCount');
+  if (topEl) {
+    const hidden = activeTab === 'WALLETS' || total === 0;
+    topEl.style.display = hidden ? 'none' : '';
+    if (!hidden) topEl.textContent = more ? `Showing ${fmt(shown)} of ${fmt(total)} · scroll for more` : `Showing all ${fmt(total)}`;
+  }
+}
+
 // How many smart wallets minted a drop: the count the 🧠 / 🔥N badge shows (smart_wallets, else smart_minters).
 function smartWalletCount(d) {
   if (!d) return 0;
@@ -5840,11 +5864,7 @@ function renderTable(keepLimit = false) {
     updateSecondaryBannerUI();
   }
   lastRenderedTab = activeTab;
-  const totalDisplay = globalStats ? globalStats.total : allDrops.length;
-  const footerCountEl = document.getElementById('footerCount');
-  if (footerCountEl) {
-    footerCountEl.textContent = `Showing ${Math.min(filtered.length, tableRenderLimit)} of ${totalDisplay} collections`;
-  }
+  updateTableShowingCount(filtered);
 
   // Dynamic table headers based on active tab
   const thColBlock = document.getElementById('thColBlock');
@@ -6759,11 +6779,7 @@ function appendNextTableBatch() {
   tbody.appendChild(fragment);
   tableRenderLimit += nextBatch.length;
 
-  const footerCountEl = document.getElementById('footerCount');
-  const totalDisplay = globalStats ? globalStats.total : allDrops.length;
-  if (footerCountEl) {
-    footerCountEl.textContent = `Showing ${Math.min(filtered.length, tableRenderLimit)} of ${totalDisplay} collections`;
-  }
+  updateTableShowingCount(filtered);
 
   const loadMoreWrap = document.getElementById('loadMoreWrap');
   if (loadMoreWrap) {
@@ -11331,6 +11347,7 @@ if (typeof module !== 'undefined' && module.exports) {
     loadMoreDrops,
     loadFreeMintsPage,
     serverPagedList,
+    tableShowingCounts,
     freeMintsFeed,
     requestNotificationPermission,
     sendDesktopNotification,

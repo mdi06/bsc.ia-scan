@@ -7901,3 +7901,11 @@ button.search-empty-btn {
     min-width: 52px;
   }
 }
+
+/* "Showing 60 of 12,647 · scroll for more" above the drops table: what the table holds vs the tab badge's total */
+.table-showing-count {
+  font-size: 11px;
+  color: var(--text-dim);
+  padding: 4px 2px 6px;
+  letter-spacing: 0.02em;
+}
