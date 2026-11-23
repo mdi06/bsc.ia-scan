@@ -454,6 +454,54 @@ def _filter_counts(projects) -> dict:
     return {name: sum(1 for d in projects if pred(d)) for name, pred in FEED_FILTERS.items()}
 
 
+MOMENTUM_TOP_NAMES = 3     # the stats bar names this many momentum drops
+# Part of every feed / stats ETag. Bump it when the response bodies gain or change fields: a browser holding a body
+# from before (same content version and totals, e.g. right after a restart) must not get a 304 and keep the old shape.
+RESPONSE_SHAPE = 2
+
+
+def compute_mint_progress_stats(projects, now: Optional[float] = None) -> dict:
+    """The stats bar's mint numbers over EVERY record (the browser only holds the newest few hundred): fill rate of
+    capped mints, near cap and momentum, each with how many are still being minted (filters.is_minting_recently).
+    Tokens whose whole supply was minted up front are not mints and are left out (filters.mint_progress_bucket)."""
+    now = time.time() if now is None else now
+    capped = sold_out = near = near_active = momentum = momentum_active = 0
+    top = []
+    for d in projects:
+        bucket = filters.mint_progress_bucket(d)
+        if bucket is None:
+            continue
+        capped += 1
+        if bucket == "sold_out":
+            sold_out += 1
+            continue
+        if bucket == "open":
+            continue
+        active = filters.is_minting_recently(d, now)
+        if bucket == "near_cap":
+            near += 1
+            near_active += active
+        else:
+            momentum += 1
+            momentum_active += active
+        if active:
+            pct = filters._js_number(filters._js_or0(d.get("total_minted"))) / filters._max_supply(d) * 100.0
+            top.append({"name": d.get("name") or "", "symbol": d.get("symbol") or "",
+                        "contract": d.get("contract") or "", "pct": round(pct, 1), "near_cap": bucket == "near_cap"})
+    top.sort(key=lambda r: (-r["pct"], r["name"]))
+    return {
+        "capped": capped,
+        "sold_out": sold_out,
+        "fill_pct": round(sold_out / capped * 100.0, 1) if capped else None,
+        "near_cap": near,
+        "near_cap_active": int(near_active),
+        "momentum": momentum,
+        "momentum_active": int(momentum_active),
+        "active_top": [r for r in top if not r["near_cap"]][:MOMENTUM_TOP_NAMES],
+        "active_window_hours": filters.MINT_ACTIVE_WINDOW_SEC // 3600,
+    }
+
+
 def _agent_wallet_stats():
     """(total agent wallets, block of that count), from whichever of the local file and the database is ahead.
     Read on every request, never cached here: the counter moves without the project data (and its content
@@ -483,7 +531,7 @@ def _agent_wallet_stats():
     return total_agent_wallets, agent_wallets_block
 
 
-def _overview_stats(all_projs, counts, pulse) -> dict:
+def _overview_stats(all_projs, counts, pulse, mint_progress=None) -> dict:
     total_agent_wallets, agent_wallets_block = _agent_wallet_stats()
     return {
         "total": len(all_projs),
@@ -498,6 +546,7 @@ def _overview_stats(all_projs, counts, pulse) -> dict:
         "total_created_wallets": total_agent_wallets,
         "agent_wallets_block": agent_wallets_block,
         "pulse_24h": pulse,
+        "mint_progress": mint_progress,
     }
 
 
@@ -515,6 +564,7 @@ def _overview_stats_fallback(all_projs) -> dict:
         "total_created_wallets": monitor.DEFAULT_AGENT_WALLET_COUNT,
         "agent_wallets_block": 0,
         "pulse_24h": None,
+        "mint_progress": None,
     }
 
 
@@ -526,7 +576,8 @@ def compute_global_overview_stats(all_projs=None) -> dict:
             all_projs = [p for p in raw_projs if isinstance(p, dict) and not is_bogus_or_synthetic_asset(p)]
         else:
             all_projs = [p for p in all_projs if isinstance(p, dict) and not is_bogus_or_synthetic_asset(p)]
-        return _overview_stats(all_projs, _filter_counts(all_projs), compute_pulse_24h(all_projs))
+        return _overview_stats(all_projs, _filter_counts(all_projs), compute_pulse_24h(all_projs),
+                               compute_mint_progress_stats(all_projs))
     except Exception as e:
         print(f"[⚠️ Overview Stats Fallback Error] {e}", flush=True)
         return _overview_stats_fallback(all_projs)
@@ -668,6 +719,11 @@ class _FeedSnapshot:
         except Exception as e:             # same outcome as compute_global_overview_stats: the stats fall back
             print(f"[⚠️ Overview Stats Fallback Error] {e}", flush=True)
             self.counts = None
+        try:
+            self.mint_progress = compute_mint_progress_stats(self.projects)
+        except Exception as e:
+            print(f"[⚠️ Mint Progress Stats Error] {e}", flush=True)
+            self.mint_progress = None
         self._lock = threading.Lock()
         self._filter_lock = threading.Lock()   # one filter list is built at a time, outside self._lock
         self._pulse_lock = threading.Lock()    # one pulse recomputation at a time, outside self._lock
@@ -749,7 +805,7 @@ class _FeedSnapshot:
     def stats(self) -> dict:
         """Same dict compute_global_overview_stats builds, from the cached counts; a new dict on every call."""
         try:
-            return _overview_stats(self.projects, self.counts, self.pulse())
+            return _overview_stats(self.projects, self.counts, self.pulse(), self.mint_progress)
         except Exception as e:
             print(f"[⚠️ Overview Stats Fallback Error] {e}", flush=True)
             return _overview_stats_fallback(self.projects)
@@ -930,7 +986,9 @@ def get_overview_stats(request: Request):
     stats = snapshot.stats()
     pulse = stats.get("pulse_24h") or {}
     pulse_tag = f'{pulse.get("new_drops")}.{pulse.get("graduated")}.{round(pulse.get("dex_volume_usd") or 0)}.{pulse.get("smart_inflows")}.{pulse.get("threats_blocked")}'
-    stats_etag = f'"v{content_version}-{stats["total"]}-{stats["agent_wallets"]}-{stats.get("agent_wallets_block")}-{stats.get("latest_block")}-{pulse_tag}"'
+    mp = stats.get("mint_progress") or {}
+    mp_tag = f'm{mp.get("sold_out")}.{mp.get("near_cap_active")}.{mp.get("momentum_active")}'
+    stats_etag = f'"v{content_version}-{stats["total"]}-{stats["agent_wallets"]}-{stats.get("agent_wallets_block")}-{stats.get("latest_block")}-{pulse_tag}-{mp_tag}-s{RESPONSE_SHAPE}"'
     client_etag = request.headers.get("if-none-match")
     if _etag_matches(client_etag, stats_etag):
         return Response(status_code=304, headers={"ETag": stats_etag, "Cache-Control": "public, max-age=5"})
@@ -1030,7 +1088,7 @@ def get_feed(
         delta = snapshot.newer_than(since_block)
 
         if not delta:
-            delta_etag = f'"v{content_version}-{total}-{total_agent_wallets}-delta-{since_block}"'
+            delta_etag = f'"v{content_version}-{total}-{total_agent_wallets}-delta-{since_block}-s{RESPONSE_SHAPE}"'
             if _etag_matches(client_etag, delta_etag):
                 return Response(status_code=304, headers={"ETag": delta_etag, "Cache-Control": "public, max-age=5"})
             # No new drops: send a minimal payload without the nested stats.
@@ -1048,7 +1106,7 @@ def get_feed(
                     "projects": []
                 })
 
-        delta_etag = f'"v{content_version}-{latest_block}-{total}-{total_agent_wallets}-delta-{since_block}-h{holders_v}"'
+        delta_etag = f'"v{content_version}-{latest_block}-{total}-{total_agent_wallets}-delta-{since_block}-h{holders_v}-s{RESPONSE_SHAPE}"'
         return _cached_json(
             request, snapshot, ("delta", since_block), volatile,
             {"ETag": delta_etag, "Cache-Control": "public, max-age=5"},
@@ -1070,7 +1128,7 @@ def get_feed(
     paginated = target_list[offset : offset + limit]
 
     list_view = view == "list"      # any other value (or none) is the full shape
-    feed_etag = (f'"v{content_version}-{latest_block}-{total}-{total_agent_wallets}-{offset}-{limit}-{filter or ""}-h{holders_v}'
+    feed_etag = (f'"v{content_version}-{latest_block}-{total}-{total_agent_wallets}-{offset}-{limit}-{filter or ""}-h{holders_v}-s{RESPONSE_SHAPE}'
                  f'{"-list" if list_view else ""}"')
     if _etag_matches(client_etag, feed_etag):
         return Response(status_code=304, headers={"ETag": feed_etag, "Cache-Control": "public, max-age=5"})

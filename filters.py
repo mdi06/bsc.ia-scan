@@ -222,6 +222,40 @@ def is_sold_out(d) -> bool:
     return tm / ms >= 0.999
 
 
+# Stats bar (app.js renderStats): a capped mint 50-99.9% filled is "momentum", 80%+ "near cap". Either one counts as
+# active only while it is still being minted: the worker stamps last_mint_at whenever its minted count goes up.
+NEAR_CAP_PCT = 80.0
+MOMENTUM_PCT = 50.0
+MINT_ACTIVE_WINDOW_SEC = 6 * 3600
+
+
+def mint_progress_bucket(d) -> Optional[str]:
+    """'sold_out' / 'near_cap' (80-99.9%) / 'momentum' (50-79.9%) / 'open' (under 50%) for a mint with a real cap, else
+    None (no cap, or a token whose whole supply was minted up front: it was never a mint that could fill). Mirrors
+    app.js mintProgressBucket."""
+    if not d:
+        return None
+    ms = _max_supply(d)
+    if not ms or is_pre_minted_token(d):
+        return None
+    tm = _js_number(_js_or0(d.get("total_minted")))
+    pct = tm / ms * 100.0
+    if pct >= 99.9:
+        return "sold_out"
+    if pct >= NEAR_CAP_PCT:
+        return "near_cap"
+    if pct >= MOMENTUM_PCT:
+        return "momentum"
+    return "open"
+
+
+def is_minting_recently(d, now: Optional[float] = None) -> bool:
+    at = _js_number(d.get("last_mint_at")) if d else 0
+    if not (at == at and at > 0):
+        return False
+    return (time.time() if now is None else now) - at <= MINT_ACTIVE_WINDOW_SEC
+
+
 def is_unsafe_to_mint(d) -> bool:
     if not d:
         return False
