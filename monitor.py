@@ -2443,11 +2443,121 @@ def _sig10(x: float) -> float:
     return float(f"{x:.10g}")
 
 
+# --- Tokens per mint ------------------------------------------------------------------------------------------------
+# A BEP-20 mint pays once and receives many tokens, so its mint price PER TOKEN is mint cost / tokens per mint. That
+# number is read from the chain once per drop (worker.run_tokens_per_mint_loop): first from a real mint (the receipt of
+# the drop's stored transaction: the tokens sent to the payer), else from a getter the contract exposes.
+TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
+TOKENS_PER_MINT_GETTERS = ("amountPerMint()", "AMOUNT_PER_MINT()", "MINT_AMOUNT()", "mintAmount()", "perMint()",
+                           "tokensPerMint()", "TOKENS_PER_MINT()", "MINT_TOKENS()")
+
+
+def tokens_from_mint_receipt(tx: Optional[dict], receipt: Optional[dict], token_addrs: List[str], mint_value_wei: int,
+                             decimals: int) -> Optional[float]:
+    """Tokens ONE mint gives, from a real mint transaction: the token Transfer(s) to the payer, scaled to one mint's
+    price when the payer bought several (value = k x mint price). None when the transaction is not a paid mint of this
+    drop (a deployment, a free claim of another contract, a failed transaction)."""
+    if not tx or not receipt or str(receipt.get("status") or "").lower() not in ("0x1", "1"):
+        return None
+    targets = {a.lower() for a in token_addrs if a}
+    if str(tx.get("to") or "").lower() not in targets:
+        return None
+    payer = str(tx.get("from") or "").lower()[2:]
+    value = int(str(tx.get("value") or "0x0"), 16)
+    if mint_value_wei > 0 and value < mint_value_wei:
+        return None
+    if mint_value_wei == 0 and value != 0:
+        return None
+    raw = 0
+    for lg in receipt.get("logs") or []:
+        t = lg.get("topics") or []
+        if (len(t) == 3 and str(t[0]).lower() == TRANSFER_TOPIC and str(lg.get("address") or "").lower() in targets
+                and str(t[2]).lower()[-40:] == payer):
+            try:
+                raw += int(str(lg.get("data") or "0x0"), 16)
+            except ValueError:
+                return None
+    if raw <= 0:
+        return None
+    tokens = raw / (10 ** decimals)
+    if mint_value_wei > 0 and value > mint_value_wei:
+        tokens = tokens * mint_value_wei / value          # bought k mints in one transaction
+    return tokens if 0 < tokens < 1e18 else None
+
+
+def read_tokens_per_mint(rpc: "BscRpcClient", contract: str, tx_hash: Optional[str], mint_value_wei: int, decimals: int,
+                         token_addrs: Optional[List[str]] = None) -> Tuple[Optional[float], Optional[str]]:
+    """(tokens one mint gives, where it came from: "receipt" / "getter"), or (None, None)."""
+    addrs = [contract] + [a for a in (token_addrs or []) if a and a.lower() != contract.lower()]
+    if tx_hash:
+        try:
+            tx = rpc.call("eth_getTransactionByHash", [tx_hash])
+            receipt = rpc.call("eth_getTransactionReceipt", [tx_hash]) if tx else None
+            tokens = tokens_from_mint_receipt(tx, receipt, addrs, mint_value_wei, decimals)
+            if tokens:
+                return tokens, "receipt"
+        except Exception as exc:
+            _log.debug("tokens-per-mint receipt read failed for %s: %s", contract, exc)
+    for sig in TOKENS_PER_MINT_GETTERS:
+        res = rpc.call_contract(contract, keccak_selector(sig))
+        if not res or len(res) < 66:
+            continue
+        try:
+            raw = int(res[2:66], 16)
+        except ValueError:
+            continue
+        tokens = raw / (10 ** decimals)
+        if 1e-6 <= tokens < 1e15:
+            return tokens, "getter"
+    return None, None
+
+
+# --- Profit per mint -------------------------------------------------------------------------------------------------
+SWAP_FEE = 0.0025      # PancakeSwap v2 fee on the sell
+
+
+def mint_units(item: Dict[str, Any]) -> Optional[float]:
+    """What one mint gives: 1 for an NFT, tokens_per_mint for a token (None while it is not known)."""
+    std = str(item.get("standard") or "").upper()
+    if any(k in std for k in ("721", "1155", "NFT")):
+        return 1.0
+    try:
+        n = float(item.get("tokens_per_mint") or 0)
+    except (TypeError, ValueError):
+        return None
+    return n if n > 0 else None
+
+
+def can_sell(item: Dict[str, Any]) -> bool:
+    sec = item.get("security") if isinstance(item.get("security"), dict) else {}
+    return not (sec.get("is_honeypot") or sec.get("cannot_sell_all") or item.get("is_honeypot"))
+
+
+def sell_tax_pct(item: Dict[str, Any]) -> float:
+    sec = item.get("security") if isinstance(item.get("security"), dict) else {}
+    try:
+        t = float(sec.get("sell_tax") or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
+    return min(max(t, 0.0), 100.0)
+
+
+def sell_value_usd(price_usd: float, units: float, tax_pct: float, pool_usd: Optional[float]) -> float:
+    """What selling one mint's worth (units at price_usd) returns: through the pool when its size is known (constant
+    product: half the pool is the paired side, minus the swap fee), then minus the sell tax."""
+    value = price_usd * units
+    if pool_usd and pool_usd > 0:
+        side = pool_usd / 2.0
+        value = side * value / (side + value) * (1.0 - SWAP_FEE)
+    return value * (1.0 - tax_pct / 100.0)
+
+
 def _no_profit() -> Dict[str, Any]:
     return {
         "sec_usd": 0.0, "mint_usd": None, "profit": None,
         "ath_price_usd": None, "ath_profit_usd": None, "ath_multiplier": None, "current_multiplier": None,
         "is_sold": False, "is_free": False,
+        "units": None, "sell_tax_pct": 0.0, "can_sell": True, "ath_lp_usd": None,
     }
 
 
@@ -2492,11 +2602,17 @@ def update_post_mint_profit_metrics(item: Dict[str, Any], bnb_price: Optional[fl
     tm = item.get("total_minted") or 0
     is_sold = bool(raw_ms and float(raw_ms) > 0 and tm and float(tm) >= float(raw_ms))
 
+    # Profit is per MINT: one mint gives `units` (1 NFT, or tokens_per_mint tokens). A token whose tokens per mint is
+    # not known yet has no profit: its per-token price says nothing about what one mint paid. A token that cannot be
+    # sold (honeypot) has none either. Selling goes through the pool (when its size is known) and pays the sell tax.
+    units = mint_units(item)
+    sellable = can_sell(item)
+    tax = sell_tax_pct(item)
     profit = None
     multiplier = None
-    if cost_known and sec_usd > 0:
-        profit = sec_usd - mint_usd
-        multiplier = _round2(sec_usd / mint_usd) if mint_usd > 0 else None
+    if cost_known and sec_usd > 0 and units and sellable:
+        profit = sell_value_usd(sec_usd, units, tax, lp_val if price_from_pair else None) - mint_usd
+        multiplier = _round2(sec_usd * units / mint_usd) if mint_usd > 0 else None
 
     # --- ATH (high-water mark) -----------------------------------------------------------------------------
     lp_ok = (not price_from_pair) or lp_val >= ATH_MIN_LP_USD
@@ -2506,21 +2622,26 @@ def update_post_mint_profit_metrics(item: Dict[str, Any], bnb_price: Optional[fl
         item["ath_price_usd"] = None
         item["ath_profit_usd"] = None
         item["ath_multiplier"] = None
+        item["ath_lp_usd"] = None
         prev_ath = 0.0
     if sec_usd > 0 and lp_ok and sec_usd > prev_ath:
         item["ath_price_usd"] = _sig10(sec_usd)
         item["ath_timestamp"] = int(time.time())
+        # the pool size when the peak was set: what one mint could really have been sold for at that moment
+        item["ath_lp_usd"] = round(lp_val, 2) if price_from_pair and lp_val > 0 else None
     ath_price = float(item.get("ath_price_usd") or 0.0)
 
     # Peak profit and multiplier come from the peak price and TODAY's mint cost, every time. Only the peak price is a
     # high-water mark: keeping these two as running maxima froze values computed from a mint cost that was later
     # corrected (neiro: 14,176x next to a peak 96% below the mint cost).
-    if cost_known and ath_price > 0:
-        item["ath_profit_usd"] = _sig10(ath_price - mint_usd)
+    if cost_known and ath_price > 0 and units and sellable:
+        ath_pool = item.get("ath_lp_usd")
+        item["ath_profit_usd"] = _sig10(sell_value_usd(ath_price, units, tax, float(ath_pool) if ath_pool else None)
+                                        - mint_usd)
     else:
         item["ath_profit_usd"] = None
-    if cost_known and not is_free and mint_usd > 0 and ath_price > 0:
-        item["ath_multiplier"] = _round2(ath_price / mint_usd)
+    if cost_known and not is_free and mint_usd > 0 and ath_price > 0 and units and sellable:
+        item["ath_multiplier"] = _round2(ath_price * units / mint_usd)
     else:
         item["ath_multiplier"] = None
 
@@ -2539,6 +2660,10 @@ def update_post_mint_profit_metrics(item: Dict[str, Any], bnb_price: Optional[fl
         "current_multiplier": multiplier,
         "is_sold": is_sold,
         "is_free": is_free,
+        "units": units,
+        "sell_tax_pct": tax,
+        "can_sell": sellable,
+        "ath_lp_usd": item.get("ath_lp_usd"),
     }
 
 

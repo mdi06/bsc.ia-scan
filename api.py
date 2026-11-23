@@ -1168,7 +1168,8 @@ LIST_VIEW_DROP = frozenset({
     "sniper_checklist", "tx_hash", "token_price_bnb", "sniper_status",
     "risk_flags", "hold", "holder_distribution", "dev_root",
 })
-LIST_VIEW_SECURITY_KEEP = frozenset({"has_refund", "refund_methods", "is_serial_dev", "is_fund_drain", "is_fresh_dev", "serial_count"})
+LIST_VIEW_SECURITY_KEEP = frozenset({"has_refund", "refund_methods", "is_serial_dev", "is_fund_drain", "is_fresh_dev", "serial_count",
+                                     "is_honeypot", "cannot_sell_all", "sell_tax"})   # the last three: profit per mint (canSellItem, sellTaxPct)
 
 
 def slim_for_list_view(p: dict) -> dict:
@@ -1312,7 +1313,7 @@ TOP_GAINER_ITEM_FIELDS = (
     "contract", "name", "symbol", "standard", "market_url", "pair_url", "token_price_usd", "floor_price_usd",
     "floor_price_bnb", "ath_price_usd", "ath_profit_usd", "ath_multiplier", "mint_price_str", "mint_price_bnb",
     "mint_value_wei", "has_free_mint", "mint_calldata", "total_minted", "max_supply", "lp_usd", "holders",
-    "block", "detected_at", "market_stale", "market_updated_at",
+    "block", "detected_at", "market_stale", "market_updated_at", "tokens_per_mint", "ath_lp_usd",
 )
 
 
@@ -1326,11 +1327,14 @@ def compute_live_top_gainers(projects, limit: int = TOP_GAINERS_LIMIT) -> list:
     for p in projects:
         if not isinstance(p, dict) or is_bogus_or_synthetic_asset(p):
             continue
-        # NFTs only: one mint gives one item, so its mint cost and its floor price compare. A token mint gives an
-        # unknown number of tokens for one payment, and its per-token price says nothing about the mint's profit.
-        if not _is_nft_record(p):
-            continue
+        # Only drops whose profit can be stated per mint: an NFT (one mint, one item) or a token whose tokens per mint
+        # was read from the chain (worker.run_tokens_per_mint_loop). update_post_mint_profit_metrics returns no profit
+        # for any other drop, and none for a token that cannot be sold.
+        if monitor.mint_units(p) is None:
+            continue                                     # a token whose tokens per mint is not known: no per-mint profit
         d = p.hot() if isinstance(p, CompactRecord) else dict(p)    # the maths reads hot fields only: no blob is decoded
+        if not _is_nft_record(d):
+            d["security"] = p.get("security")             # sell tax / honeypot (cold): tokens only, a few dozen records
         try:
             info = monitor.update_post_mint_profit_metrics(d)
         except Exception:
@@ -1354,6 +1358,10 @@ def compute_live_top_gainers(projects, limit: int = TOP_GAINERS_LIMIT) -> list:
             "isSold": bool(info["is_sold"]),
             "isFree": bool(info["is_free"]),
             "holders": int(filters._num(d.get("holders"))),
+            "units": info.get("units"),
+            "tokensPerMint": None if _is_nft_record(d) else info.get("units"),
+            "sellTaxPct": info.get("sell_tax_pct") or 0.0,
+            "athLpUsd": info.get("ath_lp_usd"),
             "item": slim_for_list({k: (d[k] if k in d else p[k]) for k in TOP_GAINER_ITEM_FIELDS if k in d or k in p}),
         })
     rows.sort(key=lambda r: (r["multiplier"] is not None, r["multiplier"] or 0.0, r["athProfit"]), reverse=True)

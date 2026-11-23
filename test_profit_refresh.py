@@ -21,21 +21,23 @@ def pair(price, lp, base="0x" + "9" * 40):
 
 def paid_token(**kw):
     d = {"contract": "0x" + "9" * 40, "name": "T", "symbol": "TST", "standard": "BEP-20 Token (18 decimals)",
-         "mint_price_bnb": 0.01, "mint_value_wei": "10000000000000000"}
+         "mint_price_bnb": 0.01, "mint_value_wei": "10000000000000000", "tokens_per_mint": 1}
     d.update(kw)
     return d
 
 
 def test_dex_update_refreshes_profit_and_ath_and_ath_only_goes_up():
     item = paid_token()
+    sell = lambda price: worker.monitor.sell_value_usd(price, 1, 0.0, item.get("lp_usd"))   # one mint sold into the pool
     worker._apply_dex_pair(item, pair(20.0, 50000))
-    assert item["current_profit_usd"] == pytest.approx(20.0 - 7.05)
+    assert item["current_profit_usd"] == pytest.approx(sell(20.0) - 7.05)
     first_ath = item["ath_profit_usd"]
     worker._apply_dex_pair(item, pair(40.0, 50000))
-    assert item["ath_profit_usd"] == pytest.approx(40.0 - 7.05) and item["ath_price_usd"] == 40.0
+    ath_profit = sell(40.0) - 7.05
+    assert item["ath_profit_usd"] == pytest.approx(ath_profit) and item["ath_price_usd"] == 40.0
     worker._apply_dex_pair(item, pair(9.0, 50000))
-    assert item["ath_profit_usd"] == pytest.approx(40.0 - 7.05)          # unchanged by the drop
-    assert item["current_profit_usd"] == pytest.approx(9.0 - 7.05)
+    assert item["ath_profit_usd"] == pytest.approx(ath_profit)          # unchanged by the drop
+    assert item["current_profit_usd"] == pytest.approx(sell(9.0) - 7.05)
     assert item["ath_profit_usd"] > first_ath
 
 
@@ -66,9 +68,10 @@ def test_pancake_estimate_refreshes_profit(monkeypatch):
     monkeypatch.setattr(worker.monitor, "get_pair_address", lambda *a: "0x" + "9" * 40)
     monkeypatch.setattr(worker.monitor, "get_reserves", lambda rpc, p: (1_000_000 * 10**18, 50 * 10**18))
     monkeypatch.setattr(worker.monitor, "refresh_bnb_price", lambda rpc=None, **k: BNB)
-    item = {"contract": token, "standard": "BEP-20 Token (18 decimals)", "has_free_mint": True}
+    item = {"contract": token, "standard": "BEP-20 Token (18 decimals)", "has_free_mint": True, "tokens_per_mint": 1}
     worker._apply_pancake_estimate(object(), item)
-    assert item["current_profit_usd"] == pytest.approx(0.035 * (BNB / 700.0))   # free mint: profit = price
+    price = 0.035 * (BNB / 700.0)
+    assert item["current_profit_usd"] == pytest.approx(worker.monitor.sell_value_usd(price, 1, 0.0, item.get("lp_usd")))  # free: all of it
 
 
 def test_element_floor_change_refreshes_nft_profit(monkeypatch):
