@@ -313,10 +313,10 @@ assert.strictEqual(getSavedTopGainers().length, 0, 'No invented baseline winners
 // A winner delivered by the API is kept in the separate memory
 app.mergeTopGainersList([{
   name: 'AGENT人生8', symbol: 'AGENT人生8', contract: '0xca45f13730154fbbf2d93acf169de83f52864f80',
-  standard: 'BEP-20 Token (18 decimals)', secUsd: 0.04794, mintUsd: 0.0, profit: 0.04794, athPrice: 0.04794,
+  standard: 'ERC-721 (NFT Collection)', secUsd: 0.04794, mintUsd: 0.0, profit: 0.04794, athPrice: 0.04794,
   athProfit: 0.04794, multiplier: 0, isSold: true, isFree: true, holders: 100,
   item: { name: 'AGENT人生8', symbol: 'AGENT人生8', contract: '0xca45f13730154fbbf2d93acf169de83f52864f80',
-          standard: 'BEP-20 Token (18 decimals)', mint_price_str: 'FREE', has_free_mint: true, token_price_usd: 0.04794,
+          standard: 'ERC-721 (NFT Collection)', mint_price_str: 'FREE', has_free_mint: true, token_price_usd: 0.04794,
           lp_usd: 20000, ath_price_usd: 0.04794 }
 }]);
 const initialMemory = getSavedTopGainers();
@@ -331,7 +331,7 @@ for (let i = 0; i < 150; i++) {
     contract: `0xaaaa${i.toString(16).padStart(36, '0')}`,
     name: `NewDrop #${i}`,
     symbol: `ND${i}`,
-    standard: 'BEP-20 Token (18 decimals)',
+    standard: 'ERC-721 (NFT Collection)',
     mint_price_str: 'FREE',
     mint_price_bnb: 0.0,
     mint_value_wei: '0',

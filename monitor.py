@@ -2512,15 +2512,15 @@ def update_post_mint_profit_metrics(item: Dict[str, Any], bnb_price: Optional[fl
         item["ath_timestamp"] = int(time.time())
     ath_price = float(item.get("ath_price_usd") or 0.0)
 
-    if cost_known and profit is not None and lp_ok:
-        prev_p = item.get("ath_profit_usd")
-        item["ath_profit_usd"] = _sig10(profit if prev_p is None else max(float(prev_p), profit))
-    elif not cost_known:
+    # Peak profit and multiplier come from the peak price and TODAY's mint cost, every time. Only the peak price is a
+    # high-water mark: keeping these two as running maxima froze values computed from a mint cost that was later
+    # corrected (neiro: 14,176x next to a peak 96% below the mint cost).
+    if cost_known and ath_price > 0:
+        item["ath_profit_usd"] = _sig10(ath_price - mint_usd)
+    else:
         item["ath_profit_usd"] = None
     if cost_known and not is_free and mint_usd > 0 and ath_price > 0:
-        m = _round2(ath_price / mint_usd)
-        prev_m = item.get("ath_multiplier")
-        item["ath_multiplier"] = m if prev_m is None else max(float(prev_m), m)
+        item["ath_multiplier"] = _round2(ath_price / mint_usd)
     else:
         item["ath_multiplier"] = None
 
