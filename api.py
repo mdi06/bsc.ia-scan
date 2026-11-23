@@ -1326,6 +1326,10 @@ def compute_live_top_gainers(projects, limit: int = TOP_GAINERS_LIMIT) -> list:
     for p in projects:
         if not isinstance(p, dict) or is_bogus_or_synthetic_asset(p):
             continue
+        # NFTs only: one mint gives one item, so its mint cost and its floor price compare. A token mint gives an
+        # unknown number of tokens for one payment, and its per-token price says nothing about the mint's profit.
+        if not _is_nft_record(p):
+            continue
         d = p.hot() if isinstance(p, CompactRecord) else dict(p)    # the maths reads hot fields only: no blob is decoded
         try:
             info = monitor.update_post_mint_profit_metrics(d)

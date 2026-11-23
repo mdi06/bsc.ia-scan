@@ -1091,19 +1091,10 @@ function computeItemProfit(item, bnbPriceUsd = bnbPrice) {
   }
   const athPrice = numOrZero(item.ath_price_usd);
 
-  if (costKnown && profit !== null && lpOk) {
-    const prevP = item.ath_profit_usd;
-    item.ath_profit_usd = sig10((prevP === null || prevP === undefined) ? profit : Math.max(Number(prevP), profit));
-  } else if (!costKnown) {
-    item.ath_profit_usd = null;
-  }
-  if (costKnown && !isFree && mintUsd > 0 && athPrice > 0) {
-    const m = round2(athPrice / mintUsd);
-    const prevM = item.ath_multiplier;
-    item.ath_multiplier = (prevM === null || prevM === undefined) ? m : Math.max(Number(prevM), m);
-  } else {
-    item.ath_multiplier = null;
-  }
+  // Same rule as monitor.update_post_mint_profit_metrics: peak profit / multiplier from the peak price and today's
+  // mint cost; only the peak price is a high-water mark.
+  item.ath_profit_usd = (costKnown && athPrice > 0) ? sig10(athPrice - mintUsd) : null;
+  item.ath_multiplier = (costKnown && !isFree && mintUsd > 0 && athPrice > 0) ? round2(athPrice / mintUsd) : null;
 
   item.current_profit_usd = profit !== null ? sig10(profit) : null;
   item.current_multiplier = multiplier;
@@ -1125,7 +1116,7 @@ function computeItemProfit(item, bnbPriceUsd = bnbPrice) {
 
 // Persistent Memory for Top Post-Mint Gainers & Hall of Fame Markets
 // Eliminates full 2k+ project scans; incrementally updates and saves top winners from incoming 150-drop batches.
-const SAVED_TOP_MARKETS_KEY = 'agent_id_saved_top_markets_v3';  // v2 held USD values computed with a fallback BNB price
+const SAVED_TOP_MARKETS_KEY = 'agent_id_saved_top_markets_v4';  // v3 held tokens and frozen peak profit / multiplier maxima
 let savedTopGainers = [];
 
 // There is no hard-coded list of "historical winners" any more: its profits, free-mint flags and holder
@@ -1134,11 +1125,20 @@ function getBaselineTopGainers() {
   return [];
 }
 
+// Hall of Fame / top post-mint profit: NFT collections only (same rule as api.compute_live_top_gainers). One mint
+// gives one NFT, so mint cost and floor price compare; a token mint gives an unknown number of tokens for one payment.
+function isNftMarketItem(item) {
+  const std = String(item.standard || (item.item && item.item.standard) || '');
+  const mkt = String(item.market_url || (item.item && item.item.market_url) || '');
+  return /721|1155|NFT/.test(std) || mkt.includes('element.market');
+}
+
 function isValidTopMarketItem(item) {
   if (!item) return false;
   if (isExcludedMajorAsset(item)) {
     return false;
   }
+  if (!isNftMarketItem(item)) return false;
   const pStr = String(item.mint_price_str || (item.item && item.item.mint_price_str) || '').toUpperCase();
   if (pStr.includes('DEX TRADED')) return false;
 
@@ -1168,6 +1168,7 @@ function loadSavedTopGainers() {
       // Clean up legacy poisoned cache keys
       localStorage.removeItem('agent_id_saved_top_markets');
       localStorage.removeItem('agent_id_saved_top_markets_v2');
+      localStorage.removeItem('agent_id_saved_top_markets_v3');
       localStorage.removeItem('saved_top_markets_v1');
 
       const stored = localStorage.getItem(SAVED_TOP_MARKETS_KEY);
@@ -1245,6 +1246,17 @@ async function syncSeededTopGainers() {
   } catch (e2) {}
 }
 
+// A saved gainer's peak profit / multiplier, from its peak price and its current mint cost (the server's rule): when
+// the peak price rises, these follow it instead of keeping an older, larger value.
+function refreshGainerPeak(g) {
+  const ath = Number(g.athPrice || 0);
+  const mint = (g.mintUsd === null || g.mintUsd === undefined) ? null : Number(g.mintUsd);
+  if (mint === null || !(ath > 0)) return g;
+  g.athProfit = sig10(ath - mint);
+  g.multiplier = (!g.isFree && mint > 0) ? round2(ath / mint) : null;
+  return g;
+}
+
 function mergeTopGainersList(externalList) {
   if (!Array.isArray(externalList) || externalList.length === 0) return;
   let updated = false;
@@ -1262,7 +1274,7 @@ function mergeTopGainersList(externalList) {
       const existing = savedTopGainers[existingIdx];
       if (peakAth > Number(existing.athPrice || 0)) {
         existing.athPrice = peakAth;
-        existing.athProfit = Math.max(Number(existing.athProfit || 0), peakProfit);
+        refreshGainerPeak(existing);
         updated = true;
       }
     } else {
@@ -1290,6 +1302,9 @@ function mergeTopGainersList(externalList) {
     savedTopGainers.sort(compareGainers);
     if (savedTopGainers.length > 50) savedTopGainers = savedTopGainers.slice(0, 50);
     saveSavedTopGainers();
+    // The list can arrive after the drops did (first visit: nothing saved in this browser yet): redraw the banner,
+    // which otherwise stays "—" until the next feed refresh.
+    if (typeof document !== 'undefined' && Array.isArray(allDrops) && allDrops.length > 0) renderStats(allDrops);
   }
 }
 
@@ -1320,10 +1335,9 @@ function updateSavedTopMarkets(incomingDrops) {
           existing.mintUsd = pInfo.mintUsd;
           existing.profit = pInfo.profit;
           existing.athPrice = Math.max(Number(existing.athPrice || 0), peakPrice);
-          existing.athProfit = Math.max(Number(existing.athProfit || 0), peakProfit);
-          existing.multiplier = pInfo.multiplier || existing.multiplier;
           existing.isSold = pInfo.isSold || existing.isSold;
           existing.isFree = pInfo.isFree || existing.isFree;
+          refreshGainerPeak(existing);
           existing.holders = Number(item.holders || existing.holders || 0);
           existing.item = { ...existing.item, ...item };
           if (!item.server_metrics) delete existing.item.server_metrics;   // never keep figures of an older copy
@@ -2393,7 +2407,7 @@ function computeStats(drops) {
     .filter(g => isValidTopMarketItem(g.item || g))
     .sort(compareGainers);
   const soldGainers = allGainers.filter(g => g.isSold);
-  const majorGainers = allGainers.filter(g => Math.max(g.athProfit, g.profit) >= 0.001);
+  const majorGainers = allGainers.filter(g => Math.max(g.athProfit, g.profit) >= 1);
 
   const topGainer = allGainers[0] || null;
   const runnerUp = allGainers[1] || null;
@@ -2561,8 +2575,8 @@ function renderStats(drops) {
     const tgAth = Math.max(tg.athPrice, tg.secUsd);
     const tgNet = Math.max(tg.athProfit, tg.profit);
     setBannerText('topGainerName', `${tg.name} (${tg.symbol})`);
-    setBannerText('topGainerDetails', `Mint: ${tgMint} ➔ ATH: ${formatCryptoPrice(tgAth)}`);
-    setBannerText('topGainerNet', `Net: ${formatCryptoPrice(tgNet, true)} / token`);
+    setBannerText('topGainerDetails', `Mint: ${tgMint} ➔ Peak floor: ${formatCryptoPrice(tgAth)}`);
+    setBannerText('topGainerNet', `Net: ${formatCryptoPrice(tgNet, true)} / NFT`);
   } else {
     setBannerText('topGainerName', '—');
     setBannerText('topGainerDetails', '');
@@ -7832,28 +7846,33 @@ function openHallOfFameModal(filterMode = 'ALL') {
       else if (rankNum === 3) rankBadge = `<span class="hof-rank hof-rank-3">🥉 #3</span>`;
       else rankBadge = `<span class="hof-rank" style="color: var(--text-dim);">#${rankNum}</span>`;
 
+      // Every number in the row comes from the same two figures: the mint cost (one mint = one NFT) and the peak floor.
+      const mintCost = g.isFree ? 0 : ((g.mintUsd === null || g.mintUsd === undefined) ? null : Number(g.mintUsd));
+      const athPrice = Math.max(Number(g.athPrice || 0), Number(g.secUsd || 0));
       const mintCostStr = g.isFree
         ? '<span style="color: var(--color-green); font-weight:700;">FREE</span>'
-        : (g.mintUsd > 0 ? formatCryptoPrice(g.mintUsd) : '<span class="dim" title="Mint cost not known">TBD</span>');
-      const athPriceStr = formatCryptoPrice(g.athPrice);
-      const athProfitStr = formatCryptoPrice(g.athProfit, true);
-      const athMultiplier = g.multiplier || (g.item && g.item.ath_multiplier) || null;   // the API sends ath_multiplier, not "multiplier"
-      const multStr = athMultiplier ? `<span class="badge badge-yellow" style="font-size: 10px;">${athMultiplier}x</span>` : (g.isFree ? `<span class="badge badge-green" style="font-size: 10px;">FREE ALPHA</span>` : '');
-
-      // Profit % needs a KNOWN mint cost. A free or unknown mint has no base to divide by: no % is shown
-      // (the net profit and multiplier next to it are real); there is no assumed base price.
-      const mintCost = (g.mintUsd === null || g.mintUsd === undefined) ? null : Number(g.mintUsd);
-      const athPrice = Math.max(Number(g.athPrice || 0), Number(g.secUsd || 0));
-      let gainPct = null;
+        : (mintCost > 0 ? `${formatCryptoPrice(mintCost)}<div class="dim" style="font-size: 10px;">per mint</div>` : '<span class="dim" title="Mint cost not known">TBD</span>');
+      const athPriceStr = formatCryptoPrice(athPrice);
+      let peakVsMint = '';
       if (mintCost > 0 && athPrice > 0) {
-        gainPct = ((athPrice - mintCost) / mintCost) * 100;
+        const pct = ((athPrice - mintCost) / mintCost) * 100;
+        const up = pct >= 0;
+        const pctStr = (up ? '+' : '') + (Math.abs(pct) >= 1000 ? Math.round(pct).toLocaleString('en-US') : pct.toFixed(1)) + '%';
+        const mult = athPrice / mintCost;
+        const multStr = mult >= 100 ? Math.round(mult).toLocaleString('en-US') : mult.toFixed(mult >= 10 ? 1 : 2);
+        peakVsMint = `<span class="badge ${up ? 'badge-green' : 'badge-red'}" style="font-size: 10px; font-weight: 800; padding: 2px 5px;" title="Peak floor compared with the mint cost">${pctStr} · ${multStr}x</span>`;
+      } else if (g.isFree && athPrice > 0) {
+        peakVsMint = '<span class="badge badge-green" style="font-size: 10px;" title="Minted for free: the whole floor price is profit">FREE ALPHA</span>';
       }
-      const isUp = gainPct === null || gainPct >= 0;
-      const gainPctStr = gainPct === null ? '' : (isUp ? '+' : '') + (gainPct >= 1000 ? Math.round(gainPct).toLocaleString('en-US') : gainPct.toFixed(1)) + '%';
-      const profitPctBadge = gainPct !== null && athPrice > 0 ? `<span class="badge ${isUp ? 'badge-green' : 'badge-red'}" style="font-size: 10px; font-weight: 800; padding: 2px 5px; letter-spacing: 0.2px;">${gainPctStr}</span>` : '';
+      const peakProfit = mintCost !== null && athPrice > 0 ? athPrice - mintCost : null;
+      const peakProfitStr = peakProfit === null ? '<span class="dim">—</span>'
+        : `<span style="color: ${peakProfit >= 0 ? 'var(--color-green)' : 'var(--color-red)'};">${formatCryptoPrice(peakProfit, true)}</span>`;
 
-      const curPriceStr = g.secUsd > 0 ? formatCryptoPrice(g.secUsd) : '<span class="dim">—</span>';
-      const curNetStr = g.profit > 0 ? `<span style="color: var(--color-green); font-weight:600;">${formatCryptoPrice(g.profit, true)}</span>` : '<span class="dim">—</span>';
+      const nowPrice = Number(g.secUsd || 0);
+      const curPriceStr = nowPrice > 0 ? formatCryptoPrice(nowPrice) : '<span class="dim">—</span>';
+      const nowProfit = mintCost !== null && nowPrice > 0 ? nowPrice - mintCost : null;
+      const curNetStr = nowProfit === null ? '<span class="dim">—</span>'
+        : `<span style="color: ${nowProfit >= 0 ? 'var(--color-green)' : 'var(--color-red)'}; font-weight:600;">${formatCryptoPrice(nowProfit, true)}</span>`;
 
       const statusBadge = g.isSold
         ? `<span class="badge badge-magenta" style="font-size: 10px;">Sold Out</span>`
@@ -7889,15 +7908,15 @@ function openHallOfFameModal(filterMode = 'ALL') {
           </td>
           <td class="hof-col-mint">${mintCostStr}</td>
           <td class="hof-col-ath">
-            <div style="display: flex; align-items: center; gap: 6px;">
+            <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
               <span style="font-weight: 700; color: var(--color-yellow);">${athPriceStr}</span>
-              ${profitPctBadge}
+              ${peakVsMint}
             </div>
-            <div style="font-size: 10.5px; color: var(--color-green); font-weight: 700; margin-top: 2px;">Net: ${athProfitStr} ${multStr}</div>
+            <div style="font-size: 10.5px; font-weight: 700; margin-top: 2px;"><span class="dim">Profit:</span> ${peakProfitStr}</div>
           </td>
           <td class="hof-col-current">
             <div>${curPriceStr}</div>
-            <div style="font-size: 10.5px;">${curNetStr}</div>
+            <div style="font-size: 10.5px;"><span class="dim">Profit:</span> ${curNetStr}</div>
           </td>
           <td class="hof-col-status">
             <div>${statusBadge}</div>
@@ -7918,7 +7937,7 @@ function openHallOfFameModal(filterMode = 'ALL') {
     <div class="hof-header">
       <div class="hof-title-group">
         <h2>🏆 ALL-TIME POST-MINT PROFIT LEADERBOARD</h2>
-        <p class="hof-subtitle">Persistent Hall of Fame tracking peak All-Time High (ATH) net gains, secondary floor/DEX prices, and multipliers across all indexed Agent ID drops.${topGainersSeedLabel() ? ` <span class="badge badge-yellow" style="font-size: 10px;" title="Part of this list comes from a frozen seed file">${topGainersSeedLabel()}</span>` : ''}</p>
+        <p class="hof-subtitle">NFT collections ranked by how far their peak floor price rose above the mint cost. One mint = one NFT, so profit is per NFT. Tokens are not listed: one token mint gives many tokens, so their price cannot be compared with the mint cost.${topGainersSeedLabel() ? ` <span class="badge badge-yellow" style="font-size: 10px;" title="Part of this list comes from a frozen seed file">${topGainersSeedLabel()}</span>` : ''}</p>
       </div>
       <button class="modal-close-btn" id="closeHofBtn" aria-label="Close modal">✕ CLOSE</button>
     </div>
@@ -7926,11 +7945,11 @@ function openHallOfFameModal(filterMode = 'ALL') {
     <div class="hof-controls">
       <div class="hof-filters">
         <button class="hof-filter-btn ${filterMode === 'ALL' ? 'active' : ''}" id="hofFilterAll">🌟 All Gainers (${stats.allGainers.length})</button>
-        <button class="hof-filter-btn ${filterMode === 'MAJOR' ? 'active' : ''}" id="hofFilterMajor">💎 Major Gainers (≥$0.001) (${stats.majorGainers.length})</button>
+        <button class="hof-filter-btn ${filterMode === 'MAJOR' ? 'active' : ''}" id="hofFilterMajor">💎 Major Gainers (≥$1 per NFT) (${stats.majorGainers.length})</button>
         <button class="hof-filter-btn ${filterMode === 'SOLD' ? 'active' : ''}" id="hofFilterSold">🔒 Sold Out Only (${stats.soldGainers.length})</button>
       </div>
       <div class="hof-summary-pill">
-        📈 Tracking ${list.length} Profitable Drops │ Top Gain: ${topPeakStr} / token
+        📈 ${list.length} profitable collections │ Top profit: ${topPeakStr} per NFT
       </div>
     </div>
 
@@ -7939,10 +7958,10 @@ function openHallOfFameModal(filterMode = 'ALL') {
         <thead>
           <tr>
             <th style="width: 60px;">Rank</th>
-            <th>Collection / Token</th>
-            <th style="width: 100px;">Mint Price</th>
-            <th style="width: 165px;">Peak ATH (% Gain)</th>
-            <th style="width: 130px;">Current Price</th>
+            <th>Collection</th>
+            <th style="width: 100px;" title="What one mint (one NFT) cost">Mint Cost</th>
+            <th style="width: 175px;" title="Highest floor price seen, compared with the mint cost">Peak Floor (vs Mint)</th>
+            <th style="width: 130px;" title="Floor price now, and the profit per NFT at that price">Floor Now</th>
             <th style="width: 110px;">Status</th>
             <th style="width: 185px;">Market Links</th>
           </tr>

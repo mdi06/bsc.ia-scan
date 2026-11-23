@@ -130,9 +130,10 @@ assert.strictEqual(app.getSanitizedMcap({ contract: A, symbol: 'SOL', market_cap
 // A saved entry is merged with a newer copy that has no server figures: the older copy's figures are not kept
 {
   app.setBnbPriceState(BNB, true);
-  const stale = Object.assign(clone(paid), { server_metrics: { excluded: false, market_cap: 1, secondary: false } });
+  const nft = Object.assign(clone(paid), { standard: 'ERC-721 (NFT Collection)' });   // the Hall of Fame lists NFTs only
+  const stale = Object.assign(clone(nft), { server_metrics: { excluded: false, market_cap: 1, secondary: false } });
   app.setSavedTopGainers([{ contract: A, name: 'Paid', athProfit: 0, profit: 0, secUsd: 0, item: stale }]);
-  const fresh = clone(paid);   // no server_metrics
+  const fresh = clone(nft);   // no server_metrics
   app.updateSavedTopMarkets([fresh]);
   const saved = app.getSavedTopGainers()[0];
   assert.ok(saved.profit > 0, 'the entry was updated');

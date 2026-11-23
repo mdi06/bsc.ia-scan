@@ -36,6 +36,9 @@ def rec(n, **kw):
     return d
 
 
+NFT = "ERC-721 (NFT Collection)"
+
+
 def paid(n, price, lp=20000.0, mint_bnb=0.01, **kw):
     return rec(n, token_price_usd=price, lp_usd=lp, mint_price_bnb=mint_bnb, mint_value_wei=str(int(mint_bnb * 1e18)),
                mint_price_str=f"{mint_bnb:.4f} BNB", **kw)
@@ -44,14 +47,15 @@ def paid(n, price, lp=20000.0, mint_bnb=0.01, **kw):
 # ----------------------------------------------------------------------------------------- M9: top gainers
 def test_top_gainers_are_computed_live_and_ranked_by_ath_multiplier(client):
     client.db.upsert_projects([
-        paid(1, 14.1),                                   # 14.1 / 7.0 = 2.01x
-        paid(2, 35.25),                                  # 5.04x
-        rec(3, token_price_usd=0.3, lp_usd=4000.0, has_free_mint=True, mint_price_str="FREE"),   # free: no multiplier
-        rec(4, token_price_usd=69.65, lp_usd=13000.0, mint_price_str="DEX Traded"),              # no mint position
-        rec(5, token_price_usd=0.001, lp_usd=3000.0, mint_price_str="TBD", mint_calldata="0x1249c58b"),  # unknown cost
-        paid(6, 2.0),                                    # under water: below its mint cost
-        paid(7, 40.0, lp=300.0),                         # thin pool: no trustworthy ATH
-        rec(8, symbol="SOL", token_price_usd=150.0, lp_usd=9e6, has_free_mint=True),             # excluded asset
+        paid(1, 14.1, standard=NFT),                     # 14.1 / 7.0 = 2.01x
+        paid(2, 35.25, standard=NFT),                    # 5.04x
+        rec(3, token_price_usd=0.3, lp_usd=4000.0, has_free_mint=True, mint_price_str="FREE", standard=NFT),  # free: no multiplier
+        rec(4, token_price_usd=69.65, lp_usd=13000.0, mint_price_str="DEX Traded", standard=NFT),  # no mint position
+        rec(5, token_price_usd=0.001, lp_usd=3000.0, mint_price_str="TBD", mint_calldata="0x1249c58b", standard=NFT),  # unknown cost
+        paid(6, 2.0, standard=NFT),                      # under water: below its mint cost
+        paid(7, 40.0, lp=300.0, standard=NFT),           # thin pool: no trustworthy ATH
+        rec(8, symbol="SOL", token_price_usd=150.0, lp_usd=9e6, has_free_mint=True, standard=NFT),  # excluded asset
+        paid(9, 99.0),                                   # a token: one mint gives many tokens, not comparable
     ])
     body = client.get("/api/top-gainers").json()
     assert body["seeded"] is False and isinstance(body["as_of"], int)
@@ -61,10 +65,22 @@ def test_top_gainers_are_computed_live_and_ranked_by_ath_multiplier(client):
     assert body["gainers"][2]["isFree"] is True and body["gainers"][0]["isFree"] is False
     assert body["gainers"][0]["item"]["mint_price_str"] == "0.0100 BNB"
     assert body["count"] == 3
+    assert "Token 9" not in names, "tokens are not in the Hall of Fame"
+
+
+def test_peak_profit_and_multiplier_follow_the_current_mint_cost():
+    """Only the peak price is a high-water mark: frozen peak profit / multiplier from an older, wrong mint cost go."""
+    import monitor
+    d = paid(1, 0.05, standard=NFT, mint_bnb=0.003)
+    d.update(ath_price_usd=0.073, ath_profit_usd=0.0287, ath_multiplier=14176.28)   # stale maxima (neiro)
+    monitor.update_post_mint_profit_metrics(d, bnb_price=600.0)
+    assert d["ath_price_usd"] == 0.073
+    assert d["ath_multiplier"] == round(0.073 / 1.8, 2)
+    assert abs(d["ath_profit_usd"] - (0.073 - 1.8)) < 1e-9
 
 
 def test_top_gainers_is_no_longer_the_seed_file(client):
-    client.db.upsert_projects([paid(1, 14.1)])
+    client.db.upsert_projects([paid(1, 14.1, standard=NFT)])
     live = client.get("/api/top-gainers").json()
     seed = json.load(open(os.path.join(HERE, "seeded_top_gainers.json")))
     assert live["gainers"] != seed and "Token 1" == live["gainers"][0]["name"]

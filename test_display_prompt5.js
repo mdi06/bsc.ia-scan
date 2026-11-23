@@ -229,9 +229,9 @@ console.log('✔ BNB price: null until known, "—" without it, "≈" when stale
   global.fetch = async (url) => {
     const u = String(url);
     if (u.includes('/api/top-gainers')) {
-      return { ok: true, json: async () => ({ gainers: [{ name: 'ApiOne', symbol: 'API1', contract: '0x' + '1'.repeat(40), standard: 'BEP-20 Token (18 decimals)',
+      return { ok: true, json: async () => ({ gainers: [{ name: 'ApiOne', symbol: 'API1', contract: '0x' + '1'.repeat(40), standard: 'ERC-721 (NFT Collection)',
         secUsd: 1, mintUsd: 0.5, profit: 0.5, athPrice: 1, athProfit: 0.5, multiplier: 2, isSold: false, isFree: false, holders: 5,
-        item: { name: 'ApiOne', contract: '0x' + '1'.repeat(40), mint_price_str: '0.0007 BNB', token_price_usd: 1, lp_usd: 9000 } }],
+        item: { name: 'ApiOne', contract: '0x' + '1'.repeat(40), standard: 'ERC-721 (NFT Collection)', mint_price_str: '0.0007 BNB', token_price_usd: 1, lp_usd: 9000 } }],
         seeded: true, as_of: '2026-11-08T10:00:00Z' }) };
     }
     throw new Error('static seed file must not be requested when the API answered: ' + u);
@@ -265,7 +265,7 @@ console.log('✔ BNB price: null until known, "—" without it, "≈" when stale
   assert.strictEqual(stored.size, 0, 'nothing is cached while the BNB price is stale');
   setBnbPriceState(660.0, true);
   app.saveSavedTopGainers();
-  assert([...stored.keys()].some(k => k.includes('saved_top_markets_v3')), 'cached (under the v3 key) once the price is live');
+  assert([...stored.keys()].some(k => k.includes('saved_top_markets_v4')), 'cached (under the v4 key) once the price is live');
   setBnbPriceState(null, false);
   assert.strictEqual(app.updateSavedTopMarkets([{ contract: '0x' + '4'.repeat(40), name: 'N', mint_price_str: 'FREE', has_free_mint: true,
     token_price_usd: 5, lp_usd: 9000, standard: 'BEP-20 Token (18 decimals)' }]).length, 1, 'without a BNB price nothing new is computed or added');
