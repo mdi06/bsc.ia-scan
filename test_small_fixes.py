@@ -153,7 +153,9 @@ def test_the_list_view_drops_what_only_the_modal_reads_and_keeps_the_rest(client
             assert all(p["security"][k] == f["security"][k] for k in p["security"])
     first = slim[f"0x{4:040x}"]
     assert first["has_mint_calldata"] is True and "mint_calldata" not in first           # loaded on demand
-    assert set(first["security"]) == {"has_refund", "refund_methods", "is_serial_dev", "is_fund_drain", "is_fresh_dev", "serial_count"}
+    assert set(first["security"]) <= {"has_refund", "refund_methods", "is_serial_dev", "is_fund_drain", "is_fresh_dev", "serial_count",
+                                      "is_honeypot", "cannot_sell_all", "sell_tax"}   # the last three: profit per mint
+    assert {"has_refund", "refund_methods", "is_serial_dev", "is_fund_drain", "is_fresh_dev", "serial_count"} <= set(first["security"])
     assert slim[f"0x{3:040x}"]["security"] is None                                       # no report stays none
     assert slim[f"0x{1:040x}"]["mint_calldata"] == "0x" and "has_mint_calldata" not in slim[f"0x{1:040x}"]
     assert "mint_calldata" not in slim[f"0x{2:040x}"] and "has_mint_calldata" not in slim[f"0x{2:040x}"]

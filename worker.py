@@ -1703,6 +1703,73 @@ def run_mint_terms_backfill_loop():
         time.sleep(MINT_TERMS_BACKFILL_INTERVAL_SEC)
 
 
+# --- Tokens per mint: what one mint of a BEP-20 drop gives (monitor.read_tokens_per_mint), so its profit can be stated
+# per mint. Read once per token; a failed read is retried after a day. Tokens with a price come first (they are the
+# ones whose profit is shown), then the newest.
+TOKENS_PER_MINT_INTERVAL_SEC = 60.0
+TOKENS_PER_MINT_BATCH = 20                  # ~2-3 RPC calls each
+TOKENS_PER_MINT_RETRY_SEC = 24 * 3600
+
+
+def _tokens_per_mint_candidates(history: list, now: float, batch: int = TOKENS_PER_MINT_BATCH) -> list:
+    out = []
+    for it in history:
+        c = (it.get("contract") or "").lower()
+        if not c or monitor.is_system_infra(it) or not _has_mint(it) or monitor.mint_units(it) is not None:
+            continue
+        if monitor.mint_units({"standard": it.get("standard")}) == 1.0:      # an NFT: one mint, one item
+            continue
+        if _token_decimals(it) is None:
+            continue
+        p_str = str(it.get("mint_price_str") or "").upper()
+        paid = int(float(it.get("mint_value_wei") or 0)) > 0
+        if not (paid or it.get("has_free_mint") or "FREE" in p_str):
+            continue                                                          # mint cost unknown: nothing to compare
+        if now - float(it.get("tokens_per_mint_at") or 0) < TOKENS_PER_MINT_RETRY_SEC:
+            continue
+        out.append(it)
+    priced = lambda x: 1 if (float(x.get("ath_price_usd") or 0) > 0 or float(x.get("token_price_usd") or 0) > 0) else 0
+    return sorted(out, key=lambda x: (priced(x), int(x.get("block") or 0)), reverse=True)[:batch]
+
+
+def run_tokens_per_mint_loop():
+    time.sleep(30)
+    rpc = monitor.BscRpcClient(monitor.RPC_ENDPOINTS)
+    while True:
+        try:
+            now = time.time()
+            with history_lock:
+                todo = [dict(x) for x in _tokens_per_mint_candidates(get_shared_history(), now)]
+            found = 0
+            for item in todo:
+                c = item["contract"]
+                try:
+                    targets = _supply_targets(rpc, c) + [item.get("linked_token") or ""]
+                    tokens, src = monitor.read_tokens_per_mint(
+                        rpc, c, item.get("tx_hash"), int(float(item.get("mint_value_wei") or 0)),
+                        _token_decimals(item), targets)
+                except Exception as exc:
+                    print(f"[⚠️ Tokens per Mint] {c}: {exc}", flush=True)
+                    tokens, src = None, None
+                with history_lock:
+                    history = get_shared_history()
+                    for it in history:
+                        if (it.get("contract") or "").lower() == c.lower():
+                            it["tokens_per_mint_at"] = int(now)
+                            if tokens:
+                                it["tokens_per_mint"] = float(f"{tokens:.10g}")
+                                it["tokens_per_mint_src"] = src
+                                _refresh_profit_fields(it)
+                                found += 1
+                            monitor.save_history(history, delta=it)
+                            break
+            if todo:
+                print(f"[🪙 Tokens per Mint] read {found} of {len(todo)} tokens", flush=True)
+        except Exception as exc:
+            print(f"[⚠️ Tokens per Mint] cycle failed: {exc}", flush=True)
+        time.sleep(TOKENS_PER_MINT_INTERVAL_SEC)
+
+
 def start_worker():
     """Starts every worker loop in its own thread and restarts any thread that dies."""
     print("[⚙️ Worker Process] Starting all autonomous discovery & sweeper loops...", flush=True)
@@ -1714,6 +1781,7 @@ def start_worker():
         (run_proxy_factory_watcher_loop, "ProxyWatcher"),
         (run_agent_id_counter_loop, "AgentIdCounter"),
         (run_mint_terms_backfill_loop, "MintTermsBackfill"),
+        (run_tokens_per_mint_loop, "TokensPerMint"),
         (run_memory_guard_loop, "MemoryGuard")
     ]
     threads = []

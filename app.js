@@ -1017,7 +1017,33 @@ function round2(x) { return Math.floor(x * 100 + 0.5) / 100; }
 function sig10(x) { return Number(Number(x).toPrecision(10)); }
 function noProfit() {
   return { secUsd: 0, mintUsd: null, profit: null, athPrice: null, athProfit: null, multiplier: null,
-           currentMultiplier: null, isSold: false, isFree: false };
+           currentMultiplier: null, isSold: false, isFree: false, units: null, sellTaxPct: 0, canSell: true, athLpUsd: null };
+}
+
+// Profit is per MINT (monitor.update_post_mint_profit_metrics): one mint gives `units` (1 NFT, or tokens_per_mint tokens,
+// read from the chain by the worker). Selling goes through the pool when its size is known and pays the sell tax.
+const SWAP_FEE = 0.0025;
+function mintUnits(item) {
+  if (/721|1155|NFT/.test(String((item && item.standard) || '').toUpperCase())) return 1;
+  const n = Number(item && item.tokens_per_mint);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+function canSellItem(item) {
+  const sec = (item && item.security && typeof item.security === 'object') ? item.security : {};
+  return !(sec.is_honeypot || sec.cannot_sell_all || (item && item.is_honeypot));
+}
+function sellTaxPct(item) {
+  const sec = (item && item.security && typeof item.security === 'object') ? item.security : {};
+  const t = Number(sec.sell_tax || 0);
+  return Number.isFinite(t) ? Math.min(Math.max(t, 0), 100) : 0;
+}
+function sellValueUsd(priceUsd, units, taxPct, poolUsd) {
+  let value = priceUsd * units;
+  if (poolUsd && poolUsd > 0) {
+    const side = poolUsd / 2;
+    value = side * value / (side + value) * (1 - SWAP_FEE);
+  }
+  return value * (1 - taxPct / 100);
 }
 
 function computeItemProfit(item, bnbPriceUsd = bnbPrice) {
@@ -1035,7 +1061,11 @@ function computeItemProfit(item, bnbPriceUsd = bnbPrice) {
       multiplier: n(sp.ath_multiplier),
       currentMultiplier: n(sp.current_multiplier),
       isSold: Boolean(sp.is_sold),
-      isFree: Boolean(sp.is_free)
+      isFree: Boolean(sp.is_free),
+      units: n(sp.units),
+      sellTaxPct: Number(sp.sell_tax_pct || 0),
+      canSell: sp.can_sell !== false,
+      athLpUsd: n(sp.ath_lp_usd)
     };
   }
   if (isExcludedMajorAsset(item)) return noProfit();
@@ -1069,11 +1099,14 @@ function computeItemProfit(item, bnbPriceUsd = bnbPrice) {
   const tm = Number(item.total_minted || 0);
   const isSold = Boolean(ms > 0 && tm && tm >= ms);
 
+  const units = mintUnits(item);
+  const sellable = canSellItem(item);
+  const tax = sellTaxPct(item);
   let profit = null;
   let multiplier = null;
-  if (costKnown && secUsd > 0) {
-    profit = secUsd - mintUsd;
-    multiplier = mintUsd > 0 ? round2(secUsd / mintUsd) : null;
+  if (costKnown && secUsd > 0 && units && sellable) {
+    profit = sellValueUsd(secUsd, units, tax, priceFromPair ? lpVal : null) - mintUsd;
+    multiplier = mintUsd > 0 ? round2(secUsd * units / mintUsd) : null;
   }
 
   // --- ATH (high-water mark) ---
@@ -1084,17 +1117,22 @@ function computeItemProfit(item, bnbPriceUsd = bnbPrice) {
     item.ath_price_usd = null;
     item.ath_profit_usd = null;
     item.ath_multiplier = null;
+    item.ath_lp_usd = null;
     prevAth = 0;
   }
   if (secUsd > 0 && lpOk && secUsd > prevAth) {
     item.ath_price_usd = sig10(secUsd);
+    item.ath_lp_usd = priceFromPair && lpVal > 0 ? Math.round(lpVal * 100) / 100 : null;
   }
   const athPrice = numOrZero(item.ath_price_usd);
 
   // Same rule as monitor.update_post_mint_profit_metrics: peak profit / multiplier from the peak price and today's
   // mint cost; only the peak price is a high-water mark.
-  item.ath_profit_usd = (costKnown && athPrice > 0) ? sig10(athPrice - mintUsd) : null;
-  item.ath_multiplier = (costKnown && !isFree && mintUsd > 0 && athPrice > 0) ? round2(athPrice / mintUsd) : null;
+  const athPool = Number(item.ath_lp_usd || 0);
+  item.ath_profit_usd = (costKnown && athPrice > 0 && units && sellable)
+    ? sig10(sellValueUsd(athPrice, units, tax, athPool > 0 ? athPool : null) - mintUsd) : null;
+  item.ath_multiplier = (costKnown && !isFree && mintUsd > 0 && athPrice > 0 && units && sellable)
+    ? round2(athPrice * units / mintUsd) : null;
 
   item.current_profit_usd = profit !== null ? sig10(profit) : null;
   item.current_multiplier = multiplier;
@@ -1110,7 +1148,11 @@ function computeItemProfit(item, bnbPriceUsd = bnbPrice) {
     multiplier: item.ath_multiplier === undefined ? null : item.ath_multiplier,
     currentMultiplier: multiplier,
     isSold,
-    isFree
+    isFree,
+    units,
+    sellTaxPct: tax,
+    canSell: sellable,
+    athLpUsd: item.ath_lp_usd === undefined ? null : item.ath_lp_usd
   };
 }
 
@@ -1125,12 +1167,19 @@ function getBaselineTopGainers() {
   return [];
 }
 
-// Hall of Fame / top post-mint profit: NFT collections only (same rule as api.compute_live_top_gainers). One mint
-// gives one NFT, so mint cost and floor price compare; a token mint gives an unknown number of tokens for one payment.
+// Hall of Fame / top post-mint profit: only drops whose profit can be stated per mint (same rule as
+// api.compute_live_top_gainers): an NFT (one mint, one item) or a token whose tokens per mint the worker read from the
+// chain. A token that cannot be sold (honeypot) is left out.
 function isNftMarketItem(item) {
   const std = String(item.standard || (item.item && item.item.standard) || '');
   const mkt = String(item.market_url || (item.item && item.item.market_url) || '');
   return /721|1155|NFT/.test(std) || mkt.includes('element.market');
+}
+function isPerMintItem(item) {
+  if (isNftMarketItem(item)) return true;
+  const tpm = Number(item.tokensPerMint || item.tokens_per_mint || (item.item && item.item.tokens_per_mint) || 0);
+  if (!(tpm > 0)) return false;
+  return canSellItem(item) && (!item.item || canSellItem(item.item));
 }
 
 function isValidTopMarketItem(item) {
@@ -1138,7 +1187,7 @@ function isValidTopMarketItem(item) {
   if (isExcludedMajorAsset(item)) {
     return false;
   }
-  if (!isNftMarketItem(item)) return false;
+  if (!isPerMintItem(item)) return false;
   const pStr = String(item.mint_price_str || (item.item && item.item.mint_price_str) || '').toUpperCase();
   if (pStr.includes('DEX TRADED')) return false;
 
@@ -1251,10 +1300,19 @@ async function syncSeededTopGainers() {
 function refreshGainerPeak(g) {
   const ath = Number(g.athPrice || 0);
   const mint = (g.mintUsd === null || g.mintUsd === undefined) ? null : Number(g.mintUsd);
-  if (mint === null || !(ath > 0)) return g;
-  g.athProfit = sig10(ath - mint);
-  g.multiplier = (!g.isFree && mint > 0) ? round2(ath / mint) : null;
+  const units = gainerUnits(g);
+  if (mint === null || !(ath > 0) || !units) return g;
+  const pool = Number(g.athLpUsd || 0);
+  g.athProfit = sig10(sellValueUsd(ath, units, Number(g.sellTaxPct || 0), pool > 0 ? pool : null) - mint);
+  g.multiplier = (!g.isFree && mint > 0) ? round2(ath * units / mint) : null;
   return g;
+}
+
+// What one mint of a saved gainer gives: 1 NFT, or its tokens per mint.
+function gainerUnits(g) {
+  if (isNftMarketItem(g)) return 1;
+  const n = Number(g.units || g.tokensPerMint || (g.item && g.item.tokens_per_mint) || 0);
+  return n > 0 ? n : null;
 }
 
 function mergeTopGainersList(externalList) {
@@ -1292,7 +1350,11 @@ function mergeTopGainersList(externalList) {
         multiplier: Number(item.multiplier || item.ath_multiplier || (item.item && item.item.ath_multiplier) || 0),
         isSold: Boolean(item.isSold),
         isFree: Boolean(item.isFree),
-        holders: Number(item.holders || 0)
+        holders: Number(item.holders || 0),
+        units: item.units === undefined ? null : item.units,
+        tokensPerMint: item.tokensPerMint === undefined ? null : item.tokensPerMint,
+        sellTaxPct: Number(item.sellTaxPct || 0),
+        athLpUsd: item.athLpUsd === undefined ? null : item.athLpUsd
       });
       updated = true;
     }
@@ -1335,6 +1397,10 @@ function updateSavedTopMarkets(incomingDrops) {
           existing.mintUsd = pInfo.mintUsd;
           existing.profit = pInfo.profit;
           existing.athPrice = Math.max(Number(existing.athPrice || 0), peakPrice);
+          existing.units = pInfo.units;
+          existing.tokensPerMint = isNftMarketItem(item) ? null : pInfo.units;
+          existing.sellTaxPct = pInfo.sellTaxPct;
+          if (pInfo.athLpUsd !== null && pInfo.athLpUsd !== undefined) existing.athLpUsd = pInfo.athLpUsd;
           existing.isSold = pInfo.isSold || existing.isSold;
           existing.isFree = pInfo.isFree || existing.isFree;
           refreshGainerPeak(existing);
@@ -1358,7 +1424,11 @@ function updateSavedTopMarkets(incomingDrops) {
           multiplier: pInfo.multiplier,
           isSold: pInfo.isSold,
           isFree: pInfo.isFree,
-          holders: Number(item.holders || 0)
+          holders: Number(item.holders || 0),
+          units: pInfo.units,
+          tokensPerMint: isNftMarketItem(item) ? null : pInfo.units,
+          sellTaxPct: pInfo.sellTaxPct,
+          athLpUsd: pInfo.athLpUsd
         });
         changed = true;
       }
@@ -2576,7 +2646,7 @@ function renderStats(drops) {
     const tgNet = Math.max(tg.athProfit, tg.profit);
     setBannerText('topGainerName', `${tg.name} (${tg.symbol})`);
     setBannerText('topGainerDetails', `Mint: ${tgMint} ➔ Peak floor: ${formatCryptoPrice(tgAth)}`);
-    setBannerText('topGainerNet', `Net: ${formatCryptoPrice(tgNet, true)} / NFT`);
+    setBannerText('topGainerNet', `Net: ${formatCryptoPrice(tgNet, true)} per mint`);
   } else {
     setBannerText('topGainerName', '—');
     setBannerText('topGainerDetails', '');
@@ -7846,33 +7916,51 @@ function openHallOfFameModal(filterMode = 'ALL') {
       else if (rankNum === 3) rankBadge = `<span class="hof-rank hof-rank-3">🥉 #3</span>`;
       else rankBadge = `<span class="hof-rank" style="color: var(--text-dim);">#${rankNum}</span>`;
 
-      // Every number in the row comes from the same two figures: the mint cost (one mint = one NFT) and the peak floor.
+      // Every number in the row comes from the same figures: what one mint cost, what it gave (1 NFT or N tokens), and
+      // the price per NFT / token at the peak and now. Profit = selling that mint's worth (through the pool when its
+      // size is known, less the sell tax) minus the mint cost.
+      const units = gainerUnits(g) || 1;
+      const isToken = !isNftMarketItem(g);
+      const tax = Number(g.sellTaxPct || 0);
       const mintCost = g.isFree ? 0 : ((g.mintUsd === null || g.mintUsd === undefined) ? null : Number(g.mintUsd));
       const athPrice = Math.max(Number(g.athPrice || 0), Number(g.secUsd || 0));
+      const fmtUnits = n => (n >= 1000 ? Math.round(n).toLocaleString('en-US') : String(Number(n.toPrecision(4))));
+      const unitLine = isToken
+        ? `<div class="dim" style="font-size: 10px;">${fmtUnits(units)} tokens${mintCost > 0 ? ` · ${formatCryptoPrice(mintCost / units)} each` : ''}</div>` : '';
       const mintCostStr = g.isFree
-        ? '<span style="color: var(--color-green); font-weight:700;">FREE</span>'
-        : (mintCost > 0 ? `${formatCryptoPrice(mintCost)}<div class="dim" style="font-size: 10px;">per mint</div>` : '<span class="dim" title="Mint cost not known">TBD</span>');
-      const athPriceStr = formatCryptoPrice(athPrice);
+        ? `<span style="color: var(--color-green); font-weight:700;">FREE</span>${unitLine}`
+        : (mintCost > 0 ? `${formatCryptoPrice(mintCost)}<div class="dim" style="font-size: 10px;">per mint</div>${unitLine}` : '<span class="dim" title="Mint cost not known">TBD</span>');
+      const athPriceStr = formatCryptoPrice(athPrice) + (isToken ? '<span class="dim" style="font-size: 10px;"> /token</span>' : '');
       let peakVsMint = '';
       if (mintCost > 0 && athPrice > 0) {
-        const pct = ((athPrice - mintCost) / mintCost) * 100;
+        const mult = athPrice * units / mintCost;
+        const pct = (mult - 1) * 100;
         const up = pct >= 0;
         const pctStr = (up ? '+' : '') + (Math.abs(pct) >= 1000 ? Math.round(pct).toLocaleString('en-US') : pct.toFixed(1)) + '%';
-        const mult = athPrice / mintCost;
         const multStr = mult >= 100 ? Math.round(mult).toLocaleString('en-US') : mult.toFixed(mult >= 10 ? 1 : 2);
-        peakVsMint = `<span class="badge ${up ? 'badge-green' : 'badge-red'}" style="font-size: 10px; font-weight: 800; padding: 2px 5px;" title="Peak floor compared with the mint cost">${pctStr} · ${multStr}x</span>`;
+        peakVsMint = `<span class="badge ${up ? 'badge-green' : 'badge-red'}" style="font-size: 10px; font-weight: 800; padding: 2px 5px;" title="One mint's worth at the peak price, compared with what the mint cost">${pctStr} · ${multStr}x</span>`;
       } else if (g.isFree && athPrice > 0) {
-        peakVsMint = '<span class="badge badge-green" style="font-size: 10px;" title="Minted for free: the whole floor price is profit">FREE ALPHA</span>';
+        peakVsMint = '<span class="badge badge-green" style="font-size: 10px;" title="Minted for free: what one mint sold for is all profit">FREE ALPHA</span>';
       }
-      const peakProfit = mintCost !== null && athPrice > 0 ? athPrice - mintCost : null;
+      const athPool = Number(g.athLpUsd || 0) > 0 ? Number(g.athLpUsd) : null;
+      const peakProfit = mintCost !== null && athPrice > 0 ? sellValueUsd(athPrice, units, tax, athPool) - mintCost : null;
+      const profitTitle = (price, pool) => {
+        const parts = [`${isToken ? fmtUnits(units) + ' tokens' : '1 NFT'} at ${formatCryptoPrice(price)} = ${formatCryptoPrice(price * units)}`];
+        if (pool) parts.push(`sold into a ${formatCryptoPrice(pool)} pool`);
+        else if (isToken) parts.push('pool size not known: not limited by it');
+        if (tax > 0) parts.push(`less ${tax}% sell tax`);
+        parts.push(`minus the mint cost ${mintCost > 0 ? formatCryptoPrice(mintCost) : '(free)'}`);
+        return parts.join(', ');
+      };
       const peakProfitStr = peakProfit === null ? '<span class="dim">—</span>'
-        : `<span style="color: ${peakProfit >= 0 ? 'var(--color-green)' : 'var(--color-red)'};">${formatCryptoPrice(peakProfit, true)}</span>`;
+        : `<span style="color: ${peakProfit >= 0 ? 'var(--color-green)' : 'var(--color-red)'};" title="${escapeHtml(profitTitle(athPrice, athPool))}">${formatCryptoPrice(peakProfit, true)}</span>${tax > 0 ? `<span class="dim" style="font-size: 9.5px;"> after ${tax}% tax</span>` : ''}`;
 
       const nowPrice = Number(g.secUsd || 0);
-      const curPriceStr = nowPrice > 0 ? formatCryptoPrice(nowPrice) : '<span class="dim">—</span>';
-      const nowProfit = mintCost !== null && nowPrice > 0 ? nowPrice - mintCost : null;
+      const nowPool = isToken && Number(g.item && g.item.lp_usd) > 0 ? Number(g.item.lp_usd) : null;
+      const curPriceStr = nowPrice > 0 ? formatCryptoPrice(nowPrice) + (isToken ? '<span class="dim" style="font-size: 10px;"> /token</span>' : '') : '<span class="dim">—</span>';
+      const nowProfit = mintCost !== null && nowPrice > 0 ? sellValueUsd(nowPrice, units, tax, nowPool) - mintCost : null;
       const curNetStr = nowProfit === null ? '<span class="dim">—</span>'
-        : `<span style="color: ${nowProfit >= 0 ? 'var(--color-green)' : 'var(--color-red)'}; font-weight:600;">${formatCryptoPrice(nowProfit, true)}</span>`;
+        : `<span style="color: ${nowProfit >= 0 ? 'var(--color-green)' : 'var(--color-red)'}; font-weight:600;" title="${escapeHtml(profitTitle(nowPrice, nowPool))}">${formatCryptoPrice(nowProfit, true)}</span>`;
 
       const statusBadge = g.isSold
         ? `<span class="badge badge-magenta" style="font-size: 10px;">Sold Out</span>`
@@ -7930,14 +8018,15 @@ function openHallOfFameModal(filterMode = 'ALL') {
     });
   }
 
-  const topPeak = list[0] ? Math.max(list[0].athProfit, list[0].profit) : 0;
+  // the same figure the top row shows: peak profit per mint, recomputed from its mint cost, units, tax and pool
+  const topPeak = list[0] ? Number(refreshGainerPeak({ ...list[0], mintUsd: list[0].isFree ? 0 : list[0].mintUsd }).athProfit || 0) : 0;
   const topPeakStr = formatCryptoPrice(topPeak, true);
 
   content.innerHTML = `
     <div class="hof-header">
       <div class="hof-title-group">
         <h2>🏆 ALL-TIME POST-MINT PROFIT LEADERBOARD</h2>
-        <p class="hof-subtitle">NFT collections ranked by how far their peak floor price rose above the mint cost. One mint = one NFT, so profit is per NFT. Tokens are not listed: one token mint gives many tokens, so their price cannot be compared with the mint cost.${topGainersSeedLabel() ? ` <span class="badge badge-yellow" style="font-size: 10px;" title="Part of this list comes from a frozen seed file">${topGainersSeedLabel()}</span>` : ''}</p>
+        <p class="hof-subtitle">Drops ranked by how far one mint's worth rose above what the mint cost. Profit is per mint: one NFT, or the tokens one mint gave (read from the chain). Token profit is after the sell tax, and limited by the pool size when it is known. Tokens whose amount per mint is not known yet, and tokens that cannot be sold, are not listed.${topGainersSeedLabel() ? ` <span class="badge badge-yellow" style="font-size: 10px;" title="Part of this list comes from a frozen seed file">${topGainersSeedLabel()}</span>` : ''}</p>
       </div>
       <button class="modal-close-btn" id="closeHofBtn" aria-label="Close modal">✕ CLOSE</button>
     </div>
@@ -7945,11 +8034,11 @@ function openHallOfFameModal(filterMode = 'ALL') {
     <div class="hof-controls">
       <div class="hof-filters">
         <button class="hof-filter-btn ${filterMode === 'ALL' ? 'active' : ''}" id="hofFilterAll">🌟 All Gainers (${stats.allGainers.length})</button>
-        <button class="hof-filter-btn ${filterMode === 'MAJOR' ? 'active' : ''}" id="hofFilterMajor">💎 Major Gainers (≥$1 per NFT) (${stats.majorGainers.length})</button>
+        <button class="hof-filter-btn ${filterMode === 'MAJOR' ? 'active' : ''}" id="hofFilterMajor">💎 Major Gainers (≥$1 per mint) (${stats.majorGainers.length})</button>
         <button class="hof-filter-btn ${filterMode === 'SOLD' ? 'active' : ''}" id="hofFilterSold">🔒 Sold Out Only (${stats.soldGainers.length})</button>
       </div>
       <div class="hof-summary-pill">
-        📈 ${list.length} profitable collections │ Top profit: ${topPeakStr} per NFT
+        📈 ${list.length} profitable drops │ Top profit: ${topPeakStr} per mint
       </div>
     </div>
 
@@ -7958,10 +8047,10 @@ function openHallOfFameModal(filterMode = 'ALL') {
         <thead>
           <tr>
             <th style="width: 60px;">Rank</th>
-            <th>Collection</th>
-            <th style="width: 100px;" title="What one mint (one NFT) cost">Mint Cost</th>
-            <th style="width: 175px;" title="Highest floor price seen, compared with the mint cost">Peak Floor (vs Mint)</th>
-            <th style="width: 130px;" title="Floor price now, and the profit per NFT at that price">Floor Now</th>
+            <th>Collection / Token</th>
+            <th style="width: 120px;" title="What one mint cost, and what it gave">Mint Cost</th>
+            <th style="width: 185px;" title="Highest price seen (floor per NFT, DEX price per token); one mint\'s worth at that price vs the mint cost; profit per mint">Peak (vs Mint)</th>
+            <th style="width: 130px;" title="Price now, and the profit per mint at that price">Now</th>
             <th style="width: 110px;">Status</th>
             <th style="width: 185px;">Market Links</th>
           </tr>

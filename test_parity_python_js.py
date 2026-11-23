@@ -21,7 +21,8 @@ BNB = 705.0
 
 def rec(**kw):
     base = {"contract": "0x" + "9" * 40, "name": "Test Token", "symbol": "TST",
-            "standard": "BEP-20 Token (18 decimals)"}
+            "standard": "BEP-20 Token (18 decimals)",
+            "tokens_per_mint": 1}      # profit is per mint: one token per mint keeps these cases' per-token arithmetic
     base.update(kw)
     return base
 
@@ -338,7 +339,9 @@ def test_h8_thin_pool_never_sets_an_ath_and_poisoned_ath_is_dropped():
 
 def test_h8_free_mint_multiplier_is_null():
     r = result("free_mint_token_with_liquidity")
-    assert r["is_free"] and r["ath_multiplier"] is None and r["current_multiplier"] is None and r["profit"] == 0.5
+    # $0.50 sold into a $5k pool (half of it the paired side) less the 0.25% swap fee
+    assert r["is_free"] and r["ath_multiplier"] is None and r["current_multiplier"] is None
+    assert r["profit"] == pytest.approx(2500 * 0.5 / 2500.5 * 0.9975)
 
 
 def test_h8_ath_multiplier_follows_the_ath_price():

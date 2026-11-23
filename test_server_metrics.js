@@ -9,14 +9,14 @@ const clone = o => JSON.parse(JSON.stringify(o));
 
 // ---------------------------------------------------------------------------------------------- fallback
 // No server_metrics (old cached responses, seeded_*.json, feed_snapshot.json): the existing calculation runs.
-const paid = { contract: A, name: 'Paid', symbol: 'PAID', standard: 'BEP-20 Token (18 decimals)',
+const paid = { contract: A, name: 'Paid', symbol: 'PAID', standard: 'BEP-20 Token (18 decimals)', tokens_per_mint: 1,
   mint_price_str: '0.0100 BNB', mint_value_wei: '10000000000000000', mint_price_bnb: 0.01,
   token_price_usd: 14.1, lp_usd: 50000, market_cap: 1.5e6 };
 {
   const r = app.computeItemProfit(clone(paid), BNB);
   assert.strictEqual(r.mintUsd, 7.05);
   assert.strictEqual(r.secUsd, 14.1);
-  assert.ok(Math.abs(r.profit - 7.05) < 1e-9);
+  assert.ok(Math.abs(r.profit - (25000 * 14.1 / 25014.1 * 0.9975 - 7.05)) < 1e-9, 'one mint sold into the $50k pool, less the swap fee');
   assert.strictEqual(r.currentMultiplier, 2);
   assert.strictEqual(app.getSanitizedMcap(clone(paid)), 1.5e6);
   assert.strictEqual(app.isSecondaryMarketAsset(clone(paid)), true);
@@ -51,7 +51,8 @@ for (const junk of [null, 'x', 5, [], {}]) {
   assert.strictEqual(app.isExcludedMajorAsset(d), false);
   const r = app.computeItemProfit(d, BNB);
   assert.deepStrictEqual(r, { secUsd: 99, mintUsd: 3, profit: 96, athPrice: 120, athProfit: 117, multiplier: 40,
-                              currentMultiplier: 33, isSold: true, isFree: false });
+                              currentMultiplier: 33, isSold: true, isFree: false,
+                              units: null, sellTaxPct: 0, canSell: true, athLpUsd: null });   // the server sent none of these
   assert.strictEqual(d.current_profit_usd, undefined, 'the server path does not write into the record');
 }
 
@@ -65,7 +66,8 @@ for (const junk of [null, 'x', 5, [], {}]) {
   assert.strictEqual(app.getSanitizedMcap(d), null);          // not the raw 1.9e9
   const r = app.computeItemProfit(d, BNB);
   assert.deepStrictEqual(r, { secUsd: 0, mintUsd: null, profit: null, athPrice: null, athProfit: null,
-                              multiplier: null, currentMultiplier: null, isSold: false, isFree: false });
+                              multiplier: null, currentMultiplier: null, isSold: false, isFree: false,
+                              units: null, sellTaxPct: 0, canSell: true, athLpUsd: null });
 }
 
 // excluded from the server wins, in both directions
