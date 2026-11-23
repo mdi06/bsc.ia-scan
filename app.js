@@ -1158,8 +1158,11 @@ function computeItemProfit(item, bnbPriceUsd = bnbPrice) {
 
 // Persistent Memory for Top Post-Mint Gainers & Hall of Fame Markets
 // Eliminates full 2k+ project scans; incrementally updates and saves top winners from incoming 150-drop batches.
-const SAVED_TOP_MARKETS_KEY = 'agent_id_saved_top_markets_v4';  // v3 held tokens and frozen peak profit / multiplier maxima
+const SAVED_TOP_MARKETS_KEY = 'agent_id_saved_top_markets_v5';  // v4 could hold rows from the frozen seed file (old BNB price)
 let savedTopGainers = [];
+// Rows from the frozen seed file (seeded_top_gainers.json). Shown only while nothing live is known: never saved and
+// never mixed with live rows (its prices use the BNB price of the day it was written).
+let seededTopGainers = [];
 
 // There is no hard-coded list of "historical winners" any more: its profits, free-mint flags and holder
 // counts were invented. Kept as a function returning [] so existing fallbacks degrade to an empty state.
@@ -1218,6 +1221,7 @@ function loadSavedTopGainers() {
       localStorage.removeItem('agent_id_saved_top_markets');
       localStorage.removeItem('agent_id_saved_top_markets_v2');
       localStorage.removeItem('agent_id_saved_top_markets_v3');
+      localStorage.removeItem('agent_id_saved_top_markets_v4');
       localStorage.removeItem('saved_top_markets_v1');
 
       const stored = localStorage.getItem(SAVED_TOP_MARKETS_KEY);
@@ -1263,7 +1267,7 @@ function formatAsOfDate(asOf) {
 
 // "Seed data, as of 2026-11-08" when the shown list is a frozen seed file, '' for live data
 function topGainersSeedLabel() {
-  if (!topGainersSource.seeded) return '';
+  if (!topGainersSource.seeded || savedTopGainers.length > 0) return '';
   const d = formatAsOfDate(topGainersSource.asOf);
   return d ? `Seed data, as of ${d}` : 'Seed data (date unknown)';
 }
@@ -1275,8 +1279,9 @@ async function syncSeededTopGainers() {
       const dataApi = await resApi.json();
       const list = dataApi && (Array.isArray(dataApi.gainers) ? dataApi.gainers : (Array.isArray(dataApi.items) ? dataApi.items : null));
       if (list && list.length > 0) {
-        topGainersSource = { seeded: Boolean(dataApi.seeded), asOf: dataApi.as_of || null };
-        mergeTopGainersList(list);
+        const seeded = Boolean(dataApi.seeded);
+        topGainersSource = { seeded, asOf: dataApi.as_of || null };
+        mergeTopGainersList(list, { seed: seeded });
         return;
       }
     }
@@ -1289,7 +1294,7 @@ async function syncSeededTopGainers() {
       const data = await res.json();
       if (Array.isArray(data) && data.length > 0) {
         topGainersSource = { seeded: true, asOf: res.headers && res.headers.get ? res.headers.get('last-modified') : null };
-        mergeTopGainersList(data);
+        mergeTopGainersList(data, { seed: true });
       }
     }
   } catch (e2) {}
@@ -1315,8 +1320,45 @@ function gainerUnits(g) {
   return n > 0 ? n : null;
 }
 
-function mergeTopGainersList(externalList) {
+// A leaderboard row from an /api/top-gainers (or seed file) entry.
+function gainerRowFrom(item, c) {
+  return {
+    item: item.item || item,
+    name: item.name || 'Unknown',
+    symbol: item.symbol || '',
+    contract: item.contract || c,
+    standard: item.standard || '',
+    secUsd: Number(item.secUsd || 0),
+    mintUsd: (item.mintUsd === null || item.mintUsd === undefined) ? null : Number(item.mintUsd),
+    profit: Number(item.profit || 0),
+    athPrice: Math.max(Number(item.athPrice || 0), Number(item.secUsd || 0)),
+    athProfit: Math.max(Number(item.athProfit || 0), Number(item.profit || 0)),
+    multiplier: Number(item.multiplier || item.ath_multiplier || (item.item && item.item.ath_multiplier) || 0),
+    isSold: Boolean(item.isSold),
+    isFree: Boolean(item.isFree),
+    holders: Number(item.holders || 0),
+    units: item.units === undefined ? null : item.units,
+    tokensPerMint: item.tokensPerMint === undefined ? null : item.tokensPerMint,
+    sellTaxPct: Number(item.sellTaxPct || 0),
+    athLpUsd: item.athLpUsd === undefined ? null : item.athLpUsd
+  };
+}
+
+// opts.seed: the list is the frozen seed file (or the server's copy of it). Its rows go to seededTopGainers, which is
+// shown only while there is no live row, and is never saved.
+function mergeTopGainersList(externalList, opts = {}) {
   if (!Array.isArray(externalList) || externalList.length === 0) return;
+  if (opts.seed) {
+    seededTopGainers = [];
+    externalList.forEach(item => {
+      if (!isValidTopMarketItem(item.item || item)) return;
+      const c = String(item.contract || (item.item && item.item.contract) || '').toLowerCase();
+      if (c && !seededTopGainers.some(g => String(g.contract || '').toLowerCase() === c)) seededTopGainers.push(gainerRowFrom(item, c));
+    });
+    seededTopGainers.sort(compareGainers);
+    if (typeof document !== 'undefined' && Array.isArray(allDrops) && allDrops.length > 0) renderStats(allDrops);
+    return;
+  }
   let updated = false;
 
   externalList.forEach(item => {
@@ -1326,36 +1368,24 @@ function mergeTopGainersList(externalList) {
 
     const existingIdx = savedTopGainers.findIndex(g => String(g.contract || '').toLowerCase() === c);
     const peakAth = Math.max(Number(item.athPrice || 0), Number(item.secUsd || 0));
-    const peakProfit = Math.max(Number(item.athProfit || 0), Number(item.profit || 0));
 
     if (existingIdx >= 0) {
       const existing = savedTopGainers[existingIdx];
+      // The server's mint cost, tokens per mint, tax and pool are the current ones: a saved row takes them.
+      const fresh = gainerRowFrom(item, c);
+      const keys = ['mintUsd', 'isFree', 'units', 'tokensPerMint', 'sellTaxPct', 'athLpUsd', 'secUsd', 'isSold'];
+      const changed = keys.filter(k => fresh[k] !== null && fresh[k] !== existing[k]);
+      changed.forEach(k => { existing[k] = fresh[k]; });
       if (peakAth > Number(existing.athPrice || 0)) {
         existing.athPrice = peakAth;
+        changed.push('athPrice');
+      }
+      if (changed.length) {
         refreshGainerPeak(existing);
         updated = true;
       }
     } else {
-      savedTopGainers.push({
-        item: item.item || item,
-        name: item.name || 'Unknown',
-        symbol: item.symbol || '',
-        contract: item.contract || c,
-        standard: item.standard || '',
-        secUsd: Number(item.secUsd || 0),
-        mintUsd: (item.mintUsd === null || item.mintUsd === undefined) ? null : Number(item.mintUsd),
-        profit: Number(item.profit || 0),
-        athPrice: peakAth,
-        athProfit: peakProfit,
-        multiplier: Number(item.multiplier || item.ath_multiplier || (item.item && item.item.ath_multiplier) || 0),
-        isSold: Boolean(item.isSold),
-        isFree: Boolean(item.isFree),
-        holders: Number(item.holders || 0),
-        units: item.units === undefined ? null : item.units,
-        tokensPerMint: item.tokensPerMint === undefined ? null : item.tokensPerMint,
-        sellTaxPct: Number(item.sellTaxPct || 0),
-        athLpUsd: item.athLpUsd === undefined ? null : item.athLpUsd
-      });
+      savedTopGainers.push(gainerRowFrom(item, c));
       updated = true;
     }
   });
@@ -2455,14 +2485,41 @@ function computeMintProgress(drops, serverMp) {
   return out;
 }
 
-// One order for top gainers, the server's (compute_live_top_gainers): by ATH multiplier, then a free mint (no
-// multiplier) by ATH profit. Ranking by dollars per token compared a $35 NFT with a $0.00001 token.
+// A gainer's mint cost per mint: 0 for a free mint, null when not known (a "TBD" price that is not a verified free
+// mint, or $0 without the free flag).
+function gainerMintCost(g) {
+  if (g.isFree) return 0;
+  const m = (g.mintUsd === null || g.mintUsd === undefined) ? null : Number(g.mintUsd);
+  return m > 0 ? m : null;
+}
+
+// A gainer's peak profit per mint: the figure its Hall of Fame row shows (peak price, or the price now when higher;
+// sold through the peak pool when known, less the sell tax, minus the mint cost). null when it cannot be stated.
+function gainerPeakProfit(g) {
+  const mint = gainerMintCost(g);
+  const units = gainerUnits(g);
+  const price = Math.max(Number(g.athPrice || 0), Number(g.secUsd || 0));
+  if (mint === null || !units || !(price > 0)) return null;
+  const pool = Number(g.athLpUsd || 0);
+  return sellValueUsd(price, units, Number(g.sellTaxPct || 0), pool > 0 ? pool : null) - mint;
+}
+
+// A row the Hall of Fame lists: a valid drop with a known mint cost and a positive peak profit per mint. The filter
+// buttons, the banner, the stats bar and the table all count this same list.
+function isRankableGainer(g) {
+  if (!g || !isValidTopMarketItem(g.item || g)) return false;
+  const p = gainerPeakProfit(g);
+  return p !== null && p > 0;
+}
+
+// One order for top gainers, the server's (compute_live_top_gainers): by peak profit per mint, which is comparable
+// across drops now that a token's profit counts the tokens one mint gave. The multiplier breaks ties.
 function compareGainers(a, b) {
-  const ma = Number(a && a.multiplier) > 0 ? Number(a.multiplier) : null;
-  const mb = Number(b && b.multiplier) > 0 ? Number(b.multiplier) : null;
-  if ((ma !== null) !== (mb !== null)) return ma !== null ? -1 : 1;
-  if (ma !== null && mb !== null && ma !== mb) return mb - ma;
-  return Math.max(Number(b.athProfit) || 0, Number(b.profit) || 0) - Math.max(Number(a.athProfit) || 0, Number(a.profit) || 0);
+  const pa = gainerPeakProfit(a);
+  const pb = gainerPeakProfit(b);
+  if ((pa !== null) !== (pb !== null)) return pa !== null ? -1 : 1;
+  if (pa !== null && pb !== null && pa !== pb) return pb - pa;
+  return (Number(b && b.multiplier) || 0) - (Number(a && a.multiplier) || 0);
 }
 
 // Compute Macro Stats
@@ -2473,11 +2530,11 @@ function computeStats(drops) {
   updateSavedTopMarkets(drops);
 
   const fillRatePct = mp.cappedTotal > 0 ? (mp.soldOutCount / mp.cappedTotal) * 100 : 0;
-  const allGainers = [...savedTopGainers]
-    .filter(g => isValidTopMarketItem(g.item || g))
+  const allGainers = [...(savedTopGainers.length > 0 ? savedTopGainers : seededTopGainers)]
+    .filter(isRankableGainer)
     .sort(compareGainers);
   const soldGainers = allGainers.filter(g => g.isSold);
-  const majorGainers = allGainers.filter(g => Math.max(g.athProfit, g.profit) >= 1);
+  const majorGainers = allGainers.filter(g => gainerPeakProfit(g) >= 1);
 
   const topGainer = allGainers[0] || null;
   const runnerUp = allGainers[1] || null;
@@ -7901,8 +7958,6 @@ function openHallOfFameModal(filterMode = 'ALL') {
     list = stats.majorGainers;
   }
 
-  // Strict non-zero guard & validity check: completely filter out zero-price/profit entries and non-legit drops
-  list = list.filter(g => isValidTopMarketItem(g.item || g) && g.athPrice > 0 && (g.athProfit > 0 || g.profit > 0));
 
   let rowsHtml = '';
   if (!list || list.length === 0) {
@@ -8019,14 +8074,14 @@ function openHallOfFameModal(filterMode = 'ALL') {
   }
 
   // the same figure the top row shows: peak profit per mint, recomputed from its mint cost, units, tax and pool
-  const topPeak = list[0] ? Number(refreshGainerPeak({ ...list[0], mintUsd: list[0].isFree ? 0 : list[0].mintUsd }).athProfit || 0) : 0;
+  const topPeak = list[0] ? Number(gainerPeakProfit(list[0]) || 0) : 0;
   const topPeakStr = formatCryptoPrice(topPeak, true);
 
   content.innerHTML = `
     <div class="hof-header">
       <div class="hof-title-group">
         <h2>🏆 ALL-TIME POST-MINT PROFIT LEADERBOARD</h2>
-        <p class="hof-subtitle">Drops ranked by how far one mint's worth rose above what the mint cost. Profit is per mint: one NFT, or the tokens one mint gave (read from the chain). Token profit is after the sell tax, and limited by the pool size when it is known. Tokens whose amount per mint is not known yet, and tokens that cannot be sold, are not listed.${topGainersSeedLabel() ? ` <span class="badge badge-yellow" style="font-size: 10px;" title="Part of this list comes from a frozen seed file">${topGainersSeedLabel()}</span>` : ''}</p>
+        <p class="hof-subtitle">Drops ranked by peak profit per mint: what one mint's worth sold for at the highest price, minus what the mint cost. Profit is per mint: one NFT, or the tokens one mint gave (read from the chain). Token profit is after the sell tax, and limited by the pool size when it is known. Drops whose mint cost is not known, tokens whose amount per mint is not known yet, and tokens that cannot be sold are not listed.${topGainersSeedLabel() ? ` <span class="badge badge-yellow" style="font-size: 10px;" title="Part of this list comes from a frozen seed file">${topGainersSeedLabel()}</span>` : ''}</p>
       </div>
       <button class="modal-close-btn" id="closeHofBtn" aria-label="Close modal">✕ CLOSE</button>
     </div>
@@ -8046,13 +8101,13 @@ function openHallOfFameModal(filterMode = 'ALL') {
       <table class="hof-table">
         <thead>
           <tr>
-            <th style="width: 60px;">Rank</th>
+            <th style="width: 76px;">Rank</th>
             <th>Collection / Token</th>
-            <th style="width: 120px;" title="What one mint cost, and what it gave">Mint Cost</th>
-            <th style="width: 185px;" title="Highest price seen (floor per NFT, DEX price per token); one mint\'s worth at that price vs the mint cost; profit per mint">Peak (vs Mint)</th>
-            <th style="width: 130px;" title="Price now, and the profit per mint at that price">Now</th>
-            <th style="width: 110px;">Status</th>
-            <th style="width: 185px;">Market Links</th>
+            <th style="width: 150px;" title="What one mint cost, and what it gave">Mint Cost</th>
+            <th style="width: 200px;" title="Highest price seen (floor per NFT, DEX price per token); one mint\'s worth at that price vs the mint cost; profit per mint">Peak (vs Mint)</th>
+            <th style="width: 150px;" title="Price now, and the profit per mint at that price">Now</th>
+            <th style="width: 100px;">Status</th>
+            <th style="width: 120px;">Market Links</th>
           </tr>
         </thead>
         <tbody>
@@ -11543,6 +11598,10 @@ if (typeof module !== 'undefined' && module.exports) {
     getBaselineTopGainers,
     getSavedTopGainers: () => savedTopGainers,
     setSavedTopGainers: (arr) => { savedTopGainers = arr; },
+    getSeededTopGainers: () => seededTopGainers,
+    gainerPeakProfit,
+    gainerMintCost,
+    isRankableGainer,
     toggleFollowWallet,
     getBaselineSmartHunters,
     syncSeededSmartHunters,

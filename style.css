@@ -3072,7 +3072,7 @@ a.inspect-btn:hover {
 
 /* Hall of Fame Modal Styles */
 .hof-modal {
-  max-width: 960px;
+  max-width: 1120px;
   width: 95vw;
   border: 2px solid var(--color-yellow);
   box-shadow: 0 10px 40px rgba(0, 0, 0, 0.9), 0 0 30px rgba(255, 215, 0, 0.25);
@@ -3157,6 +3157,8 @@ a.inspect-btn:hover {
 
 .hof-table {
   width: 100%;
+  min-width: 0;          /* the site-wide table min-width (1260px, for the drops table) made it wider than the modal */
+  table-layout: fixed;   /* the column widths below hold; only the name column stretches */
   border-collapse: collapse;
   font-size: 12px;
   text-align: left;
@@ -3179,6 +3181,27 @@ a.inspect-btn:hover {
   padding: 9px 12px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.05);
   vertical-align: middle;
+  /* the site-wide td rule (nowrap, hidden, ellipsis) cut the rank to "…" and the mint / now details mid-number */
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  overflow-wrap: anywhere;
+}
+
+.hof-table td.hof-col-rank {
+  white-space: nowrap;
+  overflow-wrap: normal;
+}
+
+/* long names stay on one line, cut with an ellipsis inside their own column */
+.hof-table td.hof-col-project {
+  overflow: hidden;
+}
+
+.hof-table td.hof-col-project > div {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .hof-table tr:hover {
@@ -3207,8 +3230,9 @@ a.inspect-btn:hover {
 
 .hof-action-links {
   display: flex;
-  gap: 6px;
-  align-items: center;
+  flex-direction: column;
+  gap: 4px;
+  align-items: flex-start;
 }
 
 .hof-btn {
@@ -4898,6 +4922,7 @@ a.inspect-btn:hover {
   .hof-col-action .hof-action-links {
     width: 100% !important;
     display: flex !important;
+    flex-direction: row !important;
     gap: 6px !important;
   }
 

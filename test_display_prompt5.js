@@ -240,14 +240,18 @@ console.log('✔ BNB price: null until known, "—" without it, "≈" when stale
   await app.syncSeededTopGainers();
   assert.deepStrictEqual(app.getTopGainersSource(), { seeded: true, asOf: '2026-11-08T10:00:00Z' }, 'the API response says it is a seed, with its date');
   assert.strictEqual(app.topGainersSeedLabel(), 'Seed data, as of 2026-11-08', 'a seeded list is labelled with its date');
-  assert(app.getSavedTopGainers().some(g => g.name === 'ApiOne'), 'the API list is merged');
+  assert(app.getSeededTopGainers().some(g => g.name === 'ApiOne'), 'the seeded API list is shown');
+  assert(!app.getSavedTopGainers().some(g => g.name === 'ApiOne'), 'a seeded list is never saved or mixed with live rows');
+  assert(app.computeStats([]).allGainers.some(g => g.name === 'ApiOne'), 'with no live row, the seed rows are what the Hall of Fame shows');
   global.fetch = async (url) => {
-    if (String(url).includes('/api/top-gainers')) return { ok: true, json: async () => ({ gainers: [{ name: 'LiveOne', contract: '0x' + '2'.repeat(40), secUsd: 2, mintUsd: 1, profit: 1, athPrice: 2, athProfit: 1,
-      item: { name: 'LiveOne', contract: '0x' + '2'.repeat(40), mint_price_str: '0.0015 BNB', token_price_usd: 2, lp_usd: 9000 } }] }) };
+    if (String(url).includes('/api/top-gainers')) return { ok: true, json: async () => ({ gainers: [{ name: 'LiveOne', contract: '0x' + '2'.repeat(40), standard: 'ERC-721 (NFT Collection)', secUsd: 2, mintUsd: 1, profit: 1, athPrice: 2, athProfit: 1,
+      item: { name: 'LiveOne', contract: '0x' + '2'.repeat(40), standard: 'ERC-721 (NFT Collection)', mint_price_str: '0.0015 BNB', token_price_usd: 2, lp_usd: 9000 } }] }) };
     throw new Error('unexpected ' + url);
   };
   await app.syncSeededTopGainers();
   assert.strictEqual(app.topGainersSeedLabel(), '', 'live API data carries no seed label');
+  assert(app.getSavedTopGainers().some(g => g.name === 'LiveOne'), 'a live list is saved');
+  assert(!app.computeStats([]).allGainers.some(g => g.name === 'ApiOne'), 'once a live row exists the seed rows are not shown');
   // API down -> the static seed file, labelled with the file's date
   global.fetch = async (url) => {
     if (String(url).includes('/api/top-gainers')) throw new Error('offline');
@@ -265,7 +269,7 @@ console.log('✔ BNB price: null until known, "—" without it, "≈" when stale
   assert.strictEqual(stored.size, 0, 'nothing is cached while the BNB price is stale');
   setBnbPriceState(660.0, true);
   app.saveSavedTopGainers();
-  assert([...stored.keys()].some(k => k.includes('saved_top_markets_v4')), 'cached (under the v4 key) once the price is live');
+  assert([...stored.keys()].some(k => k.includes('saved_top_markets_v5')), 'cached (under the v5 key) once the price is live');
   setBnbPriceState(null, false);
   assert.strictEqual(app.updateSavedTopMarkets([{ contract: '0x' + '4'.repeat(40), name: 'N', mint_price_str: 'FREE', has_free_mint: true,
     token_price_usd: 5, lp_usd: 9000, standard: 'BEP-20 Token (18 decimals)' }]).length, 1, 'without a BNB price nothing new is computed or added');
