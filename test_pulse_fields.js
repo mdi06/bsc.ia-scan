@@ -43,7 +43,7 @@ global.window = {
 Object.defineProperty(global, 'navigator', { configurable: true, writable: true, value: { clipboard: { writeText: () => Promise.resolve() } } });
 
 const app = require('./app.js');
-const { compute24hPulseMetrics } = app;
+const { compute24hPulseMetrics, comparePulseLaunches, pulseLaunchRow } = app;
 
 const live = (n, over) => ({
   contract: '0x' + String(n).repeat(40), name: 'Tok' + n, symbol: 'T' + n, standard: 'BEP-20 Token (18 decimals)',
@@ -81,3 +81,15 @@ assert.deepStrictEqual([neither.gradCount, neither.totalSmartInflows, neither.th
 console.log('✔ Renamed Pulse fields are read by new name, old name as fallback: PASS');
 
 console.log('test_pulse_fields.js: all assertions passed');
+
+// 4. Card 2 (new launches): gainers first, wash-traded pools left out (twin of api.pulse_launch_rank / pulse_launch_row)
+{
+  const row = (n, chg, vol, lp) => ({ name: 'L' + n, price_change_24h: chg, volume_24h: vol, lp_usd: lp });
+  const sorted = [row(1, -52.9, 616165, 11033), row(3, 194, 202617, 14401), row(4, -74.2, 246600, 27714), row(5, 12, 60000, 50000)]
+    .sort(comparePulseLaunches).map((r) => r.name);
+  assert.deepStrictEqual(sorted, ['L3', 'L5', 'L1', 'L4']);
+  const base = { contract: '0x' + '7'.repeat(40), standard: 'BEP-20 Token (18 decimals)', token_price_usd: 0.01, detected_at: '2026-11-24 10:00:00' };
+  assert.strictEqual(pulseLaunchRow({ ...base, lp_usd: 4254, volume_24h: 352802 }), null, 'a pool turning over 83x is wash trading');
+  assert.ok(pulseLaunchRow({ ...base, lp_usd: 14401, volume_24h: 202617 }), 'a pool turning over 14x is kept');
+  console.log('✔ New launches: gainers first, wash-traded pools left out: PASS');
+}

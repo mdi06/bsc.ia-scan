@@ -155,10 +155,10 @@ def nft(i, ago, minted, cap=None, **kw):
                 volume_24h=0, **kw)
 
 
-def test_new_launches_are_new_trading_tokens_ranked_by_volume():
+def test_new_launches_are_new_trading_tokens_gainers_first():
     rows = [
         drop(1, 600, token_price_usd=0.01, lp_usd=20000, volume_24h=50000, price_change_24h=12.5),
-        drop(2, 600, token_price_usd=0.02, lp_usd=9000, volume_24h=900000),
+        drop(2, 600, token_price_usd=0.02, lp_usd=90000, volume_24h=900000),
         drop(3, 600, token_price_usd=0.03, lp_usd=500, volume_24h=10**6),          # too little liquidity
         drop(4, 600, token_price_usd=0.04, lp_usd=50000, volume_24h=500),           # too little volume
         drop(5, 600, token_price_usd=0, lp_usd=50000, volume_24h=10**6),            # no price
@@ -168,8 +168,23 @@ def test_new_launches_are_new_trading_tokens_ranked_by_volume():
         nft(9, 600, 100),                                                             # an NFT is not a launch
     ]
     launches = api.compute_pulse_24h(rows, now=NOW)["top_launches"]
-    assert [r["name"] for r in launches] == ["D2", "D1"]
-    assert launches[1]["price_change_24h"] == 12.5 and launches[1]["lp_usd"] == 20000
+    assert [r["name"] for r in launches] == ["D1", "D2"]            # the gainer first, then the rest by volume
+    assert launches[0]["price_change_24h"] == 12.5 and launches[0]["lp_usd"] == 20000
+
+
+def test_wash_traded_launches_are_left_out_and_losers_rank_after_gainers():
+    """Measured 2026-11-24: the card's top three were down 53%, 97% and 91%, two of them on pools turning over 55-83x a day."""
+    rows = [
+        drop(1, 600, token_price_usd=0.01, lp_usd=11033, volume_24h=616165, price_change_24h=-52.9),    # 56x its pool
+        drop(2, 600, token_price_usd=0.01, lp_usd=4254, volume_24h=352802, price_change_24h=-97.0),     # 83x
+        drop(3, 600, token_price_usd=0.01, lp_usd=14401, volume_24h=202617, price_change_24h=194.0),    # 14x, up
+        drop(4, 600, token_price_usd=0.01, lp_usd=27714, volume_24h=246600, price_change_24h=-74.2),    # 9x, down
+        drop(5, 600, token_price_usd=0.01, lp_usd=50000, volume_24h=60000, price_change_24h=12.0),      # small gain, little volume
+        drop(6, 600, token_price_usd=0.01, lp_usd=50000, volume_24h=2_500_000, price_change_24h=12.0),  # 50x: right at the limit
+    ]
+    launches = api.compute_pulse_24h(rows, now=NOW)["top_launches"]
+    assert [r["name"] for r in launches] == ["D3", "D6", "D5", "D4"]
+    assert api.pulse_launch_row(rows[0], NOW) is None and api.pulse_launch_row(rows[1], NOW) is None
 
 
 def test_nft_mints_rank_new_collections_by_mints_with_fill_share():
