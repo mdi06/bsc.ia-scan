@@ -95,3 +95,10 @@ Both heal old records by themselves; there is no script to run.
 ## Going back
 
 Stop the worker on the host (`systemctl disable --now agent-id-worker`), then set `RUN_WORKER=1` on Render.
+
+## Snipe-ready "crowd surge" (changed 2026-11-24)
+
+A drop with no known cap is snipe ready only when it is a live mint with a real crowd: 100+ mints (`filters.crowd_surge_mints`),
+not DEX-traded, and still minting (mint probe open, or a mint seen within 24 h). It used to be `holders >= 100`, which for a
+token is every wallet holding it. After a restart the sweeper clears stored `sniper_ready` flags that no longer pass
+(`[🎯 Snipe Ready] N stored 'ready' flags ... cleared` in the log). It only clears; new ready drops come from the normal sweep.

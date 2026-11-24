@@ -2979,6 +2979,33 @@ if (typeof window !== 'undefined') {
   window.hydrateCachedOverviewStats = hydrateCachedOverviewStats;
 }
 
+// "Crowd surge": the second way a drop becomes snipe ready. No cap is known (so there is no progress to read), but a lot of people
+// are minting. Twin of filters.crowd_surge_mints: it used to be holders >= 100, which for a token is every wallet holding it, so
+// DEX-traded tokens with a pre-minted supply and no mint at all passed. Returns the mints so far, or 0 when it is not a surge.
+const CROWD_SURGE_MIN_MINTS = 100;
+const CROWD_SURGE_ACTIVE_WINDOW_SEC = 24 * 3600;
+function crowdSurgeMints(item, nowSec = Date.now() / 1000) {
+  const ms = Number(item.max_supply || 0);
+  if (ms > 0 && ms < 1e20) return 0;                                       // a known cap: progress decides, not a crowd
+  if (String(item.mint_price_str || '').toUpperCase().includes('DEX')) return 0;
+  const std = String(item.standard || '').toUpperCase();
+  const total = Number(item.total_minted || 0);
+  if (!(total > 0)) return 0;
+  let mints;
+  if (/721|1155|NFT/.test(std) || std.includes('FAIR-MINT')) {
+    mints = total;                                                         // NFT items, or a fair-mint's own counter
+  } else {
+    const perMint = Number(item.tokens_per_mint || 0);                     // a token's 1,000,000,000 supply is not that many mints
+    if (!(perMint > 0)) return 0;
+    mints = total / perMint;
+  }
+  const terms = item.mint_terms && typeof item.mint_terms === 'object' ? item.mint_terms : {};
+  const last = Number(item.last_mint_at || 0);
+  const stillMinting = terms.open === true || (last > 0 && nowSec - last <= CROWD_SURGE_ACTIVE_WINDOW_SEC);
+  mints = Math.floor(mints);
+  return stillMinting && mints >= CROWD_SURGE_MIN_MINTS ? mints : 0;
+}
+
 // Evaluate Assisted Sniper Conviction (60% Rule & Anti-Rug)
 function getSniperEval(item) {
   const std = String(item.standard || '');
@@ -3011,17 +3038,17 @@ function getSniperEval(item) {
     prog = ms > 0 ? (tm / ms) : 0;
   }
 
-  const agents = Number(item.holders || item.unique_minters || 0);
+  const surge = crowdSurgeMints(item);
   const isSoldOut = (prog >= 0.999) || (isNft && ms > 0 && tm >= ms);
-  const progPass = (prog >= 0.60 && prog < 0.999) || (prog === 0 && agents >= 100);
+  const progPass = (prog >= 0.60 && prog < 0.999) || (prog === 0 && surge > 0);
 
   const checklist = [];
   if (isSoldOut) {
     checklist.push('<span style="color:var(--color-red);">✖ Progress: 100% Sold Out / Completed</span>');
   } else if (prog >= 0.60) {
     checklist.push(`<span style="color:var(--color-green);">✔ Progress: ${(prog * 100).toFixed(1)}% (≥60% conviction threshold passed)</span>`);
-  } else if (prog === 0 && agents >= 100) {
-    checklist.push(`<span style="color:var(--color-green);">✔ Progress: Crowd Surge (${agents} active agent wallets)</span>`);
+  } else if (prog === 0 && surge > 0) {
+    checklist.push(`<span style="color:var(--color-green);">✔ Progress: Crowd Surge (${surge} mints so far, still minting)</span>`);
   } else {
     const pStr = prog > 0 ? `${(prog * 100).toFixed(1)}%` : '0%';
     checklist.push(`<span style="color:var(--color-yellow);">⏳ Progress: ${pStr} (&lt;60% threshold, tracking)</span>`);
@@ -11544,6 +11571,7 @@ if (typeof module !== 'undefined' && module.exports) {
     modalFeature = loadFeatureIntoAppScope('modal');
   }
   module.exports = {
+    crowdSurgeMints,
     rowHeatClass,
     safetyChipHtml,
     escapeHtml,

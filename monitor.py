@@ -2421,7 +2421,7 @@ def format_lp_or_volume(item: Dict[str, Any], bnb_price: Optional[float] = None)
 def evaluate_sniper_ready(item: Dict[str, Any]) -> Dict[str, Any]:
     """
     Evaluates whether an asset qualifies for high-conviction assisted sniper entry:
-    1. Standard-specific Progress (>=60% or >=100 agent wallets)
+    1. Standard-specific Progress (>=60% filled, or a "crowd surge": no cap known but 100+ mints and still minting)
     2. Bytecode Refund Guarantee (mandatory if paid drop)
     3. DEX Pre-Check (for tokens: if PancakeSwap pool is already open, trade on DEX instead)
     4. Anti-Rug & Anti-Spam (not serial dev >=3 drops, wallet not fresh <8h, no capital drain)
@@ -2458,17 +2458,17 @@ def evaluate_sniper_ready(item: Dict[str, Any]) -> Dict[str, Any]:
     else:
         prog = (tm / ms) if (ms and ms > 0) else 0.0
 
-    agents = int((item.get("holders") or 0) or item.get("unique_minters", 0) or 0)
+    surge = filters.crowd_surge_mints(item)     # mints so far when a cap-less drop has a live crowd, else 0
 
     # Progress check
     is_sold_out = (prog >= 0.999) or (is_nft and bool(ms) and bool(tm) and tm >= ms)
-    prog_pass = (0.60 <= prog < 0.999) or (prog == 0.0 and agents >= 100)
+    prog_pass = (0.60 <= prog < 0.999) or (prog == 0.0 and surge > 0)
     if is_sold_out:
         checklist.append("▫ [red]✖[/red] Progress: 100% Sold Out / Completed")
     elif prog >= 0.60:
         checklist.append(f"▫ [green]✔[/green] Progress: {prog*100:.1f}% (≥60% conviction threshold passed)")
-    elif prog == 0.0 and agents >= 100:
-        checklist.append(f"▫ [green]✔[/green] Progress: Crowd Surge ({agents} active agent wallets)")
+    elif prog == 0.0 and surge > 0:
+        checklist.append(f"▫ [green]✔[/green] Progress: Crowd Surge ({surge} mints so far, still minting)")
     else:
         p_pct_str = f"{prog*100:.1f}%" if prog > 0 else "0%"
         checklist.append(f"▫ [yellow]⏳[/yellow] Progress: {p_pct_str} (<60% threshold, tracking)")

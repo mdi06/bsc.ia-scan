@@ -247,6 +247,43 @@ def _max_supply(d) -> float:
     return corrected_max_supply(d)
 
 
+# "Crowd surge" is the second way a drop becomes "snipe ready": no cap is known (so there is no progress to read), but a lot of people
+# are minting. It used to be `holders >= 100`, which for a token is every wallet holding it, not minters: 539 of the 683 drops that
+# were snipe ready only this way were DEX-traded tokens with a pre-minted 1,000,000,000 supply and no mint at all.
+CROWD_SURGE_MIN_MINTS = 100
+CROWD_SURGE_ACTIVE_WINDOW_SEC = 24 * 3600
+
+
+def crowd_surge_mints(d, now: Optional[float] = None) -> int:
+    """How many mints a drop has when that counts as a crowd surge, else 0. All of these must hold:
+    - no cap is known (with a cap, progress decides, not a crowd);
+    - it is a real mint: not a DEX-traded token, and a token needs a known tokens_per_mint to count mints at all (a pre-minted
+      supply of 1,000,000,000 is not 1,000,000,000 mints);
+    - at least CROWD_SURGE_MIN_MINTS mints so far (NFT items, a fair-mint's own counter, or total / tokens-per-mint);
+    - it is still minting: the mint probe says open, or a mint was seen within CROWD_SURGE_ACTIVE_WINDOW_SEC."""
+    if not d or _max_supply(d) > 0:
+        return 0
+    if "DEX" in str(d.get("mint_price_str") or "").upper():
+        return 0
+    std = str(d.get("standard") or "")
+    total = _js_number(_js_or0(d.get("total_minted")))
+    if not (total == total and total > 0):
+        return 0
+    if _NFT_STANDARD_RE.search(std.upper()) or "FAIR-MINT" in std.upper():
+        mints = total
+    else:
+        per_mint = _js_number(d.get("tokens_per_mint"))
+        if not (per_mint == per_mint and per_mint > 0):
+            return 0
+        mints = total / per_mint
+    terms = d.get("mint_terms") if isinstance(d.get("mint_terms"), dict) else {}
+    last = _js_number(d.get("last_mint_at"))
+    now = time.time() if now is None else now
+    still_minting = terms.get("open") is True or (last == last and last > 0 and now - last <= CROWD_SURGE_ACTIVE_WINDOW_SEC)
+    mints = int(mints)
+    return mints if (still_minting and mints >= CROWD_SURGE_MIN_MINTS) else 0
+
+
 def is_pre_minted_token(d) -> bool:
     if not d:
         return False
