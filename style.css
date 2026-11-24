@@ -8024,3 +8024,18 @@ button.search-empty-btn {
   padding: 4px 2px 6px;
   letter-spacing: 0.02em;
 }
+
+/* Utility classes: the inline style strings app.js and features/modal.js repeated, named once */
+.u-cyan-600 { color:var(--color-cyan);font-weight:600; }
+.u-green-700 { color:var(--color-green);font-weight:700; }
+.u-fs-2xs { font-size:var(--fs-2xs); }
+.u-fs-xs { font-size:var(--fs-xs); }
+.u-green { color:var(--color-green); }
+.u-gold-600 { color:var(--color-yellow);font-weight:600; }
+.u-magenta-600 { color:var(--color-magenta);font-weight:600; }
+.u-red { color:var(--color-red); }
+.u-dim { color:var(--text-dim); }
+.u-cyan-link { color:var(--color-cyan);text-decoration:underline; }
+.u-gold { color:var(--color-yellow); }
+.u-row-between { display:flex;justify-content:space-between;align-items:center; }
+.u-fs-xs-700 { font-size:var(--fs-xs);font-weight:700; }
