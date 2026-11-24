@@ -584,6 +584,26 @@ def heal_slot_caps(history: list) -> list:
     return [x for x in history if filters.is_mint_count_cap(x) and repair_mint_count_cap(x)]
 
 
+def reevaluate_ready_flags(history: list) -> list:
+    """Re-runs the snipe-ready rule on every record stored as ready and keeps the verdicts that changed. The rule changed (a
+    "crowd surge" is now a live uncapped mint, no longer any token with 100+ holders), and a stored flag is only refreshed when its
+    drop is swept again. Only demotes: a record that became ready is found by the normal sweep, which also raises the alert.
+    Returns the records it changed."""
+    changed = []
+    for x in history:
+        if not x.get("sniper_ready") or monitor.is_system_infra(x):
+            continue
+        eva = monitor.evaluate_sniper_readiness(x)
+        if eva.get("sniper_ready", False):
+            continue
+        x["sniper_ready"] = False
+        x["sniper_status"] = eva.get("sniper_status", "TRACKING")
+        x["sniper_badge"] = eva.get("sniper_badge", "⏳ Tracking")
+        x["sniper_checklist"] = eva.get("sniper_checklist", [])
+        changed.append(x)
+    return changed
+
+
 # contract -> time of the last supply-cap probe, so NFTs without a cap getter aren't re-probed every sweep
 _supply_probe_at: Dict[str, float] = {}
 SUPPLY_PROBE_INTERVAL_SEC = 3600.0
@@ -772,6 +792,12 @@ def run_fast_track_progress_sweeper_loop():
                     monitor.save_history(history, delta=healed)
             if healed:
                 print(f"[🔧 Cap Repair] {len(healed)} records stored a mint-slot count as their cap: rewritten", flush=True)
+            with history_lock:
+                demoted = reevaluate_ready_flags(history)
+                if demoted:
+                    monitor.save_history(history, delta=demoted)
+            if demoted:
+                print(f"[🎯 Snipe Ready] {len(demoted)} stored 'ready' flags no longer pass the rule: cleared", flush=True)
 
             if not history:
                 time.sleep(15)
