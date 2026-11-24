@@ -4028,6 +4028,7 @@ function renderPulseSmartMintRow(sm, idx) {
 // Pulse card 2: a NEW token (first seen in the 24h window) that already trades, ranked by 24h volume.
 // Same rule as api.pulse_launch_row (the server list is preferred; this is the fallback before /api/stats loads).
 const PULSE_LAUNCH_MIN_LP_USD = 1000;
+const PULSE_VOLUME_MAX_TURNOVER = 50;   // same limit as api.PULSE_VOLUME_MAX_TURNOVER: volume beyond 50x the pool is wash trading
 const PULSE_LAUNCH_MIN_VOLUME_USD = 1000;
 const PULSE_UNCAPPED_SUPPLY = 1e20;
 
@@ -4049,6 +4050,18 @@ function pulseSmartCount(d) {
 
 const PULSE_LAUNCH_MAX_PAIR_AGE_SEC = 3 * 86400;
 
+// Card 2 order (twin of api.pulse_launch_rank): launches that are up over 24h first, biggest gain with volume as the tie-breaker,
+// then the rest by volume.
+function pulseLaunchRank(r) {
+  const chg = Number(r && r.price_change_24h) || 0;
+  const vol = Number(r && r.volume_24h) || 0;
+  return chg > 0 ? [1, chg * 1e4 + Math.min(vol, 500000)] : [0, vol];
+}
+function comparePulseLaunches(a, b) {
+  const x = pulseLaunchRank(a), y = pulseLaunchRank(b);
+  return (y[0] - x[0]) || (y[1] - x[1]);
+}
+
 function pulseLaunchRow(d) {
   if (!d || isPulseNftRecord(d) || d.market_stale || isPulseFlaggedRisky(d)) return null;
   // a DEX pair older than 3 days is not a new launch (detected_at is only when the worker first saw the token)
@@ -4058,6 +4071,7 @@ function pulseLaunchRow(d) {
   const vol = Number(d.volume_24h || 0);
   const px = Number(d.token_price_usd || 0);
   if (!(lp >= PULSE_LAUNCH_MIN_LP_USD) || !(vol >= PULSE_LAUNCH_MIN_VOLUME_USD) || !(px > 0)) return null;
+  if (vol / lp > PULSE_VOLUME_MAX_TURNOVER) return null;   // wash trading: the pool turns over its whole size dozens of times
   const chg = d.price_change_24h;
   return {
     contract: d.contract, name: d.name || 'Unknown', symbol: d.symbol || '', standard: d.standard || '',
@@ -4283,7 +4297,7 @@ function compute24hPulseMetrics(drops = allDrops, topGainersList = savedTopGaine
   const runnerContracts = new Set(topRunners.map(lowerC));
   const serverLaunches = serverPulse && Array.isArray(serverPulse.top_launches) ? serverPulse.top_launches : null;
   const launchPool = serverLaunches || list.filter(inWindow).map(pulseLaunchRow).filter(Boolean)
-    .sort((a, b) => b.volume_24h - a.volume_24h);
+    .sort(comparePulseLaunches);
   const topLaunches = launchPool.filter(r => r && !runnerContracts.has(lowerC(r)) && !isExcludedMajorAsset(r)).slice(0, 3);
 
   // Card 4: Top 3 NEW NFT collections by mints (server list over the full dataset, same fallback rule).
@@ -4377,7 +4391,10 @@ function compute24hPulseMetrics(drops = allDrops, topGainersList = savedTopGaine
   }
 
   if (topLaunches.length > 0) {
-    headlineParts.push(`${topLaunches[0].name} leads new launches ($${formatCount(topLaunches[0].volume_24h)} 24h volume)`);
+    const lead = topLaunches[0];
+    headlineParts.push(Number(lead.price_change_24h) > 0
+      ? `${lead.name} leads new launches (+${Number(lead.price_change_24h).toFixed(1)}%)`
+      : `${lead.name} leads new launches ($${formatCount(lead.volume_24h)} 24h volume)`);
   }
 
   if (topSmartMints && topSmartMints.length > 0) {
@@ -11777,6 +11794,7 @@ if (typeof module !== 'undefined' && module.exports) {
     renderPulseLaunchRow,
     renderPulseNftMintRow,
     pulseLaunchRow,
+    comparePulseLaunches,
     pulseNftMintRow,
     setupPulseCarousel,
     scrollPulseCarousel,

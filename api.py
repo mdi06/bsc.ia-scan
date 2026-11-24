@@ -413,6 +413,8 @@ def pulse_launch_row(d: dict, now: Optional[float] = None) -> Optional[dict]:
     px = filters._num(d.get("token_price_usd"))
     if lp < PULSE_LAUNCH_MIN_LP_USD or vol < PULSE_LAUNCH_MIN_VOLUME_USD or px <= 0:
         return None
+    if vol / lp > PULSE_VOLUME_MAX_TURNOVER:
+        return None       # a pool turning over its whole size dozens of times: wash trading, the same rule as the DEX volume headline
     chg = d.get("price_change_24h")
     return {
         "contract": d.get("contract"), "name": d.get("name") or "Unknown", "symbol": d.get("symbol") or "",
@@ -421,6 +423,14 @@ def pulse_launch_row(d: dict, now: Optional[float] = None) -> Optional[dict]:
         "market_cap": get_sanitized_mcap(d), "smart_count": _smart_count(d),
         "pair_url": d.get("pair_url") or "", "detected_at": d.get("detected_at"), "_slim": True,
     }
+
+
+def pulse_launch_rank(row: dict) -> tuple:
+    """Card 2 shows the new launches that are performing: the ones up over 24h first (biggest gain, volume as the tie-breaker),
+    then the rest by volume. Ranking by volume alone put the busiest tokens first, and those are mostly crashed ones."""
+    chg = filters._num(row.get("price_change_24h"))
+    vol = filters._num(row.get("volume_24h"))
+    return (1, chg * 1e4 + min(vol, 500000.0)) if chg > 0 else (0, vol)
 
 
 def pulse_nft_mint_row(d: dict) -> Optional[dict]:
@@ -526,7 +536,7 @@ def compute_pulse_24h(projects, now=None) -> dict:
         "smart_inflows": smart_entries,
         "threats_blocked": flagged,
         "top_runners": [row for _, row in sorted(runners, key=lambda x: x[0], reverse=True)[:PULSE_TOP_RUNNERS]],
-        "top_launches": sorted(launches, key=lambda r: r["volume_24h"], reverse=True)[:PULSE_TOP_LAUNCHES],
+        "top_launches": sorted(launches, key=pulse_launch_rank, reverse=True)[:PULSE_TOP_LAUNCHES],
         "top_nft_mints": sorted(nft_mints, key=lambda r: (r["total_minted"], r["smart_count"]),
                                 reverse=True)[:PULSE_TOP_NFT_MINTS],
     }
