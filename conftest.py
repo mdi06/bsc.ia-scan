@@ -12,6 +12,14 @@ FAR_FUTURE = 4102444800.0      # year 2100: the price always counts as recently 
 
 
 @pytest.fixture(autouse=True)
+def fresh_getter_memo():
+    """monitor remembers which supply getter answered per contract; tests reuse addresses with different fakes."""
+    monitor._GETTER_MEMO.clear()
+    yield
+    monitor._GETTER_MEMO.clear()
+
+
+@pytest.fixture(autouse=True)
 def live_bnb_price_by_default():
     saved = dict(monitor._bnb_price_state)
     monitor._bnb_price_state.update(usd=monitor.BNB_PRICE_FALLBACK_USD, live=True, ok_at=FAR_FUTURE, fetched_at=FAR_FUTURE)

@@ -24,6 +24,7 @@ import logging
 import urllib.request
 import math
 import threading
+import random
 from typing import Optional, Dict, Any, List, Tuple, Iterable
 
 import filters
@@ -459,6 +460,57 @@ class BscRpcClient:
             return res if res and res != "0x" else None
         except Exception:
             return None
+
+    # JSON-RPC requests sent in one HTTP request by call_batch. Public endpoints differ in how many they accept;
+    # when one refuses, call_batch falls back to single calls, so a too-large value costs speed, not answers.
+    BATCH_CHUNK = 50
+    BATCH_RETRY_AFTER_SEC = 60.0
+    _batch_off_until = 0.0
+
+    def _post_batch(self, part: List[Tuple[str, list]]) -> Optional[List[Any]]:
+        """One JSON-RPC batch request. Returns the results in the order of `part` (None for an item that errored or
+        reverted), or None when no endpoint answered with a usable batch. A batch where every item came back
+        empty is treated as a refusal, not as an answer, so the caller re-asks one by one."""
+        if self._http_client is None or time.time() < self._batch_off_until:
+            return None
+        payload = [{"jsonrpc": "2.0", "id": i, "method": m, "params": p} for i, (m, p) in enumerate(part)]
+        headers = {"Content-Type": "application/json", "User-Agent": "Mozilla/5.0"}
+        for _ in range(len(self.endpoints)):
+            rpc_url = self.endpoints[self.current_idx]
+            try:
+                resp = self._http_client.post(rpc_url, json=payload, headers=headers)
+                if getattr(resp, "status_code", 200) != 200:
+                    raise RuntimeError(f"HTTP {resp.status_code}")
+                data = resp.json()
+                if not isinstance(data, list):
+                    raise RuntimeError("endpoint does not accept batches")
+                by_id = {d.get("id"): d for d in data if isinstance(d, dict)}
+                results = []
+                for i in range(len(part)):
+                    d = by_id.get(i)
+                    results.append(None if d is None or "error" in d else d.get("result"))
+                if len(part) > 1 and all(r is None for r in results):
+                    raise RuntimeError("batch answered with nothing")
+                return results
+            except Exception:
+                self.current_idx = (self.current_idx + 1) % len(self.endpoints)
+        self._batch_off_until = time.time() + self.BATCH_RETRY_AFTER_SEC
+        return None
+
+    def call_batch(self, calls: List[Tuple[str, list]], chunk: Optional[int] = None) -> List[Any]:
+        """Runs many (method, params) calls with one HTTP request per `chunk` of them. Returns one result per call,
+        in order, with None where a call errored or reverted (the same as call()). If batches are not supported, the
+        calls go out one by one through call(), so the answers are the same either way."""
+        n = len(calls)
+        out: List[Any] = [None] * n
+        size = max(1, chunk or self.BATCH_CHUNK)
+        for start in range(0, n, size):
+            part = calls[start:start + size]
+            res = self._post_batch(part)
+            if res is None:
+                res = [self.call(m, p) for m, p in part]
+            out[start:start + len(part)] = res
+        return out
 
 
 def keccak_selector(func_sig: str) -> str:
@@ -1208,6 +1260,40 @@ MINTED_GETTERS = ("totalMinted()", "_totalMinted()", "totalSupply()", "currentSu
                   "nextTokenId()", "_nextTokenId()", "currentTokenId()", "lifetimeCommitted()", "miningCommitted()")
 
 
+# Which getter answered for a contract, so the next read asks that one first instead of walking the whole list
+# (each getter that does not exist is a wasted request). (address, "max" | "minted") -> (getter, expiry time).
+# Entries expire after about an hour (spread out, so they do not all expire together): a contract that later
+# gains an earlier-listed getter is then picked up again, and the first answering getter in list order wins as before.
+_GETTER_MEMO: Dict[Tuple[str, str], Tuple[str, float]] = {}
+GETTER_MEMO_TTL_SEC = 3600.0
+
+
+def _memo_get(addr: str, kind: str) -> Optional[str]:
+    ent = _GETTER_MEMO.get((addr.lower(), kind))
+    if ent is None or time.time() >= ent[1]:
+        return None
+    return ent[0]
+
+
+def _memo_put(addr: str, kind: str, getter: str) -> None:
+    _GETTER_MEMO[(addr.lower(), kind)] = (getter, time.time() + GETTER_MEMO_TTL_SEC * (1.0 + 0.5 * random.random()))
+
+
+def _memo_forget(addr: str, kind: str) -> None:
+    _GETTER_MEMO.pop((addr.lower(), kind), None)
+
+
+def _minted_kind(token_decimals: Optional[int]) -> str:
+    return "minted" if token_decimals is None else "minted_tok"
+
+
+def _memo_first(getters: Tuple[str, ...], remembered: Optional[str]) -> Tuple[str, ...]:
+    """`getters` with the remembered one moved to the front (the rest keep their order)."""
+    if remembered and remembered in getters:
+        return (remembered,) + tuple(g for g in getters if g != remembered)
+    return getters
+
+
 def read_supply(
     rpc: BscRpcClient,
     target_addrs: List[str],
@@ -1238,12 +1324,16 @@ def read_supply(
     if token_decimals is not None:
         minted_getters = ("totalSupply()",) + tuple(g for g in MINTED_GETTERS if g != "totalSupply()")
 
+    # tokens try totalSupply() first, so what answered is remembered apart from the NFT / dispenser order
+    minted_kind = _minted_kind(token_decimals)
     max_supply = None
     total_minted = None
     cap_status = "unknown"
     for t_addr in target_addrs:
         if need_max and max_supply is None and cap_status != "unlimited":
-            for sel_name in MAX_SUPPLY_GETTERS:
+            remembered = _memo_get(t_addr, "max")
+            answered = None
+            for sel_name in _memo_first(MAX_SUPPLY_GETTERS, remembered):
                 s_res = rpc.call_contract(t_addr, keccak_selector(sel_name))
                 if s_res and len(s_res) >= 66:
                     try:
@@ -1251,15 +1341,24 @@ def read_supply(
                         if raw_s >= 2**128 or raw_s == (2**256 - 1) or raw_s >= 10**30:
                             max_supply = None  # effectively unlimited
                             cap_status = "unlimited"
+                            answered = sel_name
                             break
                         max_supply = scale(raw_s)
                         cap_status = "capped"
+                        answered = sel_name
                         break
                     except Exception as exc:
                         _log.debug("could not parse max supply %r for %s: %s", s_res, t_addr, exc)
+            if answered is None:
+                if remembered:
+                    _memo_forget(t_addr, "max")      # the remembered getter stopped answering: probe afresh next time
+            elif answered != remembered:
+                _memo_put(t_addr, "max", answered)
 
         if total_minted is None or total_minted == 0:
-            for sel_name in minted_getters:
+            remembered = _memo_get(t_addr, minted_kind)
+            answered = None
+            for sel_name in _memo_first(minted_getters, remembered):
                 m_res = rpc.call_contract(t_addr, keccak_selector(sel_name))
                 if m_res and len(m_res) >= 66:
                     try:
@@ -1267,12 +1366,64 @@ def read_supply(
                         if "nextTokenId" in sel_name and raw_m > 0:
                             raw_m = raw_m - 1  # nextTokenId-style counters point at the next id (ids start at 1)
                         total_minted = scale(raw_m)
+                        answered = sel_name
                         break
                     except Exception as exc:
                         _log.debug("could not parse total minted %r for %s: %s", m_res, t_addr, exc)
+            if answered is None:
+                if remembered:
+                    _memo_forget(t_addr, minted_kind)   # the remembered getter stopped answering: probe afresh next time
+            elif answered != remembered:
+                _memo_put(t_addr, minted_kind, answered)
     if meta is not None:
         meta["cap_status"] = cap_status
     return max_supply, total_minted
+
+
+def read_minted_batch(rpc, jobs: List[Tuple[List[str], Optional[int]]]) -> List[Optional[float]]:
+    """total_minted for many contracts with a handful of batched requests, for the sweeper's hot path.
+
+    `jobs` is a list of (target_addrs, token_decimals), as for read_supply. A job is answered here only when its
+    first target has a remembered minted getter (see _GETTER_MEMO) and that getter answers; the result is then the
+    same number read_supply would give. Everything else is None, and the caller reads those with read_supply, which
+    also learns the getter: new contracts, expired or failed memos, and contracts whose companion (core()) has to be
+    asked when the first answers nothing or zero.
+    `rpc` needs call_batch(); without it the same calls go out one by one."""
+    out: List[Optional[float]] = [None] * len(jobs)
+    asked: List[Tuple[int, str, str]] = []          # (job index, getter, address)
+    for i, (targets, _dec) in enumerate(jobs):
+        if not targets:
+            continue
+        getter = _memo_get(targets[0], _minted_kind(_dec))
+        if getter:
+            asked.append((i, getter, targets[0]))
+    if not asked:
+        return out
+
+    batch = getattr(rpc, "call_batch", None)
+    if batch is not None:
+        calls = [("eth_call", [{"to": to, "data": keccak_selector(g)}, "latest"]) for _i, g, to in asked]
+        replies = batch(calls)
+    else:
+        replies = [rpc.call_contract(to, keccak_selector(g)) for _i, g, to in asked]
+
+    for (i, getter, addr), res in zip(asked, replies):
+        targets, dec = jobs[i]
+        if not res or res == "0x" or len(res) < 66:
+            _memo_forget(addr, _minted_kind(dec))   # stopped answering: read_supply probes afresh
+            continue
+        try:
+            raw = int(res[:66], 16)
+        except ValueError:
+            _memo_forget(addr, _minted_kind(dec))
+            continue
+        if "nextTokenId" in getter and raw > 0:
+            raw -= 1
+        minted = raw if dec is None else raw / (10 ** dec)
+        if len(targets) > 1 and not minted:
+            continue                                # read_supply would go on to the companion
+        out[i] = minted
+    return out
 
 
 # ---------------------------------------------------------------------------------------------- mint terms
