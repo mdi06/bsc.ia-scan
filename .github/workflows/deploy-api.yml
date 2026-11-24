@@ -1,0 +1,41 @@
+# Deploys the API to Railway, but only when backend code changes.
+#
+# Every Railway deploy restarts the API, and a fresh API downloads the whole projects table from Supabase (~58 MB),
+# which counts against Supabase's 5 GB/month egress. With Railway's own "Auto deploys when pushed to GitHub" on, the
+# snapshot commits and frontend-only changes restarted it several times a day for nothing. So that switch is off and
+# this workflow deploys instead, only for pushes that change the Python code or its dependencies.
+# Anything else that should reach the API (a data file it reads, say): Actions → deploy-api → Run workflow.
+#
+# Needs the repository secret RAILWAY_TOKEN: a Railway *project* token (Project → Settings → Tokens) for the
+# production environment.
+name: deploy-api
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "**/*.py"
+      - "requirements.txt"
+      - ".github/workflows/deploy-api.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-api
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    container: ghcr.io/railwayapp/cli:latest
+    env:
+      RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Deploy to Railway
+        # --ci streams the build log and fails this job if the build fails
+        run: railway up --service agent-id-backend --ci
