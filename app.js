@@ -4148,7 +4148,7 @@ function renderPulseNftMintRow(n, idx) {
       </div>
     </div>
     <div class="pulse-row-mid">
-      <span class="pulse-row-price" style="color: #f472b6;">${mintedStr}</span>
+      <span class="pulse-row-price" style="color: var(--color-magenta);">${mintedStr}</span>
       <span class="pulse-row-mcap">${priceLabel}${smartStr}</span>
     </div>
     <div class="pulse-row-right">

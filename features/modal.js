@@ -335,7 +335,7 @@ export function openModal(item, source = 'direct') {
     <div class="modal-section bonding-gauge-card" data-modal-section="bonding_gauge">
       <div class="bonding-gauge-header">
         <span class="bonding-gauge-title">${bondingGraduated ? '🚀 GRADUATED TO PANCAKESWAP DEX' : '📈 Secondary Market Bonding Curve & DEX Graduation Gauge'}</span>
-        <span class="badge ${bondingGraduated ? 'badge-green' : (bondingPct >= 80 ? 'badge-red' : (bondingPct >= 50 ? 'badge-yellow' : 'badge-cyan'))}" style="font-weight: 700;">
+        <span class="badge ${bondingGraduated ? 'badge-green' : (bondingPct >= 80 ? 'badge-yellow' : (bondingPct >= 50 ? 'badge-green' : 'badge-cyan'))}" style="font-weight: 700;">
           ${bondingGraduated ? '100% DEX LIQUIDITY' : `${bondingPct.toFixed(1)}% GRADUATED`}
         </span>
       </div>
