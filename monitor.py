@@ -53,6 +53,13 @@ from market.bnb_price import (  # noqa: F401  (moved to market/bnb_price.py; re-
     BNB_PRICE_FALLBACK_USD, BNB_PRICE_STALE_AFTER_TTLS, BNB_PRICE_TTL_SEC, _bnb_price_lock, _bnb_price_rpc, _bnb_price_state,
     fetch_bnb_price_usd, refresh_bnb_price,
 )
+from smart_wallets import (  # noqa: F401  (moved to smart_wallets.py; re-exported so `monitor.X` keeps working)
+    SMART_WALLETS_CSV_URL, SMART_WALLETS_FILE, _SMART_WALLETS_CACHE, get_cached_smart_wallets, load_smart_wallets, sync_smart_wallets,
+)
+from chain.bytecode import (  # noqa: F401  (moved to chain/bytecode.py; re-exported so `monitor.X` keeps working)
+    BEACON_IMPL_SELECTOR, EIP1967_BEACON_SLOT, EIP1967_IMPL_SLOT, FACTORY_SELECTORS, detect_factory_pattern, is_launchpad_factory,
+    is_proxy_contract, replace_calldata_recipient, resolve_full_bytecode,
+)
 
 # Swallowed best-effort failures are logged at DEBUG: printing would flood the worker's output.
 _log = logging.getLogger(__name__)
@@ -63,11 +70,6 @@ def matches_tracked_registry(data_str: str) -> bool:
         return False
     d = data_str.lower()
     return any(b in d for b in TRACKED_REGISTRY_BYTES)
-
-# Stealth Factory & EIP-1167 / EIP-1967 Proxy Signatures (Option E)
-EIP1967_IMPL_SLOT = "0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc"
-EIP1967_BEACON_SLOT = "0xa3f0ad74e5423aebfd80d3ef4346578335a9a72aeaee59ff6cb3582b35133d50"
-BEACON_IMPL_SELECTOR = "0x5c60da1b"  # implementation()
 
 # Calls that move or approve an existing token / NFT but cannot mint one. A tracked wallet making one of these is
 # trading or managing something that already exists, so it is never evidence of a new agent drop.
@@ -125,8 +127,6 @@ def contract_links_to_registry(rpc, contract_addr: str) -> bool:
         return False
 
 
-FACTORY_SELECTORS = ["27cca59f", "7d38bb0d", "1737a4bd"]
-
 # Top BSC quote pairs for PancakeSwap V2 secondary liquidity resolution
 QUOTE_TOKENS = [
     {"symbol": "WBNB", "address": WBNB_ADDRESS, "is_bnb": True, "decimals": 18},
@@ -155,11 +155,8 @@ REFUND_SELECTORS = {
 }
 
 HISTORY_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "history.json")
-SMART_WALLETS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "smart_wallets.json")
 STATS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "agent_id_stats.json")
 STATS_FILE_ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "agent_id_stats.json")
-SMART_WALLETS_CSV_URL = "https://docs.google.com/spreadsheets/d/1jcKyWK1JJ8uBchTS3p1ok18DeB7yrDb2ZDxOaNYF73Q/export?format=csv&gid=395869104"
-
 # Registered .ai wallets, used until a real count has been read from the chain.
 DEFAULT_AGENT_WALLET_COUNT = 178001
 
@@ -201,134 +198,6 @@ def save_agent_id_stats(stats: Dict[str, Any]):
             os.replace(tmp, p)
         except Exception as exc:
             _log.debug("could not write agent-id stats to %s: %s", p, exc)
-
-def load_smart_wallets() -> Dict[str, str]:
-    """Loads smart wallets mapping: {wallet_address_lower: agent_id_name}."""
-    if os.path.exists(SMART_WALLETS_FILE):
-        try:
-            with open(SMART_WALLETS_FILE, "r") as f:
-                return json.load(f)
-        except Exception as exc:
-            _log.debug("could not read %s, will re-sync: %s", SMART_WALLETS_FILE, exc)
-    return sync_smart_wallets()
-
-
-def sync_smart_wallets() -> Dict[str, str]:
-    """Downloads/syncs the 5,000 tracked smart agent wallets from Google Sheets."""
-    print(f"[*] Fetching smart agent wallets from Google Sheets ({SMART_WALLETS_CSV_URL[:45]}...)...")
-    wallets = {}
-    try:
-        req = urllib.request.Request(SMART_WALLETS_CSV_URL, headers={"User-Agent": "Mozilla/5.0"})
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            lines = [line.decode("utf-8", errors="ignore") for line in resp.readlines()]
-            reader = csv.reader(lines)
-            for row in reader:
-                if not row:
-                    continue
-                addr = None
-                name = None
-                for cell in row:
-                    cell_s = cell.strip()
-                    if cell_s.startswith("0x") and len(cell_s) == 42:
-                        addr = cell_s.lower()
-                    elif ".ai" in cell_s:
-                        name = cell_s
-                if addr:
-                    wallets[addr] = name or "agent.ai"
-        if wallets:
-            with open(SMART_WALLETS_FILE, "w") as f:
-                json.dump(wallets, f, indent=2)
-            print(f"[+] Successfully synced {len(wallets):,} smart agent wallets to {SMART_WALLETS_FILE}!")
-        else:
-            print(f"[!] Could not parse smart wallets from spreadsheet.")
-    except Exception as e:
-        print(f"[!] Error downloading smart wallets: {e}")
-    return wallets
-
-
-_SMART_WALLETS_CACHE: Optional[Dict[str, str]] = None
-
-
-def get_cached_smart_wallets() -> Dict[str, str]:
-    """Returns memory-cached smart wallets mapping to prevent repeated file I/O."""
-    global _SMART_WALLETS_CACHE
-    if _SMART_WALLETS_CACHE is None:
-        try:
-            _SMART_WALLETS_CACHE = load_smart_wallets() or {}
-        except Exception:
-            _SMART_WALLETS_CACHE = {}
-    return _SMART_WALLETS_CACHE
-
-
-def replace_calldata_recipient(
-    calldata: Optional[str],
-    target_wallet: str,
-    original_sender: Optional[str] = None,
-    extra_addresses: Optional[Iterable[str]] = None
-) -> str:
-    """
-    Replaces address parameters in EVM calldata with the active user's wallet address.
-
-    1. Supports recv (plain BNB transfer): returns '0x' if calldata is empty, '0x', 'recv', 'receive', or None.
-    2. Pattern C (0x836a1040): Word 1 (bytes 36..68) is the recipient parameter of mint(uint256,address,uint256),
-       always replaced with target_wallet.
-    3. Any 32-byte word matching original_sender, DEFAULT_WALLET, or any tracked smart wallet
-       is replaced with target_wallet.
-    """
-    if not calldata:
-        return "0x"
-    c_str = str(calldata).strip()
-    if c_str.lower() in ("0x", "recv", "receive", "none", ""):
-        return "0x"
-
-    prefix = "0x" if c_str.startswith("0x") else ""
-    raw = c_str[2:] if c_str.startswith("0x") else c_str
-    if len(raw) < 8:
-        return ("0x" + raw) if prefix else raw
-
-    selector = raw[:8].lower()
-    params = raw[8:]
-
-    tgt_clean = target_wallet.lower().replace("0x", "").strip()
-    if len(tgt_clean) != 40:
-        return ("0x" + raw) if prefix else raw
-    tgt_word = "0" * 24 + tgt_clean
-
-    words = [params[i:i+64] for i in range(0, len(params), 64)]
-
-    # Collect known smart wallets, sender & default wallet
-    known_sw = get_cached_smart_wallets()
-
-    explicit_addrs = set()
-    if original_sender:
-        explicit_addrs.add(original_sender.lower().replace("0x", "").strip())
-    if DEFAULT_WALLET:
-        explicit_addrs.add(DEFAULT_WALLET.lower().replace("0x", "").strip())
-    if extra_addresses:
-        for ea in extra_addresses:
-            if ea:
-                explicit_addrs.add(ea.lower().replace("0x", "").strip())
-
-    new_words = []
-    for idx, w in enumerate(words):
-        if len(w) == 64:
-            # Pattern C (0x836a1040): mint(uint256 quantity, address recipient, uint256 maxCost)
-            if selector == "836a1040" and idx == 1:
-                new_words.append(tgt_word)
-            elif w.startswith("0" * 24):
-                addr_hex = w[24:].lower()
-                addr_with_prefix = "0x" + addr_hex
-                if addr_hex in explicit_addrs or addr_with_prefix in known_sw:
-                    new_words.append(tgt_word)
-                else:
-                    new_words.append(w)
-            else:
-                new_words.append(w)
-        else:
-            new_words.append(w)
-
-    return ("0x" if prefix else "") + selector + "".join(new_words)
-
 
 def classify_asset_type(rpc: BscRpcClient, addr: str) -> Dict[str, Any]:
     """
@@ -416,118 +285,6 @@ def classify_asset_type(rpc: BscRpcClient, addr: str) -> Dict[str, Any]:
         "is_nft": False,
         "underlying": None
     }
-
-
-def resolve_full_bytecode(rpc: BscRpcClient, contract_addr: str, code: str) -> Tuple[str, Optional[str], Optional[str]]:
-    """
-    Option E: Stealth Factory & EIP-1167 / EIP-1967 / Beacon Proxy Clone Resolver.
-    Unwraps:
-    1. EIP-1167 Minimal Proxy Clones (e.g. 45-byte clones used by launchpad factories).
-    2. EIP-1967 Transparent & UUPS Implementation Proxies (slot 0x360894a1...).
-    3. EIP-1967 Beacon Proxies (slot 0xa3f0ad74... -> implementation()).
-    Returns (full_code_hex, proxy_type, master_implementation_address).
-    """
-    c_clean = (code or "").lower()
-    if c_clean.startswith("0x"):
-        c_clean = c_clean[2:]
-
-    # 1. EIP-1167 Minimal Proxy Clone (Opcode pattern: 363d3d373d3d3d363d73<20-byte target>5af4...)
-    if "363d3d373d3d3d363d73" in c_clean and len(c_clean) <= 120:
-        idx = c_clean.find("363d3d373d3d3d363d73") + 20
-        target_hex = c_clean[idx:idx + 40]
-        if len(target_hex) == 40 and target_hex != "0" * 40:
-            target_addr = "0x" + target_hex
-            try:
-                target_code = rpc.get_code(target_addr)
-                if target_code and len(target_code) > 10:
-                    return target_code.lower(), "EIP-1167 Clone", target_addr
-            except Exception as exc:
-                _log.debug("could not fetch EIP-1167 target code %s: %s", target_addr, exc)
-            return c_clean, "EIP-1167 Clone", target_addr
-
-    # 2. EIP-1967 Implementation Slot (UUPS / Transparent Proxy)
-    try:
-        impl_slot = rpc.get_storage_at(contract_addr, EIP1967_IMPL_SLOT)
-        if impl_slot and len(impl_slot) >= 66:
-            clean_val = impl_slot[2:] if impl_slot.startswith("0x") else impl_slot
-            target_hex = clean_val[-40:].lower()
-            if target_hex != "0" * 40:
-                target_addr = "0x" + target_hex
-                target_code = rpc.get_code(target_addr)
-                if target_code and len(target_code) > 10:
-                    return target_code.lower(), "EIP-1967 Proxy", target_addr
-                return c_clean, "EIP-1967 Proxy", target_addr
-    except Exception as exc:
-        _log.debug("EIP-1967 implementation lookup failed for %s: %s", contract_addr, exc)
-
-    # 3. EIP-1967 Beacon Proxy Slot (reads beacon address -> implementation())
-    try:
-        beacon_slot = rpc.get_storage_at(contract_addr, EIP1967_BEACON_SLOT)
-        if beacon_slot and len(beacon_slot) >= 66:
-            clean_b = beacon_slot[2:] if beacon_slot.startswith("0x") else beacon_slot
-            beacon_hex = clean_b[-40:].lower()
-            if beacon_hex != "0" * 40:
-                beacon_addr = "0x" + beacon_hex
-                impl_res = rpc.call_contract(beacon_addr, BEACON_IMPL_SELECTOR)
-                if impl_res and len(impl_res) >= 66:
-                    clean_impl = impl_res[2:] if impl_res.startswith("0x") else impl_res
-                    target_hex = clean_impl[-40:].lower()
-                    if target_hex != "0" * 40:
-                        target_addr = "0x" + target_hex
-                        target_code = rpc.get_code(target_addr)
-                        if target_code and len(target_code) > 10:
-                            return target_code.lower(), "Beacon Proxy", target_addr
-                        return c_clean, "Beacon Proxy", target_addr
-    except Exception as exc:
-        _log.debug("EIP-1967 beacon lookup failed for %s: %s", contract_addr, exc)
-
-    return c_clean, None, None
-
-
-def is_launchpad_factory(code: str, contract_addr: str = "") -> Tuple[bool, Optional[str]]:
-    """
-    Identifies launchpad factories (Flap, ToshX, Four.meme, etc.)
-    that deploy proxy clones for fair-mint tokens/NFTs.
-    """
-    if contract_addr and contract_addr.lower() in [f.lower() for f in VAULT_FACTORIES]:
-        return True, "Flap Vault Factory"
-
-    c = (code or "").lower()
-    if not c:
-        return False, None
-
-    if "27cca59f" in c:
-        return True, "Flap / ToshX Vault Factory"
-    if "7d38bb0d" in c or "1737a4bd" in c:
-        return True, "Launchpad Factory"
-    if any(sel in c for sel in FACTORY_SELECTORS):
-        return True, "Proxy Factory"
-
-    return False, None
-
-
-def is_proxy_contract(rpc: BscRpcClient, contract_addr: str) -> Tuple[bool, Optional[str], Optional[str]]:
-    """Checks if a contract address is an EIP-1167, EIP-1967, or Beacon proxy."""
-    try:
-        code = rpc.get_code(contract_addr)
-        if not code or len(code) <= 2:
-            return False, None, None
-        full_code, proxy_type, impl_addr = resolve_full_bytecode(rpc, contract_addr, code)
-        is_proxy = proxy_type is not None
-        return is_proxy, proxy_type, impl_addr
-    except Exception:
-        return False, None, None
-
-
-def detect_factory_pattern(rpc: BscRpcClient, contract_addr: str) -> Tuple[bool, Optional[str]]:
-    """Checks if a contract address is a recognized launchpad / token factory."""
-    try:
-        code = rpc.get_code(contract_addr)
-        if not code or len(code) <= 2:
-            return False, None
-        return is_launchpad_factory(code, contract_addr)
-    except Exception:
-        return False, None
 
 
 def analyze_contract(rpc: BscRpcClient, contract_addr: str, wallet_addr: str) -> Dict[str, Any]:
