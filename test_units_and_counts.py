@@ -6,6 +6,7 @@ import time
 
 import pytest
 
+from market import element as market_element
 import monitor
 import worker
 
@@ -362,7 +363,7 @@ def test_element_token_id_is_word_8_not_the_fees_offset():
 
 @pytest.fixture(autouse=True)
 def _no_element_retry_wait(monkeypatch):
-    monkeypatch.setattr(monitor, "ELEMENT_LOG_RETRY_SEC", 0.0)
+    monkeypatch.setattr(market_element, "ELEMENT_LOG_RETRY_SEC", 0.0)   # read where it lives: market/element.py
 
 
 class ElementRpc:
