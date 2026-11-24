@@ -575,6 +575,15 @@ def repair_mint_count_cap(item: dict) -> bool:
     return changed
 
 
+def heal_slot_caps(history: list) -> list:
+    """Repairs every record that still stores a slot count as its cap, with no chain read at all: slots x tokens_per_mint is
+    arithmetic on data the record already holds. Without this the repair waited for each record's turn in the sweeper's cold lane
+    (50 contracts per 4th cycle out of ~8,000): 508 records were fixed in the first ten minutes after a restart and then only
+    ~7 per ten minutes. The totals still refresh in that rotation; the wrong "sold out" does not wait for it.
+    Returns the records it changed."""
+    return [x for x in history if filters.is_mint_count_cap(x) and repair_mint_count_cap(x)]
+
+
 # contract -> time of the last supply-cap probe, so NFTs without a cap getter aren't re-probed every sweep
 _supply_probe_at: Dict[str, float] = {}
 SUPPLY_PROBE_INTERVAL_SEC = 3600.0
@@ -758,6 +767,11 @@ def run_fast_track_progress_sweeper_loop():
         try:
             with history_lock:
                 history = get_shared_history()
+                healed = heal_slot_caps(history)
+                if healed:
+                    monitor.save_history(history, delta=healed)
+            if healed:
+                print(f"[🔧 Cap Repair] {len(healed)} records stored a mint-slot count as their cap: rewritten", flush=True)
 
             if not history:
                 time.sleep(15)
