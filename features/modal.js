@@ -410,7 +410,7 @@ export function openModal(item, source = 'direct') {
           <span class="holder-dist-chip"><span class="holder-dist-dot dev"></span>Dev: <strong style="color: #a855f7;">${devHold.toFixed(1)}%</strong></span>
           <span class="holder-dist-chip"><span class="holder-dist-dot insider"></span>Insiders: <strong style="color: #f97316;">${insiderHold.toFixed(1)}%</strong></span>
           <span class="holder-dist-chip"><span class="holder-dist-dot sniper"></span>Snipers: <strong style="color: #ef4444;">${sniperHold.toFixed(1)}%</strong></span>
-          <span class="holder-dist-chip"><span class="holder-dist-dot smart"></span>Smart Agents: <strong style="color: #00f0ff;">${smartHold.toFixed(1)}%</strong></span>
+          <span class="holder-dist-chip"><span class="holder-dist-dot smart"></span>Smart Agents: <strong style="color: #4cc9ff;">${smartHold.toFixed(1)}%</strong></span>
           <span class="holder-dist-chip"><span class="holder-dist-dot fresh"></span>Fresh: <strong style="color: #eab308;">${freshHold.toFixed(1)}%</strong></span>
           <span class="holder-dist-chip"><span class="holder-dist-dot public"></span>Public: <strong style="color: #22c55e;">${publicHold.toFixed(1)}%</strong></span>
         </div>
@@ -457,7 +457,7 @@ export function openModal(item, source = 'direct') {
         ${smList.slice(0, 12).map(w => {
           const isF = followedWallets.has(String(w).toLowerCase());
           return `
-            <div style="display: inline-flex; align-items: center; gap: 4px; background: rgba(0, 240, 255, 0.05); border: 1px solid rgba(0, 240, 255, 0.2); border-radius: 4px; padding: 2px 6px; margin: 2px;">
+            <div style="display: inline-flex; align-items: center; gap: 4px; background: rgba(76, 201, 255, 0.05); border: 1px solid rgba(76, 201, 255, 0.2); border-radius: 4px; padding: 2px 6px; margin: 2px;">
               <span style="font-weight: 700; color: ${isF ? 'var(--color-yellow)' : 'var(--color-cyan)'}; font-size: 11px;">${isF ? '⭐ ' : ''}${escapeHtml(w)}</span>
               <button class="${isF ? 'btn-follow-wallet following' : 'btn-follow-wallet'}" style="padding: 2px 6px; font-size: 9.5px;" onclick="trackAnalytics('wallet_follow_toggled', { wallet: ${jsAttr(w)}, will_follow: !followedWallets.has(${jsAttr(w)}.toLowerCase()) }); toggleFollowWallet(${jsAttr(w)}); this.classList.toggle('following'); this.textContent = this.classList.contains('following') ? '★ Following' : '⭐ Follow';">
                 ${isF ? '★ Following' : '⭐ Follow'}
@@ -509,7 +509,7 @@ export function openModal(item, source = 'direct') {
     <div class="modal-section" data-modal-section="secondary_links">
       <div class="modal-section-title">🔗 Official Secondary Links</div>
       <div class="modal-links">
-        ${!isNft && dexScreenerUrl ? `<a href="${dexScreenerUrl}" target="_blank" rel="noopener" onclick="trackExternalClick('dexscreener_links', ${jsAttr(sym)}, '${cAddr}')" class="modal-btn" style="background: rgba(0, 240, 255, 0.15); border: 1px solid var(--color-cyan); color: var(--color-cyan); font-weight: 700;">📈 View on DexScreener ↗</a>` : ''}
+        ${!isNft && dexScreenerUrl ? `<a href="${dexScreenerUrl}" target="_blank" rel="noopener" onclick="trackExternalClick('dexscreener_links', ${jsAttr(sym)}, '${cAddr}')" class="modal-btn" style="background: rgba(76, 201, 255, 0.15); border: 1px solid var(--color-cyan); color: var(--color-cyan); font-weight: 700;">📈 View on DexScreener ↗</a>` : ''}
         <a href="${isNft ? mktUrl : `https://pancakeswap.finance/swap?outputCurrency=${cAddr}`}" target="_blank" rel="noopener" onclick="trackExternalClick('pancakeswap_links', ${jsAttr(sym)}, '${cAddr}')" class="modal-btn btn-element">🛒 ${isNft ? 'Element NFT Collection' : 'Trade on PancakeSwap DEX'}</a>
         ${!isNft ? `<a href="https://pancakeswap.finance/swap?inputCurrency=${cAddr}&outputCurrency=BNB" target="_blank" rel="noopener" onclick="trackExternalClick('pancakeswap_swap_bnb', ${jsAttr(sym)}, '${cAddr}')" class="modal-btn" style="background: rgba(240, 185, 11, 0.15); border: 1px solid #f0b90b; color: #f0b90b;">🥞 Swap to BNB (PancakeSwap)</a>` : ''}
         <a href="https://bscscan.com/address/${cAddr}" target="_blank" rel="noopener" onclick="trackExternalClick('bscscan_address', ${jsAttr(sym)}, '${cAddr}')" class="modal-btn btn-bscscan">🔍 View on BscScan</a>
@@ -524,7 +524,7 @@ export function openModal(item, source = 'direct') {
         <span style="font-size: 12px; font-weight: 700; color: var(--color-cyan);">📈 Live DEX Candlestick Price Action Chart</span>
         <div style="display: flex; gap: 8px; align-items: center;">
           ${dexScreenerUrl ? `
-            <a href="${dexScreenerUrl}" target="_blank" rel="noopener" onclick="trackExternalClick('dexscreener_chart_open', ${jsAttr(sym)}, '${cAddr}')" class="dex-chart-toggle-btn" style="color: var(--color-cyan); text-decoration: none; padding: 4px 8px; border: 1px solid rgba(0, 240, 255, 0.3); border-radius: 4px; font-size: 11px; display: inline-flex; align-items: center; gap: 4px;" title="Open live pair on DexScreener in new window">
+            <a href="${dexScreenerUrl}" target="_blank" rel="noopener" onclick="trackExternalClick('dexscreener_chart_open', ${jsAttr(sym)}, '${cAddr}')" class="dex-chart-toggle-btn" style="color: var(--color-cyan); text-decoration: none; padding: 4px 8px; border: 1px solid rgba(76, 201, 255, 0.3); border-radius: 4px; font-size: 11px; display: inline-flex; align-items: center; gap: 4px;" title="Open live pair on DexScreener in new window">
               <span>↗</span> <span>Open DexScreener</span>
             </a>
           ` : ''}
@@ -537,7 +537,7 @@ export function openModal(item, source = 'direct') {
     </div>
     ` : ''}
 
-    <div class="modal-section mint-action-section" data-modal-section="mint_action" style="${isSoldOut ? 'opacity: 0.85;' : (isReady ? 'border-color: rgba(74, 222, 128, 0.5); box-shadow: 0 0 15px rgba(74, 222, 128, 0.1);' : 'border-color: rgba(0, 240, 255, 0.4);')}">
+    <div class="modal-section mint-action-section" data-modal-section="mint_action" style="${isSoldOut ? 'opacity: 0.85;' : (isReady ? 'border-color: rgba(74, 222, 128, 0.5); box-shadow: 0 0 15px rgba(74, 222, 128, 0.1);' : 'border-color: rgba(76, 201, 255, 0.4);')}">
       <div class="modal-section-title" style="display: flex; justify-content: space-between; align-items: center;">
         <span style="color: var(--color-cyan); font-weight: 700; display: inline-flex; align-items: center; gap: 6px;">
           ⚡ 1-Click Web3 Direct Mint
@@ -568,7 +568,7 @@ export function openModal(item, source = 'direct') {
           <a href="https://web3.binance.com/en/dev-docs/products/agentic-wallet/ai-pro#came-from-the-agent-id-campaign" target="_blank" rel="noopener" onclick="trackExternalClick('binance_claim_ai', ${jsAttr(sym)}, '${cAddr}')" style="color: var(--color-cyan); text-decoration: underline;">Claim .ai in Binance App ↗</a>
         </div>
       ` : (connectedWallet && isAgenticWallet ? `
-        <div class="agentic-status-success" style="background: rgba(0, 240, 255, 0.08); border: 1px solid rgba(0, 240, 255, 0.3); border-radius: 6px; padding: 6px 12px; margin: 8px 0; font-size: 11px; color: var(--color-cyan); display: flex; align-items: center; gap: 8px;">
+        <div class="agentic-status-success" style="background: rgba(76, 201, 255, 0.08); border: 1px solid rgba(76, 201, 255, 0.3); border-radius: 6px; padding: 6px 12px; margin: 8px 0; font-size: 11px; color: var(--color-cyan); display: flex; align-items: center; gap: 8px;">
           <span>🤖</span>
           <span><strong>Agentic Wallet Active:</strong> Your wallet holds a verified <code>.ai</code> Agent ID on BSC. Eligible for exclusive inner-market minting.</span>
         </div>
@@ -622,7 +622,7 @@ export function openModal(item, source = 'direct') {
         <strong style="color: var(--text-white);">Exit Strategy:</strong> ${exitEval.recommendation}
       </div>
       <div class="modal-links" style="margin-bottom: 10px;">
-        ${dexScreenerUrl ? `<a href="${dexScreenerUrl}" target="_blank" rel="noopener" onclick="trackExternalClick('exit_dexscreener_chart', ${jsAttr(sym)}, '${cAddr}')" class="modal-btn" style="background: rgba(0, 240, 255, 0.15); border: 1px solid var(--color-cyan); color: var(--color-cyan); font-weight: 700; text-decoration: none;">📈 DexScreener Live Chart ↗</a>` : ''}
+        ${dexScreenerUrl ? `<a href="${dexScreenerUrl}" target="_blank" rel="noopener" onclick="trackExternalClick('exit_dexscreener_chart', ${jsAttr(sym)}, '${cAddr}')" class="modal-btn" style="background: rgba(76, 201, 255, 0.15); border: 1px solid var(--color-cyan); color: var(--color-cyan); font-weight: 700; text-decoration: none;">📈 DexScreener Live Chart ↗</a>` : ''}
         <a href="https://pancakeswap.finance/swap?inputCurrency=${cAddr}&outputCurrency=BNB" target="_blank" rel="noopener" onclick="trackExternalClick('exit_pancakeswap_swap', ${jsAttr(sym)}, '${cAddr}')" class="modal-btn" style="background: rgba(240, 185, 11, 0.2); border: 1px solid #f0b90b; color: #f0b90b; text-decoration: none;">🥞 1-Click Swap on PancakeSwap ↗</a>
       </div>
       <div class="cli-box">
@@ -633,7 +633,7 @@ export function openModal(item, source = 'direct') {
     ` : ''}
 
     ${navTotal > 1 && navIndex !== -1 ? `
-    <div class="modal-section modal-footer-nav-card" style="border-color: rgba(0, 240, 255, 0.25); background: rgba(0, 240, 255, 0.03);">
+    <div class="modal-section modal-footer-nav-card" style="border-color: rgba(76, 201, 255, 0.25); background: rgba(76, 201, 255, 0.03);">
       <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
         <div style="display: flex; align-items: center; gap: 8px;">
           <span style="font-size: 13px; font-weight: 700; color: var(--color-cyan);">⚡ In-Modal Quick Flip</span>
