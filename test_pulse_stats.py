@@ -57,11 +57,12 @@ def test_security_smart_money_and_dex_counts():
     assert p["trading_on_dex"] == 1                                     # only the pooled drop trades on a DEX
 
 
-def test_the_old_field_names_still_answer_for_one_release():
+def test_the_old_field_names_are_gone():
+    """graduated / smart_inflows / threats_blocked were kept for one release after the rename; that release has shipped."""
     records = [drop(1, 100, standard=NFT, smart_wallets=["a.ai"], lp_usd=60000), drop(2, 100, risk_level="RUG")]
     p = api.compute_pulse_24h(records, now=NOW)
-    assert p["graduated"] == p["trading_on_dex"] and p["smart_inflows"] == p["smart_wallet_entries"]
-    assert p["threats_blocked"] == p["flagged_risky"] == 1
+    assert not {"graduated", "smart_inflows", "threats_blocked"} & set(p)
+    assert p["flagged_risky"] == 1 and p["smart_wallet_entries"] == 1
 
 
 def test_clean_mints_counts_mints_not_every_unflagged_record():

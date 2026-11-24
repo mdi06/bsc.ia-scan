@@ -78,13 +78,17 @@ def test_the_counter_is_written_to_kv_stats_not_to_the_fake_wallet(tmp_path, mon
     assert m.get_agent_id_stats(max_age_sec=0.0)["total_created_wallets"] == 263788
 
 
-def test_before_the_migration_reads_and_writes_use_the_old_row(tmp_path, monkeypatch):
+def test_without_the_table_the_counter_is_kept_locally_and_the_old_row_is_never_used(tmp_path, monkeypatch):
+    """The fake wallet row was retired (migration 006): no table means local SQLite only, not a read or write of user_favorites."""
     fake = Fake(kv_exists=False)
     m = mgr(tmp_path, monkeypatch, fake)
-    assert m.get_agent_id_stats(max_age_sec=0.0)["total_created_wallets"] == 111     # fallback read
+    assert m.get_agent_id_stats(max_age_sec=0.0) is None                              # the legacy row (111) is not consulted
     m.save_agent_id_stats(STATS, force_cloud=True)
-    assert fake.legacy_row["favorites"][0]["total_created_wallets"] == 263788       # fallback write: the counter stays alive
+    assert fake.legacy_row["favorites"][0]["total_created_wallets"] == 111          # never written
+    assert not any("user_favorites" in path for _, path in fake.log)
     assert m._kv_stats_is_off() is True
+    m._agent_stats_cache = None
+    assert m.get_agent_id_stats(max_age_sec=0.0)["total_created_wallets"] == 263788  # served from the local SQLite copy
 
 
 def test_a_passing_server_error_does_not_park_the_counter_on_the_old_row(tmp_path, monkeypatch):

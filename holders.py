@@ -33,16 +33,11 @@ MAX_FAILED_SHARE = 0.10        # more ids than this without an owner: ids are no
 MAX_ENTRIES = 50_000
 
 _NOT_OWNERS = {"0x" + "0" * 40, "0x000000000000000000000000000000000000dead"}
-_ADDR_RE = re.compile(r"^0x[0-9a-fA-F]{40}$")
 _NFT_RE = re.compile(r"721|NFT")
 
 
 class Unsupported(Exception):
     """The contract does not answer ownerOf for sequential token ids."""
-
-
-def is_address(value) -> bool:
-    return isinstance(value, str) and bool(_ADDR_RE.match(value))
 
 
 def countable_minted(record: Dict[str, Any]) -> Optional[int]:

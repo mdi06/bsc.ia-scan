@@ -67,7 +67,7 @@ def evaluate_sniper_ready(item: Dict[str, Any]) -> Dict[str, Any]:
     # Deployer check
     if is_serial:
         s_cnt = sec.get("serial_count") or item.get("serial_count") or 3
-        checklist.append(f"▫ [red]✖[/red] Deployer: 🚨 Serial Dev ({s_cnt} contracts deployed in 24h)")
+        checklist.append(f"▫ [red]✖[/red] Deployer: 🚨 Serial Dev ({s_cnt} contracts recorded from this deployer)")
     elif is_fresh:
         checklist.append("▫ [yellow]⚠️[/yellow] Deployer: Fresh wallet (<8h, low nonce)")
     else:

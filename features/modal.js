@@ -240,7 +240,12 @@ export function openModal(item, source = 'direct') {
   }
 
   const mintedStr = formatCount(item.total_minted);
-  const supplyStr = (item.max_supply && Number(item.max_supply) > 0) ? `/ ${formatCount(item.max_supply)}` : '<span class="dim">(Uncapped)</span>';
+  // A real cap, "unlimited" (the contract reports the 1e20+ sentinel), or no cap found. The last one is NOT "uncapped": it is an open
+  // edition or a cap the radar could not read, so it says NO CAP with the same explanation as the table's progress column.
+  const capNum = Number(item.max_supply);
+  const supplyStr = (capNum > 0 && capNum < 1e20) ? `/ ${formatCount(item.max_supply)}`
+    : (capNum >= 1e20 ? '<span class="dim" title="The contract reports an unlimited supply (open edition)">(Unlimited)</span>'
+      : '<span class="dim" title="No max supply found: an open edition, or a cap the radar could not read">NO CAP</span>');
 
   // Navigation context for in-modal flipping (Prev / Next & Arrow Keys)
   currentInspectItem = item;
@@ -343,7 +348,7 @@ export function openModal(item, source = 'direct') {
         <div class="bonding-gauge-fill" style="width: ${bondingGraduated ? 100 : bondingPct}%;"></div>
       </div>
       <div class="bonding-gauge-stats">
-        <span>${bondingGraduated ? `Secondary Liquidity Pool: $${formatCount(lp)}` : `Primary Minting: ${formatCount(tm)} / ${ms > 0 ? formatCount(ms) : 'Target Cap'}`}</span>
+        <span>${bondingGraduated ? `Secondary Liquidity Pool: $${formatCount(lp)}` : `Primary Minting: ${formatCount(tm)} / ${ms > 0 ? formatCount(ms) : 'NO CAP'}`}</span>
         <span>${bondingGraduated ? (dexScreenerUrl ? `<a href="${dexScreenerUrl}" target="_blank" rel="noopener" onclick="trackExternalClick('dexscreener_graduated', ${jsAttr(sym)}, '${cAddr}')" style="color: var(--color-green); font-weight: 600; text-decoration: none;" title="View pair on DexScreener">🟢 Active Trading on PancakeSwap V2 ➔ View on DexScreener ↗</a>` : '🟢 Active Trading on PancakeSwap V2') : (bondingPct >= 80 ? '🔥 Near DEX Pool Injection (≥80%)' : (bondingPct >= 50 ? '⚡ Strong Momentum (≥50%)' : '🌱 Early Fair-Mint Phase'))}</span>
       </div>
     </div>

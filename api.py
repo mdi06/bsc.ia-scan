@@ -530,11 +530,6 @@ def compute_pulse_24h(projects, now=None) -> dict:
         "clean_mints": clean,                        # mints that no risk check flagged
         "refunds": refunds,
         "flagged_risky": flagged,
-        # The old names, kept for one release for clients that still read them: "graduated" was never about graduation,
-        # "smart_inflows" has no amounts, "threats_blocked" blocks nothing.
-        "graduated": on_dex,
-        "smart_inflows": smart_entries,
-        "threats_blocked": flagged,
         "top_runners": [row for _, row in sorted(runners, key=lambda x: x[0], reverse=True)[:PULSE_TOP_RUNNERS]],
         "top_launches": sorted(launches, key=pulse_launch_rank, reverse=True)[:PULSE_TOP_LAUNCHES],
         "top_nft_mints": sorted(nft_mints, key=lambda r: (r["total_minted"], r["smart_count"]),
@@ -549,7 +544,7 @@ def _filter_counts(projects) -> dict:
 MOMENTUM_TOP_NAMES = 3     # the stats bar names this many momentum drops
 # Part of every feed / stats ETag. Bump it when the response bodies gain or change fields: a browser holding a body
 # from before (same content version and totals, e.g. right after a restart) must not get a 304 and keep the old shape.
-RESPONSE_SHAPE = 3
+RESPONSE_SHAPE = 4
 
 
 def compute_mint_progress_stats(projects, now: Optional[float] = None) -> dict:

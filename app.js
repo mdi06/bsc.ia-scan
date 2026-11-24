@@ -3056,7 +3056,7 @@ function getSniperEval(item) {
 
   if (isSerial) {
     const sCnt = sec.serial_count || item.serial_count || 3;
-    checklist.push(`<span class="u-red">✖ Deployer: 🚨 Serial Dev (${sCnt} contracts deployed in 24h)</span>`);
+    checklist.push(`<span class="u-red">✖ Deployer: 🚨 Serial Dev (${sCnt} contracts recorded from this deployer)</span>`);
   } else if (isFresh) {
     checklist.push('<span style="color:var(--color-yellow);">⚠️ Deployer: Fresh wallet (&lt;8h, low nonce)</span>');
   } else {
@@ -3898,6 +3898,15 @@ function updateSecondaryTabCount() {
   if (typeof syncMobileTabSelector === 'function') syncMobileTabSelector();
 }
 
+// Volume that counts as trading: not a token flagged RUG / honeypot, on a pool with real liquidity, and not turning the pool over
+// more than 50x a day (wash trading). The same rule as the Pulse's DEX volume (api.compute_pulse_24h), so the two never disagree.
+function isBackedVolume(d) {
+  if (isPulseFlaggedRisky(d)) return false;
+  const lp = Number(d.lp_usd || 0);
+  const vol = Number(d.volume_24h || 0);
+  return lp >= PULSE_VOLUME_MIN_LP_USD && vol / lp <= PULSE_VOLUME_MAX_TURNOVER;
+}
+
 function updateSecondaryBannerUI() {
   if (typeof document === 'undefined') return;
   const banner = document.getElementById('secondaryMarketBanner');
@@ -3916,7 +3925,7 @@ function updateSecondaryBannerUI() {
     const lp = Number(d.lp_usd || 0);
 
     totalMcap += mc;
-    totalVol += vol;
+    if (isBackedVolume(d)) totalVol += vol;
     totalLp += lp;
 
     if (mc > topMcap) {
@@ -3931,7 +3940,10 @@ function updateSecondaryBannerUI() {
   const secTopAssetEl = document.getElementById('secTopAsset');
 
   if (secTotalMcapEl) secTotalMcapEl.textContent = `$${formatCount(totalMcap)}`;
-  if (secTotalVolEl) secTotalVolEl.textContent = `$${formatCount(totalVol)}`;
+  if (secTotalVolEl) {
+    secTotalVolEl.textContent = `$${formatCount(totalVol)}`;
+    secTotalVolEl.title = 'Left out: tokens flagged RUG / honeypot, pools under $500 of liquidity, and volume beyond 50x the pool (wash trading)';
+  }
   if (secTotalLpEl) secTotalLpEl.textContent = `$${formatCount(totalLp)}`;
   if (secTopAssetEl) {
     if (topAsset) {
@@ -4028,6 +4040,7 @@ function renderPulseSmartMintRow(sm, idx) {
 // Pulse card 2: a NEW token (first seen in the 24h window) that already trades, ranked by 24h volume.
 // Same rule as api.pulse_launch_row (the server list is preferred; this is the fallback before /api/stats loads).
 const PULSE_LAUNCH_MIN_LP_USD = 1000;
+const PULSE_VOLUME_MIN_LP_USD = 500;     // same limits as api.PULSE_VOLUME_MIN_LP_USD / PULSE_VOLUME_MAX_TURNOVER
 const PULSE_VOLUME_MAX_TURNOVER = 50;   // same limit as api.PULSE_VOLUME_MAX_TURNOVER: volume beyond 50x the pool is wash trading
 const PULSE_LAUNCH_MIN_VOLUME_USD = 1000;
 const PULSE_UNCAPPED_SUPPLY = 1e20;
@@ -4410,24 +4423,17 @@ function compute24hPulseMetrics(drops = allDrops, topGainersList = savedTopGaine
   }
 
   const fromServer = Boolean(serverPulse && typeof serverPulse === 'object');
-  // The server renamed three fields to say what they count (the old names are still sent for one release): read the
-  // new name, then the old one.
-  const pulseNum = (...keys) => {
-    for (const k of keys) {
-      if (serverPulse[k] !== undefined && serverPulse[k] !== null) return Number(serverPulse[k]) || 0;
-    }
-    return 0;
-  };
+  const pulseNum = (key) => (serverPulse[key] !== undefined && serverPulse[key] !== null ? Number(serverPulse[key]) || 0 : 0);
   const agg = fromServer ? {
-    gradCount: pulseNum('trading_on_dex', 'graduated'),
+    gradCount: pulseNum('trading_on_dex'),
     totalDexVol: Number(serverPulse.dex_volume_usd || 0),
-    totalSmartInflows: pulseNum('smart_wallet_entries', 'smart_inflows'),
+    totalSmartInflows: pulseNum('smart_wallet_entries'),
     topHunter: serverPulse.top_hunter || 'Alpha Hunter',
     topHunterCount: Number(serverPulse.top_hunter_count || 0),
     clustersCount: Number(serverPulse.smart_clusters || 0),
     cleanMintsCount: Number(serverPulse.clean_mints || 0),
     refundsCount: Number(serverPulse.refunds || 0),
-    threatsBlockedCount: pulseNum('flagged_risky', 'threats_blocked')
+    threatsBlockedCount: pulseNum('flagged_risky')
   } : { gradCount, totalDexVol, totalSmartInflows, topHunter, topHunterCount, clustersCount, cleanMintsCount, refundsCount, threatsBlockedCount };
 
   return {
@@ -11794,6 +11800,7 @@ if (typeof module !== 'undefined' && module.exports) {
     renderPulseLaunchRow,
     renderPulseNftMintRow,
     pulseLaunchRow,
+    isBackedVolume,
     comparePulseLaunches,
     pulseNftMintRow,
     setupPulseCarousel,

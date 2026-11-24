@@ -1315,14 +1315,14 @@ class DatabaseManager:
     # Persistent .ai Agent ID Telemetry Counter
     # -------------------------------------------------------------------------
     def _kv_stats_unavailable(self, status) -> None:
-        """Called on a failed kv_stats request. Only "no such table" (400/404) switches it off for this process; a passing 5xx or
-        a timeout must not park the counter on its old row."""
+        """Called on a failed kv_stats request. Only "no such table" (400/404) pauses cloud reads and writes for a while; a passing 5xx
+        or a timeout must not. Without the table (supabase_migrations/005_kv_stats.sql) the counter lives in SQLite and the stats file."""
         if status in (400, 404):
             first = not self._kv_stats_is_off()
             self._kv_stats_off_until = time.time() + KV_STATS_RETRY_SEC
             if first:
                 print(f"[⚠️ Supabase kv_stats] unavailable (HTTP {status}); run supabase_migrations/005_kv_stats.sql. "
-                      f"Until then the counter keeps using its old row (retried every {int(KV_STATS_RETRY_SEC // 60)} min).", flush=True)
+                      f"Until then the counter is kept locally only (retried every {int(KV_STATS_RETRY_SEC // 60)} min).", flush=True)
 
     def _kv_stats_is_off(self) -> bool:
         """True while kv_stats is parked after a "no such table"; it is tried again after KV_STATS_RETRY_SEC, so running the
@@ -1336,7 +1336,6 @@ class DatabaseManager:
             if self._agent_stats_cache and (now - self._agent_stats_cache_time < max_age_sec):
                 return dict(self._agent_stats_cache)
 
-        sentinel = "__system_agent_id_stats__"
         record = None
         if self.mode == "supabase":
             try:
@@ -1351,23 +1350,6 @@ class DatabaseManager:
                         self._kv_stats_unavailable(resp.status_code)
             except Exception as e:
                 print(f"[⚠️ Supabase kv_stats Error] {e}", flush=True)
-            try:
-                client = self.client
-                if record is None and HAS_HTTPX and client:
-                    # one release of fallback: the counter used to live in a fake wallet row of user_favorites
-                    resp = client.get(f"/rest/v1/user_favorites?wallet=eq.{sentinel}&select=favorites,updated_at")
-                    if resp.status_code == 200:
-                        rows = resp.json()
-                        if rows:
-                            favs = rows[0].get("favorites")
-                            if isinstance(favs, str):
-                                favs = json.loads(favs)
-                            if isinstance(favs, list) and favs and isinstance(favs[0], dict):
-                                record = favs[0]
-                            elif isinstance(favs, dict):
-                                record = favs
-            except Exception as e:
-                print(f"[⚠️ Supabase Agent ID Stats Error] {e}", flush=True)
 
         if record is None:
             with self._lock:
@@ -1380,14 +1362,6 @@ class DatabaseManager:
                         loaded = json.loads(kv["value"])
                         if isinstance(loaded, dict):
                             record = loaded
-                    cur.execute("SELECT favorites FROM user_favorites WHERE wallet = ?", (sentinel,))
-                    row = cur.fetchone() if record is None else None
-                    if row and row["favorites"]:
-                        favs = json.loads(row["favorites"])
-                        if isinstance(favs, list) and favs and isinstance(favs[0], dict):
-                            record = favs[0]
-                        elif isinstance(favs, dict):
-                            record = favs
                 except Exception as e:
                     print(f"[⚠️ SQLite Agent ID Stats Error] {e}", flush=True)
                 finally:
@@ -1417,9 +1391,6 @@ class DatabaseManager:
             self._agent_stats_cache = clean_stats
             self._agent_stats_cache_time = now
 
-        sentinel = "__system_agent_id_stats__"
-        payload = [clean_stats]
-
         if self.mode == "supabase":
             if force_cloud or (now - self._last_stats_cloud_write >= 60.0):
                 try:
@@ -1435,15 +1406,6 @@ class DatabaseManager:
                                 self._last_stats_cloud_write = now
                                 return
                             self._kv_stats_unavailable(resp.status_code)
-                        # kv_stats is not there yet (migration 005 not run): the old row keeps the counter alive
-                        resp = client.post(
-                            "/rest/v1/user_favorites?on_conflict=wallet",
-                            json={"wallet": sentinel, "favorites": payload, "updated_at": clean_stats["last_updated"]},
-                            headers={"Prefer": "resolution=merge-duplicates"}
-                        )
-                        if resp.status_code in (200, 201):
-                            self._last_stats_cloud_write = now
-                            return
                 except Exception as e:
                     print(f"[⚠️ Supabase Save Agent ID Stats Error] {e}", flush=True)
 
