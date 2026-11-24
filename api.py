@@ -1371,7 +1371,7 @@ def with_server_metrics(p: dict, bnb_price=None, bnb_live=None) -> dict:
     if bnb_price is None:
         bnb_price = monitor.cached_bnb_price()
     out = _plain_copy(p)
-    if filters.is_mint_count_cap(out):
+    if filters.is_mint_count_cap(out) or (out.get("mint_slots") and not out.get("max_supply")):
         # the stored cap is a slot count scaled as token amounts (2.2e-16): serve the cap in the units total_minted is in,
         # or no cap when it cannot be worked out yet, so the page never shows "SOLD 100% 1.0M/0" for an open mint
         cap = filters.corrected_max_supply(out)
@@ -1418,13 +1418,13 @@ TOP_GAINER_ITEM_FIELDS = (
     "contract", "name", "symbol", "standard", "market_url", "pair_url", "token_price_usd", "floor_price_usd",
     "floor_price_bnb", "ath_price_usd", "ath_profit_usd", "ath_multiplier", "mint_price_str", "mint_price_bnb",
     "mint_value_wei", "has_free_mint", "mint_calldata", "total_minted", "max_supply", "lp_usd", "holders",
-    "block", "detected_at", "market_stale", "market_updated_at", "tokens_per_mint", "ath_lp_usd",
+    "block", "detected_at", "market_stale", "market_updated_at", "tokens_per_mint", "ath_lp_usd", "mint_slots",
 )
 
 
 def _with_corrected_cap(item: dict) -> dict:
     """`item` with a slot-count max_supply replaced by the cap in token units (or None), see filters.corrected_max_supply."""
-    if filters.is_mint_count_cap(item):
+    if filters.is_mint_count_cap(item) or (item.get("mint_slots") and not item.get("max_supply")):
         cap = filters.corrected_max_supply(item)
         item["max_supply"] = cap if cap > 0 else None
     return item

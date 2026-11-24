@@ -931,12 +931,14 @@ def analyze_contract(rpc: BscRpcClient, contract_addr: str, wallet_addr: str) ->
     supply_meta: Dict[str, Any] = {}
     info["max_supply"], info["total_minted"] = read_supply(rpc, target_addrs, token_decimals, meta=supply_meta)
     info["cap_status"] = supply_meta.get("cap_status", "unknown")
+    if supply_meta.get("cap_slots"):
+        info["mint_slots"] = supply_meta["cap_slots"]       # the cap in tokens follows once tokens_per_mint is read
     # decimals of the token itself (BEP-20) or of the token a Fair-Mint dispenser hands out
     if classification.get("decimals") is not None:
         info["token_decimals"] = classification["decimals"]
 
     # Inspect bytecode constants if max_supply still not found (e.g. PUSH2 24444 -> 0x615f7c)
-    if info["max_supply"] is None:
+    if info["max_supply"] is None and not supply_meta.get("cap_slots"):
         try:
             t_codes = "".join(rpc.get_code(a) for a in target_addrs).lower()
             if "615f7c" in t_codes:
@@ -1300,6 +1302,7 @@ def read_supply(
     token_decimals: Optional[int] = None,
     need_max: bool = True,
     meta: Optional[Dict[str, Any]] = None,
+    tokens_per_mint: Optional[float] = None,
 ) -> Tuple[Optional[float], Optional[float]]:
     """(max_supply, total_minted) read from the first getters that answer on `target_addrs`
     (the contract itself, then its core() companion if it has one).
@@ -1312,6 +1315,10 @@ def read_supply(
       mix item counts and raw token amounts, so this is NOT a token supply and must never feed a market cap.
     For a BEP-20 token totalSupply() is read first: counter-style getters (totalMinted, tokenCount, ...) can
     answer with something that is not the supply.
+    A BEP-20 cap under one whole token (maxSupply() = 220 on a token with 18 decimals) is not a supply but a COUNT of mint
+    slots: a fair-mint dispenser counts mints in its cap getter while totalSupply() is a token amount. Scaled by
+    10**decimals it read 2.2e-16 next to a total of 1,040,000, so 2,914 drops looked sold out and the sweeper dropped them.
+    It is returned as meta["cap_slots"]; the cap in tokens is slots x `tokens_per_mint` when that is known, else None.
     need_max=False skips the cap probes (about 8 calls) when the cap is already known.
     `meta`, if given, gets "cap_status": "capped" (a cap was read), "unlimited" (a cap getter answered with an
     effectively infinite value) or "unknown" (no cap getter answered), so "no cap" can be told apart from "not read"."""
@@ -1329,8 +1336,9 @@ def read_supply(
     max_supply = None
     total_minted = None
     cap_status = "unknown"
+    cap_slots = None
     for t_addr in target_addrs:
-        if need_max and max_supply is None and cap_status != "unlimited":
+        if need_max and max_supply is None and cap_slots is None and cap_status != "unlimited":
             remembered = _memo_get(t_addr, "max")
             answered = None
             for sel_name in _memo_first(MAX_SUPPLY_GETTERS, remembered):
@@ -1343,7 +1351,12 @@ def read_supply(
                             cap_status = "unlimited"
                             answered = sel_name
                             break
-                        max_supply = scale(raw_s)
+                        if token_decimals is not None and 0 < raw_s < 10 ** token_decimals:
+                            cap_slots = raw_s                     # a count of mint slots, not a token amount
+                            if tokens_per_mint and tokens_per_mint > 0:
+                                max_supply = raw_s * float(tokens_per_mint)
+                        else:
+                            max_supply = scale(raw_s)
                         cap_status = "capped"
                         answered = sel_name
                         break
@@ -1377,6 +1390,8 @@ def read_supply(
                 _memo_put(t_addr, minted_kind, answered)
     if meta is not None:
         meta["cap_status"] = cap_status
+        if cap_slots is not None:
+            meta["cap_slots"] = cap_slots
     return max_supply, total_minted
 
 

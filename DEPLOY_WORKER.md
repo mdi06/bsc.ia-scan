@@ -71,6 +71,24 @@ service.
 Render redeploys the API on its own from `main`; the worker host does not, so pull there after merging worker
 changes.
 
+## After a restart that includes the cap repair and the risk re-score
+
+Both heal old records by themselves; there is no script to run.
+
+- **Mint caps.** Fair-mint dispensers used to be stored with a cap of about 2e-16 (a count of mint slots scaled as a token
+  amount), so they looked sold out and the sweeper had stopped tracking them. The sweeper now reads the corrected cap and
+  rewrites the stored value on its first pass over each such token (a few minutes). Tokens whose `tokens_per_mint` is not
+  known yet keep their slot count in `mint_slots` and get a cap once the tokens-per-mint loop reads it. Nothing to configure.
+- **Risk re-score** (`RISK_RESCORE` in `.env.worker`):
+  - `dry-run` (the default): re-checks the records the old Serial Dev / Fund Drain rules flagged, 8 every 30 seconds, and
+    **only logs** what would change. Watch it with
+    `journalctl -u agent-id-worker -f | grep "Risk Rescore"`: lines like `was RUG 🚨 Serial Dev: RUG->MED (🟡 Med Risk)` and a
+    running total. About 2,500 records, so a couple of hours.
+  - `apply`: writes the new verdict (risk fields and the sniper flags only, never prices or liquidity) and stamps
+    `risk_rules_v`. Set it when the dry-run log looks right, then `sudo systemctl restart agent-id-worker`.
+  - `off`: the loop does not run. `RISK_RESCORE_BATCH` and `RISK_RESCORE_INTERVAL_SEC` change the pace.
+  A record whose GoPlus audit cannot be repeated is skipped (and retried in 6 hours), never downgraded.
+
 ## Going back
 
 Stop the worker on the host (`systemctl disable --now agent-id-worker`), then set `RUN_WORKER=1` on Render.

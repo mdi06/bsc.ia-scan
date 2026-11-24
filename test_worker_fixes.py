@@ -138,8 +138,8 @@ def test_read_supply_raw_and_scaled():
     # BEP-20: scaled by decimals
     cap, minted = monitor.read_supply(_rpc_for(c, **{"cap()": 1000 * 10**18, "totalSupply()": 250 * 10**18}), [c], 18)
     assert (cap, minted) == (1000.0, 250.0)
-    cap, minted = monitor.read_supply(_rpc_for(c, **{"cap()": 5000, "totalSupply()": 1250}), [c], 6)
-    assert (cap, minted) == (0.005, 0.00125)
+    cap, minted = monitor.read_supply(_rpc_for(c, **{"cap()": 5000 * 10**6, "totalSupply()": 1250 * 10**6}), [c], 6)
+    assert (cap, minted) == (5000.0, 1250.0)
     # a 0-decimal token's raw supply is already whole tokens (H5: it used to be divided by 1e18)
     assert monitor.read_supply(_rpc_for(c, **{"totalSupply()": 10**18}), [c], 0) == (None, 1e18)
     assert monitor.read_supply(_rpc_for(c, **{"totalSupply()": 1_000_000}), [c], 0) == (None, 1_000_000.0)
