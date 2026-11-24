@@ -530,6 +530,8 @@ def _token_decimals(item: dict) -> Optional[int]:
 # contract -> time of the last supply-cap probe, so NFTs without a cap getter aren't re-probed every sweep
 _supply_probe_at: Dict[str, float] = {}
 SUPPLY_PROBE_INTERVAL_SEC = 3600.0
+# contracts per batched RPC request in fast_sweep_batch (BscRpcClient falls back to single calls if refused)
+SWEEP_BATCH_SIZE = 50
 # contract -> its core() companion address (or None); analyze_contract reads supply from both
 _core_addr_cache: Dict[str, Optional[str]] = {}
 
@@ -596,6 +598,70 @@ def fast_sweep_contract(rpc: monitor.BscRpcClient, item: dict) -> tuple:
         return c, minted, supply, holders_estimate, changed
     except Exception:
         return c, None, None, None, False
+
+
+def fast_sweep_batch(rpc: monitor.BscRpcClient, items: list) -> list:
+    """fast_sweep_contract for many contracts at once; returns the same result tuples (in no particular order).
+
+    The common case, a capped contract whose minted getter is already remembered and which has no core() companion,
+    is read with batched requests (monitor.read_minted_batch: one HTTP request per SWEEP_BATCH_SIZE contracts instead
+    of one per contract). Everything else goes through fast_sweep_contract, which also teaches the memo the getter:
+    first sightings, contracts without a known cap, ones with a companion, and any contract whose batched read
+    came back empty. So a result never differs from the one-by-one path, only the number of requests does."""
+    results = []
+    eligible = []      # (item, kind, decimals)
+    singles = []
+    for item in items:
+        c = item.get("contract")
+        kind = _sweep_kind(item)
+        if not c or not c.startswith("0x") or len(c) != 42 or kind is None:
+            results.append((c, None, None, None, False))
+            continue
+        if not item.get("max_supply") or (c in _core_addr_cache and _core_addr_cache[c]) or c not in _core_addr_cache:
+            singles.append(item)        # no cap yet (probe path), a companion to ask, or core() not looked up yet
+            continue
+        decimals = None
+        if kind == "token":
+            decimals = _token_decimals(item)
+            if decimals is None:
+                results.append((c, None, None, None, False))
+                continue
+        eligible.append((item, kind, decimals))
+
+    def run_batch(chunk):
+        return monitor.read_minted_batch(rpc, [([it["contract"]], dec) for it, _k, dec in chunk])
+
+    batch_futs = []
+    for i in range(0, len(eligible), SWEEP_BATCH_SIZE):
+        chunk = eligible[i:i + SWEEP_BATCH_SIZE]
+        batch_futs.append((chunk, fast_sweep_pool.submit(run_batch, chunk)))
+    single_futs = [fast_sweep_pool.submit(fast_sweep_contract, rpc, it) for it in singles]
+
+    retry = []
+    for chunk, fut in batch_futs:
+        try:
+            minted_list = fut.result()
+        except Exception as e:
+            print(f"[⚠️ Fast-Track Sweeper Batch Error] {e}", flush=True)
+            minted_list = [None] * len(chunk)
+        for (item, kind, _dec), minted in zip(chunk, minted_list):
+            if minted is None:
+                retry.append(item)          # not answered from the memo: the one-by-one path reads and relearns it
+                continue
+            cur_minted = item.get("total_minted", 0)
+            cur_supply = item.get("max_supply")
+            holders_estimate = None
+            if kind == "nft" and minted > 0:
+                holders_estimate = min(minted, int(minted * 0.85) + 1)
+            results.append((item["contract"], minted, cur_supply, holders_estimate, minted != cur_minted))
+
+    single_futs += [fast_sweep_pool.submit(fast_sweep_contract, rpc, it) for it in retry]
+    for fut in single_futs:
+        try:
+            results.append(fut.result())
+        except Exception as e:
+            print(f"[⚠️ Fast-Track Sweeper Result Error] {e}", flush=True)
+    return results
 
 
 def _next_cold_batch(items: list, offset: int, size: int = 50):
@@ -687,13 +753,7 @@ def run_fast_track_progress_sweeper_loop():
                 sniper_alerts = []
                 changed_items = []
 
-                futures = [fast_sweep_pool.submit(fast_sweep_contract, rpc, it) for it in sweep_targets]
-                sweep_results = []
-                for fut in concurrent.futures.as_completed(futures):
-                    try:
-                        sweep_results.append(fut.result())
-                    except Exception as e:
-                        print(f"[⚠️ Fast-Track Sweeper Result Error] {e}", flush=True)
+                sweep_results = fast_sweep_batch(rpc, sweep_targets)
 
                 # Apply under the lock: other threads read and mutate the same history items.
                 with history_lock:
