@@ -198,9 +198,40 @@ def is_free_mint(d) -> bool:
             and "PAID" not in p_str and "DEX" not in p_str and "TBD" not in p_str)
 
 
+_DECIMALS_IN_STANDARD_RE = re.compile(r"\((\d+) decimals\)")
+
+
+def is_mint_count_cap(d) -> bool:
+    """True when the stored max_supply is under one whole token: not a supply, but a COUNT of mint slots that
+    monitor.read_supply scaled by 10**decimals as if it were a token amount."""
+    ms = _js_number(d.get("max_supply")) if d else 0.0
+    return ms == ms and 0 < ms < 1
+
+
+def corrected_max_supply(d) -> float:
+    """The cap in the units total_minted is in (whole tokens / items), or 0.0 when there is none or it is unknown.
+
+    Fair-mint dispensers answer maxSupply() with a count of mint slots (ANTCO: 220) and totalMinted() with a count of
+    mints (13), while totalSupply() is a token amount (1,040,000 = 13 x its 80,000 tokens per mint). read_supply took
+    the token amount for total_minted but scaled the slot count by 10**18 for the cap: max_supply 2.2e-16, so 2,914
+    drops (22% of the table) read as "sold out" and filled to 100%; only 3 of them really are.
+    A cap under one whole token is such a count: rescale it (slots x tokens_per_mint) when tokens_per_mint is known,
+    else the cap is unknown (0.0), never a made-up "full"."""
+    ms = _js_number(d.get("max_supply")) if d else 0.0
+    if not (ms == ms and 0 < ms < 1e20):
+        return 0.0
+    if ms >= 1:
+        return ms
+    m = _DECIMALS_IN_STANDARD_RE.search(str(d.get("standard") or ""))
+    slots = round(ms * 10 ** (int(m.group(1)) if m else 18))
+    per_mint = _js_number(d.get("tokens_per_mint"))
+    if slots >= 1 and per_mint == per_mint and per_mint > 0:
+        return float(slots) * per_mint
+    return 0.0
+
+
 def _max_supply(d) -> float:
-    ms = _js_number(d.get("max_supply"))
-    return ms if (ms == ms and 0 < ms < 1e20) else 0.0
+    return corrected_max_supply(d)
 
 
 def is_pre_minted_token(d) -> bool:
@@ -209,13 +240,14 @@ def is_pre_minted_token(d) -> bool:
     ms = _max_supply(d)
     tm = _js_number(_js_or0(d.get("total_minted")))
     return (ms > 0 and tm == ms and not _NFT_STANDARD_RE.search(str(d.get("standard") or "").upper())
-            and not _uncompressed(d, "sold_sel") and not d.get("cap"))
+            and not _uncompressed(d, "sold_sel") and not d.get("cap")
+            and not is_mint_count_cap(d))       # a dispenser whose slot count shows it is a mint, even a full one
 
 
 def is_sold_out(d) -> bool:
     if not d:
         return False
-    ms = _js_number(_js_or0(d.get("max_supply")))
+    ms = _max_supply(d)
     tm = _js_number(_js_or0(d.get("total_minted")))
     if not (ms > 0) or is_pre_minted_token(d):
         return False

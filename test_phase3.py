@@ -6,6 +6,7 @@ Tests:
 - server.py (Orchestrator): process supervision and backward-compatible exports
 """
 
+import time
 import os
 import pytest
 from fastapi.testclient import TestClient
@@ -13,6 +14,7 @@ from fastapi.testclient import TestClient
 import server
 import worker
 import api
+import monitor
 
 
 def test_worker_structure_and_exports():
@@ -96,8 +98,16 @@ def test_save_history_delta_support(tmp_path):
         monitor.HISTORY_FILE = orig_file
 
 
-def test_api_feed_endpoint():
+def _fresh_counter(monkeypatch):
+    """A real, recent agent-wallet count: the repo's own agent_id_stats.json is days old, so the API (rightly) does not
+    present it as the current number any more."""
+    monkeypatch.setattr(monitor, "load_agent_id_stats",
+                        lambda: {"total_created_wallets": 178001, "last_block": 132758000, "last_updated": time.time()})
+
+
+def test_api_feed_endpoint(monkeypatch):
     """Verifies /api/feed provides lightweight paginated and delta feeds with stats."""
+    _fresh_counter(monkeypatch)
     client = TestClient(api.app)
 
     # 1. Paginated feed mode
@@ -140,8 +150,9 @@ def test_api_feed_endpoint():
     assert "secondary" in sec_data.get("stats", {})
 
 
-def test_api_stats_and_overview_endpoints():
+def test_api_stats_and_overview_endpoints(monkeypatch):
     """Verifies /api/stats, /api/overview, and /agent_id_stats.json return summary stats."""
+    _fresh_counter(monkeypatch)
     client = TestClient(api.app)
 
     for path in ("/api/stats", "/api/overview", "/api/summary"):

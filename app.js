@@ -2580,19 +2580,34 @@ const AGENT_ID_REGISTRY_ADDR = '0x60B9262456dE011F7d15a54CdD8c48bAaa8B022F';
 const ERC721_TRANSFER_TOPIC = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef';
 const ZERO_ADDRESS_TOPIC = '0x0000000000000000000000000000000000000000000000000000000000000000';
 
+// 178,001 at block 132,757,997 is only the baseline that counting forward starts from, not a number to show: the real
+// count is ~264,000. Until a count has come from the server (or been passed in explicitly) the page shows "—".
 let currentAgentWalletsCount = 178001;
+let agentWalletsKnown = false;
+// A count older than this is not shown as the current number (the server applies the same limit). The stats file bundled
+// with the page is only refreshed when someone redeploys: on 2026-11-24 it said 182,449 from 11 days earlier, the real
+// count was ~264,000, and it appeared whenever the API took longer than 3.5 s to answer.
+const AGENT_WALLETS_MAX_AGE_SEC = 7 * 86400;
+
+function isStaleAgentStats(data, nowSec = Date.now() / 1000) {
+  const at = Number(data && data.last_updated);
+  return Number.isFinite(at) && at > 0 && nowSec - at > AGENT_WALLETS_MAX_AGE_SEC;
+}
 let agentWalletsAnchorBlock = 132757997;
 let isSyncingWalletsOnChain = false;
 let lastWalletChainSyncAt = 0;
 
-function updateDigitalAiCounter(count = currentAgentWalletsCount) {
+// `count` is a real count: pass one only when it came from the server or the chain. Called without it, the counter is
+// redrawn as it is (renderStats does this on every render), and stays "—" until a real count has arrived.
+function updateDigitalAiCounter(count) {
   const prevCount = currentAgentWalletsCount;
   if (typeof count === 'number' && !isNaN(count) && count > 0) {
     currentAgentWalletsCount = count;
+    agentWalletsKnown = true;
   } else {
     count = currentAgentWalletsCount;
   }
-  const formatted = count.toLocaleString('en-US');
+  const formatted = agentWalletsKnown ? count.toLocaleString('en-US') : '—';
   const screen = document.getElementById('digitalLcdScreen');
   if (screen) {
     screen.innerHTML = '';
@@ -2642,6 +2657,7 @@ function applyAgentWalletsState(count, blockNum = 0) {
 
 async function syncLiveAgentWalletsOnChain(currBlk) {
   if (typeof fetch === 'undefined' || !currBlk || currBlk <= agentWalletsAnchorBlock) return;
+  if (!agentWalletsKnown) return;   // counting forward from the baseline would show a partial number as the total
   if (typeof document !== 'undefined' && document.hidden) return;
   if (isSyncingWalletsOnChain) return;
 
@@ -2693,7 +2709,7 @@ function setBannerText(id, text) {
 function renderStats(drops) {
   const stats = computeStats(drops);
 
-  updateDigitalAiCounter(currentAgentWalletsCount);
+  updateDigitalAiCounter();
 
   // Fill rate is a ratio: with no capped collections it is undefined, not "0.0% (0 / 0 Sold Out)".
   const hasCapped = stats.cappedTotal > 0;
@@ -2759,7 +2775,10 @@ function hydrateCachedOverviewStats() {
       const raw = localStorage.getItem(OVERVIEW_STATS_CACHE_KEY);
       if (raw) {
         const cached = JSON.parse(raw);
-        if (cached && (cached.stats || cached.total !== undefined || cached.count !== undefined || cached.agent_wallets || cached.total_created_wallets)) {
+        if (cached && !cached.stats && isStaleAgentStats(cached)) {
+          // an out-of-date bundled counter file that an older version of the page saved: drop it, never show it as a count
+          try { localStorage.removeItem(OVERVIEW_STATS_CACHE_KEY); } catch (_) {}
+        } else if (cached && (cached.stats || cached.total !== undefined || cached.count !== undefined || cached.agent_wallets || cached.total_created_wallets)) {
           applyOverviewStats(cached, false);
           return true;
         }
@@ -2890,6 +2909,10 @@ async function fetchOverviewStats(isRetry = false) {
         continue;
       }
       const data = await res.json();
+      if (!data || (!data.stats && isStaleAgentStats(data))) {
+        lastErr = new Error(`${ep} is out of date`);   // a bundled counter file from days ago is not a count
+        continue;
+      }
       if (data && (data.stats || data.total_created_wallets || data.agent_wallets || data.total)) {
         loadedStats = data;
         break;
@@ -4119,17 +4142,15 @@ function compute24hPulseMetrics(drops = allDrops, topGainersList = savedTopGaine
     const rBdg = String(d.risk_badge || '').toUpperCase();
     if (rLvl === 'RUG' || rBdg.includes('HONEYPOT')) return;
 
-    let score = 0;
-    if (chg > 0) {
-      score = 100000000 + (chg * 10000) + Math.min(vol, 500000);
-    } else {
-      score = mcap + (vol * 2);
-    }
+    // Two tiers, compared first (the server's pulse_runner_row does the same): gainers, then the rest. One number for
+    // both let a $126M token that was DOWN 1% outrank every gainer.
+    const tier = chg > 0 ? 1 : 0;
+    const score = tier ? (chg * 10000) + Math.min(vol, 500000) : mcap + (vol * 2);
 
-    runnerCandidates.push({ item: d, score });
+    runnerCandidates.push({ item: d, tier, score });
   });
 
-  runnerCandidates.sort((a, b) => b.score - a.score);
+  runnerCandidates.sort((a, b) => (b.tier - a.tier) || (b.score - a.score));
   // The server ranks every live token with the same rule (pulse_24h.top_runners), so the card no longer depends on
   // which part of the dataset this page happens to have loaded (it used to need the 120 KB secondary preload).
   const serverRunners = serverPulse && Array.isArray(serverPulse.top_runners) ? serverPulse.top_runners : null;
@@ -4315,16 +4336,24 @@ function compute24hPulseMetrics(drops = allDrops, topGainersList = savedTopGaine
   }
 
   const fromServer = Boolean(serverPulse && typeof serverPulse === 'object');
+  // The server renamed three fields to say what they count (the old names are still sent for one release): read the
+  // new name, then the old one.
+  const pulseNum = (...keys) => {
+    for (const k of keys) {
+      if (serverPulse[k] !== undefined && serverPulse[k] !== null) return Number(serverPulse[k]) || 0;
+    }
+    return 0;
+  };
   const agg = fromServer ? {
-    gradCount: Number(serverPulse.graduated || 0),
+    gradCount: pulseNum('trading_on_dex', 'graduated'),
     totalDexVol: Number(serverPulse.dex_volume_usd || 0),
-    totalSmartInflows: Number(serverPulse.smart_inflows || 0),
+    totalSmartInflows: pulseNum('smart_wallet_entries', 'smart_inflows'),
     topHunter: serverPulse.top_hunter || 'Alpha Hunter',
     topHunterCount: Number(serverPulse.top_hunter_count || 0),
     clustersCount: Number(serverPulse.smart_clusters || 0),
     cleanMintsCount: Number(serverPulse.clean_mints || 0),
     refundsCount: Number(serverPulse.refunds || 0),
-    threatsBlockedCount: Number(serverPulse.threats_blocked || 0)
+    threatsBlockedCount: pulseNum('flagged_risky', 'threats_blocked')
   } : { gradCount, totalDexVol, totalSmartInflows, topHunter, topHunterCount, clustersCount, cleanMintsCount, refundsCount, threatsBlockedCount };
 
   return {
@@ -4476,14 +4505,22 @@ function updateDailyPulseUI() {
     const chg = Number(r1.price_change_24h || 0);
     tickerRunner.textContent = `🏆 Top: ${r1.name || r1.symbol} (${chg >= 0 ? '+' : ''}${chg.toFixed(1)}%)`;
   }
-  if (tickerVolume) tickerVolume.textContent = `🌊 DEX Vol: ${serverAgg ? '$' + formatCount(metrics.totalDexVol) : '—'}`;
-  if (tickerGrad) tickerGrad.textContent = `🚀 ${serverAgg ? metrics.gradCount : '—'} Graduated`;
+  if (tickerVolume) {
+    tickerVolume.textContent = `🌊 DEX Vol: ${serverAgg ? '$' + formatCount(metrics.totalDexVol) : '—'}`;
+    tickerVolume.title = 'Last 24h, tokens first seen in that window that still have liquidity. Left out: tokens flagged '
+      + 'rug / honeypot, volume on empty pools, and volume more than 50x the pool (wash-like).';
+  }
+  if (tickerGrad) {
+    tickerGrad.textContent = `🚀 ${serverAgg ? metrics.gradCount : '—'} On DEX`;
+    tickerGrad.title = 'New drops in the last 24h that already trade on a DEX or an NFT marketplace';
+  }
   if (tickerInflow) {
     if (metrics.topSmartMints && metrics.topSmartMints.length > 0) {
       const sm1 = metrics.topSmartMints[0];
       tickerInflow.textContent = `🧠 Top Mint: ${sm1.drop.name || sm1.drop.symbol} (${sm1.count} Wallets)`;
     } else {
-      tickerInflow.textContent = `🧠 ${aggText(metrics.totalSmartInflows)} Smart Inflows`;
+      tickerInflow.textContent = `🧠 ${aggText(metrics.totalSmartInflows)} Smart Entries`;
+      tickerInflow.title = 'Smart-wallet entries into new drops in the last 24h (one per wallet and project)';
     }
   }
 }
@@ -11718,6 +11755,10 @@ if (typeof module !== 'undefined' && module.exports) {
     getAgentWalletsAnchorBlock: () => agentWalletsAnchorBlock,
     setAgentWalletsAnchorBlock: (b) => { agentWalletsAnchorBlock = b; },
     getCurrentAgentWalletsCount: () => currentAgentWalletsCount,
+    isAgentWalletsKnown: () => agentWalletsKnown,
+    isStaleAgentStats,
+    fetchOverviewStats,
+    hydrateCachedOverviewStats,
     fetchOverviewStats,
     applyOverviewStats,
     applyOverviewStatsFallback,
