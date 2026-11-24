@@ -74,16 +74,18 @@ from chain.supply import (  # noqa: F401  (moved to chain/supply.py; re-exported
 )
 from known_projects import KNOWN_PROJECTS  # noqa: F401  (moved to known_projects.py)
 from chain.classify import classify_asset_type  # noqa: F401  (moved to chain/classify.py)
+from scoring import (  # noqa: F401  (moved to scoring.py; re-exported so `monitor.X` keeps working)
+     RATING_BY_TIER, compute_interest, evaluate_sniper_ready,
+)
+from chain.registry import (  # noqa: F401  (moved to chain/registry.py; re-exported so `monitor.X` keeps working)
+     _linked_code, contract_links_to_registry, matches_tracked_registry,
+)
+from chain.receipts import (  # noqa: F401  (moved to chain/receipts.py; re-exported so `monitor.X` keeps working)
+     TOKENS_PER_MINT_GETTERS, TRANSFER_TOPIC, read_tokens_per_mint, tokens_from_mint_receipt,
+)
 
 # Swallowed best-effort failures are logged at DEBUG: printing would flood the worker's output.
 _log = logging.getLogger(__name__)
-
-def matches_tracked_registry(data_str: str) -> bool:
-    """Returns True if the given calldata or bytecode references any tracked registry or launchpad."""
-    if not data_str:
-        return False
-    d = data_str.lower()
-    return any(b in d for b in TRACKED_REGISTRY_BYTES)
 
 # Calls that move or approve an existing token / NFT but cannot mint one. A tracked wallet making one of these is
 # trading or managing something that already exists, so it is never evidence of a new agent drop.
@@ -108,37 +110,6 @@ def is_non_mint_call(calldata: str) -> bool:
     if d.startswith("0x"):
         d = d[2:]
     return len(d) >= 8 and d[:8] in NON_MINT_SELECTORS
-
-
-def _linked_code(code: Optional[str]) -> bool:
-    return bool(code and len(code) > 2 and matches_tracked_registry(code))
-
-
-def contract_links_to_registry(rpc, contract_addr: str) -> bool:
-    """True when the contract's bytecode, or the bytecode it delegates to, references the Agent ID registry or
-    another tracked launchpad. This is what makes a contract an agent mint rather than any token that happens to be
-    on BSC. "Delegates to" covers an EIP-1167 minimal clone (the implementation address is inside the code, which is
-    how most agent mints are deployed), an EIP-1967 proxy (implementation slot) and an EIP-1967 beacon proxy. An RPC
-    failure counts as "not linked": the contract is looked at again the next time a tracked wallet calls it."""
-    try:
-        code = rpc.get_code(contract_addr)
-        if _linked_code(code):
-            return True
-        impls = []
-        if code and code.startswith("0x363d3d373d3d3d363d73") and len(code) >= 2 + 22 * 2 + 40:
-            impls.append("0x" + code[22:62])                       # EIP-1167: 0x363d3d373d3d3d363d73 <20-byte impl> ...
-        slot = rpc.get_storage_at(contract_addr, EIP1967_IMPL_SLOT)
-        if slot and len(slot) >= 42 and int(slot, 16) != 0:
-            impls.append("0x" + slot[-40:])
-        beacon = rpc.get_storage_at(contract_addr, EIP1967_BEACON_SLOT)
-        if beacon and len(beacon) >= 42 and int(beacon, 16) != 0:
-            b_addr = "0x" + beacon[-40:]
-            res = rpc.call_contract(b_addr, BEACON_IMPL_SELECTOR)
-            if res and len(res) >= 42 and int(res, 16) != 0:
-                impls.append("0x" + res[-40:])
-        return any(_linked_code(rpc.get_code(i)) for i in impls)
-    except Exception:
-        return False
 
 
 # Top BSC quote pairs for PancakeSwap V2 secondary liquidity resolution
@@ -933,122 +904,6 @@ def is_system_infra(item: Dict[str, Any]) -> bool:
     return False
 
 
-def evaluate_sniper_ready(item: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Evaluates whether an asset qualifies for high-conviction assisted sniper entry:
-    1. Standard-specific Progress (>=60% filled, or a "crowd surge": no cap known but 100+ mints and still minting)
-    2. Bytecode Refund Guarantee (mandatory if paid drop)
-    3. DEX Pre-Check (for tokens: if PancakeSwap pool is already open, trade on DEX instead)
-    4. Anti-Rug & Anti-Spam (not serial dev >=3 drops, wallet not fresh <8h, no capital drain)
-    5. Simulation Safety (mint not paused, no honeypot)
-    """
-    std = str(item.get("standard") or "")
-    cls = item.get("classification") or {}
-    is_nft = "NFT" in std or "721" in std or "1155" in std or bool(cls.get("is_nft"))
-    is_token = "BEP-20" in std or "Fair-Mint" in std or cls.get("category") in ("TOKEN", "TOKEN_FAIR_MINT")
-
-    ms = filters.corrected_max_supply(item) or None      # a fair-mint dispenser's slot-count cap, in token units
-    tm = item.get("total_minted") or 0
-    lp = float(item.get("lp_usd", 0) or 0)
-    has_ref = bool(item.get("has_refund") or (item.get("security") or {}).get("has_refund"))
-    risk = item.get("risk_level", "SAFE")
-    sec = item.get("security") or {}
-    is_serial = bool(item.get("is_serial_dev") or sec.get("is_serial_dev"))
-    is_drained = bool(item.get("is_fund_drain") or sec.get("is_fund_drain"))
-    is_fresh = bool(item.get("is_fresh_dev") or sec.get("is_fresh_dev"))
-    is_paused = item.get("is_paused") is True
-
-    val_wei = int(item.get("mint_value_wei", "0") or 0)
-    price_bnb = float(item.get("mint_price_bnb", 0.0) or 0.0)
-    is_paid = price_bnb > 0.001 or val_wei > 0
-
-    checklist = []
-
-    # 1. Progress calculation
-    if is_token and not is_nft:
-        if ms and tm and ms == tm and not item.get("sold_sel") and not item.get("cap") and not filters.is_mint_count_cap(item):
-            prog = 0.0
-        else:
-            prog = (tm / ms) if (ms and ms > 0) else 0.0
-    else:
-        prog = (tm / ms) if (ms and ms > 0) else 0.0
-
-    surge = filters.crowd_surge_mints(item)     # mints so far when a cap-less drop has a live crowd, else 0
-
-    # Progress check
-    is_sold_out = (prog >= 0.999) or (is_nft and bool(ms) and bool(tm) and tm >= ms)
-    prog_pass = (0.60 <= prog < 0.999) or (prog == 0.0 and surge > 0)
-    if is_sold_out:
-        checklist.append("▫ [red]✖[/red] Progress: 100% Sold Out / Completed")
-    elif prog >= 0.60:
-        checklist.append(f"▫ [green]✔[/green] Progress: {prog*100:.1f}% (≥60% conviction threshold passed)")
-    elif prog == 0.0 and surge > 0:
-        checklist.append(f"▫ [green]✔[/green] Progress: Crowd Surge ({surge} mints so far, still minting)")
-    else:
-        p_pct_str = f"{prog*100:.1f}%" if prog > 0 else "0%"
-        checklist.append(f"▫ [yellow]⏳[/yellow] Progress: {p_pct_str} (<60% threshold, tracking)")
-
-    # Deployer check
-    if is_serial:
-        s_cnt = sec.get("serial_count") or item.get("serial_count") or 3
-        checklist.append(f"▫ [red]✖[/red] Deployer: 🚨 Serial Dev ({s_cnt} contracts deployed in 24h)")
-    elif is_fresh:
-        checklist.append("▫ [yellow]⚠️[/yellow] Deployer: Fresh wallet (<8h, low nonce)")
-    else:
-        checklist.append("▫ [green]✔[/green] Deployer: Clean reputation (No spam deployment)")
-
-    # Capital drain check
-    if risk == "RUG" or is_drained:
-        checklist.append("▫ [red]✖[/red] Capital Drain: 🚨 Empty contract with no DEX LP (Funds pocketed)")
-    else:
-        checklist.append("▫ [green]✔[/green] Capital Safety: No fund drain detected")
-
-    # Bytecode refund guarantee check
-    if is_paid:
-        if has_ref:
-            ref_m = sec.get("refund_methods") or item.get("refund_methods") or ["refund()"]
-            checklist.append(f"▫ [green]✔[/green] Refund Guarantee: Bytecode refund verified ({ref_m[0]})")
-        else:
-            checklist.append("▫ [red]✖[/red] Refund Guarantee: ⚠️ No refund method (Capital trapped if unfilled)")
-    else:
-        checklist.append("▫ [dim]▫ Refund Guarantee: N/A (Free Mint / Gas Only)[/dim]")
-
-    # Secondary DEX pre-check (Tokens only)
-    if is_token:
-        if lp >= 500:
-            checklist.append(f"▫ [yellow]✖[/yellow] Secondary Market: DEX LP already active (${lp:,.0f}) -> Trade on DEX instead of minting")
-        else:
-            checklist.append("▫ [green]✔[/green] Secondary Market: Primary bonding phase (No DEX LP yet)")
-
-    # Final verdict
-    if is_paused:
-        res = {"is_ready": False, "status": "PAUSED", "badge": "⏸️ Paused", "prog": prog, "checklist": checklist}
-    elif risk == "RUG" or is_drained:
-        res = {"is_ready": False, "status": "RUG_RISK", "badge": "🚨 Rug Risk", "prog": prog, "checklist": checklist}
-    elif is_serial:
-        res = {"is_ready": False, "status": "SERIAL_DEV", "badge": "🚨 Serial Dev", "prog": prog, "checklist": checklist}
-    elif is_token and lp >= 500:
-        res = {"is_ready": False, "status": "GRADUATED_TO_DEX", "badge": "📈 On DEX", "prog": prog, "checklist": checklist}
-    elif is_paid and not has_ref:
-        res = {"is_ready": False, "status": "NO_REFUND", "badge": "⚠️ No Refund", "prog": prog, "checklist": checklist}
-    elif is_sold_out:
-        res = {"is_ready": False, "status": "SOLD_OUT", "badge": "🛑 Sold Out", "prog": prog, "checklist": checklist}
-    elif prog_pass:
-        res = {"is_ready": True, "status": "SNIPER_READY", "badge": "🎯 Snipe Ready", "prog": prog, "checklist": checklist}
-    else:
-        res = {
-            "is_ready": False,
-            "status": "TRACKING",
-            "badge": f"⏳ Track ({prog*100:.0f}%)" if prog > 0 else "⏳ Tracking",
-            "prog": prog,
-            "checklist": checklist
-        }
-    res["sniper_ready"] = res["is_ready"]
-    res["sniper_status"] = res["status"]
-    res["sniper_badge"] = res["badge"]
-    res["sniper_checklist"] = res["checklist"]
-    return res
-
 evaluate_sniper_readiness = evaluate_sniper_ready
 
 
@@ -1072,75 +927,6 @@ def _round2(x: float) -> float:
 
 def _sig10(x: float) -> float:
     return float(f"{x:.10g}")
-
-
-# --- Tokens per mint ------------------------------------------------------------------------------------------------
-# A BEP-20 mint pays once and receives many tokens, so its mint price PER TOKEN is mint cost / tokens per mint. That
-# number is read from the chain once per drop (worker.run_tokens_per_mint_loop): first from a real mint (the receipt of
-# the drop's stored transaction: the tokens sent to the payer), else from a getter the contract exposes.
-TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
-TOKENS_PER_MINT_GETTERS = ("amountPerMint()", "AMOUNT_PER_MINT()", "MINT_AMOUNT()", "mintAmount()", "perMint()",
-                           "tokensPerMint()", "TOKENS_PER_MINT()", "MINT_TOKENS()")
-
-
-def tokens_from_mint_receipt(tx: Optional[dict], receipt: Optional[dict], token_addrs: List[str], mint_value_wei: int,
-                             decimals: int) -> Optional[float]:
-    """Tokens ONE mint gives, from a real mint transaction: the token Transfer(s) to the payer, scaled to one mint's
-    price when the payer bought several (value = k x mint price). None when the transaction is not a paid mint of this
-    drop (a deployment, a free claim of another contract, a failed transaction)."""
-    if not tx or not receipt or str(receipt.get("status") or "").lower() not in ("0x1", "1"):
-        return None
-    targets = {a.lower() for a in token_addrs if a}
-    if str(tx.get("to") or "").lower() not in targets:
-        return None
-    payer = str(tx.get("from") or "").lower()[2:]
-    value = int(str(tx.get("value") or "0x0"), 16)
-    if mint_value_wei > 0 and value < mint_value_wei:
-        return None
-    if mint_value_wei == 0 and value != 0:
-        return None
-    raw = 0
-    for lg in receipt.get("logs") or []:
-        t = lg.get("topics") or []
-        if (len(t) == 3 and str(t[0]).lower() == TRANSFER_TOPIC and str(lg.get("address") or "").lower() in targets
-                and str(t[2]).lower()[-40:] == payer):
-            try:
-                raw += int(str(lg.get("data") or "0x0"), 16)
-            except ValueError:
-                return None
-    if raw <= 0:
-        return None
-    tokens = raw / (10 ** decimals)
-    if mint_value_wei > 0 and value > mint_value_wei:
-        tokens = tokens * mint_value_wei / value          # bought k mints in one transaction
-    return tokens if 0 < tokens < 1e18 else None
-
-
-def read_tokens_per_mint(rpc: "BscRpcClient", contract: str, tx_hash: Optional[str], mint_value_wei: int, decimals: int,
-                         token_addrs: Optional[List[str]] = None) -> Tuple[Optional[float], Optional[str]]:
-    """(tokens one mint gives, where it came from: "receipt" / "getter"), or (None, None)."""
-    addrs = [contract] + [a for a in (token_addrs or []) if a and a.lower() != contract.lower()]
-    if tx_hash:
-        try:
-            tx = rpc.call("eth_getTransactionByHash", [tx_hash])
-            receipt = rpc.call("eth_getTransactionReceipt", [tx_hash]) if tx else None
-            tokens = tokens_from_mint_receipt(tx, receipt, addrs, mint_value_wei, decimals)
-            if tokens:
-                return tokens, "receipt"
-        except Exception as exc:
-            _log.debug("tokens-per-mint receipt read failed for %s: %s", contract, exc)
-    for sig in TOKENS_PER_MINT_GETTERS:
-        res = rpc.call_contract(contract, keccak_selector(sig))
-        if not res or len(res) < 66:
-            continue
-        try:
-            raw = int(res[2:66], 16)
-        except ValueError:
-            continue
-        tokens = raw / (10 ** decimals)
-        if 1e-6 <= tokens < 1e15:
-            return tokens, "getter"
-    return None, None
 
 
 # --- Profit per mint -------------------------------------------------------------------------------------------------
@@ -1410,46 +1196,6 @@ def _store_linked_market(stats: Dict[str, Any], mkt: Dict[str, Any], merge: bool
         if merge and stats.get(dst) and src not in ("lp_usd",):
             continue
         stats[dst] = val
-
-
-RATING_BY_TIER = {"SURGING": "🔥 SURGING", "HIGH": "🚀 HIGH", "MODERATE": "⚡ MODERATE", "EARLY": "🌱 EARLY"}
-
-
-def compute_interest(item: Dict[str, Any]) -> Tuple[int, str]:
-    """The single interest score (0-100) and rating label. analyze_market_interest and the worker's
-    _recompute_interest both call this, so a stored score never depends on which of them ran last.
-    Bands: liquidity (0-40), 24h volume (0-30), 24h buys (0-30), +5 per smart wallet. A honeypot scores 0 and a
-    HIGH risk rating costs 25 points (the guard analyze_market_interest always applied). The JavaScript badge
-    uses the same tiers (filters.interest_tier / interestTier in app.js)."""
-    lp = float(item.get("lp_usd") or 0.0)
-    vol = float(item.get("volume_24h") or 0.0)
-    b24 = int(item.get("buys_24h") or 0)
-
-    score = 0
-    if lp > 50000: score += 40
-    elif lp > 10000: score += 30
-    elif lp > 2000: score += 20
-    elif lp > 500: score += 10
-
-    if vol > 20000: score += 30
-    elif vol > 5000: score += 20
-    elif vol > 500: score += 10
-
-    if b24 > 500: score += 30
-    elif b24 > 100: score += 20
-    elif b24 > 20: score += 10
-
-    if item.get("smart_wallets"):
-        score += len(item["smart_wallets"]) * 5
-
-    risk = item.get("risk_level")
-    if risk == "RUG":
-        score = 0
-    elif risk == "HIGH":
-        score = max(0, score - 25)
-
-    score = min(100, score)
-    return score, RATING_BY_TIER[filters.interest_tier(score)]
 
 
 # ------------------------------------------------------------------------------------------ who deployed it, and drains
