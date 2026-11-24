@@ -1696,12 +1696,19 @@ async def post_sync(request: Request):
     raise HTTPException(status_code=400, detail="Expected JSON array of projects")
 
 
+def running_hosted(env=None) -> bool:
+    """True on a hosting platform (Railway, Render): the frontend is on Vercel there, and the API must not serve files.
+    Railway sets several RAILWAY_* variables (RAILWAY_ENVIRONMENT_NAME, RAILWAY_SERVICE_ID, ...), Render sets RENDER."""
+    env = os.environ if env is None else env
+    return bool(env.get("RENDER")) or any(k.startswith("RAILWAY_") and env.get(k) for k in env)
+
+
 @app.get("/")
 def root_handler(request: Request):
     """On the hosted API (Render or Railway), send browsers and crawlers to the Vercel frontend so page loads don't use the API host's bandwidth."""
     accept = request.headers.get("accept", "")
     host = request.headers.get("host", "")
-    if os.environ.get("RENDER") or os.environ.get("RAILWAY_ENVIRONMENT") or "onrender.com" in host or "railway.app" in host:
+    if running_hosted() or "onrender.com" in host or "railway.app" in host:
         if "application/json" in accept and "text/html" not in accept:
             return {"status": "ok", "service": "agent-id-backend", "frontend": "https://agent-id-monitor.vercel.app"}
         return RedirectResponse(url="https://agent-id-monitor.vercel.app", status_code=302)
@@ -1739,8 +1746,9 @@ def _local_frontend_route(filename: str):
     return serve
 
 
-if not os.environ.get("RENDER") and os.path.exists(os.path.join(workspace_dir, "index.html")):
-    app.mount("/static", StaticFiles(directory=workspace_dir, html=False), name="static")
+# Never a mount of the whole workspace: one at /static (checked only for RENDER) served the source, history.json and
+# smart_wallets.json from the Railway API to anyone who asked.
+if not running_hosted() and os.path.exists(os.path.join(workspace_dir, "index.html")):
     # Lazy feature modules app.js imports by URL when there is no build (loadFeature in app.js).
     _features_dir = os.path.join(workspace_dir, "features")
     if os.path.isdir(_features_dir):

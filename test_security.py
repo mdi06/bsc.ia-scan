@@ -118,3 +118,14 @@ def test_rate_limit_prefers_cf_connecting_ip_over_spoofable_xff(monkeypatch):
     h = {"CF-Connecting-IP": "203.0.113.50", "X-Forwarded-For": "198.51.100.99"}
     assert client.get("/api/favorites?wallet=bad", headers=h).status_code == 429
     api._rate_counts.clear()
+
+
+def test_clean_chain_text_strips_markup_and_control_chars():
+    """Token names come from the contract deployer: markup and control characters never reach the database."""
+    import monitor
+    assert monitor.clean_chain_text("<img src=x onerror=alert(1)>Coin") == "img src=x onerror=alert(1)Coin"
+    assert monitor.clean_chain_text("Don't Panic") == "Don't Panic"          # real names with quotes are kept
+    assert monitor.clean_chain_text("黄仁勋人生") == "黄仁勋人生"
+    assert monitor.clean_chain_text("a\x00b\x1fc`d\x7f") == "abcd"
+    assert monitor.clean_chain_text("x" * 200) == "x" * 80
+    assert monitor.clean_chain_text("") == "" and monitor.clean_chain_text(None) == ""

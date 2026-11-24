@@ -503,6 +503,16 @@ def decode_string(hex_res: str) -> str:
         return ""
 
 
+
+_UNSAFE_TEXT_RE = re.compile(r"[<>`\x00-\x1f\x7f]")
+
+
+def clean_chain_text(text: str, max_len: int = 80) -> str:
+    """A token name / symbol read from a contract, made safe to display: whoever deploys a contract chooses its
+    name(), so markup characters (< > `) and control characters are dropped and the length is capped. The page
+    escapes these too; this keeps them out of the database and every client in the first place."""
+    return _UNSAFE_TEXT_RE.sub("", text or "").strip()[:max_len]
+
 _SMART_WALLETS_CACHE: Optional[Dict[str, str]] = None
 
 
@@ -642,8 +652,8 @@ def classify_asset_type(rpc: BscRpcClient, addr: str) -> Dict[str, Any]:
             d_val = int(underlying_dec, 16)
             name_res = rpc.call_contract(underlying, "0x06fdde03")
             sym_res = rpc.call_contract(underlying, "0x95d89b41")
-            name = decode_string(name_res) if name_res else "Token"
-            sym = decode_string(sym_res) if sym_res else ""
+            name = clean_chain_text(decode_string(name_res)) if name_res else "Token"
+            sym = clean_chain_text(decode_string(sym_res)) if sym_res else ""
             return {
                 "category": "TOKEN_FAIR_MINT",
                 "standard": f"Fair-Mint Contract (Dispenses ${sym or name} Token)",
@@ -835,11 +845,11 @@ def analyze_contract(rpc: BscRpcClient, contract_addr: str, wallet_addr: str) ->
     # Retrieve Name & Symbol
     name_res = rpc.call_contract(contract_addr, keccak_selector("name()"))
     if name_res:
-        info["name"] = decode_string(name_res)
+        info["name"] = clean_chain_text(decode_string(name_res))
 
     symbol_res = rpc.call_contract(contract_addr, keccak_selector("symbol()"))
     if symbol_res:
-        info["symbol"] = decode_string(symbol_res)
+        info["symbol"] = clean_chain_text(decode_string(symbol_res))
 
     # If it's a fair-mint contract without direct name, use the underlying token info
     if classification["category"] == "TOKEN_FAIR_MINT":
@@ -2973,7 +2983,7 @@ def analyze_market_interest(
             target_token = "0x" + t_res[-40:].lower()
             sym_res = rpc.call_contract(target_token, keccak_selector("symbol()"))
             if sym_res:
-                token_sym = decode_string(sym_res)
+                token_sym = clean_chain_text(decode_string(sym_res))
         else:
             # Check marsToken()
             mars_res = rpc.call_contract(contract_addr, "0x7419f946")
@@ -2981,7 +2991,7 @@ def analyze_market_interest(
                 target_token = "0x" + mars_res[-40:].lower()
                 sym_res = rpc.call_contract(target_token, keccak_selector("symbol()"))
                 if sym_res:
-                    token_sym = decode_string(sym_res)
+                    token_sym = clean_chain_text(decode_string(sym_res))
             else:
                 # Fallback: test contract_addr directly
                 target_token = contract_addr

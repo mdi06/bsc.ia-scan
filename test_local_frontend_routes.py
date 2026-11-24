@@ -54,19 +54,44 @@ def test_existing_routes_are_not_shadowed():
     assert root.headers["cache-control"] == "no-cache"
 
 
-def test_no_frontend_routes_on_render():
-    """Imported in a fresh interpreter with RENDER set, the way production runs."""
+def test_the_workspace_is_never_mounted():
+    """A /static mount of the whole directory served api.py, history.json and smart_wallets.json from the live API."""
+    client = TestClient(api.app)
+    for path in ("/static/api.py", "/static/history.json", "/static/smart_wallets.json", "/static/user_favorites.json",
+                 "/features/../api.py", "/features/%2e%2e/api.py"):
+        assert client.get(path).status_code == 404, path
+
+
+def test_running_hosted():
+    assert api.running_hosted({"RENDER": "true"})
+    assert api.running_hosted({"RAILWAY_ENVIRONMENT_NAME": "production"})
+    assert api.running_hosted({"RAILWAY_SERVICE_ID": "abc"})
+    assert not api.running_hosted({"HOME": "/x", "RAILWAY_EMPTY": ""})
+    assert not api.running_hosted({})
+
+
+def _hosted_paths(extra_env: dict) -> str:
     code = (
         "import api\n"
         "paths = {getattr(r, 'path', None) for r in api.app.routes}\n"
-        "bad = [p for p in ('/app.js', '/style.css', '/static', '/seeded_smart_drops.json') if p in paths]\n"
+        "bad = [p for p in ('/app.js', '/style.css', '/static', '/features', '/seeded_smart_drops.json') if p in paths]\n"
         "print('BAD:' + ','.join(bad))\n"
     )
-    env = {k: v for k, v in os.environ.items() if not k.startswith("SUPABASE")}
-    env["RENDER"] = "1"
+    env = {k: v for k, v in os.environ.items() if not k.startswith(("SUPABASE", "RAILWAY_")) and k != "RENDER"}
+    env.update(extra_env)
     out = subprocess.run([sys.executable, "-c", code], cwd=HERE, env=env, capture_output=True, text=True, timeout=120)
     assert out.returncode == 0, out.stderr[-500:]
-    assert out.stdout.strip().splitlines()[-1] == "BAD:", out.stdout[-500:]
+    return out.stdout.strip().splitlines()[-1]
+
+
+def test_no_frontend_routes_on_render():
+    """Imported in a fresh interpreter with RENDER set, the way Render runs it."""
+    assert _hosted_paths({"RENDER": "1"}) == "BAD:"
+
+
+def test_no_frontend_routes_on_railway():
+    """Railway sets RAILWAY_* variables, never RENDER: production runs here."""
+    assert _hosted_paths({"RAILWAY_ENVIRONMENT_NAME": "production", "RAILWAY_SERVICE_ID": "svc"}) == "BAD:"
 
 
 def test_index_html_has_no_call_to_a_missing_function():

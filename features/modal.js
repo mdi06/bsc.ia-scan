@@ -75,7 +75,7 @@ export function openModal(item, source = 'direct') {
   const dexScreenerUrl = getDexScreenerUrl(item);
   const mktUrl = isNft
     ? getElementUrl(name, cAddr)
-    : (dexScreenerUrl || item.market_url || `https://pancakeswap.finance/swap?outputCurrency=${cAddr}`);
+    : (dexScreenerUrl || safeUrl(item.market_url) || `https://pancakeswap.finance/swap?outputCurrency=${cAddr}`);
 
   const smList = item.smart_wallets || item.smart_minters || [];
   const sEval = getSniperEval(item);
@@ -257,7 +257,7 @@ export function openModal(item, source = 'direct') {
   content.innerHTML = `
     <div class="modal-header">
       <div class="modal-title-group">
-        <div class="modal-title">🔍 ${name} (${sym}) - Deep Dive Inspection</div>
+        <div class="modal-title">🔍 ${escapeHtml(name)} (${escapeHtml(sym)}) - Deep Dive Inspection</div>
         ${navTotal > 1 && navIndex !== -1 ? `
           <div class="modal-nav-compact" role="group" aria-label="In-Modal Token Navigation">
             <button class="modal-nav-btn prev-btn" id="modalPrevBtn" onclick="navigateInspectModal(-1)" ${hasPrev ? '' : 'disabled'} title="${prevTitle}" aria-label="Previous Token">
@@ -299,7 +299,7 @@ export function openModal(item, source = 'direct') {
           💎 Market Valuation & Trading Dynamics
         </span>
         <div style="display: flex; gap: 6px; align-items: center;">
-          ${dexScreenerUrl ? `<a href="${dexScreenerUrl}" target="_blank" rel="noopener" class="badge badge-cyan" onclick="trackExternalClick('dexscreener_badge', '${escapeHtml(sym)}', '${cAddr}')" style="text-decoration: none; font-weight: 700; padding: 3px 8px; font-size: 11px;" title="Open live chart and trades on DexScreener">📈 DexScreener ↗</a>` : ''}
+          ${dexScreenerUrl ? `<a href="${dexScreenerUrl}" target="_blank" rel="noopener" class="badge badge-cyan" onclick="trackExternalClick('dexscreener_badge', ${jsAttr(sym)}, '${cAddr}')" style="text-decoration: none; font-weight: 700; padding: 3px 8px; font-size: 11px;" title="Open live chart and trades on DexScreener">📈 DexScreener ↗</a>` : ''}
           ${chg24Badge}
         </div>
       </div>
@@ -307,25 +307,25 @@ export function openModal(item, source = 'direct') {
         <div class="market-metric-box">
           <span class="dim">${mcapLabel(item) === 'FDV' ? 'FDV' : 'Market Cap'}</span>
           <strong style="color: ${mcapNum > 0 ? 'var(--color-green)' : 'var(--text-primary)'}; font-size: 15px; display: block; margin-top: 2px;">
-            ${dexScreenerUrl && mcapNum > 0 ? `<a href="${dexScreenerUrl}" target="_blank" rel="noopener" onclick="trackExternalClick('dexscreener_mcap', '${escapeHtml(sym)}', '${cAddr}')" style="color: var(--color-green); text-decoration: none;" title="View Valuation on DexScreener">${mcapFormatted} ↗</a>` : mcapFormatted}
+            ${dexScreenerUrl && mcapNum > 0 ? `<a href="${dexScreenerUrl}" target="_blank" rel="noopener" onclick="trackExternalClick('dexscreener_mcap', ${jsAttr(sym)}, '${cAddr}')" style="color: var(--color-green); text-decoration: none;" title="View Valuation on DexScreener">${mcapFormatted} ↗</a>` : mcapFormatted}
           </strong>
         </div>
         <div class="market-metric-box">
           <span class="dim">24h Trading Vol</span>
           <strong style="color: ${vol24Num > 0 ? 'var(--color-cyan)' : 'var(--text-dim)'}; font-size: 15px; display: block; margin-top: 2px;">
-            ${dexScreenerUrl && vol24Num > 0 ? `<a href="${dexScreenerUrl}" target="_blank" rel="noopener" onclick="trackExternalClick('dexscreener_vol', '${escapeHtml(sym)}', '${cAddr}')" style="color: var(--color-cyan); text-decoration: none;" title="View Volume on DexScreener">${vol24Formatted} ↗</a>` : vol24Formatted}
+            ${dexScreenerUrl && vol24Num > 0 ? `<a href="${dexScreenerUrl}" target="_blank" rel="noopener" onclick="trackExternalClick('dexscreener_vol', ${jsAttr(sym)}, '${cAddr}')" style="color: var(--color-cyan); text-decoration: none;" title="View Volume on DexScreener">${vol24Formatted} ↗</a>` : vol24Formatted}
           </strong>
         </div>
         <div class="market-metric-box">
           <span class="dim">PancakeSwap LP${marketFreshnessHtml(item)}</span>
           <strong style="color: ${lp > 0 ? 'var(--color-yellow)' : 'var(--text-dim)'}; font-size: 15px; display: block; margin-top: 2px;">
-            ${dexScreenerUrl && lp > 0 ? `<a href="${dexScreenerUrl}" target="_blank" rel="noopener" onclick="trackExternalClick('dexscreener_lp', '${escapeHtml(sym)}', '${cAddr}')" style="color: var(--color-yellow); text-decoration: none;" title="View Liquidity Pool on DexScreener">$${formatCount(lp)} ↗</a>` : (lp > 0 ? `$${formatCount(lp)}` : '$0')}
+            ${dexScreenerUrl && lp > 0 ? `<a href="${dexScreenerUrl}" target="_blank" rel="noopener" onclick="trackExternalClick('dexscreener_lp', ${jsAttr(sym)}, '${cAddr}')" style="color: var(--color-yellow); text-decoration: none;" title="View Liquidity Pool on DexScreener">$${formatCount(lp)} ↗</a>` : (lp > 0 ? `$${formatCount(lp)}` : '$0')}
           </strong>
         </div>
         <div class="market-metric-box">
           <span class="dim">Current Price${marketFreshnessHtml(item)}</span>
           <strong style="font-size: 15px; display: block; margin-top: 2px;">
-            ${dexScreenerUrl && tkPriceNum > 0 ? `<a href="${dexScreenerUrl}" target="_blank" rel="noopener" onclick="trackExternalClick('dexscreener_price', '${escapeHtml(sym)}', '${cAddr}')" style="color: var(--color-green); text-decoration: none;" title="Open live chart on DexScreener">${formatCryptoPrice(tkPriceNum)} ↗</a>` : (tkPriceNum > 0 ? formatCryptoPrice(tkPriceNum) : (Number(item.floor_price_usd || 0) > 0 ? formatCryptoPrice(item.floor_price_usd) : '<span class="dim">—</span>'))}
+            ${dexScreenerUrl && tkPriceNum > 0 ? `<a href="${dexScreenerUrl}" target="_blank" rel="noopener" onclick="trackExternalClick('dexscreener_price', ${jsAttr(sym)}, '${cAddr}')" style="color: var(--color-green); text-decoration: none;" title="Open live chart on DexScreener">${formatCryptoPrice(tkPriceNum)} ↗</a>` : (tkPriceNum > 0 ? formatCryptoPrice(tkPriceNum) : (Number(item.floor_price_usd || 0) > 0 ? formatCryptoPrice(item.floor_price_usd) : '<span class="dim">—</span>'))}
           </strong>
         </div>
       </div>
@@ -344,7 +344,7 @@ export function openModal(item, source = 'direct') {
       </div>
       <div class="bonding-gauge-stats">
         <span>${bondingGraduated ? `Secondary Liquidity Pool: $${formatCount(lp)}` : `Primary Minting: ${formatCount(tm)} / ${ms > 0 ? formatCount(ms) : 'Target Cap'}`}</span>
-        <span>${bondingGraduated ? (dexScreenerUrl ? `<a href="${dexScreenerUrl}" target="_blank" rel="noopener" onclick="trackExternalClick('dexscreener_graduated', '${escapeHtml(sym)}', '${cAddr}')" style="color: var(--color-green); font-weight: 600; text-decoration: none;" title="View pair on DexScreener">🟢 Active Trading on PancakeSwap V2 ➔ View on DexScreener ↗</a>` : '🟢 Active Trading on PancakeSwap V2') : (bondingPct >= 80 ? '🔥 Near DEX Pool Injection (≥80%)' : (bondingPct >= 50 ? '⚡ Strong Momentum (≥50%)' : '🌱 Early Fair-Mint Phase'))}</span>
+        <span>${bondingGraduated ? (dexScreenerUrl ? `<a href="${dexScreenerUrl}" target="_blank" rel="noopener" onclick="trackExternalClick('dexscreener_graduated', ${jsAttr(sym)}, '${cAddr}')" style="color: var(--color-green); font-weight: 600; text-decoration: none;" title="View pair on DexScreener">🟢 Active Trading on PancakeSwap V2 ➔ View on DexScreener ↗</a>` : '🟢 Active Trading on PancakeSwap V2') : (bondingPct >= 80 ? '🔥 Near DEX Pool Injection (≥80%)' : (bondingPct >= 50 ? '⚡ Strong Momentum (≥50%)' : '🌱 Early Fair-Mint Phase'))}</span>
       </div>
     </div>
     ` : ''}
@@ -428,7 +428,7 @@ export function openModal(item, source = 'direct') {
       </div>
       <div class="modal-grid" style="margin-top: 6px;">
         <div><span class="dim">Proxy Pattern:</span> <strong>${escapeHtml(item.proxy_type || 'EIP-1167 / EIP-1967')}</strong></div>
-        <div><span class="dim">Implementation:</span> <strong>${item.master_implementation ? `<a href="https://bscscan.com/address/${item.master_implementation}" target="_blank" rel="noopener" onclick="trackExternalClick('bscscan_proxy_impl', '${escapeHtml(sym)}', '${cAddr}')" style="color: var(--color-cyan); text-decoration: underline;">${item.master_implementation.slice(0, 10)}...${item.master_implementation.slice(-6)}</a>` : 'Direct Contract'}</strong></div>
+        <div><span class="dim">Implementation:</span> <strong>${item.master_implementation ? `<a href="https://bscscan.com/address/${item.master_implementation}" target="_blank" rel="noopener" onclick="trackExternalClick('bscscan_proxy_impl', ${jsAttr(sym)}, '${cAddr}')" style="color: var(--color-cyan); text-decoration: underline;">${item.master_implementation.slice(0, 10)}...${item.master_implementation.slice(-6)}</a>` : 'Direct Contract'}</strong></div>
         ${item.is_factory ? `<div><span class="dim">Factory:</span> <strong style="color: var(--color-yellow);">${escapeHtml(item.factory_badge || 'Launchpad Factory')}</strong></div>` : ''}
       </div>
     </div>
@@ -451,7 +451,7 @@ export function openModal(item, source = 'direct') {
           🧠 Smart Money Activity (${smList.length} Tracked Wallets)
           ${smList.length >= 3 ? `<span class="badge-cluster" style="font-size: 10px;" title="3+ Smart Money Alpha Wallets Inflow Detected">🔥 SM Cluster (${smList.length})</span>` : ''}
         </span>
-        <button class="btn-sm-view-leaderboard" onclick="trackAnalytics('leaderboard_opened_from_modal', { token_symbol: '${escapeHtml(sym)}' }); document.getElementById('inspectModal').close(); openSmartLeaderboardModal('ALL')">🏆 View All Smart Hunters (Win Rates) ↗</button>
+        <button class="btn-sm-view-leaderboard" onclick="trackAnalytics('leaderboard_opened_from_modal', { token_symbol: ${jsAttr(sym)} }); document.getElementById('inspectModal').close(); openSmartLeaderboardModal('ALL')">🏆 View All Smart Hunters (Win Rates) ↗</button>
       </div>
       <div style="color: var(--color-cyan); font-size: 12px; margin-top: 8px; display: flex; flex-wrap: wrap; gap: 6px;">
         ${smList.slice(0, 12).map(w => {
@@ -459,10 +459,10 @@ export function openModal(item, source = 'direct') {
           return `
             <div style="display: inline-flex; align-items: center; gap: 4px; background: rgba(0, 240, 255, 0.05); border: 1px solid rgba(0, 240, 255, 0.2); border-radius: 4px; padding: 2px 6px; margin: 2px;">
               <span style="font-weight: 700; color: ${isF ? 'var(--color-yellow)' : 'var(--color-cyan)'}; font-size: 11px;">${isF ? '⭐ ' : ''}${escapeHtml(w)}</span>
-              <button class="${isF ? 'btn-follow-wallet following' : 'btn-follow-wallet'}" style="padding: 2px 6px; font-size: 9.5px;" onclick="trackAnalytics('wallet_follow_toggled', { wallet: '${escapeHtml(w)}', will_follow: !followedWallets.has('${escapeHtml(w)}'.toLowerCase()) }); toggleFollowWallet('${escapeHtml(w)}'); this.classList.toggle('following'); this.textContent = this.classList.contains('following') ? '★ Following' : '⭐ Follow';">
+              <button class="${isF ? 'btn-follow-wallet following' : 'btn-follow-wallet'}" style="padding: 2px 6px; font-size: 9.5px;" onclick="trackAnalytics('wallet_follow_toggled', { wallet: ${jsAttr(w)}, will_follow: !followedWallets.has(${jsAttr(w)}.toLowerCase()) }); toggleFollowWallet(${jsAttr(w)}); this.classList.toggle('following'); this.textContent = this.classList.contains('following') ? '★ Following' : '⭐ Follow';">
                 ${isF ? '★ Following' : '⭐ Follow'}
               </button>
-              <button class="btn-view-activity" style="padding: 2px 6px; font-size: 9.5px;" onclick="trackAnalytics('wallet_activity_viewed', { wallet: '${escapeHtml(w)}' }); viewWalletActivity('${escapeHtml(w)}')" title="View all drops minted by ${escapeHtml(w)}">
+              <button class="btn-view-activity" style="padding: 2px 6px; font-size: 9.5px;" onclick="trackAnalytics('wallet_activity_viewed', { wallet: ${jsAttr(w)} }); viewWalletActivity(${jsAttr(w)})" title="View all drops minted by ${escapeHtml(w)}">
                 👁️ Activity
               </button>
             </div>
@@ -486,7 +486,7 @@ export function openModal(item, source = 'direct') {
         <div><span class="dim">Secondary Transfers:</span> <strong>${item.secondary_transfers || 0} transfers</strong></div>
       </div>
       <div style="margin-top: 10px; font-size: 11px; color: var(--text-dim);">
-        🔗 Marketplace: <a href="${mktUrl}" target="_blank" rel="noopener" onclick="trackExternalClick('element_market', '${escapeHtml(sym)}', '${cAddr}')" style="color: var(--color-cyan); text-decoration: underline;">${mktUrl}</a> (Manual confirmation only — no auto-trade)
+        🔗 Marketplace: <a href="${mktUrl}" target="_blank" rel="noopener" onclick="trackExternalClick('element_market', ${jsAttr(sym)}, '${cAddr}')" style="color: var(--color-cyan); text-decoration: underline;">${mktUrl}</a> (Manual confirmation only — no auto-trade)
       </div>
     </div>
     ` : ''}
@@ -501,7 +501,7 @@ export function openModal(item, source = 'direct') {
         <strong style="color: var(--text-white);">Exit Strategy:</strong> ${exitEval.recommendation}
       </div>
       <div class="modal-links">
-        <a href="${mktUrl}" target="_blank" rel="noopener" onclick="trackExternalClick('element_sell_nft', '${escapeHtml(sym)}', '${cAddr}')" class="modal-btn" style="background: rgba(217, 70, 239, 0.2); border: 1px solid var(--color-magenta); color: #ffffff; text-decoration: none;">🛒 Open Element Market to List/Sell NFT</a>
+        <a href="${mktUrl}" target="_blank" rel="noopener" onclick="trackExternalClick('element_sell_nft', ${jsAttr(sym)}, '${cAddr}')" class="modal-btn" style="background: rgba(217, 70, 239, 0.2); border: 1px solid var(--color-magenta); color: #ffffff; text-decoration: none;">🛒 Open Element Market to List/Sell NFT</a>
       </div>
     </div>
     ` : ''}
@@ -509,12 +509,12 @@ export function openModal(item, source = 'direct') {
     <div class="modal-section" data-modal-section="secondary_links">
       <div class="modal-section-title">🔗 Official Secondary Links</div>
       <div class="modal-links">
-        ${!isNft && dexScreenerUrl ? `<a href="${dexScreenerUrl}" target="_blank" rel="noopener" onclick="trackExternalClick('dexscreener_links', '${escapeHtml(sym)}', '${cAddr}')" class="modal-btn" style="background: rgba(0, 240, 255, 0.15); border: 1px solid var(--color-cyan); color: var(--color-cyan); font-weight: 700;">📈 View on DexScreener ↗</a>` : ''}
-        <a href="${isNft ? mktUrl : `https://pancakeswap.finance/swap?outputCurrency=${cAddr}`}" target="_blank" rel="noopener" onclick="trackExternalClick('pancakeswap_links', '${escapeHtml(sym)}', '${cAddr}')" class="modal-btn btn-element">🛒 ${isNft ? 'Element NFT Collection' : 'Trade on PancakeSwap DEX'}</a>
-        ${!isNft ? `<a href="https://pancakeswap.finance/swap?inputCurrency=${cAddr}&outputCurrency=BNB" target="_blank" rel="noopener" onclick="trackExternalClick('pancakeswap_swap_bnb', '${escapeHtml(sym)}', '${cAddr}')" class="modal-btn" style="background: rgba(240, 185, 11, 0.15); border: 1px solid #f0b90b; color: #f0b90b;">🥞 Swap to BNB (PancakeSwap)</a>` : ''}
-        <a href="https://bscscan.com/address/${cAddr}" target="_blank" rel="noopener" onclick="trackExternalClick('bscscan_address', '${escapeHtml(sym)}', '${cAddr}')" class="modal-btn btn-bscscan">🔍 View on BscScan</a>
-        ${item.website ? `<a href="${item.website}" target="_blank" rel="noopener" onclick="trackExternalClick('website', '${escapeHtml(sym)}', '${cAddr}')" class="modal-btn btn-bscscan">🌐 Website</a>` : ''}
-        ${item.twitter ? `<a href="${item.twitter}" target="_blank" rel="noopener" onclick="trackExternalClick('twitter', '${escapeHtml(sym)}', '${cAddr}')" class="modal-btn btn-bscscan">🐦 Twitter / X</a>` : ''}
+        ${!isNft && dexScreenerUrl ? `<a href="${dexScreenerUrl}" target="_blank" rel="noopener" onclick="trackExternalClick('dexscreener_links', ${jsAttr(sym)}, '${cAddr}')" class="modal-btn" style="background: rgba(0, 240, 255, 0.15); border: 1px solid var(--color-cyan); color: var(--color-cyan); font-weight: 700;">📈 View on DexScreener ↗</a>` : ''}
+        <a href="${isNft ? mktUrl : `https://pancakeswap.finance/swap?outputCurrency=${cAddr}`}" target="_blank" rel="noopener" onclick="trackExternalClick('pancakeswap_links', ${jsAttr(sym)}, '${cAddr}')" class="modal-btn btn-element">🛒 ${isNft ? 'Element NFT Collection' : 'Trade on PancakeSwap DEX'}</a>
+        ${!isNft ? `<a href="https://pancakeswap.finance/swap?inputCurrency=${cAddr}&outputCurrency=BNB" target="_blank" rel="noopener" onclick="trackExternalClick('pancakeswap_swap_bnb', ${jsAttr(sym)}, '${cAddr}')" class="modal-btn" style="background: rgba(240, 185, 11, 0.15); border: 1px solid #f0b90b; color: #f0b90b;">🥞 Swap to BNB (PancakeSwap)</a>` : ''}
+        <a href="https://bscscan.com/address/${cAddr}" target="_blank" rel="noopener" onclick="trackExternalClick('bscscan_address', ${jsAttr(sym)}, '${cAddr}')" class="modal-btn btn-bscscan">🔍 View on BscScan</a>
+        ${safeUrl(item.website) ? `<a href="${escapeHtml(safeUrl(item.website))}" target="_blank" rel="noopener" onclick="trackExternalClick('website', ${jsAttr(sym)}, '${cAddr}')" class="modal-btn btn-bscscan">🌐 Website</a>` : ''}
+        ${safeUrl(item.twitter) ? `<a href="${escapeHtml(safeUrl(item.twitter))}" target="_blank" rel="noopener" onclick="trackExternalClick('twitter', ${jsAttr(sym)}, '${cAddr}')" class="modal-btn btn-bscscan">🐦 Twitter / X</a>` : ''}
       </div>
     </div>
 
@@ -524,11 +524,11 @@ export function openModal(item, source = 'direct') {
         <span style="font-size: 12px; font-weight: 700; color: var(--color-cyan);">📈 Live DEX Candlestick Price Action Chart</span>
         <div style="display: flex; gap: 8px; align-items: center;">
           ${dexScreenerUrl ? `
-            <a href="${dexScreenerUrl}" target="_blank" rel="noopener" onclick="trackExternalClick('dexscreener_chart_open', '${escapeHtml(sym)}', '${cAddr}')" class="dex-chart-toggle-btn" style="color: var(--color-cyan); text-decoration: none; padding: 4px 8px; border: 1px solid rgba(0, 240, 255, 0.3); border-radius: 4px; font-size: 11px; display: inline-flex; align-items: center; gap: 4px;" title="Open live pair on DexScreener in new window">
+            <a href="${dexScreenerUrl}" target="_blank" rel="noopener" onclick="trackExternalClick('dexscreener_chart_open', ${jsAttr(sym)}, '${cAddr}')" class="dex-chart-toggle-btn" style="color: var(--color-cyan); text-decoration: none; padding: 4px 8px; border: 1px solid rgba(0, 240, 255, 0.3); border-radius: 4px; font-size: 11px; display: inline-flex; align-items: center; gap: 4px;" title="Open live pair on DexScreener in new window">
               <span>↗</span> <span>Open DexScreener</span>
             </a>
           ` : ''}
-          <button class="dex-chart-toggle-btn" id="chartToggleBtn" onclick="trackAnalytics('dex_chart_toggled', { token_symbol: '${escapeHtml(sym)}' }); toggleDexChart('${cAddr}', '${dexScreenerUrl}')">
+          <button class="dex-chart-toggle-btn" id="chartToggleBtn" onclick="trackAnalytics('dex_chart_toggled', { token_symbol: ${jsAttr(sym)} }); toggleDexChart('${cAddr}', ${jsAttr(dexScreenerUrl)})">
             <span id="chartToggleIcon">📊</span> <span id="chartToggleLabel">Show Live DEX Chart</span>
           </button>
         </div>
@@ -565,7 +565,7 @@ export function openModal(item, source = 'direct') {
       ${connectedWallet && !isAgenticWallet ? `
         <div class="agentic-status-warning" style="background: rgba(240, 185, 11, 0.08); border: 1px dashed rgba(240, 185, 11, 0.4); border-radius: 6px; padding: 8px 12px; margin: 8px 0; font-size: 11px; color: var(--color-yellow); display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap;">
           <span>ℹ️ <strong>Non-Agentic Wallet:</strong> If this drop is an Agent ID exclusive launch, it requires an active <code>.ai</code> Agent ID to mint.</span>
-          <a href="https://web3.binance.com/en/dev-docs/products/agentic-wallet/ai-pro#came-from-the-agent-id-campaign" target="_blank" rel="noopener" onclick="trackExternalClick('binance_claim_ai', '${escapeHtml(sym)}', '${cAddr}')" style="color: var(--color-cyan); text-decoration: underline;">Claim .ai in Binance App ↗</a>
+          <a href="https://web3.binance.com/en/dev-docs/products/agentic-wallet/ai-pro#came-from-the-agent-id-campaign" target="_blank" rel="noopener" onclick="trackExternalClick('binance_claim_ai', ${jsAttr(sym)}, '${cAddr}')" style="color: var(--color-cyan); text-decoration: underline;">Claim .ai in Binance App ↗</a>
         </div>
       ` : (connectedWallet && isAgenticWallet ? `
         <div class="agentic-status-success" style="background: rgba(0, 240, 255, 0.08); border: 1px solid rgba(0, 240, 255, 0.3); border-radius: 6px; padding: 6px 12px; margin: 8px 0; font-size: 11px; color: var(--color-cyan); display: flex; align-items: center; gap: 8px;">
@@ -576,14 +576,14 @@ export function openModal(item, source = 'direct') {
 
       ${isSoldOut ? `
         <div style="display: flex; gap: 10px; margin-top: 8px;">
-          <a href="${!isNft ? (dexScreenerUrl || mktUrl) : mktUrl}" target="_blank" rel="noopener" onclick="trackExternalClick('sold_out_trade', '${escapeHtml(sym)}', '${cAddr}')" class="web3-mint-btn sold-out" style="text-align: center; text-decoration: none; display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%;">
+          <a href="${!isNft ? (dexScreenerUrl || mktUrl) : mktUrl}" target="_blank" rel="noopener" onclick="trackExternalClick('sold_out_trade', ${jsAttr(sym)}, '${cAddr}')" class="web3-mint-btn sold-out" style="text-align: center; text-decoration: none; display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%;">
             <span>🔒 Sold Out (100% Capped) ➔ ${!isNft ? 'View Chart & Trade on DexScreener ↗' : 'Trade on Secondary Market'}</span>
           </a>
         </div>
       ` : `
         ${isDexTraded ? `
         <div class="mint-btn-container" style="margin-top: 8px;">
-          <a href="${dexScreenerUrl || mktUrl}" target="_blank" rel="noopener" class="web3-mint-btn sold-out" style="text-align: center; text-decoration: none; display: flex; align-items: center; justify-content: center; gap: 8px;" onclick="trackExternalClick('dex_traded_trade', '${escapeHtml(sym)}', '${cAddr}')">
+          <a href="${dexScreenerUrl || mktUrl}" target="_blank" rel="noopener" class="web3-mint-btn sold-out" style="text-align: center; text-decoration: none; display: flex; align-items: center; justify-content: center; gap: 8px;" onclick="trackExternalClick('dex_traded_trade', ${jsAttr(sym)}, '${cAddr}')">
             <span>📈 Already trading on a DEX: no mint (open the live chart ↗)</span>
           </a>
         </div>
@@ -622,12 +622,12 @@ export function openModal(item, source = 'direct') {
         <strong style="color: var(--text-white);">Exit Strategy:</strong> ${exitEval.recommendation}
       </div>
       <div class="modal-links" style="margin-bottom: 10px;">
-        ${dexScreenerUrl ? `<a href="${dexScreenerUrl}" target="_blank" rel="noopener" onclick="trackExternalClick('exit_dexscreener_chart', '${escapeHtml(sym)}', '${cAddr}')" class="modal-btn" style="background: rgba(0, 240, 255, 0.15); border: 1px solid var(--color-cyan); color: var(--color-cyan); font-weight: 700; text-decoration: none;">📈 DexScreener Live Chart ↗</a>` : ''}
-        <a href="https://pancakeswap.finance/swap?inputCurrency=${cAddr}&outputCurrency=BNB" target="_blank" rel="noopener" onclick="trackExternalClick('exit_pancakeswap_swap', '${escapeHtml(sym)}', '${cAddr}')" class="modal-btn" style="background: rgba(240, 185, 11, 0.2); border: 1px solid #f0b90b; color: #f0b90b; text-decoration: none;">🥞 1-Click Swap on PancakeSwap ↗</a>
+        ${dexScreenerUrl ? `<a href="${dexScreenerUrl}" target="_blank" rel="noopener" onclick="trackExternalClick('exit_dexscreener_chart', ${jsAttr(sym)}, '${cAddr}')" class="modal-btn" style="background: rgba(0, 240, 255, 0.15); border: 1px solid var(--color-cyan); color: var(--color-cyan); font-weight: 700; text-decoration: none;">📈 DexScreener Live Chart ↗</a>` : ''}
+        <a href="https://pancakeswap.finance/swap?inputCurrency=${cAddr}&outputCurrency=BNB" target="_blank" rel="noopener" onclick="trackExternalClick('exit_pancakeswap_swap', ${jsAttr(sym)}, '${cAddr}')" class="modal-btn" style="background: rgba(240, 185, 11, 0.2); border: 1px solid #f0b90b; color: #f0b90b; text-decoration: none;">🥞 1-Click Swap on PancakeSwap ↗</a>
       </div>
       <div class="cli-box">
         <code>${escapeHtml(sellCliSnippet)}</code>
-        <button class="copy-btn" onclick="trackCliCopy('exit_cli', '${escapeHtml(sym)}', '${cAddr}', 'pancakeswap_exit'); navigator.clipboard.writeText('${sellCliSnippet.replace(/'/g, "\\'")}'); this.textContent='Copied!'; setTimeout(()=>this.textContent='Copy', 1500)">Copy Exit CLI</button>
+        <button class="copy-btn" onclick="trackCliCopy('exit_cli', ${jsAttr(sym)}, '${cAddr}', 'pancakeswap_exit'); navigator.clipboard.writeText('${sellCliSnippet.replace(/'/g, "\\'")}'); this.textContent='Copied!'; setTimeout(()=>this.textContent='Copy', 1500)">Copy Exit CLI</button>
       </div>
     </div>
     ` : ''}
@@ -667,7 +667,7 @@ export function openModal(item, source = 'direct') {
 
     <div class="modal-shortcut-bar" id="modalShortcutBar">
       <button type="button" class="modal-shortcut-btn"
-        onclick="jumpToModalSection('mint_action', '${escapeHtml(sym)}', ${isFree}, ${isDexTraded}, ${isSoldOut})">
+        onclick="jumpToModalSection('mint_action', ${jsAttr(sym)}, ${isFree}, ${isDexTraded}, ${isSoldOut})">
         ${(!isSoldOut && !isDexTraded && isFree) ? '⚡ Free Mint / Snipe' : '⚡ Mint / Snipe'} <span aria-hidden="true">↓</span>
       </button>
       <button type="button" class="modal-shortcut-btn modal-shortcut-btn-secondary" title="Copy the Sniper CLI command"

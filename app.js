@@ -613,6 +613,32 @@ function escapeHtml(str) {
     .replace(/'/g, '&#39;');
 }
 
+// A JS string literal for an argument of an inline handler: onclick="f(${jsAttr(x)})". The browser decodes the
+// attribute's HTML entities BEFORE it runs the code, so '${escapeHtml(x)}' let a ' in a token symbol end the string
+// (and run whatever followed it). JSON.stringify quotes and escapes it for JS, escapeHtml then for the attribute.
+function jsAttr(value) {
+  return escapeHtml(JSON.stringify(String(value === null || value === undefined ? '' : value)));
+}
+
+// `url` if it is an absolute http(s) URL, else '' (javascript:, data: and anything unparsable). For href="..." values
+// that come from outside: DexScreener's website / twitter links are whatever the token's creator entered.
+function safeUrl(url) {
+  if (typeof url !== 'string' || !url.trim()) return '';
+  try {
+    const u = new URL(url.trim());
+    return (u.protocol === 'https:' || u.protocol === 'http:') ? u.href : '';
+  } catch (e) {
+    return '';
+  }
+}
+
+function isDexScreenerUrl(url) {
+  const safe = safeUrl(url);
+  if (!safe) return false;
+  const host = new URL(safe).hostname;
+  return host === 'dexscreener.com' || host.endsWith('.dexscreener.com');
+}
+
 // Crisp, futuristic Cyberpunk Web Audio Chime (D5 -> A5 -> D6)
 function playMarketAlertSound() {
   if (isMobileClient()) return; // Silent on mobile: updates table silently without audio disruption
@@ -774,11 +800,11 @@ function getDexScreenerUrl(item) {
   if (!item) return '';
   if (typeof item === 'string') {
     const s = item.trim();
-    if (s.startsWith('http')) return s;
-    if (s.startsWith('0x')) return `https://dexscreener.com/bsc/${s.toLowerCase()}`;
+    if (s.startsWith('http')) return safeUrl(s);
+    if (/^0x[0-9a-fA-F]{40}$/.test(s)) return `https://dexscreener.com/bsc/${s.toLowerCase()}`;
     return '';
   }
-  if (item.pair_url && item.pair_url.includes('dexscreener.com')) return item.pair_url;
+  if (isDexScreenerUrl(item.pair_url)) return item.pair_url;
   if (item.pair_address && item.pair_address.startsWith('0x')) {
     return `https://dexscreener.com/bsc/${item.pair_address.toLowerCase()}`;
   }
@@ -1990,7 +2016,7 @@ function renderSmartLeaderboardRows() {
         <td>${rankBadge}</td>
         <td>
           <div style="font-weight: 700; color: var(--color-cyan); display: flex; align-items: center; gap: 4px;">
-            <a href="javascript:void(0)" onclick="viewWalletActivity('${escapeHtml(h.name)}')" style="color: inherit; text-decoration: none;" title="Click to view all drops minted by ${escapeHtml(h.name)}">
+            <a href="javascript:void(0)" onclick="viewWalletActivity(${jsAttr(h.name)})" style="color: inherit; text-decoration: none;" title="Click to view all drops minted by ${escapeHtml(h.name)}">
               ${isF ? '<span style="color: var(--color-yellow);">⭐</span> ' : ''}${escapeHtml(h.name)}
             </a>
           </div>
@@ -2003,8 +2029,8 @@ function renderSmartLeaderboardRows() {
         <td>${picksHtml}</td>
         <td>
           <div style="display: flex; gap: 6px; align-items: center;">
-            <button class="${followBtnClass}" onclick="toggleFollowWallet('${escapeHtml(h.name)}')">${followBtnText}</button>
-            <button class="btn-view-activity" onclick="viewWalletActivity('${escapeHtml(h.name)}')" title="View all drops minted by ${escapeHtml(h.name)}">👁️ Activity</button>
+            <button class="${followBtnClass}" onclick="toggleFollowWallet(${jsAttr(h.name)})">${followBtnText}</button>
+            <button class="btn-view-activity" onclick="viewWalletActivity(${jsAttr(h.name)})" title="View all drops minted by ${escapeHtml(h.name)}">👁️ Activity</button>
           </div>
         </td>
       </tr>
@@ -2355,10 +2381,10 @@ function renderWalletsTabLeaderboard() {
         </td>
         <td style="text-align: center;">
           <div style="display: flex; gap: 6px; justify-content: center;">
-            <button class="${isF ? 'btn-follow-wallet following' : 'btn-follow-wallet'}" onclick="toggleFollowWallet('${escapeHtml(h.name)}'); renderWalletsTabLeaderboard();">
+            <button class="${isF ? 'btn-follow-wallet following' : 'btn-follow-wallet'}" onclick="toggleFollowWallet(${jsAttr(h.name)}); renderWalletsTabLeaderboard();">
               ${isF ? '★ Following' : '⭐ Follow'}
             </button>
-            <button class="btn-view-activity" onclick="viewWalletActivity('${escapeHtml(h.name)}')">
+            <button class="btn-view-activity" onclick="viewWalletActivity(${jsAttr(h.name)})">
               🔍 Mints
             </button>
           </div>
@@ -2384,9 +2410,9 @@ function toggleDexChart(contract, customUrl) {
 
   if (wrap.style.display === 'none') {
     wrap.style.display = 'block';
-    const chartSrc = (customUrl && customUrl.includes('dexscreener.com'))
-      ? `${customUrl}?embed=1&theme=dark&trades=0&info=0`
-      : `https://dexscreener.com/bsc/${contract}?embed=1&theme=dark&trades=0&info=0`;
+    const chartSrc = isDexScreenerUrl(customUrl)
+      ? `${escapeHtml(customUrl)}?embed=1&theme=dark&trades=0&info=0`
+      : `https://dexscreener.com/bsc/${escapeHtml(contract)}?embed=1&theme=dark&trades=0&info=0`;
     wrap.innerHTML = `
       <iframe src="${chartSrc}" width="100%" height="340" style="border:0;" loading="lazy"></iframe>
     `;
@@ -3995,7 +4021,7 @@ function renderPulseLaunchRow(r, idx) {
   const hasChg = chg !== null && chg !== undefined && isFinite(Number(chg));
   const chgText = hasChg ? ((Number(chg) >= 0 ? '+' : '') + Number(chg).toFixed(1) + '%') : ('LP $' + formatCount(Number(r.lp_usd || 0)));
   const chgBadge = hasChg ? (Number(chg) >= 0 ? 'badge-green' : 'badge-red') : 'badge-dim';
-  const dexUrl = getDexScreenerUrl(r) || r.pair_url || ('https://pancakeswap.finance/swap?outputCurrency=' + (r.contract || ''));
+  const dexUrl = getDexScreenerUrl(r) || safeUrl(r.pair_url) || ('https://pancakeswap.finance/swap?outputCurrency=' + (r.contract || ''));
   if (r.contract) registerPulseItem(r.contract, r);
   return `<div class="pulse-list-row pulse-ath-row" onclick="openInspectModalByContract('${cAddr}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openInspectModalByContract('${cAddr}');}" role="button" tabindex="0" title="Click to inspect ${name} (${volStr}, liquidity $${formatCount(Number(r.lp_usd || 0))})">
     <div class="pulse-row-left">
@@ -4031,7 +4057,7 @@ function renderPulseNftMintRow(n, idx) {
   const badgeClass = hasFill && fill >= 100 ? 'badge-yellow' : 'badge-magenta';
   const smart = Number(n.smart_count || 0);
   const smartStr = smart > 0 ? ` · 🧠 ${smart}` : '';
-  const elementUrl = n.market_url || ('https://element.market/collections/' + (n.contract || ''));
+  const elementUrl = safeUrl(n.market_url) || ('https://element.market/collections/' + (n.contract || ''));
   if (n.contract) registerPulseItem(n.contract, n);
   return `<div class="pulse-list-row pulse-nft-row" onclick="openInspectModalByContract('${cAddr}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openInspectModalByContract('${cAddr}');}" role="button" tabindex="0" title="Click to inspect ${name} (${mintedStr})">
     <div class="pulse-row-left">
@@ -5342,7 +5368,7 @@ function renderRecentChips() {
     const sym = escapeHtml(item.symbol || item.name || 'Token');
     const c = escapeHtml(item.contract || '');
     return `
-      <button type="button" class="recent-chip" onclick="handleRecentChipClick('${sym.replace(/'/g, "\\'")}', '${c}', event)" title="Jump back to ${sym}">
+      <button type="button" class="recent-chip" onclick="handleRecentChipClick(${jsAttr(item.symbol || item.name || 'Token')}, '${c}', event)" title="Jump back to ${sym}">
         <span class="recent-chip-icon">⚡</span>
         <span class="recent-chip-text">${sym}</span>
       </button>
@@ -6500,7 +6526,7 @@ function renderTable(keepLimit = false) {
 
     const tokenSym = item.symbol || item.name || item.contract || '';
     const tokenHash = '#token=' + encodeURIComponent(tokenSym);
-    const tokenLink = `<a href="${tokenHash}" class="token-permalink" onclick="handleTokenClick(event, '${item.contract}')" title="Inspect ${escapeHtml(item.name || tokenSym)} (Ctrl+Click to open in new tab)"><strong>${item.name || 'Unknown'}</strong><span class="sym">(${item.symbol || ''})</span></a>`;
+    const tokenLink = `<a href="${tokenHash}" class="token-permalink" onclick="handleTokenClick(event, '${item.contract}')" title="Inspect ${escapeHtml(item.name || tokenSym)} (Ctrl+Click to open in new tab)"><strong>${escapeHtml(item.name || 'Unknown')}</strong><span class="sym">(${escapeHtml(item.symbol || '')})</span></a>`;
     let actBtn = `<a href="${tokenHash}" class="inspect-btn" onclick="handleTokenClick(event, '${item.contract}')" title="Inspect & Snipe CLI (Ctrl+Click to open in new tab)"><span class="desktop-only">Inspect ➔</span><span class="mobile-only">🔍 Inspect ➔</span></a>`;
 
     if (isSec) {
@@ -6551,7 +6577,7 @@ function renderTable(keepLimit = false) {
       }
 
       const dexUrl = dexScreenerUrl || `https://pancakeswap.finance/swap?outputCurrency=${item.contract}`;
-      actBtn = `<button class="inspect-btn trade-dex-btn dex-screener-btn" onclick="event.stopPropagation(); window.open('${dexUrl}', '_blank')" style="border-color: var(--color-cyan); color: var(--color-cyan); font-weight: 700; background: rgba(0, 240, 255, 0.08);" title="View Live Chart & Order Book on DexScreener"><span class="desktop-only">📈 DexScreener ↗</span><span class="mobile-only">📈 Chart ↗</span></button>`;
+      actBtn = `<button class="inspect-btn trade-dex-btn dex-screener-btn" onclick="event.stopPropagation(); window.open(${jsAttr(dexUrl)}, '_blank')" style="border-color: var(--color-cyan); color: var(--color-cyan); font-weight: 700; background: rgba(0, 240, 255, 0.08);" title="View Live Chart & Order Book on DexScreener"><span class="desktop-only">📈 DexScreener ↗</span><span class="mobile-only">📈 Chart ↗</span></button>`;
     } else if (isPort) {
       if (item.contract === '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee') {
         cellHolders = `<span style="color: var(--color-green); font-weight:700;">Gas: ${Number(item.user_balance || 0).toFixed(4)} BNB</span>`;
@@ -6867,7 +6893,7 @@ function appendNextTableBatch() {
 
     const tokenSym = item.symbol || item.name || item.contract || '';
     const tokenHash = '#token=' + encodeURIComponent(tokenSym);
-    const tokenLink = `<a href="${tokenHash}" class="token-permalink" onclick="handleTokenClick(event, '${item.contract}')" title="Inspect ${escapeHtml(item.name || tokenSym)} (Ctrl+Click to open in new tab)"><strong>${item.name || 'Unknown'}</strong><span class="sym">(${item.symbol || ''})</span></a>`;
+    const tokenLink = `<a href="${tokenHash}" class="token-permalink" onclick="handleTokenClick(event, '${item.contract}')" title="Inspect ${escapeHtml(item.name || tokenSym)} (Ctrl+Click to open in new tab)"><strong>${escapeHtml(item.name || 'Unknown')}</strong><span class="sym">(${escapeHtml(item.symbol || '')})</span></a>`;
     let actBtn = `<a href="${tokenHash}" class="inspect-btn" onclick="handleTokenClick(event, '${item.contract}')" title="Inspect & Snipe CLI (Ctrl+Click to open in new tab)"><span class="desktop-only">Inspect ➔</span><span class="mobile-only">🔍 Inspect ➔</span></a>`;
 
     if (isSec) {
@@ -6918,7 +6944,7 @@ function appendNextTableBatch() {
       }
 
       const dexUrl = dexScreenerUrl || `https://pancakeswap.finance/swap?outputCurrency=${item.contract}`;
-      actBtn = `<button class="inspect-btn trade-dex-btn dex-screener-btn" onclick="event.stopPropagation(); window.open('${dexUrl}', '_blank')" style="border-color: var(--color-cyan); color: var(--color-cyan); font-weight: 700; background: rgba(0, 240, 255, 0.08);" title="View Live Chart & Order Book on DexScreener"><span class="desktop-only">📈 DexScreener ↗</span><span class="mobile-only">📈 Chart ↗</span></button>`;
+      actBtn = `<button class="inspect-btn trade-dex-btn dex-screener-btn" onclick="event.stopPropagation(); window.open(${jsAttr(dexUrl)}, '_blank')" style="border-color: var(--color-cyan); color: var(--color-cyan); font-weight: 700; background: rgba(0, 240, 255, 0.08);" title="View Live Chart & Order Book on DexScreener"><span class="desktop-only">📈 DexScreener ↗</span><span class="mobile-only">📈 Chart ↗</span></button>`;
     } else if (isPort && item.user_balance > 0) {
       if (item.is_native_gas) {
         cellHolders = `<span style="color: var(--color-green); font-weight:700;">Gas: ${Number(item.user_balance || 0).toFixed(4)} BNB</span>`;
@@ -8026,8 +8052,8 @@ function openHallOfFameModal(filterMode = 'ALL') {
       const isNft = std.includes('721') || std.includes('NFT');
       const cleanName = (g.name || '').replace(/\([^)]*\)/g, '').trim();
       const slug = cleanName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-      const elementUrl = (g.item && g.item.market_url) || (slug ? `https://element.market/collections/${slug}` : `https://element.market/collections/${g.contract}`);
-      const dexScreenerUrl = (g.item && g.item.pair_url && g.item.pair_url.includes('dexscreener.com'))
+      const elementUrl = (g.item && safeUrl(g.item.market_url)) || (slug ? `https://element.market/collections/${slug}` : `https://element.market/collections/${g.contract}`);
+      const dexScreenerUrl = (g.item && isDexScreenerUrl(g.item.pair_url))
         ? g.item.pair_url
         : `https://dexscreener.com/bsc/${g.contract}`;
       const pancakeUrl = `https://pancakeswap.finance/swap?outputCurrency=${g.contract}`;
@@ -9565,7 +9591,7 @@ function openBinanceQrModal() {
           </div>
           <div style="display: flex; gap: 8px;">
             <input type="text" id="binanceDappUrlInput" readonly value="${currentOrigin}" style="flex: 1; background: #03080c; border: 1px solid var(--border-color); color: var(--color-cyan); padding: 8px 10px; border-radius: 4px; font-family: monospace; font-size: 12px;" />
-            <button class="wallet-switch-submit" onclick="navigator.clipboard.writeText('${currentOrigin}'); this.textContent='✓ Copied!'; setTimeout(()=>this.textContent='Copy', 1500);" style="padding: 0 16px;">Copy</button>
+            <button class="wallet-switch-submit" onclick="navigator.clipboard.writeText(${jsAttr(currentOrigin)}); this.textContent='✓ Copied!'; setTimeout(()=>this.textContent='Copy', 1500);" style="padding: 0 16px;">Copy</button>
           </div>
           <div style="font-size: 11px; color: var(--color-green); margin-top: 6px;">
             🟢 Inside Discover, your .ai Agentic Wallet is automatically injected with 1-Click Mint authorization!
@@ -9644,7 +9670,7 @@ function openSyncModal() {
 
       <div class="sync-url-box">
         <input type="text" id="syncShareInput" readonly value="${syncUrl}" />
-        <button class="copy-btn" onclick="navigator.clipboard.writeText('${syncUrl}'); this.textContent='Copied!'; setTimeout(()=>this.textContent='Copy', 1500)">Copy</button>
+        <button class="copy-btn" onclick="navigator.clipboard.writeText(${jsAttr(syncUrl)}); this.textContent='Copied!'; setTimeout(()=>this.textContent='Copy', 1500)">Copy</button>
       </div>
 
       <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 14px; font-size: 11px; padding: 8px 12px; background: rgba(0, 255, 136, 0.06); border: 1px solid rgba(0, 255, 136, 0.2); border-radius: 4px;">
@@ -11477,6 +11503,10 @@ if (typeof module !== 'undefined' && module.exports) {
     modalFeature = loadFeatureIntoAppScope('modal');
   }
   module.exports = {
+    escapeHtml,
+    jsAttr,
+    safeUrl,
+    isDexScreenerUrl,
     readDropAlertPref,
     writeDropAlertPref,
     getDropAlertPermission,
