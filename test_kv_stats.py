@@ -84,14 +84,14 @@ def test_before_the_migration_reads_and_writes_use_the_old_row(tmp_path, monkeyp
     assert m.get_agent_id_stats(max_age_sec=0.0)["total_created_wallets"] == 111     # fallback read
     m.save_agent_id_stats(STATS, force_cloud=True)
     assert fake.legacy_row["favorites"][0]["total_created_wallets"] == 263788       # fallback write: the counter stays alive
-    assert m._kv_stats_off is True
+    assert m._kv_stats_is_off() is True
 
 
 def test_a_passing_server_error_does_not_park_the_counter_on_the_old_row(tmp_path, monkeypatch):
     fake = Fake(kv_status=503)
     m = mgr(tmp_path, monkeypatch, fake)
     m.get_agent_id_stats(max_age_sec=0.0)
-    assert not getattr(m, "_kv_stats_off", False)
+    assert not m._kv_stats_is_off()
 
 
 def test_sqlite_keeps_the_counter_in_kv_stats(tmp_path, monkeypatch):
@@ -106,3 +106,14 @@ def test_sqlite_keeps_the_counter_in_kv_stats(tmp_path, monkeypatch):
     import sqlite3
     rows = sqlite3.connect(str(tmp_path / "s.db")).execute("SELECT key FROM kv_stats").fetchall()
     assert rows == [("agent_id_stats",)]
+
+
+def test_the_table_is_picked_up_after_the_migration_without_a_restart(tmp_path, monkeypatch):
+    fake = Fake(kv_exists=False)
+    m = mgr(tmp_path, monkeypatch, fake)
+    m.save_agent_id_stats(STATS, force_cloud=True)
+    assert m._kv_stats_is_off() and "agent_id_stats" not in fake.kv
+    fake.kv_exists = True                                            # the migration was run
+    m._kv_stats_off_until = 0.0                                      # ... and the retry window has passed
+    m.save_agent_id_stats(dict(STATS, total_created_wallets=263999), force_cloud=True)
+    assert fake.kv["agent_id_stats"]["total_created_wallets"] == 263999 and not m._kv_stats_is_off()
