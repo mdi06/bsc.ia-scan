@@ -1,4 +1,5 @@
 import threading
+import time
 
 import pytest
 from fastapi.testclient import TestClient
@@ -17,9 +18,8 @@ def fav_db(tmp_path, monkeypatch):
     """A throwaway SQLite-backed DatabaseManager, installed as api.db for the test."""
     for var in ("SUPABASE_URL", "SUPABASE_KEY", "SUPABASE_SERVICE_ROLE_KEY", "SUPABASE_ANON_KEY"):
         monkeypatch.delenv(var, raising=False)
-    # Don't seed from the repo's real history.json / user_favorites.json.
+    # Don't seed from the repo's real history.json.
     monkeypatch.setattr(db_module, "HISTORY_FILE", str(tmp_path / "no_history.json"))
-    monkeypatch.setattr(db_module, "FAVORITES_FILE", str(tmp_path / "no_favorites.json"))
     manager = db_module.DatabaseManager(db_path=str(tmp_path / "fav.db"))
     monkeypatch.setattr(api, "db", manager)
     return manager
@@ -74,10 +74,11 @@ def test_http_favorites_endpoints(client):
     assert post.json()["success"] is True
     assert len(post.json()["favorites"]) == 2
 
-    # Read back
+    # Read back: updated_at is the server's clock, not the client's `timestamp`
     got = client.get("/api/favorites", params={"wallet": WALLET}).json()
     assert got["favorites"] == [FAV_A, FAV_B]
-    assert got["updated_at"] == 1730500000
+    assert got["updated_at"] != 1730500000
+    assert abs(got["updated_at"] - time.time()) < 60
 
 
 def test_http_favorites_rejects_bad_input(client):
@@ -116,3 +117,48 @@ def test_cross_device_sync_scenario(client):
     final = client.get("/api/favorites", params={"wallet": wallet}).json()
     assert len(final["favorites"]) == 3
     assert FAV_C in final["favorites"]
+
+
+@pytest.fixture(autouse=True)
+def _fresh_write_counters():
+    api._favorites_writes.clear()
+    yield
+    api._favorites_writes.clear()
+
+
+def test_client_timestamp_cannot_stamp_a_list(client):
+    far_future = 4102444800                       # 2100-01-01
+    post = client.post("/api/favorites", json={"wallet": WALLET, "favorites": [FAV_A], "timestamp": far_future})
+    assert post.status_code == 200
+    assert abs(post.json()["updated_at"] - time.time()) < 60
+    assert abs(client.get("/api/favorites", params={"wallet": WALLET}).json()["updated_at"] - time.time()) < 60
+
+
+def test_unchanged_list_is_not_written_again(client, fav_db, monkeypatch):
+    saves = []
+    real_save = fav_db.save_favorites
+    monkeypatch.setattr(fav_db, "save_favorites", lambda *a, **k: saves.append(a) or real_save(*a, **k))
+    first = client.post("/api/favorites", json={"wallet": WALLET, "favorites": [FAV_A, FAV_B]}).json()
+    again = client.post("/api/favorites", json={"wallet": WALLET, "favorites": [FAV_A, FAV_B]}).json()
+    assert len(saves) == 1, "the second, identical push is answered without a database write"
+    assert again["favorites"] == [FAV_A, FAV_B] and again["updated_at"] == first["updated_at"]
+    client.post("/api/favorites", json={"wallet": WALLET, "favorites": [FAV_A]})       # a removal still goes through
+    assert len(saves) == 2
+    assert client.get("/api/favorites", params={"wallet": WALLET}).json()["favorites"] == [FAV_A]
+
+
+def test_writes_to_one_wallet_are_limited_per_minute(client, monkeypatch):
+    monkeypatch.setattr(api, "RATE_LIMIT_MAX", 10 ** 9)                      # only the per-wallet limit is under test
+    api._rate_counts.clear()
+    for i in range(api.FAVORITES_WRITES_PER_MIN):
+        assert client.post("/api/favorites", json={"wallet": WALLET, "favorites": [f"0x{i:040x}"]}).status_code == 200
+    blocked = client.post("/api/favorites", json={"wallet": WALLET, "favorites": [FAV_A]})
+    assert blocked.status_code == 429
+    assert 1 <= int(blocked.headers["Retry-After"]) <= 61
+    other = "0x6827d403df6b07ba405a6cfe0305dbd0fc727f55"
+    assert client.post("/api/favorites", json={"wallet": other, "favorites": [FAV_A]}).status_code == 200
+    assert client.get("/api/favorites", params={"wallet": WALLET}).status_code == 200      # reads are not limited here
+    # the limit is per wallet per minute: the next minute starts a new allowance
+    assert api._favorites_write_wait(WALLET, time.time()) > 0
+    assert api._favorites_write_wait(WALLET, time.time() + 61) == 0
+    api._rate_counts.clear()

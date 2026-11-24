@@ -39,7 +39,6 @@ def manager(tmp_path, monkeypatch):
     for var in ("SUPABASE_URL", "SUPABASE_KEY", "SUPABASE_SERVICE_ROLE_KEY", "SUPABASE_ANON_KEY"):
         monkeypatch.delenv(var, raising=False)
     monkeypatch.setattr(db_module, "HISTORY_FILE", str(tmp_path / "no_history.json"))
-    monkeypatch.setattr(db_module, "FAVORITES_FILE", str(tmp_path / "no_favorites.json"))
     m = db_module.DatabaseManager(db_path=str(tmp_path / "t.db"))
     monkeypatch.setattr(api, "db", m)
     monkeypatch.setattr(api, "_current_snapshot", None)

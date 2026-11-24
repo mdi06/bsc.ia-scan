@@ -27,7 +27,6 @@ except ImportError:
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_DB_PATH = os.path.join(BASE_DIR, "data", "agent_monitor.db")
 HISTORY_FILE = os.path.join(BASE_DIR, "history.json")
-FAVORITES_FILE = os.path.join(BASE_DIR, "user_favorites.json")
 
 
 def scrub_non_finite(obj):
@@ -249,7 +248,7 @@ class DatabaseManager:
     # Seeding & Migration
     # -------------------------------------------------------------------------
     def seed_from_local_json(self):
-        """Seeds SQLite / Supabase from history.json and user_favorites.json if DB is empty."""
+        """Seeds SQLite / Supabase from history.json if the DB is empty."""
         count = self.get_project_count()
         if count == 0 and os.path.exists(HISTORY_FILE):
             try:
@@ -260,18 +259,6 @@ class DatabaseManager:
                     self.upsert_projects(data)
             except Exception as e:
                 print(f"[⚠️ Seed Warning] Failed to seed from {HISTORY_FILE}: {e}", flush=True)
-
-        # Seed favorites if present
-        if os.path.exists(FAVORITES_FILE):
-            try:
-                with open(FAVORITES_FILE, "r", encoding="utf-8") as f:
-                    fav_data = json.load(f)
-                if isinstance(fav_data, dict):
-                    for wallet, entry in fav_data.items():
-                        if isinstance(entry, dict) and "favorites" in entry:
-                            self.save_favorites(wallet, entry["favorites"], entry.get("updated_at"))
-            except Exception as e:
-                print(f"[⚠️ Seed Warning] Failed to seed favorites: {e}", flush=True)
 
     # -------------------------------------------------------------------------
     # Projects CRUD Operations

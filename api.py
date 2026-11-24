@@ -111,16 +111,24 @@ _rate_window_id = 0
 _rate_counts: Dict[str, int] = {}
 
 
+# Which address is "the client" depends on what stands in front of the API, and a header the client can set itself
+# must never decide it. On Railway the edge proxy APPENDS the address it saw to X-Forwarded-For, so the last entry is
+# trustworthy and every earlier one is whatever the client (or a client-side proxy) wrote. RATE_LIMIT_PROXY_HOPS is
+# how many trusted proxies append to the header (1 for Railway's edge alone). CF-Connecting-IP is only believed when
+# Cloudflare really is in front (set RATE_LIMIT_TRUST_CF=1): behind Railway any client can send that header itself.
+RATE_LIMIT_PROXY_HOPS = int(os.environ.get("RATE_LIMIT_PROXY_HOPS", "1"))
+RATE_LIMIT_TRUST_CF = os.environ.get("RATE_LIMIT_TRUST_CF", "0").strip().lower() in ("1", "true", "yes", "on")
+
+
 def _client_ip(request: Request) -> str:
-    # Cloudflare (in front of Render) overwrites CF-Connecting-IP, so clients cannot spoof it.
-    # X-Forwarded-For is the last resort (its first entry is client-controlled).
-    ip = request.headers.get("cf-connecting-ip")
-    if not ip:
-        xff = request.headers.get("x-forwarded-for", "")
-        ip = xff.split(",")[0].strip() if xff else ""
-    if not ip:
-        ip = request.client.host if request.client else "unknown"
-    return ip
+    if RATE_LIMIT_TRUST_CF:
+        cf = request.headers.get("cf-connecting-ip", "").strip()
+        if cf:
+            return cf
+    entries = [e.strip() for e in request.headers.get("x-forwarded-for", "").split(",") if e.strip()]
+    if RATE_LIMIT_PROXY_HOPS > 0 and len(entries) >= RATE_LIMIT_PROXY_HOPS:
+        return entries[-RATE_LIMIT_PROXY_HOPS]
+    return request.client.host if request.client else "unknown"
 
 
 @app.middleware("http")
@@ -189,6 +197,26 @@ async def global_exception_handler(request: Request, exc: Exception):
 
 ADDRESS_RE = re.compile(r"^0x[0-9a-fA-F]{40}$")
 MAX_FAVORITES = 500
+
+# POSTs accepted per wallet per minute. The browser sends one per change after a 600 ms pause, so a person never gets
+# near this; it stops one caller hammering a single wallet's row.
+FAVORITES_WRITES_PER_MIN = 20
+_FAVORITES_MAX_TRACKED_WALLETS = 50000
+_favorites_writes: Dict[str, list] = {}      # wallet -> [window id, writes in that window]
+
+
+def _favorites_write_wait(wallet: str, now: float) -> int:
+    """0 if this wallet may be written now (and counts the attempt), else the seconds until its minute is over."""
+    window_id = int(now // 60)
+    entry = _favorites_writes.get(wallet)
+    if entry is None or entry[0] != window_id:
+        if entry is None and len(_favorites_writes) >= _FAVORITES_MAX_TRACKED_WALLETS:
+            _favorites_writes.clear()        # hard cap against key-flooding; fails open for this window
+        entry = _favorites_writes[wallet] = [window_id, 0]
+    entry[1] += 1
+    if entry[1] > FAVORITES_WRITES_PER_MIN:
+        return max(1, int((window_id + 1) * 60 - now) + 1)
+    return 0
 
 
 @app.on_event("startup")
@@ -1656,8 +1684,21 @@ async def post_favorites(request: Request):
         raise HTTPException(status_code=413, detail=f"Too many favorites (max {MAX_FAVORITES})")
     clean_favs = [c.lower() for c in raw_favs if isinstance(c, str) and ADDRESS_RE.fullmatch(c)]
     clean_favs = list(dict.fromkeys(clean_favs))
-    ts = int(incoming.get("timestamp") or time.time())
 
+    # Anyone can POST any wallet's address (a list is public data, not proven to belong to the caller), so a write
+    # is limited per wallet as well as per IP, and the client's `timestamp` is ignored: it let a caller stamp a list
+    # with any time. updated_at is the server's clock.
+    now = time.time()
+    wait = _favorites_write_wait(wallet, now)
+    if wait:
+        return SafeJSONResponse(status_code=429, headers={"Retry-After": str(wait)},
+                                content={"success": False, "error": "rate_limited"})
+
+    existing = db.get_favorites(wallet)
+    if existing.get("favorites") == clean_favs:
+        # nothing changed (the browser pushes after every pull): no database write
+        return {"success": True, "wallet": wallet, "favorites": clean_favs, "updated_at": existing.get("updated_at", 0)}
+    ts = int(now)
     db.save_favorites(wallet, clean_favs, ts)
 
     return {

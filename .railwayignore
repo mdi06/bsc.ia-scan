@@ -1,0 +1,56 @@
+# What `railway up` leaves out of the upload (gitignore syntax; .gitignore applies too). The Railway service runs
+# only the API (`python server.py`, RUN_WORKER=0): Python code, requirements.txt, the seeded_*.json files api.py
+# serves and agent_id_stats.json. The frontend is on Vercel (the hosted API only redirects to it), the worker is on
+# the GCP VM. Anything uploaded is a file that could be exposed by a future mistake, so upload nothing extra.
+# `python3 -m pytest` is not run on Railway; CI runs it before this deploys.
+#
+# Kept on purpose: package.json / package-lock.json (they decide how Nixpacks detects the build; not worth touching).
+
+# tests, tooling, CI, deploy descriptions
+test_*.py
+test_*.js
+tests/
+scripts/
+.github/
+deploy/
+render.yaml
+.vercelignore
+vercel.json
+start_local.sh
+supabase_migrations/
+supabase_schema.sql
+cleanup_*.py
+migrate_supabase.py
+
+# the frontend (Vercel builds and serves it)
+index.html
+app.js
+style.css
+features/
+feed_snapshot.json
+icon.svg
+google*.html
+template-*.html
+dist/
+node_modules/
+
+# data the API process never reads: history.json is only a cold-start fallback when Supabase is unreachable
+# (db.py), smart_wallets.json is the worker's list, user_favorites.json is test data
+history.json
+smart_wallets.json
+user_favorites.json
+
+# notes, prompts, reports, media
+*.md
+*.mp4
+*.png
+*.jpg
+video_assets/
+out/
+
+# local state
+data/
+scratch/
+.claude/
+.vercel/
+.env*

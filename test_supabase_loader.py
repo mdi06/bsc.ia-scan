@@ -95,7 +95,6 @@ class FakeSupabase:
 @pytest.fixture
 def make(tmp_path, monkeypatch):
     monkeypatch.setattr(db_module, "HISTORY_FILE", str(tmp_path / "history.json"))
-    monkeypatch.setattr(db_module, "FAVORITES_FILE", str(tmp_path / "fav.json"))
     monkeypatch.setattr(DatabaseManager, "seed_from_local_json", lambda self: None)
 
     def build(n=2500, cap=1000, history=None):
