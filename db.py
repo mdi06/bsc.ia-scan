@@ -99,6 +99,8 @@ class DatabaseManager:
         self._cache_initialized = False
         self._last_cache_time = 0.0
         self._last_synced_updated_at = 0
+        # wall-clock time the read that set _last_synced_updated_at started (0: unknown), see SUPABASE_SETTLE_SEC
+        self._sync_read_at = 0.0
         self._cache_ttl = 60.0  # seconds
         self._cached_json_bytes: Optional[bytes] = None
         self._cached_json_etag: Optional[str] = None
@@ -309,6 +311,11 @@ class DatabaseManager:
     SUPABASE_READ_TIMEOUT = 45.0      # the shared client's 10s is right for small calls, not for a multi-MB page
     SUPABASE_PAGE_ATTEMPTS = 3
     SUPABASE_FAILED_LOAD_COOLDOWN = 20.0   # after a failed full load, serve what we have this long before trying again
+    # A flush stamps all its rows with one updated_at and writes them in a few POSTs over seconds. Once a read started
+    # this long after that stamp, every row carrying it was already committed and seen, so the next delta can ask
+    # for strictly newer rows (gt) instead of re-downloading the whole last batch (gte) on every later write.
+    # Covers the flush duration plus clock difference between the writing and the reading host.
+    SUPABASE_SETTLE_SEC = 30.0
     _page_retry_sleep = staticmethod(time.sleep)
 
     def _get_page(self, client, path: str, headers: Dict[str, str]):
@@ -452,11 +459,16 @@ class DatabaseManager:
                         # The delta skips static_data (bulky, rarely changed): a row whose static hash differs from
                         # the cached one gets it in a second, targeted request (see _fetch_static_data).
                         full_load = not self._cache_initialized or not self._projects_cache or force_refresh
+                        read_started = time.time()
                         if full_load:
                             query_path = "/rest/v1/projects?select=*&order=contract.asc"
                         else:
+                            # gte re-reads the rows stamped with the sync point, in case some were still being written;
+                            # once that stamp has settled (see SUPABASE_SETTLE_SEC) only newer rows are asked for
+                            settled = self._sync_read_at - self._last_synced_updated_at >= self.SUPABASE_SETTLE_SEC
+                            op = "gt" if settled else "gte"
                             # oldest first: if a later page failed, nothing half-applied moves the sync point past rows we missed
-                            query_path = (f"/rest/v1/projects?updated_at=gte.{self._last_synced_updated_at}"
+                            query_path = (f"/rest/v1/projects?updated_at={op}.{self._last_synced_updated_at}"
                                           f"&select=contract,data,updated_at&order=updated_at.asc,contract.asc")
 
                         staged: Dict[str, Dict[str, Any]] = {}
@@ -512,6 +524,7 @@ class DatabaseManager:
                                     if c not in self._pending_remote:
                                         self._projects_cache[c] = rec
                                 self._last_synced_updated_at = max_ts
+                                self._sync_read_at = read_started
                                 self._cache_initialized = True
                                 self._load_failed_until = 0.0
                                 self._cache_dirty = True
@@ -857,13 +870,16 @@ class DatabaseManager:
             if not (HAS_HTTPX and client):
                 failed.extend(recs)
                 continue
+            # stamped as each chunk goes out, not once per flush: a reader then knows every row carrying a stamp was
+            # committed within one request's timeout of it (see SUPABASE_SETTLE_SEC), however long the whole flush took
+            chunk_ts = max(now_ts, int(time.time()))
             try:
                 if self._static_split:
                     with_static, plain, digests = [], [], {}
                     for p in recs:
                         c = p["contract"].lower()
                         data, static, digest = self._split_static(p)
-                        row = self._supabase_base_row(p, now_ts)
+                        row = self._supabase_base_row(p, chunk_ts)
                         row["data"] = data
                         if self._static_fp.get(c) != digest:
                             row["static_data"] = static
@@ -894,7 +910,7 @@ class DatabaseManager:
                         continue
                 rows = []
                 for p in recs:
-                    row = self._supabase_base_row(p, now_ts)
+                    row = self._supabase_base_row(p, chunk_ts)
                     row["data"] = p
                     rows.append(row)
                 resp = self._supabase_post(client, rows)

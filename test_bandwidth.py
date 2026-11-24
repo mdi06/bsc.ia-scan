@@ -54,9 +54,11 @@ class FakePostgrest:
         if "select=updated_at&order=updated_at.desc&limit=1" in path:
             rows.sort(key=lambda r: r.get("updated_at", 0), reverse=True)
             return Resp(200, [{"updated_at": r.get("updated_at", 0)} for r in rows[:1]])
-        m = re.search(r"updated_at=gte\.(\d+)", path)
+        m = re.search(r"updated_at=(gte?)\.(\d+)", path)
         if m:
-            rows = [r for r in rows if r.get("updated_at", 0) >= int(m.group(1))]
+            thr = int(m.group(2))
+            keep = (lambda u: u >= thr) if m.group(1) == "gte" else (lambda u: u > thr)
+            rows = [r for r in rows if keep(r.get("updated_at", 0))]
         m = re.search(r"contract=in\.\(([^)]*)\)", path)
         if m:
             wanted = {c.strip('"') for c in m.group(1).split(",")}
@@ -233,6 +235,80 @@ def test_delta_read_keeps_a_queued_local_update(tmp_path, monkeypatch):
     got = {p["contract"]: p for p in mgr.get_all_projects()}
     assert got[A]["token_price_usd"] == 0.33
 
+
+
+# --------------------------------------------------------------------------------------------- delta re-reads
+
+def _rows_fetched(fake, start):
+    """Project rows the reader downloaded through delta / full selects since fake.gets[start]."""
+    return sum(n for _, n in fake.fetched[start:])
+
+
+def _counting(fake):
+    fake.fetched = []
+    orig = fake.get
+
+    def get(path, headers=None, timeout=None):
+        resp = orig(path, headers=headers, timeout=timeout)
+        if "limit=1" not in path and "static_data" not in path:
+            fake.fetched.append((path, len(resp.json() or [])))
+        return resp
+    fake.get = get
+    return fake
+
+
+def test_settled_batch_is_not_downloaded_again_on_the_next_write(tmp_path, monkeypatch):
+    """A flush's rows share their stamp; once a read started SUPABASE_SETTLE_SEC after it, later deltas ask for
+    strictly newer rows instead of re-reading that whole batch every time something else is written."""
+    fake = _counting(FakePostgrest())
+    now = int(time.time())
+    batch_ts = now - 120                              # a flush two minutes ago, 40 rows
+    for i in range(40):
+        c = "0x" + f"{i:040x}"
+        fake.rows[c] = {"contract": c, "data": {"contract": c, "block": i}, "updated_at": batch_ts}
+    reader = make_mgr(tmp_path, monkeypatch, fake)
+    reader._cache_initialized = False
+    assert len(reader.get_all_projects(force_refresh=True)) == 40
+    assert reader._last_synced_updated_at == batch_ts
+
+    # a new drop is written: the delta brings only that row, not the 40 settled ones again
+    fake.rows[A] = {"contract": A, "data": rec(), "updated_at": now}
+    start = len(fake.fetched)
+    reader._last_cache_time = 0
+    got = {p["contract"] for p in reader.get_all_projects()}
+    assert A in got and len(got) == 41
+    assert "updated_at=gt." in fake.fetched[-1][0]
+    assert _rows_fetched(fake, start) == 1
+
+
+def test_recent_stamp_is_read_again_in_case_rows_were_still_being_written(tmp_path, monkeypatch):
+    """A read that started right after a stamp may have missed rows of the same flush still in flight: the next
+    delta keeps asking for that stamp (gte) and picks them up."""
+    fake = _counting(FakePostgrest())
+    now = int(time.time())
+    fake.rows[A] = {"contract": A, "data": rec(), "updated_at": now}
+    reader = make_mgr(tmp_path, monkeypatch, fake)
+    reader._cache_initialized = False
+    reader.get_all_projects(force_refresh=True)
+
+    fake.rows[B] = {"contract": B, "data": rec(contract=B), "updated_at": now}   # same flush, committed later
+    C = "0x" + "c" * 40
+    fake.rows[C] = {"contract": C, "data": rec(contract=C), "updated_at": now + 1}  # the next write shows up
+    reader._last_cache_time = 0
+    got = {p["contract"] for p in reader.get_all_projects()}
+    assert "updated_at=gte." in fake.fetched[-1][0]
+    assert got == {A, B, C}
+
+
+def test_chunks_of_one_flush_carry_their_own_send_time(tmp_path, monkeypatch):
+    fake = FakePostgrest()
+    mgr = make_mgr(tmp_path, monkeypatch, fake, interval=0)
+    mgr.SUPABASE_CHUNK_SIZE = 1
+    tick = iter(range(10**6))
+    monkeypatch.setattr(db_module.time, "time", lambda: 1000.0 + 5 * next(tick))   # a slow flush: 5 s per call
+    mgr.upsert_projects([rec(), rec(contract=B)])
+    stamps = [rows[0]["updated_at"] for rows in fake.posts]
+    assert stamps[0] < stamps[-1]
 
 def test_bytes_sent_for_an_hour_of_market_sweeps(tmp_path, monkeypatch):
     """30 two-minute sweeps of one live token: before, 30 full records; now one record per 10 minutes, without
