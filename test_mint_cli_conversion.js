@@ -111,7 +111,7 @@ function onclickJs(html, marker) {
   assert.ok(html.includes("copyModalSniperCli(this, 'sniper_section')"), 'the Sniper section copy button is the same helper');
   assert.ok(html.indexOf('mint-cli-row') < html.indexOf('data-modal-section="sniper_cli"'),
     'the Mint-section copy sits above the Sniper section (no scrolling to it)');
-  assert.ok(html.includes("trackCliCopy('exit_cli', 'AGT', '" + C + "', 'pancakeswap_exit')"), 'the exit copy tracks its source');
+  assert.ok(html.includes("trackCliCopy('exit_cli', &quot;AGT&quot;, '" + C + "', 'pancakeswap_exit')"), 'the exit copy tracks its source');
   const mintJs = onclickJs(html, 'id="modalMintBtn"');
   assert.ok(mintJs.startsWith("trackAnalytics('mint_button_clicked', mintClickProps(\"AGT\", false)); executeWeb3Mint('" + C + "', '" + CALLDATA + "', '" + VALUE_WEI + "', \"Agent's Drop\")"),
     'the Mint button keeps its call and tracks through mintClickProps');

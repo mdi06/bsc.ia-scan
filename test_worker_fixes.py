@@ -79,7 +79,6 @@ def test_sqlite_schema_is_created_on_demand_in_supabase_mode(tmp_path, monkeypat
     monkeypatch.setenv("SUPABASE_URL", "https://example.invalid")
     monkeypatch.setenv("SUPABASE_KEY", "k")
     monkeypatch.setattr(db_module, "HISTORY_FILE", str(tmp_path / "none.json"))
-    monkeypatch.setattr(db_module, "FAVORITES_FILE", str(tmp_path / "none2.json"))
     mgr = db_module.DatabaseManager(db_path=str(tmp_path / "s.db"))
     assert mgr.mode == "supabase"
     mgr.save_agent_id_stats({"total_created_wallets": 5, "last_block": 1}, force_cloud=False)  # used to raise "no such table"

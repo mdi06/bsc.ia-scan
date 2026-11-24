@@ -258,10 +258,13 @@ def load_agent_id_stats() -> Dict[str, Any]:
                 _log.debug("could not read agent-id stats from %s: %s", p, exc)
     if best is not None:
         return best
+    # The starting point the worker counts forward from, not a count taken now: `is_default` lets the API tell, and
+    # last_updated is 0 so it never passes for fresh.
     return {
+        "is_default": True,
         "total_created_wallets": DEFAULT_AGENT_WALLET_COUNT,
         "last_block": 132757997,
-        "last_updated": time.time(),
+        "last_updated": 0,
         "source": "SPACE ID / Binance Agent ID Registry (0x60B9262456dE011F7d15a54CdD8c48bAaa8B022F)"
     }
 
@@ -503,6 +506,16 @@ def decode_string(hex_res: str) -> str:
         return ""
 
 
+
+_UNSAFE_TEXT_RE = re.compile(r"[<>`\x00-\x1f\x7f]")
+
+
+def clean_chain_text(text: str, max_len: int = 80) -> str:
+    """A token name / symbol read from a contract, made safe to display: whoever deploys a contract chooses its
+    name(), so markup characters (< > `) and control characters are dropped and the length is capped. The page
+    escapes these too; this keeps them out of the database and every client in the first place."""
+    return _UNSAFE_TEXT_RE.sub("", text or "").strip()[:max_len]
+
 _SMART_WALLETS_CACHE: Optional[Dict[str, str]] = None
 
 
@@ -642,8 +655,8 @@ def classify_asset_type(rpc: BscRpcClient, addr: str) -> Dict[str, Any]:
             d_val = int(underlying_dec, 16)
             name_res = rpc.call_contract(underlying, "0x06fdde03")
             sym_res = rpc.call_contract(underlying, "0x95d89b41")
-            name = decode_string(name_res) if name_res else "Token"
-            sym = decode_string(sym_res) if sym_res else ""
+            name = clean_chain_text(decode_string(name_res)) if name_res else "Token"
+            sym = clean_chain_text(decode_string(sym_res)) if sym_res else ""
             return {
                 "category": "TOKEN_FAIR_MINT",
                 "standard": f"Fair-Mint Contract (Dispenses ${sym or name} Token)",
@@ -835,11 +848,11 @@ def analyze_contract(rpc: BscRpcClient, contract_addr: str, wallet_addr: str) ->
     # Retrieve Name & Symbol
     name_res = rpc.call_contract(contract_addr, keccak_selector("name()"))
     if name_res:
-        info["name"] = decode_string(name_res)
+        info["name"] = clean_chain_text(decode_string(name_res))
 
     symbol_res = rpc.call_contract(contract_addr, keccak_selector("symbol()"))
     if symbol_res:
-        info["symbol"] = decode_string(symbol_res)
+        info["symbol"] = clean_chain_text(decode_string(symbol_res))
 
     # If it's a fair-mint contract without direct name, use the underlying token info
     if classification["category"] == "TOKEN_FAIR_MINT":
@@ -1843,6 +1856,13 @@ def bnb_price_as_of() -> Optional[float]:
     return _bnb_price_state.get("ok_at") or None
 
 
+def live_bnb_price() -> Optional[float]:
+    """BNB/USD while the last successful lookup is recent, else None. For USD figures that get stored or served: the
+    built-in BNB_PRICE_FALLBACK_USD is only a placeholder (it was $705 when BNB was $553), and a profit / ATH built on it
+    is kept as a running maximum."""
+    return cached_bnb_price() if bnb_price_is_live() else None
+
+
 def bnb_price_is_live() -> bool:
     """True while the last *successful* on-chain lookup is recent (within BNB_PRICE_STALE_AFTER_TTLS TTLs).
     After a longer RPC outage the cached price is reported as not live."""
@@ -2246,7 +2266,7 @@ def evaluate_sniper_ready(item: Dict[str, Any]) -> Dict[str, Any]:
     is_nft = "NFT" in std or "721" in std or "1155" in std or bool(cls.get("is_nft"))
     is_token = "BEP-20" in std or "Fair-Mint" in std or cls.get("category") in ("TOKEN", "TOKEN_FAIR_MINT")
 
-    ms = item.get("max_supply")
+    ms = filters.corrected_max_supply(item) or None      # a fair-mint dispenser's slot-count cap, in token units
     tm = item.get("total_minted") or 0
     lp = float(item.get("lp_usd", 0) or 0)
     has_ref = bool(item.get("has_refund") or (item.get("security") or {}).get("has_refund"))
@@ -2265,7 +2285,7 @@ def evaluate_sniper_ready(item: Dict[str, Any]) -> Dict[str, Any]:
 
     # 1. Progress calculation
     if is_token and not is_nft:
-        if ms and tm and ms == tm and not item.get("sold_sel") and not item.get("cap"):
+        if ms and tm and ms == tm and not item.get("sold_sel") and not item.get("cap") and not filters.is_mint_count_cap(item):
             prog = 0.0
         else:
             prog = (tm / ms) if (ms and ms > 0) else 0.0
@@ -2567,7 +2587,9 @@ def update_post_mint_profit_metrics(item: Dict[str, Any], bnb_price: Optional[fl
     Filters out pegged crypto assets, synthetic stocks, known scams and system infra.
     """
     if bnb_price is None:
-        bnb_price = cached_bnb_price()
+        bnb_price = live_bnb_price()
+        if bnb_price is None:
+            return _no_profit()       # no live BNB/USD: no profit rather than one built on a placeholder price
     c = (item.get("contract") or "").lower()
     if filters.is_excluded_asset(item) or is_system_infra(item):
         return _no_profit()
@@ -2973,7 +2995,7 @@ def analyze_market_interest(
             target_token = "0x" + t_res[-40:].lower()
             sym_res = rpc.call_contract(target_token, keccak_selector("symbol()"))
             if sym_res:
-                token_sym = decode_string(sym_res)
+                token_sym = clean_chain_text(decode_string(sym_res))
         else:
             # Check marsToken()
             mars_res = rpc.call_contract(contract_addr, "0x7419f946")
@@ -2981,7 +3003,7 @@ def analyze_market_interest(
                 target_token = "0x" + mars_res[-40:].lower()
                 sym_res = rpc.call_contract(target_token, keccak_selector("symbol()"))
                 if sym_res:
-                    token_sym = decode_string(sym_res)
+                    token_sym = clean_chain_text(decode_string(sym_res))
             else:
                 # Fallback: test contract_addr directly
                 target_token = contract_addr
@@ -3062,7 +3084,9 @@ def analyze_market_interest(
                     vol_wei = int(m_data.get("vol24") or m_data.get("volAll") or 0)
                     if vol_wei > 0:
                         stats["volume_bnb"] = round(vol_wei / 1e18, 2)
-                        stats["volume_24h"] = (vol_wei / 1e18) * cached_bnb_price()
+                        bnb_now = live_bnb_price()
+                        if bnb_now:                       # in USD only with a live BNB/USD; volume_bnb is kept either way
+                            stats["volume_24h"] = (vol_wei / 1e18) * bnb_now
             except Exception as exc:
                 _log.debug("oathbots market.json fetch failed: %s", exc)
         if not stats.get("volume_bnb") and details.get("volume_bnb"):
@@ -3077,6 +3101,8 @@ def analyze_market_interest(
     if target_token:
         try:
             bnb_price = get_bnb_price_usd(rpc)
+            if not bnb_price_is_live():
+                bnb_price = 0.0       # the placeholder is not a price: BNB-quoted pools are skipped, BNB figures left unset
             best_lp_usd = mk.get("lp_usd", 0.0)
             best_lp_wbnb = mk.get("lp_wbnb", 0.0)
             best_pair_addr = None

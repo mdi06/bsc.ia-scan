@@ -97,24 +97,67 @@ def test_startup_does_not_purge(monkeypatch):
 def test_rate_limit_returns_429_with_retry_after(monkeypatch):
     monkeypatch.setattr(api, "RATE_LIMIT_MAX", 3)
     api._rate_counts.clear()
-    h = {"CF-Connecting-IP": "203.0.113.9"}
+    h = {"X-Forwarded-For": "203.0.113.9"}      # what Railway's edge sends: the address it saw
     for _ in range(3):
         assert client.get("/api/favorites?wallet=bad", headers=h).status_code == 400
     r = client.get("/api/favorites?wallet=bad", headers=h)
     assert r.status_code == 429
     assert int(r.headers["Retry-After"]) >= 1
     # other clients and exempt health routes are unaffected
-    assert client.get("/api/favorites?wallet=bad", headers={"CF-Connecting-IP": "203.0.113.10"}).status_code == 400
+    assert client.get("/api/favorites?wallet=bad", headers={"X-Forwarded-For": "203.0.113.10"}).status_code == 400
     assert client.get("/healthz", headers=h).status_code == 200
     api._rate_counts.clear()
 
 
-def test_rate_limit_prefers_cf_connecting_ip_over_spoofable_xff(monkeypatch):
+def test_rate_limit_ignores_client_written_forwarded_entries(monkeypatch):
+    """The edge appends the real address LAST; a client can only write the entries before it."""
     monkeypatch.setattr(api, "RATE_LIMIT_MAX", 2)
     api._rate_counts.clear()
     for i in range(2):
-        h = {"CF-Connecting-IP": "203.0.113.50", "X-Forwarded-For": f"198.51.100.{i}"}
+        h = {"X-Forwarded-For": f"198.51.100.{i}, 203.0.113.50"}      # a fresh fake address on every request
         assert client.get("/api/favorites?wallet=bad", headers=h).status_code == 400
-    h = {"CF-Connecting-IP": "203.0.113.50", "X-Forwarded-For": "198.51.100.99"}
+    h = {"X-Forwarded-For": "198.51.100.99, 203.0.113.50"}
     assert client.get("/api/favorites?wallet=bad", headers=h).status_code == 429
     api._rate_counts.clear()
+
+
+def test_rate_limit_ignores_cf_connecting_ip_unless_cloudflare_is_in_front(monkeypatch):
+    monkeypatch.setattr(api, "RATE_LIMIT_MAX", 2)
+    api._rate_counts.clear()
+    for i in range(2):                 # a different forged CF header each time must not buy a fresh allowance
+        h = {"CF-Connecting-IP": f"198.51.100.{i}", "X-Forwarded-For": "203.0.113.60"}
+        assert client.get("/api/favorites?wallet=bad", headers=h).status_code == 400
+    h = {"CF-Connecting-IP": "198.51.100.77", "X-Forwarded-For": "203.0.113.60"}
+    assert client.get("/api/favorites?wallet=bad", headers=h).status_code == 429
+    api._rate_counts.clear()
+    monkeypatch.setattr(api, "RATE_LIMIT_TRUST_CF", True)
+    for i in range(2):
+        h = {"CF-Connecting-IP": "198.51.100.5", "X-Forwarded-For": f"203.0.113.{i}"}
+        assert client.get("/api/favorites?wallet=bad", headers=h).status_code == 400
+    assert client.get("/api/favorites?wallet=bad", headers={"CF-Connecting-IP": "198.51.100.5"}).status_code == 429
+    api._rate_counts.clear()
+
+
+def test_client_ip_falls_back_to_the_socket_address(monkeypatch):
+    class Req:
+        def __init__(self, headers, host="10.0.0.7"):
+            self.headers = headers
+            self.client = type("C", (), {"host": host})() if host else None
+    assert api._client_ip(Req({})) == "10.0.0.7"                              # no header: the socket peer
+    assert api._client_ip(Req({"x-forwarded-for": " , "})) == "10.0.0.7"      # empty entries
+    assert api._client_ip(Req({"x-forwarded-for": "1.1.1.1, 2.2.2.2"})) == "2.2.2.2"
+    assert api._client_ip(Req({}, host=None)) == "unknown"
+    monkeypatch.setattr(api, "RATE_LIMIT_PROXY_HOPS", 2)
+    assert api._client_ip(Req({"x-forwarded-for": "1.1.1.1, 2.2.2.2, 3.3.3.3"})) == "2.2.2.2"
+    assert api._client_ip(Req({"x-forwarded-for": "3.3.3.3"})) == "10.0.0.7"  # fewer entries than trusted hops
+
+
+def test_clean_chain_text_strips_markup_and_control_chars():
+    """Token names come from the contract deployer: markup and control characters never reach the database."""
+    import monitor
+    assert monitor.clean_chain_text("<img src=x onerror=alert(1)>Coin") == "img src=x onerror=alert(1)Coin"
+    assert monitor.clean_chain_text("Don't Panic") == "Don't Panic"          # real names with quotes are kept
+    assert monitor.clean_chain_text("黄仁勋人生") == "黄仁勋人生"
+    assert monitor.clean_chain_text("a\x00b\x1fc`d\x7f") == "abcd"
+    assert monitor.clean_chain_text("x" * 200) == "x" * 80
+    assert monitor.clean_chain_text("") == "" and monitor.clean_chain_text(None) == ""

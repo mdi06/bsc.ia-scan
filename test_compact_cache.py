@@ -135,7 +135,6 @@ def build_manager(tmp_path, monkeypatch, compact_on):
     for var in ("SUPABASE_URL", "SUPABASE_KEY", "SUPABASE_SERVICE_ROLE_KEY", "SUPABASE_ANON_KEY"):
         monkeypatch.delenv(var, raising=False)
     monkeypatch.setattr(db_module, "HISTORY_FILE", str(tmp_path / "no_history.json"))
-    monkeypatch.setattr(db_module, "FAVORITES_FILE", str(tmp_path / "no_favorites.json"))
     m = DatabaseManager(db_path=str(tmp_path / f"t{int(compact_on)}.db"))
     rows = [record(i) for i in range(1, 61)]
     for i in range(1, 61, 5):
@@ -233,7 +232,6 @@ def test_opening_a_modal_asks_the_database_for_nothing(tmp_path, monkeypatch):
     for var in ("SUPABASE_URL", "SUPABASE_KEY"):
         monkeypatch.setenv(var, "x")
     monkeypatch.setattr(db_module, "HISTORY_FILE", str(tmp_path / "h.json"))
-    monkeypatch.setattr(db_module, "FAVORITES_FILE", str(tmp_path / "f.json"))
     monkeypatch.setattr(DatabaseManager, "seed_from_local_json", lambda self: None)
     m = DatabaseManager(db_path=str(tmp_path / "t.db"))
     fake = FakeSupabase(0)
@@ -277,7 +275,6 @@ def split_row(r, i, with_column=True):
 @pytest.fixture
 def supa(tmp_path, monkeypatch):
     monkeypatch.setattr(db_module, "HISTORY_FILE", str(tmp_path / "history.json"))
-    monkeypatch.setattr(db_module, "FAVORITES_FILE", str(tmp_path / "fav.json"))
     monkeypatch.setattr(DatabaseManager, "seed_from_local_json", lambda self: None)
 
     def build(rows, compact_on, cap=1000):

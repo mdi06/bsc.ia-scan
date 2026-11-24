@@ -111,16 +111,24 @@ _rate_window_id = 0
 _rate_counts: Dict[str, int] = {}
 
 
+# Which address is "the client" depends on what stands in front of the API, and a header the client can set itself
+# must never decide it. On Railway the edge proxy APPENDS the address it saw to X-Forwarded-For, so the last entry is
+# trustworthy and every earlier one is whatever the client (or a client-side proxy) wrote. RATE_LIMIT_PROXY_HOPS is
+# how many trusted proxies append to the header (1 for Railway's edge alone). CF-Connecting-IP is only believed when
+# Cloudflare really is in front (set RATE_LIMIT_TRUST_CF=1): behind Railway any client can send that header itself.
+RATE_LIMIT_PROXY_HOPS = int(os.environ.get("RATE_LIMIT_PROXY_HOPS", "1"))
+RATE_LIMIT_TRUST_CF = os.environ.get("RATE_LIMIT_TRUST_CF", "0").strip().lower() in ("1", "true", "yes", "on")
+
+
 def _client_ip(request: Request) -> str:
-    # Cloudflare (in front of Render) overwrites CF-Connecting-IP, so clients cannot spoof it.
-    # X-Forwarded-For is the last resort (its first entry is client-controlled).
-    ip = request.headers.get("cf-connecting-ip")
-    if not ip:
-        xff = request.headers.get("x-forwarded-for", "")
-        ip = xff.split(",")[0].strip() if xff else ""
-    if not ip:
-        ip = request.client.host if request.client else "unknown"
-    return ip
+    if RATE_LIMIT_TRUST_CF:
+        cf = request.headers.get("cf-connecting-ip", "").strip()
+        if cf:
+            return cf
+    entries = [e.strip() for e in request.headers.get("x-forwarded-for", "").split(",") if e.strip()]
+    if RATE_LIMIT_PROXY_HOPS > 0 and len(entries) >= RATE_LIMIT_PROXY_HOPS:
+        return entries[-RATE_LIMIT_PROXY_HOPS]
+    return request.client.host if request.client else "unknown"
 
 
 @app.middleware("http")
@@ -189,6 +197,26 @@ async def global_exception_handler(request: Request, exc: Exception):
 
 ADDRESS_RE = re.compile(r"^0x[0-9a-fA-F]{40}$")
 MAX_FAVORITES = 500
+
+# POSTs accepted per wallet per minute. The browser sends one per change after a 600 ms pause, so a person never gets
+# near this; it stops one caller hammering a single wallet's row.
+FAVORITES_WRITES_PER_MIN = 20
+_FAVORITES_MAX_TRACKED_WALLETS = 50000
+_favorites_writes: Dict[str, list] = {}      # wallet -> [window id, writes in that window]
+
+
+def _favorites_write_wait(wallet: str, now: float) -> int:
+    """0 if this wallet may be written now (and counts the attempt), else the seconds until its minute is over."""
+    window_id = int(now // 60)
+    entry = _favorites_writes.get(wallet)
+    if entry is None or entry[0] != window_id:
+        if entry is None and len(_favorites_writes) >= _FAVORITES_MAX_TRACKED_WALLETS:
+            _favorites_writes.clear()        # hard cap against key-flooding; fails open for this window
+        entry = _favorites_writes[wallet] = [window_id, 0]
+    entry[1] += 1
+    if entry[1] > FAVORITES_WRITES_PER_MIN:
+        return max(1, int((window_id + 1) * 60 - now) + 1)
+    return 0
 
 
 @app.on_event("startup")
@@ -300,17 +328,43 @@ def _smart_count(d: dict) -> int:
     return len(d.get("smart_wallets") or d.get("smart_minters") or [])
 
 
-# Pulse card 1 ("Top 24h Runners"): every live token ranked with the rule app.js always used (a quality guard, then
-# the biggest 24h gainers first, otherwise the largest by market cap and volume), now over the FULL dataset.
+# Pulse card 1 ("Top 24h Runners"): every live token ranked by a quality guard, then in TWO tiers: the tokens that are
+# up over 24h first (biggest gain, with volume as a tie-breaker), then everything else by market cap and volume. The
+# tiers are compared first, not folded into one number: a single score let a $126M token that was DOWN 1% outrank
+# every gainer, because its market cap beat the fixed bonus gainers got. Over the FULL dataset.
 PULSE_RUNNER_MIN_MCAP = 500.0
 PULSE_RUNNER_MIN_LP_USD = 500.0
 PULSE_RUNNER_MIN_VOLUME_USD = 200.0
 PULSE_RUNNER_MIN_PRICE = 1e-8
 PULSE_TOP_RUNNERS = 3
 
+# DEX volume in the Pulse: what counts as trading, not churn. The headline used to add up volume_24h of every record
+# first seen in the window; 95% of it sat on tokens already flagged RUG / honeypot, and most of that on pools worth a
+# few thousand dollars turning over their whole size hundreds of times (wash trading). Volume of a flagged token, or on
+# a pool with no real liquidity, or beyond PULSE_VOLUME_MAX_TURNOVER x its pool, is reported on its own and left out
+# of dex_volume_usd. (Measured 2026-11-24: the turnover limit alone removes 68% of the flagged volume, and it changes
+# nothing for unflagged tokens, so it is not what decides the headline.)
+PULSE_VOLUME_MIN_LP_USD = 500.0
+PULSE_VOLUME_MAX_TURNOVER = 50.0
+
+
+def _has_established_pair(d: dict, now: float) -> bool:
+    """True when the worker knows the token's DEX pair is older than PULSE_LAUNCH_MAX_PAIR_AGE_SEC: it is an old token
+    the worker only just saw (detected_at is when the worker first saw it, not when the token launched)."""
+    created = filters._num(d.get("pair_created_at"))
+    return created > 0 and now - created > PULSE_LAUNCH_MAX_PAIR_AGE_SEC
+
+
+def _is_mint_record(d: dict) -> bool:
+    """A project people could mint from: a capped mint that is not a pre-minted token, an NFT collection, or a fair-mint
+    contract. A pre-minted token that only trades on a DEX is not a mint."""
+    if filters.mint_progress_bucket(d) is not None:
+        return True
+    return _is_nft_record(d) or "FAIR-MINT" in str(d.get("standard") or "").upper()
+
 
 def pulse_runner_row(d: dict) -> Optional[tuple]:
-    """(score, row) for a token that qualifies for card 1, or None: live (not cleared as stale), a real market cap,
+    """((tier, score), row) for a token that qualifies for card 1, or None: live (not cleared as stale), a real market cap,
     price, liquidity and volume, not flagged as a rug / honeypot."""
     if d.get("market_stale") or _is_flagged_risky(d):
         return None
@@ -322,7 +376,7 @@ def pulse_runner_row(d: dict) -> Optional[tuple]:
             or vol < PULSE_RUNNER_MIN_VOLUME_USD):
         return None
     chg = filters._num(d.get("price_change_24h"))
-    score = 1e8 + chg * 1e4 + min(vol, 500000.0) if chg > 0 else mcap + vol * 2.0
+    score = (1, chg * 1e4 + min(vol, 500000.0)) if chg > 0 else (0, mcap + vol * 2.0)    # (tier, rank inside the tier)
     return score, {
         "contract": d.get("contract"), "name": d.get("name") or "Unknown", "symbol": d.get("symbol") or "",
         "standard": d.get("standard") or "", "token_price_usd": px,
@@ -384,8 +438,8 @@ def compute_pulse_24h(projects, now=None) -> dict:
     can filter their own lists with a plain string comparison and no timezone guessing."""
     now = time.time() if now is None else now
     since = time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(now - PULSE_WINDOW_SEC))
-    new_drops = graduated = smart_inflows = clusters = clean = refunds = threats = 0
-    dex_volume = 0.0
+    new_drops = on_dex = smart_entries = clusters = clean = refunds = flagged = 0
+    dex_volume = dex_flagged = dex_unbacked = 0.0
     hunters: Dict[str, int] = {}
     launches, nft_mints, runners = [], [], []
     for d in projects:
@@ -396,6 +450,8 @@ def compute_pulse_24h(projects, now=None) -> dict:
             runners.append(runner)
         if str(d.get("detected_at") or "") < since:
             continue
+        if _has_established_pair(d, now):
+            continue                      # first seen today, but the token itself is old: not a new drop
         new_drops += 1
         row = pulse_launch_row(d, now)
         if row:
@@ -403,13 +459,21 @@ def compute_pulse_24h(projects, now=None) -> dict:
         row = pulse_nft_mint_row(d)
         if row:
             nft_mints.append(row)
-        if is_secondary_market_asset(d) or d.get("is_graduated"):
-            graduated += 1
-        dex_volume += filters._num(d.get("volume_24h"))
+        if is_secondary_market_asset(d):
+            on_dex += 1                   # `is_graduated` is never set by the worker: this is "trades on a DEX / Element"
+        vol = filters._num(d.get("volume_24h"))
+        if vol > 0:
+            lp = filters._num(d.get("lp_usd"))
+            if _is_flagged_risky(d):
+                dex_flagged += vol
+            elif lp < PULSE_VOLUME_MIN_LP_USD or vol / lp > PULSE_VOLUME_MAX_TURNOVER:
+                dex_unbacked += vol
+            else:
+                dex_volume += vol
 
         wallets = d.get("smart_wallets") or d.get("smart_minters") or []
         if wallets:
-            smart_inflows += len(wallets)
+            smart_entries += len(wallets)
             if len(wallets) >= 3:
                 clusters += 1
             for w in wallets:
@@ -419,8 +483,8 @@ def compute_pulse_24h(projects, now=None) -> dict:
         level = str(d.get("risk_level") or "SAFE").upper()
         badge = str(d.get("risk_badge") or "").upper()
         if any(k in badge for k in ("HONEYPOT", "SERIAL", "DRAIN")) or level in ("RUG", "HIGH"):
-            threats += 1
-        else:
+            flagged += 1
+        elif _is_mint_record(d):
             clean += 1
         if isinstance(d.get("security"), dict) and d["security"].get("has_refund"):
             refunds += 1
@@ -434,15 +498,22 @@ def compute_pulse_24h(projects, now=None) -> dict:
         "since": since,
         "as_of": int(now),
         "new_drops": new_drops,
-        "graduated": graduated,
+        "trading_on_dex": on_dex,
         "dex_volume_usd": dex_volume,
-        "smart_inflows": smart_inflows,
+        "dex_volume_flagged_usd": dex_flagged,       # volume of tokens flagged RUG / honeypot, left out of dex_volume_usd
+        "dex_volume_unbacked_usd": dex_unbacked,     # volume on a pool with no real liquidity or wash-like turnover
+        "smart_wallet_entries": smart_entries,
         "smart_clusters": clusters,
         "top_hunter": top_hunter,
         "top_hunter_count": top_count,
-        "clean_mints": clean,
+        "clean_mints": clean,                        # mints that no risk check flagged
         "refunds": refunds,
-        "threats_blocked": threats,
+        "flagged_risky": flagged,
+        # The old names, kept for one release for clients that still read them: "graduated" was never about graduation,
+        # "smart_inflows" has no amounts, "threats_blocked" blocks nothing.
+        "graduated": on_dex,
+        "smart_inflows": smart_entries,
+        "threats_blocked": flagged,
         "top_runners": [row for _, row in sorted(runners, key=lambda x: x[0], reverse=True)[:PULSE_TOP_RUNNERS]],
         "top_launches": sorted(launches, key=lambda r: r["volume_24h"], reverse=True)[:PULSE_TOP_LAUNCHES],
         "top_nft_mints": sorted(nft_mints, key=lambda r: (r["total_minted"], r["smart_count"]),
@@ -457,7 +528,7 @@ def _filter_counts(projects) -> dict:
 MOMENTUM_TOP_NAMES = 3     # the stats bar names this many momentum drops
 # Part of every feed / stats ETag. Bump it when the response bodies gain or change fields: a browser holding a body
 # from before (same content version and totals, e.g. right after a restart) must not get a 304 and keep the old shape.
-RESPONSE_SHAPE = 2
+RESPONSE_SHAPE = 3
 
 
 def compute_mint_progress_stats(projects, now: Optional[float] = None) -> dict:
@@ -502,37 +573,62 @@ def compute_mint_progress_stats(projects, now: Optional[float] = None) -> dict:
     }
 
 
-def _agent_wallet_stats():
-    """(total agent wallets, block of that count), from whichever of the local file and the database is ahead.
-    Read on every request, never cached here: the counter moves without the project data (and its content
+# The agent-wallet counter is shown as a fact, so it must come from a real count. monitor.DEFAULT_AGENT_WALLET_COUNT
+# (178,001) is only the worker's starting value for counting forward; served as `agent_wallets` it passed for a live
+# number (the real count was ~264,000 when the file the API ships with said 182,449). No source, or only a source
+# counted more than AGENT_WALLETS_MAX_AGE_SEC ago, means "unknown" (None), not a made-up number.
+AGENT_WALLETS_MAX_AGE_SEC = 7 * 86400
+AGENT_WALLETS_LIVE_SEC = 30 * 60       # counted within this long ago: `agent_wallets_live`
+
+
+def _usable_agent_stats(stats):
+    """`stats` if it is a real count counted at most AGENT_WALLETS_MAX_AGE_SEC ago (a record without a timestamp is
+    given the benefit of the doubt), else {}."""
+    if not isinstance(stats, dict) or stats.get("is_default") or int(stats.get("total_created_wallets") or 0) <= 0:
+        return {}
+    counted_at = filters._num(stats.get("last_updated"))
+    if counted_at > 0 and time.time() - counted_at > AGENT_WALLETS_MAX_AGE_SEC:
+        return {}
+    return stats
+
+
+def _best_agent_stats():
+    """The agent-wallet counter record from whichever of the local file and the database is ahead, or None when neither
+    has a usable one (see _usable_agent_stats). Each source is checked first, so a stale record can never hide a fresh
+    one. Read on every request, never cached here: the counter moves without the project data (and its content
     version) changing."""
     local_stats = {}
     try:
-        local_stats = monitor.load_agent_id_stats() or {}
+        local_stats = _usable_agent_stats(monitor.load_agent_id_stats())
     except Exception as e:
         print(f"[⚠️ Overview Stats] local agent-id stats unavailable: {e}", flush=True)
     cloud_stats = {}
     try:
-        cloud_stats = db.get_agent_id_stats() or {}
+        cloud_stats = _usable_agent_stats(db.get_agent_id_stats())
     except Exception as e:
         print(f"[⚠️ Overview Stats] cloud agent-id stats unavailable: {e}", flush=True)
 
     local_count = int(local_stats.get("total_created_wallets") or 0)
     cloud_count = int(cloud_stats.get("total_created_wallets") or 0)
     if cloud_count > local_count:
-        best_agent_stats = cloud_stats
-    elif cloud_count == local_count and int(cloud_stats.get("last_block") or 0) > int(local_stats.get("last_block") or 0):
-        best_agent_stats = cloud_stats
-    else:
-        best_agent_stats = local_stats
+        return cloud_stats
+    if cloud_count == local_count and int(cloud_stats.get("last_block") or 0) > int(local_stats.get("last_block") or 0):
+        return cloud_stats
+    return local_stats or None
 
-    total_agent_wallets = int(best_agent_stats.get("total_created_wallets") or monitor.DEFAULT_AGENT_WALLET_COUNT)
-    agent_wallets_block = int(best_agent_stats.get("last_block") or 0)
-    return total_agent_wallets, agent_wallets_block
+
+def _agent_wallet_stats():
+    """(total agent wallets or None, block of that count, counted within AGENT_WALLETS_LIVE_SEC)."""
+    best = _best_agent_stats()
+    if best is None:
+        return None, 0, False
+    counted_at = filters._num(best.get("last_updated"))
+    live = counted_at > 0 and time.time() - counted_at <= AGENT_WALLETS_LIVE_SEC
+    return int(best["total_created_wallets"]), int(best.get("last_block") or 0), live
 
 
 def _overview_stats(all_projs, counts, pulse, mint_progress=None) -> dict:
-    total_agent_wallets, agent_wallets_block = _agent_wallet_stats()
+    total_agent_wallets, agent_wallets_block, agent_wallets_live = _agent_wallet_stats()
     return {
         "total": len(all_projs),
         "smart": counts["smart"],
@@ -545,6 +641,7 @@ def _overview_stats(all_projs, counts, pulse, mint_progress=None) -> dict:
         "agent_wallets": total_agent_wallets,
         "total_created_wallets": total_agent_wallets,
         "agent_wallets_block": agent_wallets_block,
+        "agent_wallets_live": agent_wallets_live,
         "pulse_24h": pulse,
         "mint_progress": mint_progress,
     }
@@ -560,9 +657,10 @@ def _overview_stats_fallback(all_projs) -> dict:
         "secondary": 0,
         "free_mintable": 0,
         "latest_block": None,
-        "agent_wallets": monitor.DEFAULT_AGENT_WALLET_COUNT,
-        "total_created_wallets": monitor.DEFAULT_AGENT_WALLET_COUNT,
+        "agent_wallets": None,
+        "total_created_wallets": None,
         "agent_wallets_block": 0,
+        "agent_wallets_live": False,
         "pulse_24h": None,
         "mint_progress": None,
     }
@@ -985,7 +1083,7 @@ def get_overview_stats(request: Request):
     snapshot, content_version = _load_snapshot()
     stats = snapshot.stats()
     pulse = stats.get("pulse_24h") or {}
-    pulse_tag = f'{pulse.get("new_drops")}.{pulse.get("graduated")}.{round(pulse.get("dex_volume_usd") or 0)}.{pulse.get("smart_inflows")}.{pulse.get("threats_blocked")}'
+    pulse_tag = f'{pulse.get("new_drops")}.{pulse.get("trading_on_dex")}.{round(pulse.get("dex_volume_usd") or 0)}.{pulse.get("smart_wallet_entries")}.{pulse.get("flagged_risky")}.{pulse.get("clean_mints")}'
     mp = stats.get("mint_progress") or {}
     mp_tag = f'm{mp.get("sold_out")}.{mp.get("near_cap_active")}.{mp.get("momentum_active")}'
     stats_etag = f'"v{content_version}-{stats["total"]}-{stats["agent_wallets"]}-{stats.get("agent_wallets_block")}-{stats.get("latest_block")}-{pulse_tag}-{mp_tag}-s{RESPONSE_SHAPE}"'
@@ -1043,9 +1141,7 @@ def get_market_data(request: Request):
 @app.get("/data/agent_id_stats.json")
 def get_agent_id_stats_json():
     """Agent ID counter, served at the paths the static frontend falls back to."""
-    local_st = monitor.load_agent_id_stats() or {}
-    cloud_st = db.get_agent_id_stats() or {}
-    stats = cloud_st if int(cloud_st.get("total_created_wallets") or 0) > int(local_st.get("total_created_wallets") or 0) else local_st
+    stats = _best_agent_stats() or {"total_created_wallets": None, "last_block": 0, "last_updated": None}
     return SafeJSONResponse(
         content=stats,
         headers={"Cache-Control": "public, max-age=15", "Access-Control-Allow-Origin": "*"}
@@ -1272,6 +1368,12 @@ def with_server_metrics(p: dict, bnb_price=None, bnb_live=None) -> dict:
     if bnb_price is None:
         bnb_price = monitor.cached_bnb_price()
     out = _plain_copy(p)
+    if filters.is_mint_count_cap(out):
+        # the stored cap is a slot count scaled as token amounts (2.2e-16): serve the cap in the units total_minted is in,
+        # or no cap when it cannot be worked out yet, so the page never shows "SOLD 100% 1.0M/0" for an open mint
+        cap = filters.corrected_max_supply(out)
+        out["max_supply"] = cap if cap > 0 else None
+        out["max_supply_corrected"] = True
     excluded = filters.is_excluded_asset(p)
     metrics = {
         "excluded": excluded,
@@ -1315,6 +1417,14 @@ TOP_GAINER_ITEM_FIELDS = (
     "mint_value_wei", "has_free_mint", "mint_calldata", "total_minted", "max_supply", "lp_usd", "holders",
     "block", "detected_at", "market_stale", "market_updated_at", "tokens_per_mint", "ath_lp_usd",
 )
+
+
+def _with_corrected_cap(item: dict) -> dict:
+    """`item` with a slot-count max_supply replaced by the cap in token units (or None), see filters.corrected_max_supply."""
+    if filters.is_mint_count_cap(item):
+        cap = filters.corrected_max_supply(item)
+        item["max_supply"] = cap if cap > 0 else None
+    return item
 
 
 def compute_live_top_gainers(projects, limit: int = TOP_GAINERS_LIMIT) -> list:
@@ -1362,7 +1472,7 @@ def compute_live_top_gainers(projects, limit: int = TOP_GAINERS_LIMIT) -> list:
             "tokensPerMint": None if _is_nft_record(d) else info.get("units"),
             "sellTaxPct": info.get("sell_tax_pct") or 0.0,
             "athLpUsd": info.get("ath_lp_usd"),
-            "item": slim_for_list({k: (d[k] if k in d else p[k]) for k in TOP_GAINER_ITEM_FIELDS if k in d or k in p}),
+            "item": slim_for_list(_with_corrected_cap({k: (d[k] if k in d else p[k]) for k in TOP_GAINER_ITEM_FIELDS if k in d or k in p})),
         })
     rows.sort(key=lambda r: (r["athProfit"], r["multiplier"] or 0.0), reverse=True)
     return rows[:limit]
@@ -1489,7 +1599,7 @@ def derive_progress(p: dict):
     sentinel), else a stored `progress`, else None. The worker never wrote `progress` into the record, so
     `?min_progress=` used to match nothing."""
     try:
-        ms = float(p.get("max_supply") or 0.0)
+        ms = filters.corrected_max_supply(p)
         tm = p.get("total_minted")
         if tm is not None and 0.0 < ms < 1e20:
             return max(0.0, min(100.0, float(tm) / ms * 100.0))
@@ -1656,8 +1766,21 @@ async def post_favorites(request: Request):
         raise HTTPException(status_code=413, detail=f"Too many favorites (max {MAX_FAVORITES})")
     clean_favs = [c.lower() for c in raw_favs if isinstance(c, str) and ADDRESS_RE.fullmatch(c)]
     clean_favs = list(dict.fromkeys(clean_favs))
-    ts = int(incoming.get("timestamp") or time.time())
 
+    # Anyone can POST any wallet's address (a list is public data, not proven to belong to the caller), so a write
+    # is limited per wallet as well as per IP, and the client's `timestamp` is ignored: it let a caller stamp a list
+    # with any time. updated_at is the server's clock.
+    now = time.time()
+    wait = _favorites_write_wait(wallet, now)
+    if wait:
+        return SafeJSONResponse(status_code=429, headers={"Retry-After": str(wait)},
+                                content={"success": False, "error": "rate_limited"})
+
+    existing = db.get_favorites(wallet)
+    if existing.get("favorites") == clean_favs:
+        # nothing changed (the browser pushes after every pull): no database write
+        return {"success": True, "wallet": wallet, "favorites": clean_favs, "updated_at": existing.get("updated_at", 0)}
+    ts = int(now)
     db.save_favorites(wallet, clean_favs, ts)
 
     return {
@@ -1696,12 +1819,19 @@ async def post_sync(request: Request):
     raise HTTPException(status_code=400, detail="Expected JSON array of projects")
 
 
+def running_hosted(env=None) -> bool:
+    """True on a hosting platform (Railway, Render): the frontend is on Vercel there, and the API must not serve files.
+    Railway sets several RAILWAY_* variables (RAILWAY_ENVIRONMENT_NAME, RAILWAY_SERVICE_ID, ...), Render sets RENDER."""
+    env = os.environ if env is None else env
+    return bool(env.get("RENDER")) or any(k.startswith("RAILWAY_") and env.get(k) for k in env)
+
+
 @app.get("/")
 def root_handler(request: Request):
     """On the hosted API (Render or Railway), send browsers and crawlers to the Vercel frontend so page loads don't use the API host's bandwidth."""
     accept = request.headers.get("accept", "")
     host = request.headers.get("host", "")
-    if os.environ.get("RENDER") or os.environ.get("RAILWAY_ENVIRONMENT") or "onrender.com" in host or "railway.app" in host:
+    if running_hosted() or "onrender.com" in host or "railway.app" in host:
         if "application/json" in accept and "text/html" not in accept:
             return {"status": "ok", "service": "agent-id-backend", "frontend": "https://agent-id-monitor.vercel.app"}
         return RedirectResponse(url="https://agent-id-monitor.vercel.app", status_code=302)
@@ -1739,8 +1869,9 @@ def _local_frontend_route(filename: str):
     return serve
 
 
-if not os.environ.get("RENDER") and os.path.exists(os.path.join(workspace_dir, "index.html")):
-    app.mount("/static", StaticFiles(directory=workspace_dir, html=False), name="static")
+# Never a mount of the whole workspace: one at /static (checked only for RENDER) served the source, history.json and
+# smart_wallets.json from the Railway API to anyone who asked.
+if not running_hosted() and os.path.exists(os.path.join(workspace_dir, "index.html")):
     # Lazy feature modules app.js imports by URL when there is no build (loadFeature in app.js).
     _features_dir = os.path.join(workspace_dir, "features")
     if os.path.isdir(_features_dir):

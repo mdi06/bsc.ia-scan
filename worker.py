@@ -1028,7 +1028,9 @@ def _apply_pancake_estimate(rpc, item: Dict[str, Any], now: Optional[float] = No
     pair_addr = monitor.get_pair_address(rpc, monitor.PANCAKE_FACTORY_V2, c, monitor.WBNB_ADDRESS)
     if not pair_addr:
         return False
-    item["pair_url"] = f"https://pancakeswap.finance/info/v2/pairs/{pair_addr}"
+    pair_url = f"https://pancakeswap.finance/info/v2/pairs/{pair_addr}"
+    url_changed = item.get("pair_url") != pair_url
+    item["pair_url"] = pair_url
     reserves = monitor.get_reserves(rpc, pair_addr)
     if not reserves:
         return True  # the pair link alone is still new information
@@ -1038,6 +1040,8 @@ def _apply_pancake_estimate(rpc, item: Dict[str, Any], now: Optional[float] = No
     wbnb_reserve = (r1 if token_is_t0 else r0) / 1e18
     token_reserve = (r0 if token_is_t0 else r1) / (10 ** _pancake_token_decimals(rpc, item, c))
     bnb_usd = monitor.refresh_bnb_price(rpc)
+    if not monitor.bnb_price_is_live():
+        return url_changed            # no USD numbers from the placeholder price (the link is kept): tried again next sweep
     item["lp_wbnb"] = wbnb_reserve * 2
     item["lp_usd"] = wbnb_reserve * bnb_usd * 2
     if token_reserve > 0 and wbnb_reserve > 0:

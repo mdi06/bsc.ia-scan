@@ -16,7 +16,7 @@ def stamp(seconds_ago):
 
 def drop(i, ago, **kw):
     d = {"contract": f"0x{i:040x}", "name": f"D{i}", "symbol": f"S{i}", "standard": "BEP-20 Token (18 decimals)",
-         "detected_at": stamp(ago), "volume_24h": 100.0, "lp_usd": 0, "risk_level": "SAFE"}
+         "detected_at": stamp(ago), "volume_24h": 100.0, "lp_usd": 5000.0, "risk_level": "SAFE"}
     d.update(kw)
     return d
 
@@ -39,19 +39,83 @@ def test_aggregates_cover_the_whole_dataset_whatever_page_the_browser_loaded():
     assert api.compute_pulse_24h(records[:150], now=NOW)["dex_volume_usd"] == pytest.approx(150_000.0)  # a page is a page
 
 
-def test_security_smart_money_and_graduation_counts():
+NFT = "ERC-721 (NFT Collection)"
+
+
+def test_security_smart_money_and_dex_counts():
     records = [
-        drop(1, 100, smart_wallets=["a.ai", "b.ai", "c.ai"], security={"has_refund": True}, lp_usd=60000),
-        drop(2, 100, smart_wallets=["a.ai"], risk_level="RUG", risk_badge="HONEYPOT"),
-        drop(3, 100, risk_level="HIGH"),
-        drop(4, 100, risk_badge="Serial Dev"),
-        drop(5, 100, is_graduated=True),
+        drop(1, 100, standard=NFT, smart_wallets=["a.ai", "b.ai", "c.ai"], security={"has_refund": True}, lp_usd=60000),
+        drop(2, 100, standard=NFT, lp_usd=0, smart_wallets=["a.ai"], risk_level="RUG", risk_badge="HONEYPOT"),
+        drop(3, 100, standard=NFT, lp_usd=0, risk_level="HIGH"),
+        drop(4, 100, standard=NFT, lp_usd=0, risk_badge="Serial Dev"),
+        drop(5, 100, standard=NFT, lp_usd=0),
     ]
     p = api.compute_pulse_24h(records, now=NOW)
-    assert (p["smart_inflows"], p["smart_clusters"]) == (4, 1)
+    assert (p["smart_wallet_entries"], p["smart_clusters"]) == (4, 1)
     assert (p["top_hunter"], p["top_hunter_count"]) == ("a.ai", 2)
-    assert (p["clean_mints"], p["threats_blocked"], p["refunds"]) == (2, 3, 1)
-    assert p["graduated"] == 2                                          # the pooled drop and the graduated one
+    assert (p["clean_mints"], p["flagged_risky"], p["refunds"]) == (2, 3, 1)
+    assert p["trading_on_dex"] == 1                                     # only the pooled drop trades on a DEX
+
+
+def test_the_old_field_names_still_answer_for_one_release():
+    records = [drop(1, 100, standard=NFT, smart_wallets=["a.ai"], lp_usd=60000), drop(2, 100, risk_level="RUG")]
+    p = api.compute_pulse_24h(records, now=NOW)
+    assert p["graduated"] == p["trading_on_dex"] and p["smart_inflows"] == p["smart_wallet_entries"]
+    assert p["threats_blocked"] == p["flagged_risky"] == 1
+
+
+def test_clean_mints_counts_mints_not_every_unflagged_record():
+    """A pre-minted token that only trades on a DEX is not a mint: it used to be counted as a clean one."""
+    records = [
+        drop(1, 100, standard=NFT),                                                           # an NFT collection: a mint
+        drop(2, 100, standard="Fair-Mint Contract (Dispenses $X Token)"),                     # a fair mint
+        drop(3, 100, max_supply=1000.0, total_minted=400.0),                                  # a capped mint, 40% filled
+        drop(4, 100, max_supply=1_000_000_000.0, total_minted=1_000_000_000.0, lp_usd=9000),  # pre-minted memecoin on a DEX
+        drop(5, 100),                                                                         # no mint data at all
+        drop(6, 100, standard=NFT, risk_level="RUG"),                                         # a mint, but flagged
+    ]
+    p = api.compute_pulse_24h(records, now=NOW)
+    assert p["clean_mints"] == 3 and p["flagged_risky"] == 1
+
+
+def test_dex_volume_leaves_out_flagged_unbacked_and_wash_volume_but_reports_it():
+    records = [
+        drop(1, 100, volume_24h=40_000.0, lp_usd=20_000.0),                                   # real: 2x turnover
+        drop(2, 100, volume_24h=3_600_000.0, lp_usd=4_700.0, risk_level="RUG"),               # flagged AND wash-like
+        drop(3, 100, volume_24h=70_000.0, lp_usd=30_000.0, risk_badge="HONEYPOT"),            # flagged only
+        drop(4, 100, volume_24h=250_000.0, lp_usd=0.0),                                       # no liquidity left
+        drop(5, 100, volume_24h=200_000.0, lp_usd=2_000.0),                                   # 100x turnover, not flagged
+        drop(6, 100, volume_24h=0.0, lp_usd=9_000.0),                                         # no volume
+    ]
+    p = api.compute_pulse_24h(records, now=NOW)
+    assert p["dex_volume_usd"] == pytest.approx(40_000.0)
+    assert p["dex_volume_flagged_usd"] == pytest.approx(3_670_000.0)
+    assert p["dex_volume_unbacked_usd"] == pytest.approx(450_000.0)
+    # nothing disappears: the three parts add up to what the records say
+    total = p["dex_volume_usd"] + p["dex_volume_flagged_usd"] + p["dex_volume_unbacked_usd"]
+    assert total == pytest.approx(sum(r["volume_24h"] for r in records))
+
+
+def test_turnover_limit_is_a_limit_not_a_cut():
+    at_limit = drop(1, 100, volume_24h=api.PULSE_VOLUME_MAX_TURNOVER * 10_000.0, lp_usd=10_000.0)
+    over = drop(2, 100, volume_24h=api.PULSE_VOLUME_MAX_TURNOVER * 10_000.0 + 1.0, lp_usd=10_000.0)
+    thin = drop(3, 100, volume_24h=1_000.0, lp_usd=api.PULSE_VOLUME_MIN_LP_USD - 1.0)
+    p = api.compute_pulse_24h([at_limit, over, thin], now=NOW)
+    assert p["dex_volume_usd"] == pytest.approx(at_limit["volume_24h"])
+
+
+def test_an_old_token_first_seen_today_is_not_a_new_drop():
+    """detected_at is when the worker first saw the token. A pair created days earlier says it is not new."""
+    records = [
+        drop(1, 100, pair_created_at=NOW - 6 * 3600),                 # launched 6 h ago
+        drop(2, 100),                                                  # pair age unknown: counted, as before
+        drop(3, 100, pair_created_at=NOW - 2 * 86400),                # 2 days: still within the limit
+        drop(4, 100, pair_created_at=NOW - 8 * 86400, volume_24h=999_999.0, smart_wallets=["z.ai"]),   # 8 days old
+    ]
+    p = api.compute_pulse_24h(records, now=NOW)
+    assert p["new_drops"] == 3
+    assert p["dex_volume_usd"] == pytest.approx(300.0)            # the old token's volume and wallets are not counted
+    assert p["smart_wallet_entries"] == 0 and p["top_hunter"] is None
 
 
 def test_excluded_assets_and_missing_timestamps_do_not_count():
@@ -152,6 +216,19 @@ def test_runners_are_ranked_over_every_live_token_whatever_its_age():
     # gainers first, biggest gain first; any age counts (D1 is 10 days old)
     assert [r["name"] for r in runners] == ["D2", "D1", "D4"]
     assert runners[0]["price_change_24h"] == 150.0 and runners[0]["_slim"] is True
+
+
+def test_a_huge_token_that_is_down_never_outranks_a_gainer():
+    """Quack AI (market cap $126M, -0.96%) took #1 over +270% and +153% because one score mixed both rules."""
+    rows = [
+        live(1, 600, price_change_24h=-0.96, market_cap=126_000_000.0, volume_24h=2_000_000.0, lp_usd=5_000_000.0),
+        live(2, 600, price_change_24h=270.0, market_cap=53_000.0, volume_24h=9_000.0),
+        live(3, 600, price_change_24h=153.0, market_cap=11_000_000.0, volume_24h=40_000.0),
+        live(4, 600, price_change_24h=0.0, market_cap=900_000_000.0, volume_24h=1_000_000.0, lp_usd=9_000_000.0),
+    ]
+    names = [r["name"] for r in api.compute_pulse_24h(rows, now=NOW)["top_runners"]]
+    assert names == ["D2", "D3", "D4"]      # both gainers first; then the losers/flat by market cap (D1 is the 4th, cut)
+    assert api.pulse_runner_row(rows[0])[0] < api.pulse_runner_row(rows[1])[0]    # D1 (down) ranks below D2 (+270%)
 
 
 def test_runners_fall_back_to_market_cap_and_volume_when_nothing_is_gaining():
