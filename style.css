@@ -156,7 +156,7 @@ body {
   align-items: center;
   background: rgba(12, 15, 23, 0.95);
   border: 1px solid rgba(240, 185, 11, 0.35);
-  box-shadow: 0 0 10px rgba(240, 185, 11, 0.08), inset 0 1px 3px rgba(0, 0, 0, 0.6);
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.6);
   border-radius: 7px;
   padding: 0 14px !important;
   height: 40px;
@@ -356,7 +356,7 @@ body {
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
   border: 1px solid rgba(240, 185, 11, 0.35);
-  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.85), 0 0 20px rgba(240, 185, 11, 0.15);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.85);
   border-radius: 8px;
   /* The dropdown itself no longer scrolls: header and footer stay visible and only the result LIST scrolls (see
      .search-dropdown-list). The old whole-dropdown scroll pushed the header out of sight on long lists. */
@@ -1074,7 +1074,7 @@ mark.search-hl {
   min-width: 230px !important;
   max-width: calc(100vw - 32px) !important;
   width: max-content !important;
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.95), 0 0 18px rgba(76, 201, 255, 0.3) !important;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.95) !important;
   z-index: 1000 !important;
 }
 
@@ -1378,7 +1378,7 @@ mark.search-hl {
   background: #06151f;
   border: 1px solid var(--color-cyan);
   border-radius: 6px;
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.85), 0 0 18px rgba(76, 201, 255, 0.25);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.85);
   padding: 4px;
   list-style: none;
   margin: 0;
@@ -1492,7 +1492,7 @@ mark.search-hl {
   font-weight: 800;
   letter-spacing: 0.8px;
   color: var(--color-gold);
-  text-shadow: 0 0 8px rgba(240, 185, 11, 0.3);
+  text-shadow: none;
 }
 
 .ticker-pulse-dot {
@@ -1644,7 +1644,7 @@ mark.search-hl {
   letter-spacing: 0.2px;
   display: inline-flex;
   align-items: center;
-  box-shadow: 0 0 6px rgba(255, 214, 0, 0.18);
+  box-shadow: none;
   transition: color 0.15s ease, background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
@@ -1652,7 +1652,7 @@ mark.search-hl {
   color: #ffffff;
   background: rgba(240, 185, 11, 0.25);
   border-color: #ffd600;
-  box-shadow: 0 0 10px rgba(255, 214, 0, 0.35);
+  box-shadow: none;
 }
 
 .ticker-wallet:hover {
@@ -1780,7 +1780,7 @@ mark.search-hl {
   border: 2px solid var(--color-yellow, #ffd600);
   border-radius: 8px;
   padding: 10px 18px;
-  box-shadow: 0 0 16px rgba(255, 214, 0, 0.22), inset 0 0 14px rgba(255, 214, 0, 0.06);
+  box-shadow: none;
   width: fit-content;
   max-width: 100%;
   box-sizing: border-box;
@@ -1826,8 +1826,8 @@ mark.search-hl {
   font-weight: 800;
   border-radius: 4px;
   border: 1px solid rgba(255, 214, 0, 0.45);
-  box-shadow: 0 0 10px rgba(255, 214, 0, 0.35), inset 0 1px 2px rgba(255, 255, 255, 0.2);
-  text-shadow: 0 0 6px rgba(255, 214, 0, 0.9);
+  box-shadow: inset 0 1px 2px rgba(255, 255, 255, 0.2);
+  text-shadow: none;
   user-select: none;
 }
 
@@ -1836,7 +1836,7 @@ mark.search-hl {
   font-size: 20px;
   font-weight: 800;
   padding: 0 1px;
-  text-shadow: 0 0 6px rgba(255, 214, 0, 0.9);
+  text-shadow: none;
 }
 
 .dcb-sub-row {
@@ -1852,7 +1852,7 @@ mark.search-hl {
   color: #4cc9ff;
   font-weight: 700;
   letter-spacing: 0.5px;
-  text-shadow: 0 0 5px rgba(76, 201, 255, 0.6);
+  text-shadow: none;
 }
 
 .dcb-meta {
@@ -1880,7 +1880,7 @@ mark.search-hl {
   border-radius: 8px;
   border: 1px solid rgba(240, 185, 11, 0.45);
   background: linear-gradient(135deg, rgba(240, 185, 11, 0.12) 0%, rgba(14, 18, 28, 0.9) 100%);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5), 0 0 16px rgba(240, 185, 11, 0.15);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
   transition: background 0.2s cubic-bezier(0.4, 0, 0.2, 1), border-color 0.2s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.2s cubic-bezier(0.4, 0, 0.2, 1), transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   user-select: none;
   display: flex;
@@ -1912,7 +1912,7 @@ mark.search-hl {
   letter-spacing: 0.5px;
   display: inline-flex;
   align-items: center;
-  box-shadow: 0 0 8px rgba(240, 185, 11, 0.35);
+  box-shadow: none;
 }
 
 .stat-card.gainer-card:hover .stat-hof-badge {
@@ -1974,6 +1974,53 @@ mark.search-hl {
   color: var(--text-dim);
   border: 1px solid var(--border-dim);
 }
+
+/* The safety chip: a coloured dot and a word. Red and amber are risk's colours and nothing else's. */
+.risk-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: inherit;                 /* the cell sets the size: the mobile card slot is smaller than the desktop cell */
+  font-weight: 600;
+  line-height: 1.3;
+  white-space: nowrap;
+  max-width: 100%;
+}
+
+td.col-safety .risk-chip { font-size: 12px; }
+
+.risk-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+  flex: none;
+}
+
+.risk-safe { color: var(--risk-safe); }
+.risk-caution { color: var(--risk-caution); }
+.risk-high { color: var(--risk-danger); }
+
+/* a verdict is filled: it is the one thing in the row that says "do not" */
+.risk-verdict {
+  color: #ffffff;
+  background: var(--risk-danger);
+  padding: 2px 8px 2px 7px;
+  border-radius: 4px;
+  font-weight: 700;
+}
+
+.risk-verdict .risk-dot { background: #ffffff; }
+
+.risk-ready {
+  color: #04130d;
+  background: var(--color-green);
+  padding: 2px 8px 2px 7px;
+  border-radius: 4px;
+  font-weight: 700;
+}
+
+.risk-ready .risk-dot { background: #04130d; }
 
 /* Main Table Container */
 .table-container {
@@ -3892,7 +3939,7 @@ a.inspect-btn:hover {
     background: #0c0f17;
     border: 1px solid rgba(240, 185, 11, 0.45);
     border-radius: 8px;
-    box-shadow: 0 16px 48px rgba(0, 0, 0, 0.98), 0 0 20px rgba(240, 185, 11, 0.25);
+    box-shadow: 0 16px 48px rgba(0, 0, 0, 0.98);
     z-index: 99999;
     padding: 6px;
     list-style: none;
@@ -4494,6 +4541,17 @@ a.inspect-btn:hover {
     font-size: 9.5px;
     min-width: 0;
     overflow: hidden;
+  }
+
+  /* the card's safety slot is three grid columns wide: a chip at 10.5px with tighter padding fits the longest label */
+  .col-safety .risk-chip {
+    font-size: 10.5px;
+    gap: 5px;
+  }
+
+  .col-safety .risk-verdict,
+  .col-safety .risk-ready {
+    padding: 2px 6px;
   }
 
   .col-interest {
@@ -5277,22 +5335,15 @@ a.inspect-btn:hover {
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
 }
 
-.pulse-card-runner {
-  border-top: 2.5px solid var(--color-green);
-}
-
+/* One quiet frame for all four cards. They used to wear four different accent colours (green, gold, purple, pink): that is
+   identity, not state, and colour is reserved for state. The numbers and rows inside carry the colour. */
+.pulse-card-runner,
 .pulse-card-ath,
-.pulse-card-grad {
-  border-top: 2.5px solid var(--color-gold);
-}
-
-.pulse-card-alpha {
-  border-top: 2.5px solid #c084fc;
-}
-
+.pulse-card-grad,
+.pulse-card-alpha,
 .pulse-card-nft,
 .pulse-card-security {
-  border-top: 2.5px solid #f472b6;
+  border-top: 2px solid var(--border-dim);
 }
 
 
@@ -5342,28 +5393,13 @@ a.inspect-btn:hover {
   white-space: nowrap;
 }
 
-.pulse-card-runner .pulse-card-badge {
-  background: rgba(46, 242, 176, 0.12) !important;
-  border-color: rgba(46, 242, 176, 0.35) !important;
-  color: #2ef2b0 !important;
-}
-
-.pulse-card-ath .pulse-card-badge {
-  background: rgba(240, 185, 11, 0.12) !important;
-  border-color: rgba(240, 185, 11, 0.35) !important;
-  color: #f0b90b !important;
-}
-
-.pulse-card-alpha .pulse-card-badge {
-  background: rgba(192, 132, 252, 0.12) !important;
-  border-color: rgba(192, 132, 252, 0.35) !important;
-  color: #c084fc !important;
-}
-
+.pulse-card-runner .pulse-card-badge,
+.pulse-card-ath .pulse-card-badge,
+.pulse-card-alpha .pulse-card-badge,
 .pulse-card-nft .pulse-card-badge {
-  background: rgba(244, 114, 182, 0.12) !important;
-  border-color: rgba(244, 114, 182, 0.35) !important;
-  color: #f472b6 !important;
+  background: rgba(255, 255, 255, 0.05) !important;
+  border-color: var(--border-dim) !important;
+  color: var(--text-dim) !important;
 }
 
 .pulse-card-main {
@@ -5436,7 +5472,7 @@ a.inspect-btn:hover {
   background: linear-gradient(135deg, #ffd000 0%, #f0b90b 50%, #b8860b 100%);
   color: #000000;
   font-weight: 900;
-  box-shadow: 0 0 8px rgba(240, 185, 11, 0.35);
+  box-shadow: none;
   border: none;
 }
 

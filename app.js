@@ -1019,6 +1019,24 @@ function interestTier(score) {
 }
 
 // One badge for every table render path (renderTable and appendNextTableBatch): the real score, one threshold set
+// The safety chip, one for both table render paths: a coloured dot and a word. Red and amber are the colours of risk and mean
+// nothing else; a filled chip is a verdict (honeypot, serial dev, drained funds), a plain dot-and-word is a grade.
+function safetyChipHtml(item, isReady) {
+  const rLvl = String(item.risk_level || 'SAFE').toUpperCase();
+  const rBdg = String(item.risk_badge || '').toUpperCase();
+  const chip = (kind, label) => `<span class="risk-chip risk-${kind}"><i class="risk-dot"></i>${label}</span>`;
+  const sec = item.security || {};
+  // name the actual finding: a RUG level used to read "Honeypot" whatever its reason, which is wrong for a serial deployer
+  if (rBdg.includes('HONEYPOT') || sec.is_honeypot || sec.cannot_sell_all) return chip('verdict', 'Honeypot');
+  if (rBdg.includes('SERIAL') || sec.is_serial_dev) return chip('verdict', 'Serial dev');
+  if (rBdg.includes('DRAIN') || sec.is_fund_drain) return chip('verdict', 'Drained');
+  if (rLvl === 'RUG') return chip('verdict', 'Rug risk');
+  if (rBdg.includes('HIGH') || rLvl === 'HIGH') return chip('high', 'High risk');
+  if (rBdg.includes('MED') || rLvl === 'MED') return chip('caution', 'Med risk');
+  if (isReady) return chip('ready', 'Ready');
+  return chip('safe', 'Clean');
+}
+
 // Traction escalates ice -> charge -> gold (the --heat-* colours); red is kept for risk, so "Surging" is gold, not red.
 function interestBadgeHtml(score) {
   const sc = numOrZero(score);
@@ -4088,7 +4106,8 @@ function renderPulseNftMintRow(n, idx) {
   const fill = n.fill_pct;
   const hasFill = fill !== null && fill !== undefined;
   const badgeText = hasFill ? (fill >= 100 ? 'Sold out' : `${Number(fill).toFixed(fill >= 10 ? 0 : 1)}% filled`) : `${formatCount(minted)} mints`;
-  const badgeClass = hasFill && fill >= 100 ? 'badge-yellow' : 'badge-magenta';
+  // fill is traction: ice -> charge -> gold as it fills, and a sold-out mint is done (calm), same as the table's progress bar
+  const badgeClass = !hasFill ? 'badge-cyan' : fill >= 100 ? 'badge-dim' : fill >= 80 ? 'badge-yellow' : fill >= 50 ? 'badge-green' : 'badge-cyan';
   const smart = Number(n.smart_count || 0);
   const smartStr = smart > 0 ? ` · 🧠 ${smart}` : '';
   const elementUrl = safeUrl(n.market_url) || ('https://element.market/collections/' + (n.contract || ''));
@@ -6391,22 +6410,7 @@ function renderTable(keepLimit = false) {
     }
 
     // Safety badge
-    const rLvl = String(item.risk_level || 'SAFE').toUpperCase();
-    const rBdg = String(item.risk_badge || '').toUpperCase();
-    let safeBadge = `<span style="color: var(--color-green); font-weight:600;">🟢 Clean</span>`;
-    if (rBdg.includes('HONEYPOT') || rLvl === 'RUG') {
-      safeBadge = `<span class="badge badge-red">🚨 Honeypot</span>`;
-    } else if (rBdg.includes('SERIAL') || (item.security && item.security.is_serial_dev)) {
-      safeBadge = `<span class="badge badge-red">🚨 SerialDev</span>`;
-    } else if (rBdg.includes('DRAIN') || (item.security && item.security.is_fund_drain)) {
-      safeBadge = `<span class="badge badge-red">🚨 Drained</span>`;
-    } else if (rBdg.includes('HIGH') || rLvl === 'HIGH') {
-      safeBadge = `<span class="badge badge-yellow">🔴 HighRisk</span>`;
-    } else if (rBdg.includes('MED') || rLvl === 'MED') {
-      safeBadge = `<span style="color: var(--color-yellow); font-weight:600;">🟡 Med Risk</span>`;
-    } else if (isReady) {
-      safeBadge = `<span class="badge badge-green" style="box-shadow: 0 0 8px rgba(74, 222, 128, 0.4); font-weight: 700;">🎯 READY</span>`;
-    }
+    const safeBadge = safetyChipHtml(item, isReady);
 
     // Interest badge
     const intBadge = interestBadgeHtml(item.score);
@@ -6787,22 +6791,7 @@ function appendNextTableBatch() {
     }
 
     // Safety badge
-    const rLvl = String(item.risk_level || 'SAFE').toUpperCase();
-    const rBdg = String(item.risk_badge || '').toUpperCase();
-    let safeBadge = `<span style="color: var(--color-green); font-weight:600;">🟢 Clean</span>`;
-    if (rBdg.includes('HONEYPOT') || rLvl === 'RUG') {
-      safeBadge = `<span class="badge badge-red">🚨 Honeypot</span>`;
-    } else if (rBdg.includes('SERIAL') || (item.security && item.security.is_serial_dev)) {
-      safeBadge = `<span class="badge badge-red">🚨 SerialDev</span>`;
-    } else if (rBdg.includes('DRAIN') || (item.security && item.security.is_fund_drain)) {
-      safeBadge = `<span class="badge badge-red">🚨 Drained</span>`;
-    } else if (rBdg.includes('HIGH') || rLvl === 'HIGH') {
-      safeBadge = `<span class="badge badge-yellow">🔴 HighRisk</span>`;
-    } else if (rBdg.includes('MED') || rLvl === 'MED') {
-      safeBadge = `<span style="color: var(--color-yellow); font-weight:600;">🟡 Med Risk</span>`;
-    } else if (isReady) {
-      safeBadge = `<span class="badge badge-green" style="box-shadow: 0 0 8px rgba(74, 222, 128, 0.4); font-weight: 700;">🎯 READY</span>`;
-    }
+    const safeBadge = safetyChipHtml(item, isReady);
 
     // Interest Badge
     const intBadge = interestBadgeHtml(item.score);
@@ -8096,7 +8085,7 @@ function openHallOfFameModal(filterMode = 'ALL') {
         : `<span style="color: ${nowProfit >= 0 ? 'var(--color-green)' : 'var(--color-red)'}; font-weight:600;" title="${escapeHtml(profitTitle(nowPrice, nowPool))}">${formatCryptoPrice(nowProfit, true)}</span>`;
 
       const statusBadge = g.isSold
-        ? `<span class="badge badge-magenta" style="font-size: 10px;">Sold Out</span>`
+        ? `<span class="badge badge-dim" style="font-size: 10px;">Sold Out</span>`
         : `<span class="badge badge-cyan" style="font-size: 10px;">Active</span>`;
 
       // Marketplace / DEX links
@@ -11555,6 +11544,8 @@ if (typeof module !== 'undefined' && module.exports) {
     modalFeature = loadFeatureIntoAppScope('modal');
   }
   module.exports = {
+    rowHeatClass,
+    safetyChipHtml,
     escapeHtml,
     jsAttr,
     safeUrl,
