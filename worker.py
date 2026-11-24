@@ -1474,7 +1474,7 @@ def run_market_dynamics_updater_loop():
         except Exception as e:
             print(f"[⚠️ Market Engine Error] {e}", flush=True)
 
-        # 120s between sweeps keeps egress within Render's free tier.
+        # 120s between sweeps keeps database egress within budget.
         time.sleep(120)
 
 
@@ -1713,7 +1713,7 @@ def run_agent_id_counter_loop():
     zero_from_topic = "0x0000000000000000000000000000000000000000000000000000000000000000"
     registry_addr = monitor.AGENT_ID_REGISTRY
 
-    # Start from whichever baseline is further along: local JSON or cloud DB (the local file is lost on Render restarts).
+    # Start from whichever baseline is further along: local JSON or cloud DB (the local file is lost when the host restarts).
     local_st = monitor.load_agent_id_stats() or {}
     try:
         cloud_st = db.get_agent_id_stats(max_age_sec=0.0) or {}

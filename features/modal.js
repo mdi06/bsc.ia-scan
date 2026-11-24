@@ -13,12 +13,12 @@ function mintTermsModalHtml(item) {
   const terms = getMintTerms(item);
   const unknown = '<span class="dim">Unknown</span>';
   const slots = terms.slotsLeft !== null
-    ? (terms.slotsLeft > 0 ? `<strong>${formatCount(terms.slotsLeft)}</strong>` : '<strong style="color: var(--color-red);">0 (sold out)</strong>')
+    ? (terms.slotsLeft > 0 ? `<strong>${formatCount(terms.slotsLeft)}</strong>` : '<strong class="u-red">0 (sold out)</strong>')
     : (terms.cap === 'unlimited' ? '<strong>Unlimited</strong>' : unknown);
   const perWallet = terms.perWallet !== null ? `<strong>${formatCount(terms.perWallet)}</strong>` : unknown;
   const fmt = (sec) => new Date(sec * 1000).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', timeZoneName: 'short' });
   const startTxt = terms.start ? `${fmt(terms.start)}${terms.notStarted ? ` <span class="dim">(${mintTimingLabel(terms).replace('⏳ ', '')})</span>` : ''}` : unknown;
-  const endTxt = terms.end ? `${fmt(terms.end)}${terms.ended ? ' <span style="color: var(--color-red);">(ended)</span>' : ` <span class="dim">(in ${formatDurationShort(terms.end - Date.now() / 1000)})</span>`}` : unknown;
+  const endTxt = terms.end ? `${fmt(terms.end)}${terms.ended ? ' <span class="u-red">(ended)</span>' : ` <span class="dim">(in ${formatDurationShort(terms.end - Date.now() / 1000)})</span>`}` : unknown;
   const gate = terms.gate
     ? `<strong title="${MINT_GATE_LABELS[terms.gate].title}">${MINT_GATE_LABELS[terms.gate].chip}</strong>`
     : (terms.checked ? '<span class="dim" title="Neither a fresh wallet nor an Agent ID wallet could mint in a simulation (ended, paused or unusual calldata)">Unknown</span>' : unknown);
@@ -213,21 +213,21 @@ export function openModal(item, source = 'direct') {
   const deployerAddr = (item.deployer || '').trim();
   const hasDeployer = Boolean(deployerAddr && deployerAddr !== 'N/A' && deployerAddr !== '0x0000000000000000000000000000000000000000');
 
-  const cAddrFormatted = `<a href="https://bscscan.com/address/${cAddr}" target="_blank" rel="noopener" style="color: var(--color-cyan); text-decoration: underline;" title="${cAddr}"><code>${cAddr.slice(0, 8)}...${cAddr.slice(-6)}</code> ↗</a>`;
+  const cAddrFormatted = `<a href="https://bscscan.com/address/${cAddr}" target="_blank" rel="noopener" class="u-cyan-link" title="${cAddr}"><code>${cAddr.slice(0, 8)}...${cAddr.slice(-6)}</code> ↗</a>`;
   
   const deployerFormatted = hasDeployer
-    ? `<a href="https://bscscan.com/address/${deployerAddr}" target="_blank" rel="noopener" style="color: var(--color-cyan); text-decoration: underline;" title="${deployerAddr}"><code>${deployerAddr.slice(0, 8)}...${deployerAddr.slice(-6)}</code> ↗</a>`
+    ? `<a href="https://bscscan.com/address/${deployerAddr}" target="_blank" rel="noopener" class="u-cyan-link" title="${deployerAddr}"><code>${deployerAddr.slice(0, 8)}...${deployerAddr.slice(-6)}</code> ↗</a>`
     : `<span class="dim">N/A (Contract Direct)</span>`;
 
   let devRootFormatted = `<span class="dim">Unresolved</span>`;
   if (hasDeployer) {
     if (devRootAddr && devRootAddr.toLowerCase() !== deployerAddr.toLowerCase()) {
-      devRootFormatted = `<a href="https://bscscan.com/address/${devRootAddr}" target="_blank" rel="noopener" style="color: var(--color-cyan); text-decoration: underline;" title="${devRootAddr}"><code>${devRootAddr.slice(0, 8)}...${devRootAddr.slice(-6)}</code> ↗</a> <span class="badge badge-red" style="font-size: 9px;">🚨 Funder</span>`;
+      devRootFormatted = `<a href="https://bscscan.com/address/${devRootAddr}" target="_blank" rel="noopener" class="u-cyan-link" title="${devRootAddr}"><code>${devRootAddr.slice(0, 8)}...${devRootAddr.slice(-6)}</code> ↗</a> <span class="badge badge-red" style="font-size: 9px;">🚨 Funder</span>`;
     } else {
       devRootFormatted = `<code>${deployerAddr.slice(0, 6)}...${deployerAddr.slice(-4)}</code> <a href="https://bscscan.com/address/${deployerAddr}#internaltx" target="_blank" rel="noopener" style="color: var(--color-cyan); text-decoration: underline; font-size: 10.5px; margin-left: 4px;" title="Inspect incoming gas funding transactions on BscScan">🔍 Trace ↗</a>`;
     }
   } else if (devRootAddr) {
-    devRootFormatted = `<a href="https://bscscan.com/address/${devRootAddr}" target="_blank" rel="noopener" style="color: var(--color-cyan); text-decoration: underline;" title="${devRootAddr}"><code>${devRootAddr.slice(0, 8)}...${devRootAddr.slice(-6)}</code> ↗</a>`;
+    devRootFormatted = `<a href="https://bscscan.com/address/${devRootAddr}" target="_blank" rel="noopener" class="u-cyan-link" title="${devRootAddr}"><code>${devRootAddr.slice(0, 8)}...${devRootAddr.slice(-6)}</code> ↗</a>`;
   }
 
   let devSyndicateFormatted = `<span class="badge badge-dim" style="font-size: 10px;">🟢 Independent Contract</span>`;
@@ -335,7 +335,7 @@ export function openModal(item, source = 'direct') {
     <div class="modal-section bonding-gauge-card" data-modal-section="bonding_gauge">
       <div class="bonding-gauge-header">
         <span class="bonding-gauge-title">${bondingGraduated ? '🚀 GRADUATED TO PANCAKESWAP DEX' : '📈 Secondary Market Bonding Curve & DEX Graduation Gauge'}</span>
-        <span class="badge ${bondingGraduated ? 'badge-green' : (bondingPct >= 80 ? 'badge-red' : (bondingPct >= 50 ? 'badge-yellow' : 'badge-cyan'))}" style="font-weight: 700;">
+        <span class="badge ${bondingGraduated ? 'badge-green' : (bondingPct >= 80 ? 'badge-yellow' : (bondingPct >= 50 ? 'badge-green' : 'badge-cyan'))}" style="font-weight: 700;">
           ${bondingGraduated ? '100% DEX LIQUIDITY' : `${bondingPct.toFixed(1)}% GRADUATED`}
         </span>
       </div>
@@ -353,11 +353,11 @@ export function openModal(item, source = 'direct') {
       <div class="modal-section-title">🛡️ Security & Anti-Rug Audit</div>
       <div class="modal-grid">
         <div><span class="dim">Risk Rating:</span> <strong>${item.risk_badge || item.risk_level || '🟢 Clean (SAFE)'}</strong></div>
-        <div><span class="dim">Bytecode Refund:</span> ${item.security && item.security.has_refund ? '<span style="color: var(--color-green); font-weight:600;">🛡️ Verified (' + (item.security.refund_methods || []).slice(0, 1).join('') + ')</span>' : (Number(item.mint_price_bnb || 0) > 0 ? '<span style="color: var(--color-yellow); font-weight:600;">⚠️ No Refund Function</span>' : '<span class="dim">N/A (Free Mint)</span>')}</div>
-        <div><span class="dim">Deployer Profile:</span> ${item.security && item.security.is_serial_dev ? '<span style="color: var(--color-red); font-weight:700;">🚨 Serial Dev (' + item.security.serial_count + ' drops)</span>' : (item.security && item.security.is_fresh_dev ? '<span style="color: var(--color-yellow);">🟡 Fresh Wallet</span>' : '<span style="color: var(--color-green);">🟢 Established Nonce</span>')}</div>
-        <div><span class="dim">PancakeSwap LP:</span> ${item.lp_usd ? '<span style="color: var(--color-green); font-weight:700;">$' + Number(item.lp_usd).toLocaleString(undefined, { maximumFractionDigits: 0 }) + '</span>' : '<span class="dim">No LP Pool detected</span>'}</div>
+        <div><span class="dim">Bytecode Refund:</span> ${item.security && item.security.has_refund ? '<span style="color: var(--color-green); font-weight:600;">🛡️ Verified (' + (item.security.refund_methods || []).slice(0, 1).join('') + ')</span>' : (Number(item.mint_price_bnb || 0) > 0 ? '<span class="u-gold-600">⚠️ No Refund Function</span>' : '<span class="dim">N/A (Free Mint)</span>')}</div>
+        <div><span class="dim">Deployer Profile:</span> ${item.security && item.security.is_serial_dev ? '<span style="color: var(--color-red); font-weight:700;">🚨 Serial Dev (' + item.security.serial_count + ' drops)</span>' : (item.security && item.security.is_fresh_dev ? '<span class="u-gold">🟡 Fresh Wallet</span>' : '<span class="u-green">🟢 Established Nonce</span>')}</div>
+        <div><span class="dim">PancakeSwap LP:</span> ${item.lp_usd ? '<span class="u-green-700">$' + Number(item.lp_usd).toLocaleString(undefined, { maximumFractionDigits: 0 }) + '</span>' : '<span class="dim">No LP Pool detected</span>'}</div>
         <div><span class="dim">Whale Concentration:</span> ${whaleConcentrationBadge}</div>
-        <div><span class="dim">Dev Cluster Audit:</span> ${isCluster ? `<span class="badge badge-red" style="font-weight:700;" title="Dev Cluster: ${clusterDevs} linked ${clusterDevs === 1 ? 'wallet' : 'wallets'} / ${clusterN} drops">🚨 ${clusterDevs} Linked / ${clusterN} Drops</span>` : '<span style="color: var(--color-green);" title="Independent Deployer (No linked developer cluster)">🟢 Independent</span>'}</div>
+        <div><span class="dim">Dev Cluster Audit:</span> ${isCluster ? `<span class="badge badge-red" style="font-weight:700;" title="Dev Cluster: ${clusterDevs} linked ${clusterDevs === 1 ? 'wallet' : 'wallets'} / ${clusterN} drops">🚨 ${clusterDevs} Linked / ${clusterN} Drops</span>` : '<span class="u-green" title="Independent Deployer (No linked developer cluster)">🟢 Independent</span>'}</div>
       </div>
       <div style="margin-top: 8px; font-size: 11px; color: var(--text-dim); display: flex; align-items: center; gap: 6px;">
         <span class="dim">Distribution Guard:</span> <span>${whaleConcentrationDesc}</span>
@@ -428,8 +428,8 @@ export function openModal(item, source = 'direct') {
       </div>
       <div class="modal-grid" style="margin-top: 6px;">
         <div><span class="dim">Proxy Pattern:</span> <strong>${escapeHtml(item.proxy_type || 'EIP-1167 / EIP-1967')}</strong></div>
-        <div><span class="dim">Implementation:</span> <strong>${item.master_implementation ? `<a href="https://bscscan.com/address/${item.master_implementation}" target="_blank" rel="noopener" onclick="trackExternalClick('bscscan_proxy_impl', ${jsAttr(sym)}, '${cAddr}')" style="color: var(--color-cyan); text-decoration: underline;">${item.master_implementation.slice(0, 10)}...${item.master_implementation.slice(-6)}</a>` : 'Direct Contract'}</strong></div>
-        ${item.is_factory ? `<div><span class="dim">Factory:</span> <strong style="color: var(--color-yellow);">${escapeHtml(item.factory_badge || 'Launchpad Factory')}</strong></div>` : ''}
+        <div><span class="dim">Implementation:</span> <strong>${item.master_implementation ? `<a href="https://bscscan.com/address/${item.master_implementation}" target="_blank" rel="noopener" onclick="trackExternalClick('bscscan_proxy_impl', ${jsAttr(sym)}, '${cAddr}')" class="u-cyan-link">${item.master_implementation.slice(0, 10)}...${item.master_implementation.slice(-6)}</a>` : 'Direct Contract'}</strong></div>
+        ${item.is_factory ? `<div><span class="dim">Factory:</span> <strong class="u-gold">${escapeHtml(item.factory_badge || 'Launchpad Factory')}</strong></div>` : ''}
       </div>
     </div>
     ` : ''}
@@ -486,7 +486,7 @@ export function openModal(item, source = 'direct') {
         <div><span class="dim">Secondary Transfers:</span> <strong>${item.secondary_transfers || 0} transfers</strong></div>
       </div>
       <div style="margin-top: 10px; font-size: 11px; color: var(--text-dim);">
-        🔗 Marketplace: <a href="${mktUrl}" target="_blank" rel="noopener" onclick="trackExternalClick('element_market', ${jsAttr(sym)}, '${cAddr}')" style="color: var(--color-cyan); text-decoration: underline;">${mktUrl}</a> (Manual confirmation only — no auto-trade)
+        🔗 Marketplace: <a href="${mktUrl}" target="_blank" rel="noopener" onclick="trackExternalClick('element_market', ${jsAttr(sym)}, '${cAddr}')" class="u-cyan-link">${mktUrl}</a> (Manual confirmation only — no auto-trade)
       </div>
     </div>
     ` : ''}
@@ -520,7 +520,7 @@ export function openModal(item, source = 'direct') {
 
     ${!isNft ? `
     <div class="modal-section dex-chart-section" data-modal-section="dex_chart">
-      <div style="display: flex; justify-content: space-between; align-items: center;">
+      <div class="u-row-between">
         <span style="font-size: 12px; font-weight: 700; color: var(--color-cyan);">📈 Live DEX Candlestick Price Action Chart</span>
         <div style="display: flex; gap: 8px; align-items: center;">
           ${dexScreenerUrl ? `
@@ -565,7 +565,7 @@ export function openModal(item, source = 'direct') {
       ${connectedWallet && !isAgenticWallet ? `
         <div class="agentic-status-warning" style="background: rgba(240, 185, 11, 0.08); border: 1px dashed rgba(240, 185, 11, 0.4); border-radius: 6px; padding: 8px 12px; margin: 8px 0; font-size: 11px; color: var(--color-yellow); display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap;">
           <span>ℹ️ <strong>Non-Agentic Wallet:</strong> If this drop is an Agent ID exclusive launch, it requires an active <code>.ai</code> Agent ID to mint.</span>
-          <a href="https://web3.binance.com/en/dev-docs/products/agentic-wallet/ai-pro#came-from-the-agent-id-campaign" target="_blank" rel="noopener" onclick="trackExternalClick('binance_claim_ai', ${jsAttr(sym)}, '${cAddr}')" style="color: var(--color-cyan); text-decoration: underline;">Claim .ai in Binance App ↗</a>
+          <a href="https://web3.binance.com/en/dev-docs/products/agentic-wallet/ai-pro#came-from-the-agent-id-campaign" target="_blank" rel="noopener" onclick="trackExternalClick('binance_claim_ai', ${jsAttr(sym)}, '${cAddr}')" class="u-cyan-link">Claim .ai in Binance App ↗</a>
         </div>
       ` : (connectedWallet && isAgenticWallet ? `
         <div class="agentic-status-success" style="background: rgba(76, 201, 255, 0.08); border: 1px solid rgba(76, 201, 255, 0.3); border-radius: 6px; padding: 6px 12px; margin: 8px 0; font-size: 11px; color: var(--color-cyan); display: flex; align-items: center; gap: 8px;">
@@ -615,7 +615,7 @@ export function openModal(item, source = 'direct') {
     ${!isNft ? `
     <div class="modal-section" data-modal-section="pancakeswap_exit" style="border-color: rgba(240, 185, 11, 0.4); background: rgba(240, 185, 11, 0.03);">
       <div class="modal-section-title" style="display: flex; justify-content: space-between; align-items: center;">
-        <span style="color: var(--color-yellow);">🥞 1-Click PancakeSwap V2 Take-Profit / Exit Command</span>
+        <span class="u-gold">🥞 1-Click PancakeSwap V2 Take-Profit / Exit Command</span>
         <span class="badge ${exitEval.badge_class || 'badge-green'}" style="font-size: 11px;">${exitEval.badge}</span>
       </div>
       <div style="font-size: 12px; margin-top: 4px; margin-bottom: 8px; color: var(--text-dim);">
@@ -660,7 +660,7 @@ export function openModal(item, source = 'direct') {
         Help keep the 24/7 autonomous cloud discovery engine running:
       </div>
       <div class="cli-box">
-        <code style="color: var(--color-yellow);">${DONATION_WALLET}</code>
+        <code class="u-gold">${DONATION_WALLET}</code>
         <button class="copy-btn" onclick="copyDonationAddress(this, 'inspect_modal')">Copy Address</button>
       </div>
     </div>

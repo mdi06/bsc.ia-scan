@@ -2046,12 +2046,12 @@ function renderSmartLeaderboardRows() {
         <td>
           <div style="font-weight: 700; color: var(--color-cyan); display: flex; align-items: center; gap: 4px;">
             <a href="javascript:void(0)" onclick="viewWalletActivity(${jsAttr(h.name)})" style="color: inherit; text-decoration: none;" title="Click to view all drops minted by ${escapeHtml(h.name)}">
-              ${isF ? '<span style="color: var(--color-yellow);">⭐</span> ' : ''}${escapeHtml(h.name)}
+              ${isF ? '<span class="u-gold">⭐</span> ' : ''}${escapeHtml(h.name)}
             </a>
           </div>
         </td>
         <td><strong>${h.mints}</strong> <span class="dim">mints</span></td>
-        <td><strong style="color: var(--color-green);">${h.wins}</strong> <span class="dim">wins</span></td>
+        <td><strong class="u-green">${h.wins}</strong> <span class="dim">wins</span></td>
         <td>
           <span class="badge-win-rate ${winRateClass}">${h.winRate.toFixed(1)}%</span>
         </td>
@@ -3044,11 +3044,11 @@ function getSniperEval(item) {
 
   const checklist = [];
   if (isSoldOut) {
-    checklist.push('<span style="color:var(--color-red);">✖ Progress: 100% Sold Out / Completed</span>');
+    checklist.push('<span class="u-red">✖ Progress: 100% Sold Out / Completed</span>');
   } else if (prog >= 0.60) {
-    checklist.push(`<span style="color:var(--color-green);">✔ Progress: ${(prog * 100).toFixed(1)}% (≥60% conviction threshold passed)</span>`);
+    checklist.push(`<span class="u-green">✔ Progress: ${(prog * 100).toFixed(1)}% (≥60% conviction threshold passed)</span>`);
   } else if (prog === 0 && surge > 0) {
-    checklist.push(`<span style="color:var(--color-green);">✔ Progress: Crowd Surge (${surge} mints so far, still minting)</span>`);
+    checklist.push(`<span class="u-green">✔ Progress: Crowd Surge (${surge} mints so far, still minting)</span>`);
   } else {
     const pStr = prog > 0 ? `${(prog * 100).toFixed(1)}%` : '0%';
     checklist.push(`<span style="color:var(--color-yellow);">⏳ Progress: ${pStr} (&lt;60% threshold, tracking)</span>`);
@@ -3056,25 +3056,25 @@ function getSniperEval(item) {
 
   if (isSerial) {
     const sCnt = sec.serial_count || item.serial_count || 3;
-    checklist.push(`<span style="color:var(--color-red);">✖ Deployer: 🚨 Serial Dev (${sCnt} contracts deployed in 24h)</span>`);
+    checklist.push(`<span class="u-red">✖ Deployer: 🚨 Serial Dev (${sCnt} contracts deployed in 24h)</span>`);
   } else if (isFresh) {
     checklist.push('<span style="color:var(--color-yellow);">⚠️ Deployer: Fresh wallet (&lt;8h, low nonce)</span>');
   } else {
-    checklist.push('<span style="color:var(--color-green);">✔ Deployer: Clean reputation (No spam deployment)</span>');
+    checklist.push('<span class="u-green">✔ Deployer: Clean reputation (No spam deployment)</span>');
   }
 
   if (rLvl === 'RUG' || isDrained) {
-    checklist.push('<span style="color:var(--color-red);">✖ Capital Drain: 🚨 Empty contract with no DEX LP (Funds pocketed)</span>');
+    checklist.push('<span class="u-red">✖ Capital Drain: 🚨 Empty contract with no DEX LP (Funds pocketed)</span>');
   } else {
-    checklist.push('<span style="color:var(--color-green);">✔ Capital Safety: No fund drain detected</span>');
+    checklist.push('<span class="u-green">✔ Capital Safety: No fund drain detected</span>');
   }
 
   if (isPaid) {
     if (hasRef) {
       const refM = (sec.refund_methods || item.refund_methods || ['refund()'])[0];
-      checklist.push(`<span style="color:var(--color-green);">✔ Refund Guarantee: Bytecode refund verified (${refM})</span>`);
+      checklist.push(`<span class="u-green">✔ Refund Guarantee: Bytecode refund verified (${refM})</span>`);
     } else {
-      checklist.push('<span style="color:var(--color-red);">✖ Refund Guarantee: ⚠️ No refund method (Capital trapped if unfilled)</span>');
+      checklist.push('<span class="u-red">✖ Refund Guarantee: ⚠️ No refund method (Capital trapped if unfilled)</span>');
     }
   } else {
     checklist.push('<span class="dim">▫ Refund Guarantee: N/A (Free Mint / Gas Only)</span>');
@@ -3084,7 +3084,7 @@ function getSniperEval(item) {
     if (lp >= 500) {
       checklist.push(`<span style="color:var(--color-yellow);">✖ Secondary Market: DEX LP already active ($${lp.toLocaleString(undefined, { maximumFractionDigits: 0 })}) → Trade on DEX</span>`);
     } else {
-      checklist.push('<span style="color:var(--color-green);">✔ Secondary Market: Primary bonding phase (No DEX LP yet)</span>');
+      checklist.push('<span class="u-green">✔ Secondary Market: Primary bonding phase (No DEX LP yet)</span>');
     }
   }
 
@@ -4148,7 +4148,7 @@ function renderPulseNftMintRow(n, idx) {
       </div>
     </div>
     <div class="pulse-row-mid">
-      <span class="pulse-row-price" style="color: #f472b6;">${mintedStr}</span>
+      <span class="pulse-row-price" style="color: var(--color-magenta);">${mintedStr}</span>
       <span class="pulse-row-mcap">${priceLabel}${smartStr}</span>
     </div>
     <div class="pulse-row-right">
@@ -6314,7 +6314,7 @@ function renderTable(keepLimit = false) {
                 </button>
               </div>
               <div style="margin-top: 16px; font-size: 11px; color: var(--text-dim);">
-                Or enter any public BSC address in the <a href="javascript:void(0)" onclick="openWalletModal()" style="color: var(--color-cyan); text-decoration: underline;">Watch-Only Auditor</a>
+                Or enter any public BSC address in the <a href="javascript:void(0)" onclick="openWalletModal()" class="u-cyan-link">Watch-Only Auditor</a>
               </div>
             </div>
           </td>
@@ -6425,15 +6425,15 @@ function renderTable(keepLimit = false) {
 
     // Standard badge
     const std = String(item.standard || 'ERC-721');
-    let stdBadge = `<span style="color: var(--color-magenta); font-weight:600;">ERC-721</span>`;
+    let stdBadge = `<span class="u-magenta-600">ERC-721</span>`;
     if (item.is_nft_surge) {
       stdBadge = `<span class="badge badge-magenta" style="box-shadow: 0 0 8px rgba(217, 70, 239, 0.4); font-weight:700;">🦋 SURGE (${item.secondary_sales_count || 0})</span>`;
     } else if (item.is_proxy_clone) {
       stdBadge = `<span class="badge badge-cyan" style="color: #4cc9ff !important; background: rgba(76, 201, 255, 0.18) !important; border: 1px solid rgba(76, 201, 255, 0.5) !important; box-shadow: 0 0 10px rgba(76, 201, 255, 0.3); font-weight:800;" title="${escapeHtml(item.proxy_type || 'Proxy')} Master: ${escapeHtml(item.master_implementation || '')}">🧩 PROXY</span>`;
     } else if (std.includes('BEP-20')) {
-      stdBadge = `<span style="color: var(--color-cyan); font-weight:600;">BEP-20</span>`;
+      stdBadge = `<span class="u-cyan-600">BEP-20</span>`;
     } else if (std.includes('Fair-Mint')) {
-      stdBadge = `<span style="color: var(--color-yellow); font-weight:600;">Fair-Mint</span>`;
+      stdBadge = `<span class="u-gold-600">Fair-Mint</span>`;
     }
 
     // Safety badge
@@ -6462,11 +6462,11 @@ function renderTable(keepLimit = false) {
     } else if (item.is_nft_surge && secVol > 0) {
       lpStr = `<span style="color: var(--color-magenta); font-weight:700;" title="${item.secondary_sales_count || 0} Element sales">${formatBnb(secVol)} BNB 🦋</span>`;
     } else if (secVol > 0) {
-      lpStr = `<span style="color: var(--color-cyan); font-weight:600;" title="${item.secondary_sales_count || 0} Element sales">${formatBnb(secVol)} BNB</span>`;
+      lpStr = `<span class="u-cyan-600" title="${item.secondary_sales_count || 0} Element sales">${formatBnb(secVol)} BNB</span>`;
     } else if (volBnb && Number(volBnb) > 0) {
-      lpStr = `<span style="color: var(--color-cyan); font-weight:600;">${formatBnb(volBnb)} BNB</span>`;
+      lpStr = `<span class="u-cyan-600">${formatBnb(volBnb)} BNB</span>`;
     } else if (mcapUsd > 0) {
-      lpStr = `<span style="color: var(--color-cyan); font-weight:600;" title="Market Cap / FDV: $${formatCount(mcapUsd)}">${mcapLabel(item)}: $${formatCount(mcapUsd)}</span>`;
+      lpStr = `<span class="u-cyan-600" title="Market Cap / FDV: $${formatCount(mcapUsd)}">${mcapLabel(item)}: $${formatCount(mcapUsd)}</span>`;
     }
 
     // Progress Bar
@@ -6539,9 +6539,9 @@ function renderTable(keepLimit = false) {
     if (pStr.includes('DEX')) {
       priceStr = `<span style="color: var(--color-cyan);">DEX Traded</span>`;
     } else if (isFree) {
-      priceStr = `<span style="color: var(--color-green); font-weight:700;">⭐ FREE</span>`;
+      priceStr = `<span class="u-green-700">⭐ FREE</span>`;
     } else if (vWei > 0) {
-      priceStr = `<span style="color: var(--color-yellow); font-weight:600;">💎 ${formatBnb(vWei / 1e18)} BNB</span>`;
+      priceStr = `<span class="u-gold-600">💎 ${formatBnb(vWei / 1e18)} BNB</span>`;
     }
 
     // Floor / Trade
@@ -6550,12 +6550,12 @@ function renderTable(keepLimit = false) {
     const tkUsd = Number(item.token_price_usd || item.market_price_usd || 0);
     let floorStr = '';
     if (flUsd > 0) {
-      floorStr = `<span style="color: var(--color-cyan); font-weight:600;">${formatCryptoPrice(flUsd)}</span>`;
+      floorStr = `<span class="u-cyan-600">${formatCryptoPrice(flUsd)}</span>`;
     } else if (flBnb > 0) {
       if (item.is_nft_surge) {
         floorStr = `<span style="color: var(--color-magenta); font-weight:700;">${formatBnb(flBnb)} BNB</span>`;
       } else {
-        floorStr = `<span style="color: var(--color-cyan); font-weight:600;">${flBnb} BNB</span>`;
+        floorStr = `<span class="u-cyan-600">${flBnb} BNB</span>`;
       }
     } else if (tkUsd > 0) {
       const dexScreenerUrl = getDexScreenerUrl(item);
@@ -6567,12 +6567,12 @@ function renderTable(keepLimit = false) {
       }
     } else {
       if (ms > 0 && tm >= ms) {
-        floorStr = `<span style="color: var(--color-yellow); font-weight:600;">100% Sold</span>`;
+        floorStr = `<span class="u-gold-600">100% Sold</span>`;
       } else if (item.market_stale || String(item.mint_price_str || '').toUpperCase().includes('DEX')) {
         // a token that already trades (or whose market data was cleared as stale) is not in its fair-mint phase
         floorStr = `<span class="dim">—</span>`;
       } else {
-        floorStr = `<span style="color: var(--color-cyan); font-weight:600;">Fair Mint</span>`;
+        floorStr = `<span class="u-cyan-600">Fair Mint</span>`;
       }
     }
     floorStr += marketFreshnessHtml(item);   // "⚠ stale", or the age of data that has not been confirmed for a while
@@ -6615,7 +6615,7 @@ function renderTable(keepLimit = false) {
       if (lpUsd > 0) {
         cellLp = `<a href="${dexScreenerUrl}" target="_blank" rel="noopener" onclick="event.stopPropagation();" style="color: var(--color-green); font-weight:700; text-decoration: none;" title="View Liquidity Pool on DexScreener">$${formatCount(lpUsd)} ↗</a>`;
       } else if (secVol > 0) {
-        cellLp = `<span style="color: var(--color-magenta); font-weight:600;">${formatBnb(secVol)} BNB</span>`;
+        cellLp = `<span class="u-magenta-600">${formatBnb(secVol)} BNB</span>`;
       } else {
         cellLp = `<span class="dim">—</span>`;
       }
@@ -6661,17 +6661,17 @@ function renderTable(keepLimit = false) {
       actBtn = `<button class="inspect-btn trade-dex-btn dex-screener-btn" onclick="event.stopPropagation(); window.open(${jsAttr(dexUrl)}, '_blank')" style="border-color: var(--color-cyan); color: var(--color-cyan); font-weight: 700; background: rgba(76, 201, 255, 0.08);" title="View Live Chart & Order Book on DexScreener"><span class="desktop-only">📈 DexScreener ↗</span><span class="mobile-only">📈 Chart ↗</span></button>`;
     } else if (isPort) {
       if (item.contract === '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee') {
-        cellHolders = `<span style="color: var(--color-green); font-weight:700;">Gas: ${Number(item.user_balance || 0).toFixed(4)} BNB</span>`;
+        cellHolders = `<span class="u-green-700">Gas: ${Number(item.user_balance || 0).toFixed(4)} BNB</span>`;
         cellFloor = `<span class="badge badge-cyan" style="font-size: 11px;">⛽ GAS RESERVE</span>`;
         actBtn = `<a href="${tokenHash}" class="inspect-btn" onclick="handleTokenClick(event, '${item.contract}')" style="border-color: var(--color-cyan); color: var(--color-cyan); font-weight:700;"><span class="desktop-only">⛽ Gas Reserve</span><span class="mobile-only">⛽ Gas ➔</span></a>`;
       } else if (isNft) {
-        cellHolders = `<span style="color: var(--color-green); font-weight:700;">Holdings: ${formatCount(item.user_balance || 1)} NFT</span>`;
+        cellHolders = `<span class="u-green-700">Holdings: ${formatCount(item.user_balance || 1)} NFT</span>`;
         cellFloor = `<span class="badge ${exitSignal.badge_class}" style="font-size: 11px;">${exitSignal.badge}</span>`;
         actBtn = `<a href="${tokenHash}" class="inspect-btn" onclick="handleTokenClick(event, '${item.contract}')" style="border-color: var(--color-magenta); color: var(--color-magenta); font-weight:700;"><span class="desktop-only">🎨 Element List</span><span class="mobile-only">🎨 Element ➔</span></a>`;
       } else {
         const balNum = Number(item.user_balance || 0);
         const balStr = balNum >= 1000 ? formatCount(balNum) : (balNum < 0.01 ? balNum.toFixed(4) : balNum.toFixed(2));
-        cellHolders = `<span style="color: var(--color-green); font-weight:700;">Holdings: ${balStr}</span>`;
+        cellHolders = `<span class="u-green-700">Holdings: ${balStr}</span>`;
         cellFloor = `<span class="badge ${exitSignal.badge_class}" style="font-size: 11px;">${exitSignal.badge}</span>`;
         actBtn = `<a href="${tokenHash}" class="inspect-btn" onclick="handleTokenClick(event, '${item.contract}')" style="border-color: #f0b90b; color: #f0b90b; font-weight:700;"><span class="desktop-only">🥞 1-Click Exit</span><span class="mobile-only">🥞 Exit CLI ➔</span></a>`;
       }
@@ -6806,15 +6806,15 @@ function appendNextTableBatch() {
 
     // Standard badge
     const std = String(item.standard || 'ERC-721');
-    let stdBadge = `<span style="color: var(--color-magenta); font-weight:600;">ERC-721</span>`;
+    let stdBadge = `<span class="u-magenta-600">ERC-721</span>`;
     if (item.is_nft_surge) {
       stdBadge = `<span class="badge badge-magenta" style="box-shadow: 0 0 8px rgba(217, 70, 239, 0.4); font-weight:700;">🦋 SURGE (${item.secondary_sales_count || 0})</span>`;
     } else if (item.is_proxy_clone) {
       stdBadge = `<span class="badge badge-cyan" style="color: #4cc9ff !important; background: rgba(76, 201, 255, 0.18) !important; border: 1px solid rgba(76, 201, 255, 0.5) !important; box-shadow: 0 0 10px rgba(76, 201, 255, 0.3); font-weight:800;" title="${escapeHtml(item.proxy_type || 'Proxy')} Master: ${escapeHtml(item.master_implementation || '')}">🧩 PROXY</span>`;
     } else if (std.includes('BEP-20')) {
-      stdBadge = `<span style="color: var(--color-cyan); font-weight:600;">BEP-20</span>`;
+      stdBadge = `<span class="u-cyan-600">BEP-20</span>`;
     } else if (std.includes('Fair-Mint')) {
-      stdBadge = `<span style="color: var(--color-yellow); font-weight:600;">Fair-Mint</span>`;
+      stdBadge = `<span class="u-gold-600">Fair-Mint</span>`;
     }
 
     // Safety badge
@@ -6867,9 +6867,9 @@ function appendNextTableBatch() {
     if (pStr.includes('DEX')) {
       priceStr = `<span style="color: var(--color-cyan);">DEX Traded</span>`;
     } else if (isFree) {
-      priceStr = `<span style="color: var(--color-green); font-weight:700;">⭐ FREE</span>`;
+      priceStr = `<span class="u-green-700">⭐ FREE</span>`;
     } else if (vWei > 0) {
-      priceStr = `<span style="color: var(--color-yellow); font-weight:600;">💎 ${formatBnb(vWei / 1e18)} BNB</span>`;
+      priceStr = `<span class="u-gold-600">💎 ${formatBnb(vWei / 1e18)} BNB</span>`;
     }
 
     // Floor / Trade
@@ -6878,12 +6878,12 @@ function appendNextTableBatch() {
     const tkUsd = Number(item.token_price_usd || item.market_price_usd || 0);
     let floorStr = '';
     if (flUsd > 0) {
-      floorStr = `<span style="color: var(--color-cyan); font-weight:600;">${formatCryptoPrice(flUsd)}</span>`;
+      floorStr = `<span class="u-cyan-600">${formatCryptoPrice(flUsd)}</span>`;
     } else if (flBnb > 0) {
       if (item.is_nft_surge) {
         floorStr = `<span style="color: var(--color-magenta); font-weight:700;">${formatBnb(flBnb)} BNB</span>`;
       } else {
-        floorStr = `<span style="color: var(--color-cyan); font-weight:600;">${flBnb} BNB</span>`;
+        floorStr = `<span class="u-cyan-600">${flBnb} BNB</span>`;
       }
     } else if (tkUsd > 0) {
       const dexScreenerUrl = getDexScreenerUrl(item);
@@ -6895,12 +6895,12 @@ function appendNextTableBatch() {
       }
     } else {
       if (ms > 0 && tm >= ms) {
-        floorStr = `<span style="color: var(--color-yellow); font-weight:600;">100% Sold</span>`;
+        floorStr = `<span class="u-gold-600">100% Sold</span>`;
       } else if (item.market_stale || String(item.mint_price_str || '').toUpperCase().includes('DEX')) {
         // a token that already trades (or whose market data was cleared as stale) is not in its fair-mint phase
         floorStr = `<span class="dim">—</span>`;
       } else {
-        floorStr = `<span style="color: var(--color-cyan); font-weight:600;">Fair Mint</span>`;
+        floorStr = `<span class="u-cyan-600">Fair Mint</span>`;
       }
     }
     floorStr += marketFreshnessHtml(item);   // "⚠ stale", or the age of data that has not been confirmed for a while
@@ -6921,7 +6921,7 @@ function appendNextTableBatch() {
     if (isPort && item.user_balance > 0) {
       const balVal = isNft ? `${item.user_balance} NFT` : formatCount(item.user_balance);
       const usdVal = exitSignal.holding_usd > 0 ? ` (~${formatCryptoPrice(exitSignal.holding_usd)})` : '';
-      cellHolders = `<strong style="color: var(--color-green);">${balVal}</strong>${usdVal}`;
+      cellHolders = `<strong class="u-green">${balVal}</strong>${usdVal}`;
     }
 
     let cellFloor = floorStr;
@@ -6949,9 +6949,9 @@ function appendNextTableBatch() {
         lpStr += `<div class="sub-mcap" style="font-size: 10px; color: var(--color-cyan); font-weight:600;" title="Market Cap / FDV: $${formatCount(mcapUsdBatch)}"><a href="${dexScreenerUrl}" target="_blank" rel="noopener" onclick="event.stopPropagation();" style="color: var(--color-cyan); text-decoration: none;">${mcapLabel(item)}: $${formatCount(mcapUsdBatch)}</a></div>`;
       }
     } else if (item.is_nft_surge && Number(item.secondary_vol_bnb || 0) > 0) {
-      lpStr = `<span style="color: var(--color-magenta); font-weight:600;">${formatBnb(item.secondary_vol_bnb)} BNB</span>`;
+      lpStr = `<span class="u-magenta-600">${formatBnb(item.secondary_vol_bnb)} BNB</span>`;
     } else if (mcapUsdBatch > 0) {
-      lpStr = `<span style="color: var(--color-cyan); font-weight:600;" title="Market Cap / FDV: $${formatCount(mcapUsdBatch)}">${mcapLabel(item)}: $${formatCount(mcapUsdBatch)}</span>`;
+      lpStr = `<span class="u-cyan-600" title="Market Cap / FDV: $${formatCount(mcapUsdBatch)}">${mcapLabel(item)}: $${formatCount(mcapUsdBatch)}</span>`;
     }
 
     const isSec = (activeTab === 'SECONDARY');
@@ -6969,7 +6969,7 @@ function appendNextTableBatch() {
       if (Number(item.lp_usd || 0) > 0) {
         cellLp = `<a href="${dexScreenerUrl}" target="_blank" rel="noopener" onclick="event.stopPropagation();" style="color: var(--color-green); font-weight:700; text-decoration: none;" title="View Liquidity Pool on DexScreener">$${formatCount(item.lp_usd)} ↗</a>`;
       } else if (Number(item.secondary_vol_bnb || 0) > 0) {
-        cellLp = `<span style="color: var(--color-magenta); font-weight:600;">${formatBnb(item.secondary_vol_bnb)} BNB</span>`;
+        cellLp = `<span class="u-magenta-600">${formatBnb(item.secondary_vol_bnb)} BNB</span>`;
       } else {
         cellLp = `<span class="dim">—</span>`;
       }
@@ -7015,17 +7015,17 @@ function appendNextTableBatch() {
       actBtn = `<button class="inspect-btn trade-dex-btn dex-screener-btn" onclick="event.stopPropagation(); window.open(${jsAttr(dexUrl)}, '_blank')" style="border-color: var(--color-cyan); color: var(--color-cyan); font-weight: 700; background: rgba(76, 201, 255, 0.08);" title="View Live Chart & Order Book on DexScreener"><span class="desktop-only">📈 DexScreener ↗</span><span class="mobile-only">📈 Chart ↗</span></button>`;
     } else if (isPort && item.user_balance > 0) {
       if (item.is_native_gas) {
-        cellHolders = `<span style="color: var(--color-green); font-weight:700;">Gas: ${Number(item.user_balance || 0).toFixed(4)} BNB</span>`;
+        cellHolders = `<span class="u-green-700">Gas: ${Number(item.user_balance || 0).toFixed(4)} BNB</span>`;
         cellFloor = `<span class="badge badge-cyan" style="font-size: 11px;">⛽ GAS RESERVE</span>`;
         actBtn = `<a href="${tokenHash}" class="inspect-btn" onclick="handleTokenClick(event, '${item.contract}')" style="border-color: var(--color-cyan); color: var(--color-cyan); font-weight:700;"><span class="desktop-only">⛽ Gas Reserve</span><span class="mobile-only">⛽ Gas ➔</span></a>`;
       } else if (isNft) {
-        cellHolders = `<span style="color: var(--color-green); font-weight:700;">Holdings: ${formatCount(item.user_balance || 1)} NFT</span>`;
+        cellHolders = `<span class="u-green-700">Holdings: ${formatCount(item.user_balance || 1)} NFT</span>`;
         cellFloor = `<span class="badge ${exitSignal.badge_class}" style="font-size: 11px;">${exitSignal.badge}</span>`;
         actBtn = `<a href="${tokenHash}" class="inspect-btn" onclick="handleTokenClick(event, '${item.contract}')" style="border-color: var(--color-magenta); color: var(--color-magenta); font-weight:700;"><span class="desktop-only">🎨 Element List</span><span class="mobile-only">🎨 Element ➔</span></a>`;
       } else {
         const balNum = Number(item.user_balance || 0);
         const balStr = balNum >= 1000 ? formatCount(balNum) : (balNum < 0.01 ? balNum.toFixed(4) : balNum.toFixed(2));
-        cellHolders = `<span style="color: var(--color-green); font-weight:700;">Holdings: ${balStr}</span>`;
+        cellHolders = `<span class="u-green-700">Holdings: ${balStr}</span>`;
         cellFloor = `<span class="badge ${exitSignal.badge_class}" style="font-size: 11px;">${exitSignal.badge}</span>`;
         actBtn = `<a href="${tokenHash}" class="inspect-btn" onclick="handleTokenClick(event, '${item.contract}')" style="border-color: #f0b90b; color: #f0b90b; font-weight:700;"><span class="desktop-only">🥞 1-Click Exit</span><span class="mobile-only">🥞 Exit CLI ➔</span></a>`;
       }
@@ -8077,7 +8077,7 @@ function openHallOfFameModal(filterMode = 'ALL') {
       const unitLine = isToken
         ? `<div class="dim" style="font-size: 10px;">${fmtUnits(units)} tokens${mintCost > 0 ? ` · ${formatCryptoPrice(mintCost / units)} each` : ''}</div>` : '';
       const mintCostStr = g.isFree
-        ? `<span style="color: var(--color-green); font-weight:700;">FREE</span>${unitLine}`
+        ? `<span class="u-green-700">FREE</span>${unitLine}`
         : (mintCost > 0 ? `${formatCryptoPrice(mintCost)}<div class="dim" style="font-size: 10px;">per mint</div>${unitLine}` : '<span class="dim" title="Mint cost not known">TBD</span>');
       const athPriceStr = formatCryptoPrice(athPrice) + (isToken ? '<span class="dim" style="font-size: 10px;"> /token</span>' : '');
       let peakVsMint = '';
@@ -8853,7 +8853,7 @@ async function executeWeb3Mint(contractAddress, rawCalldata, valueWei, name = 'D
       <div class="mint-status-success">
         <span class="status-icon" style="font-size: 18px;">🚀</span>
         <div>
-          <strong style="color: var(--color-green);">Transaction Broadcasted to BSC!</strong><br/>
+          <strong class="u-green">Transaction Broadcasted to BSC!</strong><br/>
           <a href="https://bscscan.com/tx/${txHash}" target="_blank" rel="noopener" style="color: var(--color-cyan); text-decoration: underline; font-family: monospace; font-size: 11px;">
             ${txHash.slice(0, 10)}...${txHash.slice(-8)} ↗ (View on BscScan)
           </a>
@@ -9743,7 +9743,7 @@ function openSyncModal() {
 
       <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 14px; font-size: 11px; padding: 8px 12px; background: rgba(46, 242, 176, 0.06); border: 1px solid rgba(46, 242, 176, 0.2); border-radius: 4px;">
         <span>Cloud Sync Status:</span>
-        <strong style="color: var(--color-green);">🟢 Synced (Cloud Engine)</strong>
+        <strong class="u-green">🟢 Synced (Cloud Engine)</strong>
       </div>
     </div>
   `;

@@ -1,5 +1,5 @@
 -- ==============================================================================
--- Supabase Schema for Agent ID Monitor (Render Free + Supabase)
+-- Supabase Schema for Agent ID Monitor (Railway API + Supabase)
 -- ==============================================================================
 -- Run this in your Supabase SQL Editor (Dashboard -> SQL Editor -> New Query)
 

@@ -1,7 +1,7 @@
 """
 Storage layer for Agent ID Monitor.
 Backends:
-1. Supabase (PostgreSQL via the PostgREST API): used when SUPABASE_URL and a key are set, so data survives Render restarts.
+1. Supabase (PostgreSQL via the PostgREST API): used when SUPABASE_URL and a key are set, so data survives host restarts.
 2. SQLite (WAL mode): fallback for local development, and when a Supabase write fails.
 """
 
@@ -75,14 +75,14 @@ class DatabaseManager:
         # upserts update the cache immediately so new drops show up without waiting for a refresh.
         self._projects_cache: Dict[str, Dict[str, Any]] = {}
         # The cache sorted by block (newest first), kept until the cache changes: every request used to sort all
-        # records again (2 ms locally, ~22 ms on Render) even when nothing had changed. Keyed on (content version,
+        # records again (2 ms locally, ~22 ms on the hosted API) even when nothing had changed. Keyed on (content version,
         # record count); each mutation of the cache bumps one of them. Callers get a shallow copy.
         self._sorted_items: Optional[List[Dict[str, Any]]] = None
         self._sorted_key: Optional[tuple] = None
         self._p_fingerprints: Dict[str, str] = {}
         self._p_written_at: Dict[str, float] = {}  # contract -> when it was last durably written
         self._retry_queue: set = set()  # contracts whose last remote write failed; resent by the next upsert
-        # Bandwidth (Render's 5 GB/month cap): updates to known records wait here and go to Supabase at most once
+        # Bandwidth (egress budget): updates to known records wait here and go to Supabase at most once
         # per SUPABASE_FLUSH_INTERVAL_SEC; the latest cached version of each is sent (see _select_remote_batch).
         self._pending_remote: set = set()
         self._load_lock = threading.Lock()      # single-flight for the Supabase read
@@ -266,7 +266,7 @@ class DatabaseManager:
     def get_project_count(self) -> int:
         if self.mode == "supabase":
             # A loaded cache already holds every row (it refreshes about once a minute), so /healthz (the keep-warm
-            # ping every 10 minutes, Render's health checks) answers from it. The count query took ~190 ms in Postgres
+            # ping every 10 minutes, the host's health checks) answers from it. The count query took ~190 ms in Postgres
             # plus a round trip, on every call. Only an empty / not yet loaded cache asks the database.
             with self._cache_lock:
                 if self._cache_initialized and self._projects_cache:
@@ -931,7 +931,7 @@ class DatabaseManager:
     def _compute_fingerprint(p: Dict[str, Any]) -> str:
         """Computes a compact signature to detect if mutable metrics have actually changed significantly.
         Quantizes floating-point values (price, LP, mcap, volume) to prevent micro-fluctuations (sub-cent / sub-1%)
-        from triggering continuous multi-megabyte outbound REST syncs to Supabase on Render.
+        from triggering continuous multi-megabyte outbound REST syncs to Supabase from the hosted API.
 
         Counts, flags and all-time-high fields are compared exactly; continuous values are bucketed. Fields that
         move on every tick without meaning anything new (market_updated_at) are left out and covered by

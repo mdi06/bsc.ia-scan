@@ -8,8 +8,8 @@ and the cold ones as one zlib-compressed JSON blob, decoded only when something 
 
 It behaves like the full dict (`get`, `[]`, `in`, iteration, `items()`, `json.dumps`, `dict(rec)`, `==` all see every
 field, in the original key order), so no caller has to know about it. Reading a cold field decodes the blob (about
-40 us on a laptop, a few hundred us on Render's 0.1 CPU); code that walks every record should use `hot_get`
-or avoid cold fields. Nothing here talks to the database: no extra Supabase or Render bandwidth.
+40 us on a laptop, a few hundred us on a small hosted CPU); code that walks every record should use `hot_get`
+or avoid cold fields. Nothing here talks to the database: no extra Supabase or hosting bandwidth.
 """
 import json
 import sys

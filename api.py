@@ -86,7 +86,7 @@ app = FastAPI(
     default_response_class=SafeJSONResponse,
 )
 
-# Compress responses to stay under Render's 5 GB monthly bandwidth cap.
+# Compress responses to keep the API's bandwidth small.
 GZIP_MIN_SIZE = 500
 app.add_middleware(GZipMiddleware, minimum_size=GZIP_MIN_SIZE)
 
@@ -853,7 +853,7 @@ class _FeedSnapshot:
             out = self._by_filter.get(name)
         if out is not None:
             return out
-        # Built outside self._lock (the secondary list takes ~100 ms locally, ~1 s on Render): feed pages, the delta
+        # Built outside self._lock (the secondary list takes ~100 ms locally, ~1 s on the hosted API): feed pages, the delta
         # poll and the pulse must not wait behind it. Concurrent requests for the same list wait for the one build.
         with self._filter_lock:
             with self._lock:
@@ -880,7 +880,7 @@ class _FeedSnapshot:
 
     def pulse(self):
         """The 24h pulse, recomputed when its cached value is PULSE_CACHE_TTL_SEC old. The recomputation (~85 ms locally,
-        ~1 s on Render) runs outside self._lock and in one thread only: while it runs, other requests get the previous
+        ~1 s on the hosted API) runs outside self._lock and in one thread only: while it runs, other requests get the previous
         value (at most one recomputation older than the TTL already allows); only the very first call waits for it."""
         with self._lock:
             if self._pulse is not None and time.monotonic() - self._pulse_at < PULSE_CACHE_TTL_SEC:

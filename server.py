@@ -6,7 +6,7 @@ Entry point: runs the ingestion worker (worker.py) and the web API (api.py) as s
 - api.py serves reads from the db.py cache.
 - This module starts the worker as a child process, restarts it if it exits, and runs the API in the main process.
   Use --worker-only or --api-only (or RUN_WORKER=0) to run just one of them. Production runs the API alone on
-  Render and the worker on a separate host: see DEPLOY_WORKER.md.
+  Railway and the worker on a separate host: see DEPLOY_WORKER.md.
 """
 
 import os
@@ -35,7 +35,7 @@ history_lock = worker.history_lock
 
 def api_only_from_env() -> bool:
     """RUN_WORKER=0 runs the API alone. The worker then runs on another host (`python server.py --worker-only`):
-    its block scanning downloads every BSC block, far more than Render's 5 GB/month free bandwidth allows."""
+    its block scanning downloads every BSC block, far more bandwidth than a hosted API should spend."""
     return os.environ.get("RUN_WORKER", "1").strip().lower() in ("0", "false", "no", "off")
 
 
