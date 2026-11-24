@@ -188,15 +188,7 @@ class TestOptionD(unittest.TestCase):
             "secondary_vol_bnb": 0.0084
         }
 
-        # Python evaluation
-        py_eval = monitor.evaluate_portfolio_exit(hot_nft)
-        self.assertEqual(py_eval["signal"], "🦋 ELEMENT SURGE")
-        self.assertIn("7 sales", py_eval["badge"])
-        self.assertFalse(py_eval["can_swap"])
-        self.assertEqual(py_eval["action"], "LIST_ELEMENT")
-        self.assertIn("manual", py_eval["recommendation"].lower())
-
-        # JavaScript evaluation parity
+        # The page's evaluation (the Python twin was dead code and is gone)
         js_eval_script = """
         const { evaluatePortfolioExit } = require('./app.js');
         const raw = process.argv.slice(1).find(a => a.startsWith('[') || a.startsWith('{'));
@@ -217,19 +209,6 @@ class TestOptionD(unittest.TestCase):
         self.assertEqual(js_eval["action"], "LIST_ELEMENT")
         self.assertFalse(js_eval["can_swap"])
         self.assertIn("Element", js_eval["recommendation"])
-
-    def test_05_nft_surge_filter_and_sort(self):
-        """Test filter_and_sort_projects properly filters by NFT_SURGE."""
-        mock_history = [
-            {"contract": "0x1", "name": "Item 1", "is_nft_surge": True, "score": 80},
-            {"contract": "0x2", "name": "Item 2", "is_nft_surge": False, "score": 90},
-            {"contract": "0x3", "name": "Item 3", "is_nft_surge": True, "score": 60},
-        ]
-
-        filtered = monitor.filter_and_sort_projects(mock_history, "NFT_SURGE", "HEAT")
-        self.assertEqual(len(filtered), 2)
-        self.assertEqual(filtered[0]["contract"], "0x1")
-        self.assertEqual(filtered[1]["contract"], "0x3")
 
     def test_06_live_element_volume_scan(self):
         """Test live scan_element_nft_volume against BSC mainnet RPC."""

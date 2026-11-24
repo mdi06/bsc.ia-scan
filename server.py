@@ -19,18 +19,8 @@ import threading
 import worker
 import api
 
-# Re-export app for ASGI / Uvicorn (e.g. uvicorn server:app)
+# The ASGI entry point (e.g. uvicorn server:app). Everything else lives in worker.py / api.py: import it from there.
 app = api.app
-
-# Names the tests import from this module.
-run_discovery_loop = worker.run_discovery_loop
-run_proxy_factory_watcher_loop = worker.run_proxy_factory_watcher_loop
-run_market_dynamics_updater_loop = worker.run_market_dynamics_updater_loop
-run_fast_track_progress_sweeper_loop = worker.run_fast_track_progress_sweeper_loop
-run_element_nft_volume_sweeper_loop = worker.run_element_nft_volume_sweeper_loop
-fast_sweep_contract = worker.fast_sweep_contract
-
-history_lock = worker.history_lock
 
 
 def api_only_from_env() -> bool:

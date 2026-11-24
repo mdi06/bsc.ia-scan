@@ -296,7 +296,7 @@ def load_smart_wallets() -> Dict[str, str]:
 
 def sync_smart_wallets() -> Dict[str, str]:
     """Downloads/syncs the 5,000 tracked smart agent wallets from Google Sheets."""
-    print(f"{C_BLUE}[*] Fetching smart agent wallets from Google Sheets ({SMART_WALLETS_CSV_URL[:45]}...)...{C_RESET}")
+    print(f"[*] Fetching smart agent wallets from Google Sheets ({SMART_WALLETS_CSV_URL[:45]}...)...")
     wallets = {}
     try:
         req = urllib.request.Request(SMART_WALLETS_CSV_URL, headers={"User-Agent": "Mozilla/5.0"})
@@ -319,23 +319,15 @@ def sync_smart_wallets() -> Dict[str, str]:
         if wallets:
             with open(SMART_WALLETS_FILE, "w") as f:
                 json.dump(wallets, f, indent=2)
-            print(f"{C_GREEN}[+] Successfully synced {len(wallets):,} smart agent wallets to {SMART_WALLETS_FILE}!{C_RESET}")
+            print(f"[+] Successfully synced {len(wallets):,} smart agent wallets to {SMART_WALLETS_FILE}!")
         else:
-            print(f"{C_RED}[!] Could not parse smart wallets from spreadsheet.{C_RESET}")
+            print(f"[!] Could not parse smart wallets from spreadsheet.")
     except Exception as e:
-        print(f"{C_RED}[!] Error downloading smart wallets: {e}{C_RESET}")
+        print(f"[!] Error downloading smart wallets: {e}")
     return wallets
 
 
 # ANSI Terminal Colors
-C_RESET = "\033[0m"
-C_BOLD = "\033[1m"
-C_GREEN = "\033[32m"
-C_YELLOW = "\033[33m"
-C_BLUE = "\033[34m"
-C_MAGENTA = "\033[35m"
-C_CYAN = "\033[36m"
-C_RED = "\033[31m"
 
 
 try:
@@ -1245,17 +1237,6 @@ def get_reserves(rpc: BscRpcClient, pair_addr: str) -> Optional[Tuple[int, int]]
     return int(res[2:66], 16), int(res[66:130], 16)
 
 
-def _call_uint(rpc: BscRpcClient, contract: str, func_sig: str) -> Optional[int]:
-    """Calls a no-argument view function and returns its uint256 result, or None if it reverts or is absent."""
-    res = rpc.call_contract(contract, keccak_selector(func_sig))
-    if not res or len(res) < 66:
-        return None
-    try:
-        return int(res[:66], 16)
-    except ValueError:
-        return None
-
-
 MAX_SUPPLY_GETTERS = ("maxSupply()", "MAX_SUPPLY()", "max_supply()", "cap()", "MAX_TOKENS()", "maxTokens()",
                       "maxBoxes()", "MAX_BOXES()")
 MINTED_GETTERS = ("totalMinted()", "_totalMinted()", "totalSupply()", "currentSupply()", "tokenCount()",
@@ -1656,11 +1637,6 @@ def simulate_mint_detail(rpc: BscRpcClient, contract: str, calldata: Optional[st
     from classify_revert (None if unrecognised); (None, None) when no RPC endpoint answered. eth_call with a state
     override giving the sender a large balance, so a known price never fails it."""
     return _simulate(rpc, contract, calldata, value_wei, sender)[:2]
-
-
-def simulate_mint(rpc: BscRpcClient, contract: str, calldata: Optional[str], value_wei: Any, sender: str) -> bool:
-    """True if a mint from `sender` would go through right now (see simulate_mint_detail)."""
-    return simulate_mint_detail(rpc, contract, calldata, value_wei, sender)[0] is True
 
 
 def mint_call_is_usable(calldata: Optional[str], code: str) -> bool:
@@ -2320,104 +2296,6 @@ def is_system_infra(item: Dict[str, Any]) -> bool:
     return False
 
 
-def format_floor_trade_price(item: Dict[str, Any], bnb_price: Optional[float] = None) -> str:
-    """
-    Formats the secondary market trading price or NFT floor price:
-    - For NFTs: Floor price in BNB and USD valuation (e.g. '0.00016 BNB ($0.11)')
-    - For Tokens: DEX trading price from PancakeSwap/DexScreener (e.g. '$0.000071', '$0.0517')
-    - For Pre-market / unlisted: '—'
-    """
-    if bnb_price is None:
-        bnb_price = cached_bnb_price()
-    floor_bnb = item.get("floor_price_bnb")
-    floor_usd = item.get("floor_price_usd")
-    token_usd = item.get("token_price_usd") or 0.0
-    token_bnb = item.get("token_price_bnb") or 0.0
-
-    if not token_usd:
-        try:
-            token_usd = float(item.get("market_price_usd") or 0.0)
-        except Exception:
-            token_usd = 0.0
-    if not token_bnb:
-        try:
-            token_bnb = float(item.get("market_price_bnb") or 0.0)
-        except Exception:
-            token_bnb = 0.0
-
-    # 1. NFT Floor Price
-    if floor_bnb is not None and float(floor_bnb) > 0:
-        f_bnb = float(floor_bnb)
-        usd_val = float(floor_usd) if floor_usd else (f_bnb * bnb_price)
-        if item.get("is_nft_surge"):
-            return f"[bold magenta]{f_bnb:.4f} BNB[/bold magenta]"
-        return f"[bold cyan]{f_bnb:g} BNB[/bold cyan] [dim](${usd_val:.2f})[/dim]"
-    elif floor_usd is not None and float(floor_usd) > 0:
-        return f"[bold cyan]${float(floor_usd):.2f}[/bold cyan]"
-    elif item.get("floor_price_str"):
-        return f"[bold cyan]{item['floor_price_str']}[/bold cyan]"
-
-    # 2. DEX Token Trading Price
-    if token_usd > 0:
-        if token_usd < 0.000001:
-            p_str = f"${token_usd:.9f}"
-        elif token_usd < 0.0001:
-            p_str = f"${token_usd:.6f}"
-        elif token_usd < 1.0:
-            p_str = f"${token_usd:.4f}"
-        else:
-            p_str = f"${token_usd:,.2f}"
-        return f"[bold green]{p_str}[/bold green]"
-    elif token_bnb > 0:
-        return f"[bold green]{token_bnb:g} BNB[/bold green]"
-
-    # 3. Not trading on secondary market yet / in primary mint
-    return "[dim]—[/dim]"
-
-
-def format_lp_or_volume(item: Dict[str, Any], bnb_price: Optional[float] = None) -> str:
-    """
-    Formats the LP / Vol cell:
-    - If project has a DEX Liquidity Pool: displays LP depth in USD (e.g. '$14,105', '$4,591')
-    - If NFT collection without DEX pool: displays collection trading volume (e.g. '0.74 BNB', or '—' if 0)
-    - If Token without DEX pool: displays 'None'
-    """
-    if bnb_price is None:
-        bnb_price = cached_bnb_price()
-    lp_usd = float(item.get("lp_usd", 0) or 0)
-    if lp_usd > 0:
-        return f"[green]${lp_usd:,.0f}[/green]"
-
-    std_full = str(item.get("standard") or "")
-    cat = item.get("classification", {}).get("category") if isinstance(item.get("classification"), dict) else None
-    is_nft = ("NFT" in std_full or "ERC-721" in std_full or "ERC-1155" in std_full or cat == "NFT" or (item.get("classification") and item["classification"].get("is_nft", False)))
-
-    if is_nft:
-        sec_vol = item.get("secondary_vol_bnb")
-        if sec_vol and float(sec_vol) > 0:
-            if item.get("is_nft_surge"):
-                return f"[bold magenta]{float(sec_vol):.3f} BNB 🦋[/bold magenta]"
-            return f"[bold cyan]{float(sec_vol):.3f} BNB[/bold cyan]"
-
-        vol_bnb = item.get("volume_bnb") or item.get("nft_volume_bnb")
-        if not vol_bnb and item.get("total_volume_bnb"):
-            vol_bnb = item.get("total_volume_bnb")
-
-        if vol_bnb is not None and float(vol_bnb) > 0:
-            v_b = float(vol_bnb)
-            return f"[bold cyan]{v_b:g} BNB[/bold cyan]"
-        elif item.get("volume_str"):
-            vs = item["volume_str"]
-            return f"[bold cyan]{vs}[/bold cyan]"
-        elif item.get("nft_volume_usd") and float(item["nft_volume_usd"]) > 0:
-            v_b = float(item["nft_volume_usd"]) / bnb_price
-            return f"[bold cyan]{v_b:.2f} BNB[/bold cyan]"
-        else:
-            return "[dim]—[/dim]"
-    else:
-        return "[dim]None[/dim]"
-
-
 def evaluate_sniper_ready(item: Dict[str, Any]) -> Dict[str, Any]:
     """
     Evaluates whether an asset qualifies for high-conviction assisted sniper entry:
@@ -2535,76 +2413,6 @@ def evaluate_sniper_ready(item: Dict[str, Any]) -> Dict[str, Any]:
     return res
 
 evaluate_sniper_readiness = evaluate_sniper_ready
-
-
-def filter_and_sort_projects(history: List[Dict[str, Any]], active_filter: str, sort_mode: str) -> List[Dict[str, Any]]:
-    """
-    Applies real-time active filters and sorting rules across tracked projects.
-    """
-    clean_history = [x for x in history if not is_system_infra(x)]
-    filtered = []
-    for item in clean_history:
-        if active_filter in ("SNIPER_READY", "READY"):
-            s_res = evaluate_sniper_ready(item)
-            if not s_res["is_ready"]:
-                continue
-        elif active_filter in ("NFT_SURGE", "SURGE"):
-            if not item.get("is_nft_surge"):
-                continue
-        elif active_filter in ("PROXY", "CLONE"):
-            if not item.get("is_proxy_clone"):
-                continue
-        elif active_filter == "FREE":
-            p_str = str(item.get("mint_price_str", "")).upper()
-            if not (item.get("has_free_mint") or "FREE" in p_str):
-                continue
-        elif active_filter == "LP":
-            has_lp = float(item.get("lp_usd", 0) or 0) > 0
-            has_vol = float(item.get("volume_bnb", 0) or 0) > 0 or float(item.get("total_volume_bnb", 0) or 0) > 0
-            if not (has_lp or has_vol):
-                continue
-        elif active_filter == "ACTIVE":
-            if item.get("is_paused") is True:
-                continue
-            ms = item.get("max_supply")
-            tm = item.get("total_minted", 0) or 0
-            if ms is not None and tm >= ms:
-                continue
-        elif active_filter == "SAFE":
-            if item.get("risk_level") in ("HIGH", "RUG"):
-                continue
-        elif active_filter in ("SMART", "SMART_MONEY"):
-            if not item.get("smart_wallets") and not item.get("smart_minters"):
-                continue
-        filtered.append(item)
-
-    if sort_mode == "HEAT":
-        filtered.sort(key=lambda x: (x.get("score") or 0), reverse=True)
-    elif sort_mode == "PROFIT":
-        def get_profit_val(x):
-            ath_p = float(x.get("ath_profit_usd") or 0.0)
-            cur_p = float(x.get("current_profit_usd") or 0.0)
-            sec = float(x.get("secondary_price_usd") or 0.0)
-            mint = float(x.get("mint_cost_usd") or 0.0)
-            return max(ath_p, cur_p, (sec - mint) if sec > 0 else 0.0)
-        filtered.sort(key=get_profit_val, reverse=True)
-    elif sort_mode == "SMART":
-        filtered.sort(key=lambda x: len(x.get("smart_wallets") or x.get("smart_minters") or []), reverse=True)
-    elif sort_mode == "VELOCITY":
-        filtered.sort(key=lambda x: float(x.get("velocity_ppm") or 0.0), reverse=True)
-    elif sort_mode == "PROGRESS":
-        def get_prog(x):
-            ms = x.get("max_supply")
-            tm = x.get("total_minted") or 0
-            return (float(tm) / ms) if (ms and (float(ms) if str(ms).replace('.','',1).isdigit() else 0) > 0) else 0.0
-        filtered.sort(key=get_prog, reverse=True)
-    elif sort_mode == "SAFETY":
-        rank = {"SAFE": 0, "MED": 1, "HIGH": 2, "RUG": 3}
-        filtered.sort(key=lambda x: rank.get(x.get("risk_level", "MED"), 1))
-    else:  # "NEWEST"
-        filtered.sort(key=lambda x: int(x.get("block") or 0), reverse=True)
-
-    return filtered
 
 
 # --- Post-mint profit / ATH rules (the JavaScript twin is computeItemProfit in app.js; the parity test keeps them equal)
@@ -4095,213 +3903,6 @@ def scan_element_nft_volume(
     return results
 
 
-def evaluate_portfolio_exit(item: Dict[str, Any], bnb_price: Optional[float] = None) -> Dict[str, Any]:
-    """
-    Evaluates take-profit and stop-loss conviction signals for an asset held in portfolio:
-    - Native Gas (BNB): Operational Gas reserve.
-    - NFT (ERC-721): Direct to Element Market listing or Volume Surge alert.
-    - BEP-20 / Fungible Token:
-      * 🚀 10x MOON: Return multiple >= 10.0x (or Free Claim with >= $20 value)
-      * 🚀 5x MOON: Return multiple >= 5.0x (or Free Claim with >= $10 value)
-      * 🟢 2x RECOUP: Return multiple >= 2.0x (or Free Claim with >= $2 value) -> Recoup principal / play with house money
-      * ⚠️ -40% CRASH: Trailing stop triggered when valuation drops >= 40% from ATH
-      * 🔻 STOP LOSS: Position dropped >= 30% below entry cost
-      * ⏳ HODL: Within normal volatility bounds
-    """
-    if bnb_price is None:
-        bnb_price = cached_bnb_price()
-    contract = (item.get("contract") or "").lower()
-    is_nft = bool(item.get("is_nft"))
-    std = str(item.get("standard") or "")
-    if "721" in std or "nft" in std.lower():
-        is_nft = True
-
-    if contract == "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee" or item.get("symbol") == "BNB":
-        return {
-            "signal": "⛽ GAS RESERVE",
-            "badge": "[bold cyan]⛽ GAS RESERVE[/bold cyan]",
-            "badge_plain": "⛽ GAS RESERVE",
-            "action": "KEEP",
-            "action_label": "Gas Reserve",
-            "multiple": 1.0,
-            "pnl_usd": 0.0,
-            "pnl_pct": 0.0,
-            "peak_usd": item.get("value_usd", 0.0),
-            "recommendation": "Binance Agentic Wallet operational gas reserve. Keep funded for transaction fees.",
-            "can_swap": False
-        }
-
-    raw_item = item.get("raw_item") or {}
-    if is_nft:
-        is_surge = bool(item.get("is_nft_surge") or (raw_item and raw_item.get("is_nft_surge")))
-        sales_cnt = int(item.get("secondary_sales_count") or (raw_item and raw_item.get("secondary_sales_count")) or 0)
-        flr = float(item.get("floor_price_bnb") or (raw_item and raw_item.get("floor_price_bnb")) or 0.0)
-
-        if is_surge:
-            return {
-                "signal": "🦋 ELEMENT SURGE",
-                "badge": f"[bold magenta]🦋 SURGE ({sales_cnt} sales)[/bold magenta]",
-                "badge_plain": f"🦋 SURGE ({sales_cnt} sales)",
-                "action": "LIST_ELEMENT",
-                "action_label": "Element Surge",
-                "multiple": 1.0,
-                "pnl_usd": 0.0,
-                "pnl_pct": 0.0,
-                "peak_usd": item.get("value_usd", 0.0),
-                "recommendation": f"Element volume spike! {sales_cnt} secondary sales (Floor: {flr:.4f} BNB). List or sell manually on Element.",
-                "can_swap": False
-            }
-
-        return {
-            "signal": "🎨 LIST ON ELEMENT",
-            "badge": "[bold magenta]🎨 LIST ON ELEMENT[/bold magenta]",
-            "badge_plain": "🎨 LIST ON ELEMENT",
-            "action": "LIST_ELEMENT",
-            "action_label": "List on Element",
-            "multiple": 1.0,
-            "pnl_usd": 0.0,
-            "pnl_pct": 0.0,
-            "peak_usd": item.get("value_usd", 0.0),
-            "recommendation": "NFTs trade on Element Market. AMMs like PancakeSwap do not support ERC-721.",
-            "can_swap": False
-        }
-
-    # Fungible BEP-20 Token
-    raw_item = item.get("raw_item") or {}
-    bal = float(item.get("balance") or 0.0)
-    cur_val = float(item.get("value_usd") or 0.0)
-    cur_price = float(item.get("price_usd") or raw_item.get("token_price_usd") or 0.0)
-    if cur_val <= 0.0 and cur_price > 0.0 and bal > 0.0:
-        cur_val = bal * cur_price
-
-    mint_price_bnb = float(raw_item.get("mint_price_bnb") or item.get("mint_price_bnb") or 0.0)
-    cost_usd = mint_price_bnb * bnb_price
-
-    # ATH / Peak Tracking
-    peak_price = float(raw_item.get("peak_price_usd") or item.get("peak_price_usd") or 0.0)
-    if cur_price > peak_price:
-        peak_price = cur_price
-        item["peak_price_usd"] = peak_price
-        if raw_item:
-            raw_item["peak_price_usd"] = peak_price
-
-    peak_val = float(raw_item.get("peak_val_usd") or item.get("peak_val_usd") or 0.0)
-    if cur_val > peak_val:
-        peak_val = cur_val
-        item["peak_val_usd"] = peak_val
-        if raw_item:
-            raw_item["peak_val_usd"] = peak_val
-
-    # Trailing Stop: -40% crash from peak
-    is_crash = False
-    drawdown_pct = 0.0
-    if peak_val > 0.0 and cur_val > 0.0 and cur_val < peak_val:
-        drawdown_pct = (peak_val - cur_val) / peak_val
-        if drawdown_pct >= 0.40:
-            is_crash = True
-    elif peak_price > 0.0 and cur_price > 0.0 and cur_price < peak_price:
-        drawdown_pct = (peak_price - cur_price) / peak_price
-        if drawdown_pct >= 0.40:
-            is_crash = True
-
-    if is_crash:
-        return {
-            "signal": "⚠️ -40% CRASH",
-            "badge": "[bold red]⚠️ -40% CRASH[/bold red]",
-            "badge_plain": "⚠️ -40% CRASH",
-            "action": "SELL_PANCAKE",
-            "action_label": "Exit on PancakeSwap",
-            "multiple": (cur_val / cost_usd) if cost_usd > 0 else 1.0,
-            "pnl_usd": cur_val - cost_usd,
-            "pnl_pct": -drawdown_pct * 100.0,
-            "peak_usd": peak_val,
-            "recommendation": f"Trailing Crash Stop: Dropped {drawdown_pct*100.0:.1f}% from peak (${peak_val:.2f}). Exit to preserve capital!",
-            "can_swap": True
-        }
-
-    # Return multiple evaluation
-    if cost_usd > 0.0:
-        mult = cur_val / cost_usd
-        pnl_usd = cur_val - cost_usd
-        pnl_pct = ((cur_val - cost_usd) / cost_usd) * 100.0
-    else:
-        # Free mint or 0-cost
-        mult = 1.0
-        pnl_usd = cur_val
-        pnl_pct = 0.0
-
-    if mult >= 10.0 or (cost_usd == 0.0 and cur_val >= 20.0):
-        return {
-            "signal": "🚀 10x MOON",
-            "badge": "[bold bright_green]🚀 10x MOON[/bold bright_green]",
-            "badge_plain": "🚀 10x MOON",
-            "action": "SELL_PANCAKE",
-            "action_label": "Lock 80% Profit",
-            "multiple": mult,
-            "pnl_usd": pnl_usd,
-            "pnl_pct": pnl_pct,
-            "peak_usd": peak_val,
-            "recommendation": f"Moonshot Target Reached ({mult:.1f}x)! Lock in 80% profit on PancakeSwap V2.",
-            "can_swap": True
-        }
-    elif mult >= 5.0 or (cost_usd == 0.0 and cur_val >= 10.0):
-        return {
-            "signal": "🚀 5x MOON",
-            "badge": "[bold bright_green]🚀 5x MOON[/bold bright_green]",
-            "badge_plain": "🚀 5x MOON",
-            "action": "SELL_PANCAKE",
-            "action_label": "Scale Out 50%",
-            "multiple": mult,
-            "pnl_usd": pnl_usd,
-            "pnl_pct": pnl_pct,
-            "peak_usd": peak_val,
-            "recommendation": f"Major Profit Target Reached ({mult:.1f}x)! Scale out 50–70% into BNB.",
-            "can_swap": True
-        }
-    elif mult >= 2.0 or (cost_usd == 0.0 and cur_val >= 2.0):
-        return {
-            "signal": "🟢 2x RECOUP",
-            "badge": "[bold green]🟢 2x RECOUP[/bold green]",
-            "badge_plain": "🟢 2x RECOUP",
-            "action": "SELL_PANCAKE",
-            "action_label": "Recoup Principal",
-            "multiple": mult,
-            "pnl_usd": pnl_usd,
-            "pnl_pct": pnl_pct,
-            "peak_usd": peak_val,
-            "recommendation": f"Recoup initial principal ({mult:.1f}x return)! Sell 50% to play risk-free with house money.",
-            "can_swap": True
-        }
-    elif cost_usd > 0.0 and pnl_pct <= -30.0:
-        return {
-            "signal": "🔻 STOP LOSS",
-            "badge": "[bold yellow]🔻 STOP LOSS[/bold yellow]",
-            "badge_plain": "🔻 STOP LOSS",
-            "action": "SELL_PANCAKE",
-            "action_label": "Cut Loss",
-            "multiple": mult,
-            "pnl_usd": pnl_usd,
-            "pnl_pct": pnl_pct,
-            "peak_usd": peak_val,
-            "recommendation": f"Position down {abs(pnl_pct):.1f}% from entry cost. Consider stop loss on PancakeSwap.",
-            "can_swap": True
-        }
-    else:
-        return {
-            "signal": "⏳ HODL",
-            "badge": "[dim cyan]⏳ HODL[/dim cyan]",
-            "badge_plain": "⏳ HODL",
-            "action": "HOLD",
-            "action_label": "Holding",
-            "multiple": mult,
-            "pnl_usd": pnl_usd,
-            "pnl_pct": pnl_pct,
-            "peak_usd": peak_val,
-            "recommendation": "Valuation within normal volatility threshold. Continue monitoring market progress.",
-            "can_swap": True
-        }
-
-
 def load_history() -> List[Dict[str, Any]]:
     items = []
     try:
@@ -4388,24 +3989,3 @@ def save_history(history: List[Dict[str, Any]], delta: Optional[Any] = None):
     except Exception as exc:
         _log.debug("could not save history: %s", exc)
 
-
-def format_structured_type(std: Any, item: Optional[Dict[str, Any]] = None) -> str:
-    """
-    Standardizes contract standard badge with consistent text and color styling.
-    Highlights NFT Volume Surges (Option D) and Proxy Clones (Option E).
-    """
-    if item and item.get("is_nft_surge"):
-        return "[bold magenta]🦋 SURGE[/bold magenta]"
-    if item and item.get("is_proxy_clone"):
-        return "[bold bright_cyan]🧩 PROXY[/bold bright_cyan]"
-    s = str(std or "")
-    if "NFT" in s or "ERC-721" in s:
-        return "[magenta]ERC-721[/magenta]"
-    elif "ERC-1155" in s:
-        return "[magenta]ERC-1155[/magenta]"
-    elif "BEP-20" in s:
-        return "[cyan]BEP-20[/cyan]"
-    elif "Fair-Mint" in s:
-        return "[yellow]Fair-Mint[/yellow]"
-    else:
-        return "[dim]Custom[/dim]"

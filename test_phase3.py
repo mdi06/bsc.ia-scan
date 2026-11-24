@@ -50,14 +50,14 @@ def test_api_server_endpoints_isolated():
     assert res_proj.json()["success"] is True
 
 
-def test_server_orchestrator_backward_compatibility():
-    """Verifies server.py re-exports all legacy attributes required by tests."""
-    assert hasattr(server, "app")
-    assert hasattr(server, "run_discovery_loop")
-    assert hasattr(server, "run_proxy_factory_watcher_loop")
-    assert hasattr(server, "run_market_dynamics_updater_loop")
-    assert hasattr(server, "run_fast_track_progress_sweeper_loop")
-    assert hasattr(server, "run_element_nft_volume_sweeper_loop")
+def test_server_exposes_the_asgi_app_and_the_loops_live_in_worker():
+    """server.py keeps `app` for `uvicorn server:app`; the worker loops are imported from worker.py."""
+    import worker
+    assert server.app is api.app
+    for name in ("run_discovery_loop", "run_proxy_factory_watcher_loop", "run_market_dynamics_updater_loop",
+                 "run_fast_track_progress_sweeper_loop", "run_element_nft_volume_sweeper_loop"):
+        assert callable(getattr(worker, name))
+        assert not hasattr(server, name)
 
 
 def test_process_safe_db_client():

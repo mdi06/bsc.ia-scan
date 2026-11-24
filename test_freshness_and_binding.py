@@ -151,8 +151,6 @@ def test_cleared_record_is_a_valid_input_everywhere():
     worker._recompute_interest(item)
     monitor.compute_market_cap_stats([item], 700.0)
     monitor.update_post_mint_profit_metrics(dict(item), 700.0)
-    monitor.format_lp_or_volume(item, 700.0)
-    monitor.format_floor_trade_price(item, 700.0)
 
 
 # ----------------------------------------------------------------------------------------------- M2

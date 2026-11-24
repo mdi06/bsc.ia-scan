@@ -7,6 +7,7 @@ db.py cache, plus the static frontend in local development. It does no chain sca
 worker.py's job.
 """
 
+from contextlib import asynccontextmanager
 import bisect
 import gzip
 import json
@@ -79,11 +80,19 @@ def sanitize_history_bytes(data: bytes, etag: str) -> bytes:
 
 
 
+@asynccontextmanager
+async def lifespan(_app):
+    """Starts the API's background threads once the server is up (this replaces the deprecated @app.on_event("startup"))."""
+    start_background_work()
+    yield
+
+
 app = FastAPI(
     title="Agent ID Monitor Backend",
     version="2.0.0",
     description="High-performance async FastAPI backend powered by Supabase / SQLite WAL",
     default_response_class=SafeJSONResponse,
+    lifespan=lifespan,
 )
 
 # Compress responses to keep the API's bandwidth small.
@@ -222,8 +231,7 @@ def _favorites_write_wait(wallet: str, now: float) -> int:
     return 0
 
 
-@app.on_event("startup")
-def startup_event():
+def start_background_work():
     t = threading.Thread(target=run_memory_guard_loop, daemon=True, name="ApiMemoryGuard")
     t.start()
     if SNAPSHOT_WARMER_ENABLED:
