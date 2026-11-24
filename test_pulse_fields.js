@@ -43,7 +43,7 @@ global.window = {
 Object.defineProperty(global, 'navigator', { configurable: true, writable: true, value: { clipboard: { writeText: () => Promise.resolve() } } });
 
 const app = require('./app.js');
-const { compute24hPulseMetrics, comparePulseLaunches, pulseLaunchRow } = app;
+const { compute24hPulseMetrics, comparePulseLaunches, pulseLaunchRow, isBackedVolume } = app;
 
 const live = (n, over) => ({
   contract: '0x' + String(n).repeat(40), name: 'Tok' + n, symbol: 'T' + n, standard: 'BEP-20 Token (18 decimals)',
@@ -63,7 +63,7 @@ assert.deepStrictEqual(ranked, ['SmallGainer', 'MidGainer', 'HugeFlat'],
   `gainers first, then the rest by market cap (got ${ranked.join(', ')})`);
 console.log('✔ Page-side runner fallback ranks gainers before a bigger loser: PASS');
 
-// 2. The renamed fields: new name wins, old name is the fallback, neither gives 0
+// 2. The renamed fields are read by their new names only; the old names (graduated, smart_inflows, threats_blocked) are no longer sent or read
 const both = compute24hPulseMetrics([], [], 0, {
   since: null, trading_on_dex: 7, graduated: 99, smart_wallet_entries: 5, smart_inflows: 99, flagged_risky: 2, threats_blocked: 99,
   dex_volume_usd: 1234,
@@ -73,7 +73,7 @@ assert.strictEqual(both.totalSmartInflows, 5);
 assert.strictEqual(both.threatsBlockedCount, 2);
 assert.strictEqual(both.totalDexVol, 1234);
 const oldOnly = compute24hPulseMetrics([], [], 0, { since: null, graduated: 4, smart_inflows: 9, threats_blocked: 1 });
-assert.deepStrictEqual([oldOnly.gradCount, oldOnly.totalSmartInflows, oldOnly.threatsBlockedCount], [4, 9, 1]);
+assert.deepStrictEqual([oldOnly.gradCount, oldOnly.totalSmartInflows, oldOnly.threatsBlockedCount], [0, 0, 0], 'old names are ignored');
 const zero = compute24hPulseMetrics([], [], 0, { since: null, trading_on_dex: 0, smart_wallet_entries: 0 });
 assert.deepStrictEqual([zero.gradCount, zero.totalSmartInflows], [0, 0], 'a real 0 is kept, not replaced by the old name');
 const neither = compute24hPulseMetrics([], [], 0, { since: null });
@@ -92,4 +92,16 @@ console.log('test_pulse_fields.js: all assertions passed');
   assert.strictEqual(pulseLaunchRow({ ...base, lp_usd: 4254, volume_24h: 352802 }), null, 'a pool turning over 83x is wash trading');
   assert.ok(pulseLaunchRow({ ...base, lp_usd: 14401, volume_24h: 202617 }), 'a pool turning over 14x is kept');
   console.log('✔ New launches: gainers first, wash-traded pools left out: PASS');
+}
+
+// 5. The Secondary banner's volume uses the Pulse's rule: flagged tokens, unbacked pools and wash trading are not volume
+{
+  const base = { contract: '0x' + '8'.repeat(40), standard: 'BEP-20 Token (18 decimals)' };
+  assert.strictEqual(isBackedVolume({ ...base, lp_usd: 20000, volume_24h: 50000 }), true);
+  assert.strictEqual(isBackedVolume({ ...base, lp_usd: 20000, volume_24h: 50000, risk_level: 'RUG' }), false, 'a flagged token');
+  assert.strictEqual(isBackedVolume({ ...base, lp_usd: 20000, volume_24h: 50000, risk_badge: '🍯 Honeypot' }), false, 'a honeypot');
+  assert.strictEqual(isBackedVolume({ ...base, lp_usd: 300, volume_24h: 900 }), false, 'a pool under $500');
+  assert.strictEqual(isBackedVolume({ ...base, lp_usd: 4254, volume_24h: 352802 }), false, 'a pool turned over 83x');
+  assert.strictEqual(isBackedVolume({ ...base, lp_usd: 1000, volume_24h: 50000 }), true, 'exactly 50x is still kept');
+  console.log('✔ Secondary volume counts only backed volume: PASS');
 }

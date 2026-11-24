@@ -1425,8 +1425,8 @@ app.setPulse24hServer(null);
 updateDailyPulseUI();
 assert.strictEqual(getMock('pulseGradCount').textContent, '—', 'Without the server aggregates the Pulse shows "—", not a partial local sum');
 assert.strictEqual(getMock('pulse24hVol').textContent, '—', 'DEX volume is "—" until the server numbers arrive');
-app.setPulse24hServer({ since: null, graduated: 4, dex_volume_usd: 1234567, smart_inflows: 9, smart_clusters: 1,
-  top_hunter: 'adadcarry.ai', top_hunter_count: 2, clean_mints: 3, refunds: 1, threats_blocked: 1, new_drops: 5,
+app.setPulse24hServer({ since: null, trading_on_dex: 4, dex_volume_usd: 1234567, smart_wallet_entries: 9, smart_clusters: 1,
+  top_hunter: 'adadcarry.ai', top_hunter_count: 2, clean_mints: 3, refunds: 1, flagged_risky: 1, new_drops: 5,
   top_launches: [serverLaunchRow('0x' + '7'.repeat(40), 'Fresh Launch')],
   top_nft_mints: [{ contract: '0x' + '8'.repeat(40), name: 'Server NFT', total_minted: 777, max_supply: null, fill_pct: null, smart_count: 2 }] });
 updateDailyPulseUI();

@@ -151,12 +151,6 @@ class CompactRecord(dict):
         return (dict, (self.full(),))
 
 
-def full_record(p):
-    """`p` as a plain dict with every field (a copy for a CompactRecord, `p` itself otherwise: callers that
-    need their own copy still make it)."""
-    return p.full() if isinstance(p, CompactRecord) else p
-
-
 def compact_record(rec: Dict[str, Any], level: int = 1) -> Dict[str, Any]:
     """`rec` as a CompactRecord (a new object; `rec` is not changed). A record that is already compact, not a dict, or
     has nothing worth compressing is returned as it is."""
