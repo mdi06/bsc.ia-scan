@@ -1549,7 +1549,10 @@ def run_proxy_factory_watcher_loop():
                                     new_entry = {
                                         "block": b,
                                         "contract": cand,
-                                        "deployer": snd,
+                                        # NOT the sender: this record is created when the worker first sees a CALL to the
+                                        # contract, so `snd` is whoever made that call (often a trading bot), not the
+                                        # creator. The real creator is the factory that made the clone.
+                                        "deployer": "",
                                         "tx_hash": tx_h,
                                         "name": det.get("name") or ("Proxy Clone Drop" if is_proxy else "Factory Drop"),
                                         "symbol": det.get("symbol") or "",
@@ -1601,7 +1604,7 @@ def run_proxy_factory_watcher_loop():
                                             monitor.save_history(history, delta=new_entry)
                                             print(f"[🧩 NEW PROXY CLONE DETECTED] {new_entry['name']} ({cand}) [{proxy_type}] Master: {impl_addr}", flush=True)
 
-                                            enrichment_pool.submit(_enrich_contract_background, rpc, cand, snd, det)
+                                            enrichment_pool.submit(_enrich_contract_background, rpc, cand, None, det)
 
                 last_block = end_block
         except Exception as e:
