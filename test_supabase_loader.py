@@ -54,6 +54,9 @@ class FakeSupabase:
         if "updated_at" in q and q["updated_at"][0].startswith("gte."):
             thr = int(q["updated_at"][0][4:])
             rows = [r for r in rows if r["updated_at"] >= thr]
+        elif "updated_at" in q and q["updated_at"][0].startswith("gt."):
+            thr = int(q["updated_at"][0][3:])
+            rows = [r for r in rows if r["updated_at"] > thr]
         order = q.get("order", [""])[0]
         if order.startswith("updated_at.desc"):
             rows.sort(key=lambda r: -r["updated_at"])
