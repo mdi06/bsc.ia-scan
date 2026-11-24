@@ -2992,6 +2992,66 @@ def compute_interest(item: Dict[str, Any]) -> Tuple[int, str]:
     return score, RATING_BY_TIER[filters.interest_tier(score)]
 
 
+# ------------------------------------------------------------------------------------------ who deployed it, and drains
+# The "Serial Dev" and "Fund Drain" checks flagged 22% of all records RUG. Checked on chain (2026-11-24), the two rules
+# were wrong in different ways:
+#   * a proxy clone / factory record is created when the worker first SEES a call to the contract, so its `deployer` was
+#     whoever made that call (a trading bot with 14,642 transactions "deployed" 294 tokens); the real creator is the
+#     launchpad factory, which is also the contract's owner();
+#   * owner() of a contract is often a contract (Four.meme's factory), not the person who deployed it;
+#   * "no LP and an empty contract" is true of every NFT collection whose owner withdrew the mint revenue, and of every
+#     1,000,000,000-supply launch token whose "mint price" is just the creation fee.
+
+def launchpad_addresses() -> set:
+    """Addresses that deploy or own other people's contracts: never a developer wallet."""
+    return set(known_infra_addresses()) | {a.lower() for a in VAULT_FACTORIES}
+
+
+def resolve_deployer_from_owner(rpc: "BscRpcClient", contract_addr: str) -> Optional[str]:
+    """owner() of the contract, only when it is a plain wallet. A contract owner (a launchpad factory, a multisig) says
+    nothing about who deployed it, so it is no deployer at all (None)."""
+    owner_res = rpc.call_contract(contract_addr, keccak_selector("owner()"))
+    if not owner_res or len(owner_res) < 66:
+        return None
+    owner = "0x" + owner_res[-40:].lower()
+    if owner == "0x" + "0" * 40 or owner in launchpad_addresses():
+        return None
+    code = rpc.get_code(owner)
+    if code and len(code) > 2:
+        return None
+    return owner
+
+
+def count_prior_deployments(history: List[Dict[str, Any]], deployer: str, contract: str) -> List[Dict[str, Any]]:
+    """The records whose deployer is known to be `deployer`, other than `contract`. Proxy clones and factory records are
+    left out: their stored `deployer` is the first caller the worker saw, not whoever created the contract."""
+    deployer, contract = (deployer or "").lower(), (contract or "").lower()
+    return [
+        h for h in history
+        if (h.get("deployer") or "").lower() == deployer
+        and (h.get("contract") or "").lower() != contract
+        and not h.get("is_proxy_clone") and not h.get("is_factory")
+    ]
+
+
+def fund_drain_applies(details: Dict[str, Any], stats: Dict[str, Any], is_paid_mint: bool, contract_bnb: float) -> bool:
+    """True when "paid mint, contract empty, no pool" really says the mint money went missing. It does not for:
+    an NFT collection (no DEX pool is expected, and the owner withdrawing revenue is normal), or a token that is not a
+    mint at all (a pre-minted supply with the creation fee recorded as a "mint price"). It needs a capped mint that is
+    not pre-minted, or a fair-mint dispenser, with real mints, no DEX liquidity and no pool of any kind."""
+    cls = details.get("classification") or {}
+    std = str(cls.get("standard") or details.get("standard") or "")
+    if cls.get("is_nft") or filters._NFT_STANDARD_RE.search(std.upper()):
+        return False
+    shape = {"standard": std, "max_supply": details.get("max_supply"), "total_minted": details.get("total_minted"),
+             "tokens_per_mint": details.get("tokens_per_mint")}
+    if filters.mint_progress_bucket(shape) is None and "FAIR-MINT" not in std.upper():
+        return False
+    tot_minted = details.get("total_minted", 0) or 0
+    return bool(tot_minted > 20 and is_paid_mint and contract_bnb < 0.01
+                and (stats.get("lp_usd", 0) or 0) < 100 and not stats.get("pair_url"))
+
+
 def analyze_market_interest(
     rpc: BscRpcClient,
     contract_addr: str,
@@ -3041,11 +3101,11 @@ def analyze_market_interest(
 
     contract_addr = contract_addr.lower()
 
-    # 1. Resolve deployer if missing
+    # 1. Resolve deployer if missing: owner() only counts when it is a plain wallet (see resolve_deployer_from_owner)
     if not deployer_addr:
-        owner_res = rpc.call_contract(contract_addr, keccak_selector("owner()"))
-        if owner_res and len(owner_res) >= 66:
-            deployer_addr = "0x" + owner_res[-40:].lower()
+        deployer_addr = resolve_deployer_from_owner(rpc, contract_addr)
+    if deployer_addr and deployer_addr.lower() in launchpad_addresses():
+        deployer_addr = None        # a launchpad / factory deploys for everyone: its history is nobody's reputation
 
     is_serial_dev = False
     serial_count = 1
@@ -3080,11 +3140,7 @@ def analyze_market_interest(
 
         # Check for Serial Dev across history
         if history:
-            prev_deps = [
-                h for h in history
-                if (h.get("deployer") or "").lower() == deployer_addr
-                and (h.get("contract") or "").lower() != contract_addr
-            ]
+            prev_deps = count_prior_deployments(history, deployer_addr, contract_addr)
             serial_count = len(prev_deps) + 1
             if serial_count >= 3:
                 is_serial_dev = True
@@ -3371,13 +3427,15 @@ def analyze_market_interest(
         contract_bnb = rpc.get_balance(contract_addr) / 1e18
     except Exception as exc:
         _log.debug("contract balance lookup failed for %s: %s", contract_addr, exc)
-    tot_minted = details.get("total_minted", 0) or 0
-    if tot_minted > 20 and is_paid_mint and contract_bnb < 0.01 and stats.get("lp_usd", 0) < 100:
+    if fund_drain_applies(details, stats, is_paid_mint, contract_bnb):
         sec["is_fund_drain"] = True
         sec_flags.append("🚨 Direct Capital Drain (No LP & Contract Empty)")
-        stats["risk_level"] = "RUG"
-        stats["risk_badge"] = "🚨 Fund Drain"
-        signals.append("🚨 Funds drained to dev wallet, no DEX LP")
+        # HIGH, not RUG: the money's whereabouts are not traced (that would need transaction traces), so this is
+        # "paid mints, nothing held, no pool", a reason to be careful rather than proof of a rug.
+        if stats.get("risk_level") != "RUG":          # a proven RUG (honeypot, serial dev) keeps its level and its badge
+            stats["risk_level"] = "HIGH"
+            stats["risk_badge"] = "🚨 Fund Drain"
+        signals.append("🚨 Mint funds are not in the contract and there is no DEX pool")
 
     # E. Dev Funding Root & Cluster Check
     sec["dev_root"] = dev_root
