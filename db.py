@@ -1317,10 +1317,17 @@ class DatabaseManager:
     def _kv_stats_unavailable(self, status) -> None:
         """Called on a failed kv_stats request. Only "no such table" (400/404) switches it off for this process; a passing 5xx or
         a timeout must not park the counter on its old row."""
-        if status in (400, 404) and not getattr(self, "_kv_stats_off", False):
-            self._kv_stats_off = True
-            print(f"[⚠️ Supabase kv_stats] unavailable (HTTP {status}); run supabase_migrations/005_kv_stats.sql. "
-                  "Until then the counter keeps using its old row.", flush=True)
+        if status in (400, 404):
+            first = not self._kv_stats_is_off()
+            self._kv_stats_off_until = time.time() + KV_STATS_RETRY_SEC
+            if first:
+                print(f"[⚠️ Supabase kv_stats] unavailable (HTTP {status}); run supabase_migrations/005_kv_stats.sql. "
+                      f"Until then the counter keeps using its old row (retried every {int(KV_STATS_RETRY_SEC // 60)} min).", flush=True)
+
+    def _kv_stats_is_off(self) -> bool:
+        """True while kv_stats is parked after a "no such table"; it is tried again after KV_STATS_RETRY_SEC, so running the
+        migration needs no restart of the worker or the API."""
+        return time.time() < getattr(self, "_kv_stats_off_until", 0.0)
 
     def get_agent_id_stats(self, max_age_sec: float = 15.0) -> Optional[Dict[str, Any]]:
         """Loads persisted .ai wallet counter from Supabase or SQLite with lightweight TTL cache."""
@@ -1334,7 +1341,7 @@ class DatabaseManager:
         if self.mode == "supabase":
             try:
                 client = self.client
-                if HAS_HTTPX and client and not getattr(self, "_kv_stats_off", False):
+                if HAS_HTTPX and client and not self._kv_stats_is_off():
                     resp = client.get(f"/rest/v1/kv_stats?key=eq.{KV_AGENT_STATS}&select=value,updated_at")
                     if resp.status_code == 200:
                         rows = resp.json()
@@ -1418,7 +1425,7 @@ class DatabaseManager:
                 try:
                     client = self.client
                     if HAS_HTTPX and client:
-                        if not getattr(self, "_kv_stats_off", False):
+                        if not self._kv_stats_is_off():
                             resp = client.post(
                                 "/rest/v1/kv_stats?on_conflict=key",
                                 json={"key": KV_AGENT_STATS, "value": clean_stats, "updated_at": clean_stats["last_updated"]},
@@ -1459,6 +1466,7 @@ class DatabaseManager:
 
 
 KV_AGENT_STATS = "agent_id_stats"
+KV_STATS_RETRY_SEC = 300.0
 
 
 # Module-level singleton shared by api.py, worker.py and monitor.py.
