@@ -84,10 +84,10 @@ def test_sqlite_schema_is_created_on_demand_in_supabase_mode(tmp_path, monkeypat
     mgr.save_agent_id_stats({"total_created_wallets": 5, "last_block": 1}, force_cloud=False)  # used to raise "no such table"
     conn = mgr._get_sqlite_connection()
     try:
-        rows = conn.execute("SELECT wallet FROM user_favorites").fetchall()
+        rows = conn.execute("SELECT key FROM kv_stats").fetchall()
     finally:
         conn.close()
-    assert [r["wallet"] for r in rows] == ["__system_agent_id_stats__"]
+    assert [r["key"] for r in rows] == ["agent_id_stats"]      # the counter's own table, no longer a fake wallet row
 
 
 class _FakeRpc:

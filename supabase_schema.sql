@@ -10,9 +10,7 @@ CREATE TABLE IF NOT EXISTS projects (
     symbol TEXT,
     token_id TEXT,
     block BIGINT DEFAULT 0,
-    progress REAL DEFAULT 0.0,
     holders INTEGER DEFAULT 0,
-    status TEXT DEFAULT 'TRACKING',
     risk_level TEXT DEFAULT 'SAFE',
     risk_badge TEXT DEFAULT '🟢 Clean',
     sniper_ready BOOLEAN DEFAULT FALSE,
@@ -28,9 +26,7 @@ CREATE TABLE IF NOT EXISTS projects (
 
 -- Indexes for lightning-fast filtered & sorted queries
 CREATE INDEX IF NOT EXISTS idx_projects_block ON projects(block DESC);
-CREATE INDEX IF NOT EXISTS idx_projects_progress ON projects(progress DESC);
 CREATE INDEX IF NOT EXISTS idx_projects_sniper ON projects(sniper_ready);
-CREATE INDEX IF NOT EXISTS idx_projects_status ON projects(status);
 CREATE INDEX IF NOT EXISTS idx_projects_updated_at ON projects(updated_at DESC);
 
 -- 2. User Favorites Table (Multi-Wallet Web3 Bookmarks)
@@ -47,6 +43,14 @@ CREATE TABLE IF NOT EXISTS holder_counts (
     counted_at DOUBLE PRECISION NOT NULL
 );
 ALTER TABLE holder_counts ENABLE ROW LEVEL SECURITY;
+
+-- Small named values the app keeps for itself (the Agent ID wallet counter); supabase_migrations/005_kv_stats.sql
+CREATE TABLE IF NOT EXISTS kv_stats (
+    key TEXT PRIMARY KEY,
+    value JSONB NOT NULL,
+    updated_at BIGINT NOT NULL DEFAULT EXTRACT(EPOCH FROM NOW())::BIGINT
+);
+ALTER TABLE kv_stats ENABLE ROW LEVEL SECURITY;
 
 -- 3. Row Level Security (RLS) Policies
 ALTER TABLE projects ENABLE ROW LEVEL SECURITY;

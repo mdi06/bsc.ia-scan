@@ -102,3 +102,15 @@ A drop with no known cap is snipe ready only when it is a live mint with a real 
 not DEX-traded, and still minting (mint probe open, or a mint seen within 24 h). It used to be `holders >= 100`, which for a
 token is every wallet holding it. After a restart the sweeper clears stored `sniper_ready` flags that no longer pass
 (`[🎯 Snipe Ready] N stored 'ready' flags ... cleared` in the log). It only clears; new ready drops come from the normal sweep.
+
+## Database clean-up (Batch 4, 2026-11-24): order of operations
+
+1. **Merge, restart the worker, redeploy the API.** The new code no longer sends `projects.progress` / `projects.status`, writes the
+   Agent ID counter to `kv_stats` (falling back to its old row while that table is missing), and seeds discovery with unknown
+   (`None`) counts instead of `holders = 1`.
+2. **Run `supabase_migrations/005_kv_stats.sql`** in the Supabase SQL editor (any time; it also copies the current counter).
+   The log line `[⚠️ Supabase kv_stats] unavailable` stops appearing once it exists.
+3. **Only after step 1 is live, run `supabase_migrations/004_drop_progress_status.sql`.** The old worker still upserts those two
+   columns and PostgREST rejects an unknown column, so dropping them first would stop the worker's writes.
+4. After the restart the sweeper logs `[🧹 Counts] N records stored a placeholder holder count of 1: cleared to unknown`
+   (about 4,300 records on 2026-11-24). They show a dash on the page, which is what they showed before.

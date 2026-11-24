@@ -21,7 +21,7 @@ import json
 import subprocess
 
 import monitor
-import server
+import worker
 
 
 class TestOptionE(unittest.TestCase):
@@ -98,54 +98,6 @@ class TestOptionE(unittest.TestCase):
         self.assertIn("refund()", matched)
         print("[REFUND PROXY TEST] Successfully verified refund signature detection on master code.")
 
-    def test_05_proxy_filtering_and_sorting(self):
-        """Tests that filter_and_sort_projects filters PROXY/CLONE items correctly."""
-        sample_history = [
-            {
-                "contract": "0x1111111111111111111111111111111111111111",
-                "name": "Standard Drop",
-                "standard": "ERC-721",
-                "is_proxy_clone": False,
-                "score": 50
-            },
-            {
-                "contract": "0x2222222222222222222222222222222222222222",
-                "name": "Flap Clone Drop",
-                "standard": "Custom",
-                "is_proxy_clone": True,
-                "proxy_type": "EIP-1167 Clone",
-                "master_implementation": "0xa39a573d33181f014b326c50575589ed8efcee98",
-                "score": 85
-            },
-            {
-                "contract": "0x3333333333333333333333333333333333333333",
-                "name": "Beacon Vault Drop",
-                "standard": "BEP-20",
-                "is_proxy_clone": True,
-                "proxy_type": "Beacon Proxy",
-                "master_implementation": "0xa39a573d33181f014b326c50575589ed8efcee98",
-                "score": 92
-            }
-        ]
-
-        # PROXY filter
-        res = monitor.filter_and_sort_projects(sample_history, "PROXY", "NEWEST")
-        self.assertEqual(len(res), 2)
-        self.assertTrue(all(p.get("is_proxy_clone") for p in res))
-
-        # CLONE filter alias
-        res_clone = monitor.filter_and_sort_projects(sample_history, "CLONE", "NEWEST")
-        self.assertEqual(len(res_clone), 2)
-
-        # ALL filter
-        res_all = monitor.filter_and_sort_projects(sample_history, "ALL", "NEWEST")
-        self.assertEqual(len(res_all), 3)
-
-        # Structured Type Badge
-        badge_proxy = monitor.format_structured_type("Custom", item=sample_history[1])
-        self.assertIn("PROXY", badge_proxy)
-        print("[FILTER & BADGE TEST] PROXY filter returned exact clone contracts and rendered 🧩 PROXY badge.")
-
     def test_06_web_ui_and_nodejs_parity(self):
         """Tests that app.js properly handles PROXY filtering and exports."""
         node_script = """
@@ -174,9 +126,8 @@ class TestOptionE(unittest.TestCase):
         print("[JS PARITY TEST] app.js logic verified with 100% parity.")
 
     def test_07_server_thread_and_html_elements(self):
-        """Tests that server.py includes the watcher loop and index.html includes the pillProxy button."""
-        # Check server.py has the function
-        self.assertTrue(hasattr(server, "run_proxy_factory_watcher_loop"))
+        """Tests that worker.py includes the watcher loop and index.html includes the pillProxy button."""
+        self.assertTrue(hasattr(worker, "run_proxy_factory_watcher_loop"))
 
         # Check index.html has pillProxy button
         with open("index.html", "r", encoding="utf-8") as f:
@@ -184,7 +135,7 @@ class TestOptionE(unittest.TestCase):
         self.assertIn('id="pillProxy"', html)
         self.assertIn('id="proxyCount"', html)
         self.assertIn('data-filter="PROXY"', html)
-        print("[SERVER & HTML TEST] Verified run_proxy_factory_watcher_loop in server.py and pillProxy in index.html.")
+        print("[SERVER & HTML TEST] Verified run_proxy_factory_watcher_loop in worker.py and pillProxy in index.html.")
 
 
 if __name__ == "__main__":

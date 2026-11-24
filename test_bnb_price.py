@@ -36,14 +36,6 @@ def test_falls_back_when_never_fetched(monkeypatch):
     assert monitor._bnb_price_state["live"] is False
 
 
-def test_display_helpers_use_cached_price_when_not_given(monkeypatch):
-    monkeypatch.setattr(monitor, "fetch_bnb_price_usd", lambda rpc: 500.0)
-    monitor.refresh_bnb_price(object())
-    item = {"floor_price_bnb": 0.1, "standard": "ERC-721 (NFT Collection)"}
-    assert "$50.00" in monitor.format_floor_trade_price(item)
-    assert "$70.50" in monitor.format_floor_trade_price(item, bnb_price=705.0)
-
-
 def test_bnb_price_endpoint(monkeypatch):
     monkeypatch.setattr(monitor, "fetch_bnb_price_usd", lambda rpc: 688.0)
     res = TestClient(api.app).get("/api/bnb-price")

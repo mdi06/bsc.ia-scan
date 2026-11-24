@@ -10,7 +10,7 @@ import json
 import pytest
 from fastapi.testclient import TestClient
 from db import DatabaseManager
-from server import app
+from api import app
 
 # Disable background threads during tests
 os.environ["DISABLE_BACKGROUND_WORKERS"] = "1"
@@ -69,20 +69,6 @@ def test_db_batch_upsert_and_query(temp_db):
     assert p1 is not None
     assert p1["name"] == "Alpha Agent"
     assert p1["sniper_ready"] is True
-
-    # 2. Filter by search
-    res = temp_db.get_projects(search="Alpha")
-    assert res["success"] is True
-    assert any(x["contract"] == "0x1111111111111111111111111111111111111111" for x in res["projects"])
-
-    # 3. Filter by sniper_ready
-    sniper_res = temp_db.get_projects(sniper_ready=True)
-    assert all(x.get("sniper_ready") is True for x in sniper_res["projects"])
-
-    # 4. Sort by progress descending
-    sorted_res = temp_db.get_projects(sort_by="progress", order="desc")
-    progs = [float(x.get("progress") or 0.0) for x in sorted_res["projects"]]
-    assert progs == sorted(progs, reverse=True)
 
 
 def test_db_favorites_crud(temp_db):

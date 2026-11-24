@@ -90,7 +90,7 @@ def test_startup_does_not_purge(monkeypatch):
     called = []
     monkeypatch.setattr(api.db, "delete_projects", lambda t: called.append(t) or 0)
     monkeypatch.setattr("threading.Thread.start", lambda self: None)
-    api.startup_event()
+    api.start_background_work()
     assert called == []
 
 

@@ -188,9 +188,9 @@ def _process_smart_money_candidate(rpc, rcv, snd, aid, tx_h, b, tx_val, inp, wal
             "lp_wbnb": 0,
             "token_symbol": det.get("symbol") or "",
             "token_price_usd": 0,
-            "holders": 1,
-            "buys_24h": 1,
-            "buys_1h": 1,
+            "holders": None,   # unknown until a market source or an on-chain count says otherwise
+            "buys_24h": None,
+            "buys_1h": None,
             "sells_24h": 0,
             "volume_24h": 0.0,
             "market_url": det.get("market_url", ""),
@@ -289,9 +289,9 @@ def _process_registry_candidate(rpc, tx_h, b, snd, tx_val, inp, wallet, known_in
             "lp_wbnb": 0,
             "token_symbol": det.get("symbol") or "",
             "token_price_usd": 0,
-            "holders": 1,
-            "buys_24h": 1,
-            "buys_1h": 1,
+            "holders": None,
+            "buys_24h": None,
+            "buys_1h": None,
             "sells_24h": 0,
             "volume_24h": 0.0,
             "market_url": det.get("market_url", ""),
@@ -794,8 +794,11 @@ def run_fast_track_progress_sweeper_loop():
                 print(f"[🔧 Cap Repair] {len(healed)} records stored a mint-slot count as their cap: rewritten", flush=True)
             with history_lock:
                 demoted = reevaluate_ready_flags(history)
-                if demoted:
-                    monitor.save_history(history, delta=demoted)
+                cleared = clear_placeholder_counts(history)
+                if demoted or cleared:
+                    monitor.save_history(history, delta=demoted + [x for x in cleared if x not in demoted])
+            if cleared:
+                print(f"[🧹 Counts] {len(cleared)} records stored a placeholder holder count of 1: cleared to unknown", flush=True)
             if demoted:
                 print(f"[🎯 Snipe Ready] {len(demoted)} stored 'ready' flags no longer pass the rule: cleared", flush=True)
 
@@ -1287,6 +1290,24 @@ def clear_foreign_pair_market(item: Dict[str, Any]) -> None:
     item.pop("market_source", None)
 
 
+def clear_placeholder_counts(history: list) -> list:
+    """Discovery used to seed every new record with holders = 1 (and buys 0 or 1), so about half of the tokens stored a "holder
+    count" nobody measured. A record with no market source, no pair and no liquidity has no real count: unknown is None, which
+    the page already shows as a dash. Returns the records it changed."""
+    changed = []
+    for x in history:
+        if x.get("holders") != 1 or x.get("market_source") or x.get("market_updated_at") or x.get("pair_url"):
+            continue
+        if float(x.get("lp_usd") or 0) > 0 or x.get("holders_counted_at"):
+            continue
+        x["holders"] = None
+        for f in ("buys_24h", "buys_1h"):
+            if x.get(f) in (0, 1):
+                x[f] = None
+        changed.append(x)
+    return changed
+
+
 def clean_count_junk(item: Dict[str, Any]) -> List[str]:
     """Resets the count fields an old fallback filled with total_minted (H3) to None, in place. Returns what it
     changed. Rules:
@@ -1662,9 +1683,9 @@ def run_proxy_factory_watcher_loop():
                                         "lp_wbnb": 0,
                                         "token_symbol": det.get("symbol") or "",
                                         "token_price_usd": 0,
-                                        "holders": 1,
-                                        "buys_24h": 0,
-                                        "buys_1h": 0,
+                                        "holders": None,
+                                        "buys_24h": None,
+                                        "buys_1h": None,
                                         "sells_24h": 0,
                                         "volume_24h": 0.0,
                                         "market_url": det.get("market_url", ""),

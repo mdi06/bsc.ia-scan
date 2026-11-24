@@ -192,9 +192,7 @@ class DatabaseManager:
                         symbol TEXT,
                         token_id TEXT,
                         block INTEGER DEFAULT 0,
-                        progress REAL DEFAULT 0.0,
                         holders INTEGER DEFAULT 0,
-                        status TEXT DEFAULT 'TRACKING',
                         risk_level TEXT DEFAULT 'SAFE',
                         risk_badge TEXT DEFAULT '🟢 Clean',
                         sniper_ready INTEGER DEFAULT 0,
@@ -206,7 +204,6 @@ class DatabaseManager:
                     );
                 """)
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_projects_block ON projects(block DESC);")
-                cur.execute("CREATE INDEX IF NOT EXISTS idx_projects_progress ON projects(progress DESC);")
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_projects_sniper ON projects(sniper_ready);")
                 
                 # User Favorites table
@@ -223,6 +220,14 @@ class DatabaseManager:
                         contract TEXT PRIMARY KEY,
                         holders INTEGER NOT NULL,
                         counted_at REAL NOT NULL
+                    );
+                """)
+                # Small named values (the Agent ID wallet counter), kept apart from user data
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS kv_stats (
+                        key TEXT PRIMARY KEY,
+                        value TEXT NOT NULL,
+                        updated_at INTEGER DEFAULT 0
                     );
                 """)
                 conn.commit()
@@ -603,62 +608,6 @@ class DatabaseManager:
                 self._cache_dirty = False
             return self._cached_json_bytes, self._cached_json_etag
 
-    def get_projects(
-        self,
-        limit: int = 100,
-        offset: int = 0,
-        search: Optional[str] = None,
-        status: Optional[str] = None,
-        sniper_ready: Optional[bool] = None,
-        min_progress: Optional[float] = None,
-        sort_by: str = "block",
-        order: str = "desc"
-    ) -> Dict[str, Any]:
-        """Queries projects with filtering, pagination, and sorting."""
-        all_projs = self.get_all_projects()
-        
-        filtered = all_projs
-        if search:
-            s = search.lower().strip()
-            filtered = [
-                p for p in filtered
-                if s in (p.get("name") or "").lower()
-                or s in (p.get("symbol") or "").lower()
-                or s in (p.get("contract") or "").lower()
-            ]
-
-        if status:
-            st = status.lower().strip()
-            filtered = [p for p in filtered if (p.get("status") or "").lower() == st]
-
-        if sniper_ready is not None:
-            filtered = [p for p in filtered if bool(p.get("sniper_ready")) == sniper_ready]
-
-        if min_progress is not None:
-            filtered = [p for p in filtered if float(p.get("progress") or 0.0) >= min_progress]
-
-        reverse = (order.lower() == "desc")
-        if sort_by == "progress":
-            filtered.sort(key=lambda x: float(x.get("progress") or 0.0), reverse=reverse)
-        elif sort_by == "holders":
-            filtered.sort(key=lambda x: int(x.get("holders") or 0), reverse=reverse)
-        elif sort_by == "score":
-            filtered.sort(key=lambda x: float(x.get("score") or 0.0), reverse=reverse)
-        else:
-            filtered.sort(key=lambda x: int(x.get("block") or 0), reverse=reverse)
-
-        total = len(filtered)
-        paginated = filtered[offset : offset + limit]
-        
-        return {
-            "success": True,
-            "total": total,
-            "count": len(paginated),
-            "offset": offset,
-            "limit": limit,
-            "projects": paginated
-        }
-
     def get_project(self, contract: str) -> Optional[Dict[str, Any]]:
         c = (contract or "").lower().strip()
         if not c:
@@ -827,9 +776,7 @@ class DatabaseManager:
             "symbol": str(p.get("symbol", "")),
             "token_id": str(p.get("token_id", "")),
             "block": int(p.get("block") or 0),
-            "progress": float(p.get("progress") or 0.0),
             "holders": int(p.get("holders") or 0),
-            "status": str(p.get("status", "TRACKING")),
             "risk_level": str(p.get("risk_level", "SAFE")),
             "risk_badge": str(p.get("risk_badge", "🟢 Clean")),
             "sniper_ready": bool(p.get("sniper_ready", False)),
@@ -954,9 +901,7 @@ class DatabaseManager:
         vol_k = int(vol / 1000) if vol > 5000 else int(vol / 100)
 
         holders = int(p.get("holders") or 0)
-        prog = round(float(p.get("progress") or 0.0), 1)
-
-        # Mint progress in 1% steps: the sweeper changes total_minted without touching "progress".
+        # Mint progress in 1% steps (the sweeper changes total_minted).
         tm = float(p.get("total_minted") or 0.0)
         ms = float(p.get("max_supply") or 0.0)
         mint_pct = int(tm / ms * 100) if ms > 0 else 0
@@ -968,9 +913,9 @@ class DatabaseManager:
         chg_s = "-" if chg is None else f"{float(chg):.1f}"
 
         return (
-            f"{prog}_{holders}_{p.get('score')}_"
+            f"{holders}_{p.get('score')}_"
             f"{p.get('sniper_ready')}_{p.get('is_proxy_clone')}_{p.get('is_nft_surge')}_"
-            f"{p.get('risk_level')}_{p.get('risk_badge')}_{p.get('status')}_"
+            f"{p.get('risk_level')}_{p.get('risk_badge')}_"
             f"{px_bucket}_{p.get('token_symbol')}_{lp_k}_"
             f"{mc_k}_{vol_k}_{p.get('mint_value_wei')}_{p.get('mint_price_str')}_"
             f"{p.get('secondary_sales_count')}_{float(p.get('floor_price_bnb') or 0.0):.3g}_{mint_pct}"
@@ -1109,9 +1054,7 @@ class DatabaseManager:
                         p.get("symbol", ""),
                         p.get("token_id", ""),
                         int(p.get("block") or 0),
-                        float(p.get("progress") or 0.0),
                         int(p.get("holders") or 0),
-                        p.get("status", "TRACKING"),
                         p.get("risk_level", "SAFE"),
                         p.get("risk_badge", "🟢 Clean"),
                         1 if p.get("sniper_ready") else 0,
@@ -1123,18 +1066,16 @@ class DatabaseManager:
                     ))
                 cur.executemany("""
                     INSERT INTO projects (
-                        contract, name, symbol, token_id, block, progress, holders,
-                        status, risk_level, risk_badge, sniper_ready, is_proxy_clone,
+                        contract, name, symbol, token_id, block, holders,
+                        risk_level, risk_badge, sniper_ready, is_proxy_clone,
                         score, raw_data, detected_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(contract) DO UPDATE SET
                         name=excluded.name,
                         symbol=excluded.symbol,
                         token_id=excluded.token_id,
                         block=excluded.block,
-                        progress=excluded.progress,
                         holders=excluded.holders,
-                        status=excluded.status,
                         risk_level=excluded.risk_level,
                         risk_badge=excluded.risk_badge,
                         sniper_ready=excluded.sniper_ready,
@@ -1373,6 +1314,14 @@ class DatabaseManager:
     # -------------------------------------------------------------------------
     # Persistent .ai Agent ID Telemetry Counter
     # -------------------------------------------------------------------------
+    def _kv_stats_unavailable(self, status) -> None:
+        """Called on a failed kv_stats request. Only "no such table" (400/404) switches it off for this process; a passing 5xx or
+        a timeout must not park the counter on its old row."""
+        if status in (400, 404) and not getattr(self, "_kv_stats_off", False):
+            self._kv_stats_off = True
+            print(f"[⚠️ Supabase kv_stats] unavailable (HTTP {status}); run supabase_migrations/005_kv_stats.sql. "
+                  "Until then the counter keeps using its old row.", flush=True)
+
     def get_agent_id_stats(self, max_age_sec: float = 15.0) -> Optional[Dict[str, Any]]:
         """Loads persisted .ai wallet counter from Supabase or SQLite with lightweight TTL cache."""
         now = time.time()
@@ -1385,7 +1334,20 @@ class DatabaseManager:
         if self.mode == "supabase":
             try:
                 client = self.client
-                if HAS_HTTPX and client:
+                if HAS_HTTPX and client and not getattr(self, "_kv_stats_off", False):
+                    resp = client.get(f"/rest/v1/kv_stats?key=eq.{KV_AGENT_STATS}&select=value,updated_at")
+                    if resp.status_code == 200:
+                        rows = resp.json()
+                        if rows and isinstance(rows[0].get("value"), dict):
+                            record = rows[0]["value"]
+                    else:
+                        self._kv_stats_unavailable(resp.status_code)
+            except Exception as e:
+                print(f"[⚠️ Supabase kv_stats Error] {e}", flush=True)
+            try:
+                client = self.client
+                if record is None and HAS_HTTPX and client:
+                    # one release of fallback: the counter used to live in a fake wallet row of user_favorites
                     resp = client.get(f"/rest/v1/user_favorites?wallet=eq.{sentinel}&select=favorites,updated_at")
                     if resp.status_code == 200:
                         rows = resp.json()
@@ -1405,8 +1367,14 @@ class DatabaseManager:
                 conn = self._get_sqlite_connection()
                 try:
                     cur = conn.cursor()
+                    cur.execute("SELECT value FROM kv_stats WHERE key = ?", (KV_AGENT_STATS,))
+                    kv = cur.fetchone()
+                    if kv and kv["value"]:
+                        loaded = json.loads(kv["value"])
+                        if isinstance(loaded, dict):
+                            record = loaded
                     cur.execute("SELECT favorites FROM user_favorites WHERE wallet = ?", (sentinel,))
-                    row = cur.fetchone()
+                    row = cur.fetchone() if record is None else None
                     if row and row["favorites"]:
                         favs = json.loads(row["favorites"])
                         if isinstance(favs, list) and favs and isinstance(favs[0], dict):
@@ -1450,6 +1418,17 @@ class DatabaseManager:
                 try:
                     client = self.client
                     if HAS_HTTPX and client:
+                        if not getattr(self, "_kv_stats_off", False):
+                            resp = client.post(
+                                "/rest/v1/kv_stats?on_conflict=key",
+                                json={"key": KV_AGENT_STATS, "value": clean_stats, "updated_at": clean_stats["last_updated"]},
+                                headers={"Prefer": "resolution=merge-duplicates"}
+                            )
+                            if resp.status_code in (200, 201, 204):
+                                self._last_stats_cloud_write = now
+                                return
+                            self._kv_stats_unavailable(resp.status_code)
+                        # kv_stats is not there yet (migration 005 not run): the old row keeps the counter alive
                         resp = client.post(
                             "/rest/v1/user_favorites?on_conflict=wallet",
                             json={"wallet": sentinel, "favorites": payload, "updated_at": clean_stats["last_updated"]},
@@ -1466,17 +1445,20 @@ class DatabaseManager:
             try:
                 cur = conn.cursor()
                 cur.execute("""
-                    INSERT INTO user_favorites (wallet, favorites, updated_at)
+                    INSERT INTO kv_stats (key, value, updated_at)
                     VALUES (?, ?, ?)
-                    ON CONFLICT(wallet) DO UPDATE SET
-                        favorites=excluded.favorites,
+                    ON CONFLICT(key) DO UPDATE SET
+                        value=excluded.value,
                         updated_at=excluded.updated_at;
-                """, (sentinel, json.dumps(payload), clean_stats["last_updated"]))
+                """, (KV_AGENT_STATS, json.dumps(clean_stats), clean_stats["last_updated"]))
                 conn.commit()
             except Exception as e:
                 print(f"[⚠️ SQLite Save Agent ID Stats Error] {e}", flush=True)
             finally:
                 conn.close()
+
+
+KV_AGENT_STATS = "agent_id_stats"
 
 
 # Module-level singleton shared by api.py, worker.py and monitor.py.

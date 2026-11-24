@@ -45,14 +45,6 @@ def test_etag_matching_strips_prefix_not_characters():
     assert not api._etag_matches('"Wabc"', '"abc"')
 
 
-def test_search_survives_null_fields(tmp_db):
-    tmp_db.upsert_projects([_proj(1, name=None, symbol=None, status=None), _proj(2, name="Match")])
-    res = tmp_db.get_projects(search="match", status="tracking")
-    assert res["total"] == 0  # no crash; status filter excludes both
-    res = tmp_db.get_projects(search="match")
-    assert [p["name"] for p in res["projects"]] == ["Match"]
-
-
 def test_delete_projects_closes_connection_on_error(tmp_db, monkeypatch):
     closed = []
 

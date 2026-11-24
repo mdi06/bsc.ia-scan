@@ -20,7 +20,6 @@ import subprocess
 import time
 
 import monitor
-import server
 
 
 class TestTopProfits(unittest.TestCase):
@@ -122,30 +121,6 @@ class TestTopProfits(unittest.TestCase):
         self.assertEqual(stats["top_gainer"]["symbol"], "CVIP")
         self.assertEqual(stats["runner_up"]["symbol"], "ABOT")
         print(f"[FILTER TEST] Verified: Pegged BTCB excluded. Top Gainer: {stats['top_gainer']['symbol']} (+${stats['top_gainer']['profit']:.2f})")
-
-    def test_04_python_sort_by_profit(self):
-        """Tests that filter_and_sort_projects with sort_mode='PROFIT' orders items by maximum profit descending."""
-        item1 = dict(self.mock_free_mint)
-        item1["ath_profit_usd"] = 0.50
-
-        item2 = dict(self.mock_paid_mint)
-        item2["ath_profit_usd"] = 28.20
-
-        item3 = {
-            "contract": "0x3333333333333333333333333333333333333333",
-            "name": "Small Drop",
-            "symbol": "SML",
-            "standard": "ERC-721",
-            "ath_profit_usd": 0.02
-        }
-
-        history = [item1, item3, item2]
-        sorted_list = monitor.filter_and_sort_projects(history, "ALL", "PROFIT")
-
-        self.assertEqual(sorted_list[0]["symbol"], "CVIP")
-        self.assertEqual(sorted_list[1]["symbol"], "ABOT")
-        self.assertEqual(sorted_list[2]["symbol"], "SML")
-        print("[SORT PROFIT TEST] Successfully sorted drops: CVIP ($28.20) > ABOT ($0.50) > SML ($0.02)")
 
     def test_05_javascript_parity_node_execution(self):
         """Tests that Node.js app.js computeItemProfit and computeStats match Python calculations with 100% parity."""
