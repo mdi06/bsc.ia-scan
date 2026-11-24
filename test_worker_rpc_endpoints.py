@@ -1,6 +1,7 @@
 """BSC_RPC_URL (keyed provider, read from the worker's .env.worker) is tried first; without it the
 endpoint lists are exactly the public lists they were before."""
 import monitor
+from chain import rpc as chain_rpc
 from monitor import PUBLIC_LOG_RPC_ENDPOINTS, PUBLIC_RPC_ENDPOINTS, build_rpc_endpoints
 
 # A placeholder with no real key. The tests never contact it.
@@ -57,7 +58,7 @@ def test_client_tries_the_keyed_node_first_then_falls_back(monkeypatch):
             raise OSError("keyed node unreachable")
         return _Resp(b'{"jsonrpc":"2.0","id":1,"result":"0x2a"}')
 
-    monkeypatch.setattr(monitor, "HAS_HTTPX", False)
+    monkeypatch.setattr(chain_rpc, "HAS_HTTPX", False)   # the client lives in chain/rpc.py now
     monkeypatch.setattr(monitor.urllib.request, "urlopen", fake_urlopen)
     client = monitor.BscRpcClient(build_rpc_endpoints(PUBLIC_RPC_ENDPOINTS, env={"BSC_RPC_URL": KEYED}))
 
