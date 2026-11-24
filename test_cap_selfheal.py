@@ -170,3 +170,52 @@ def test_the_catch_up_pass_of_a_frozen_record_does_not_look_like_a_mint_just_now
     worker.repair_mint_count_cap(waiting)                          # slots known, cap in tokens not yet: already tracked
     assert worker._mint_is_live_signal(waiting, 100.0, 200.0) is True
 
+
+def test_heal_slot_caps_repairs_every_stored_slot_cap_without_touching_the_chain():
+    """A restart used to leave ~2,400 of 2,900 such records waiting for the sweeper's cold lane; the repair needs no RPC at all."""
+    with_tpm = stored(contract="0x" + "a" * 40)                              # cap in tokens is computable
+    no_tpm = stored(contract="0x" + "b" * 40)
+    no_tpm.pop("tokens_per_mint")                                            # unknown: slots kept, cap None
+    fine_token = {"contract": "0x" + "c" * 40, "standard": STD, "max_supply": 1e9, "total_minted": 5.0}
+    nft = {"contract": "0x" + "d" * 40, "standard": "ERC-721 (NFT Collection)", "max_supply": 3000.0, "total_minted": 9}
+    already = stored(contract="0x" + "e" * 40)
+    worker.repair_mint_count_cap(already)
+    history = [with_tpm, no_tpm, fine_token, nft, already]
+    snapshot_before = [dict(x) for x in history[2:]]
+
+    healed = worker.heal_slot_caps(history)
+
+    assert [x["contract"] for x in healed] == ["0x" + "a" * 40, "0x" + "b" * 40]
+    assert with_tpm["max_supply"] == pytest.approx(17_600_000.0) and with_tpm["mint_slots"] == 220
+    assert no_tpm["max_supply"] is None and no_tpm["mint_slots"] == 220
+    assert [dict(x) for x in history[2:]] == snapshot_before, "records that were fine are not touched"
+    assert not any(filters.is_mint_count_cap(x) for x in history)
+    assert worker.heal_slot_caps(history) == [], "a second pass has nothing to do"
+    assert worker.heal_slot_caps([]) == []
+    # healed records are no longer mistaken for sold out, and the unknown-cap one is still swept
+    assert not filters.is_sold_out(with_tpm) and worker._slots_pending(no_tpm)
+
+
+
+def test_the_sweeper_loop_heals_on_its_first_cycle_and_saves_what_it_changed(monkeypatch, capsys):
+    from unittest.mock import MagicMock
+    record = stored(contract="0x" + "a" * 40)
+    history = [record]
+    saved = []
+    sleeps = []
+
+    def fake_sleep(seconds):
+        sleeps.append(seconds)
+        if len(sleeps) >= 2:                       # the start-up pause, then the end of the first cycle
+            raise KeyboardInterrupt
+
+    monkeypatch.setattr(worker, "get_shared_history", lambda force_refresh=False: history)
+    monkeypatch.setattr(worker.monitor, "BscRpcClient", lambda eps: MagicMock())
+    monkeypatch.setattr(worker.monitor, "save_history", lambda h, delta=None: saved.append(delta))
+    monkeypatch.setattr(worker.time, "sleep", fake_sleep)
+    monkeypatch.setattr(worker, "fast_sweep_batch", lambda rpc, items: [])
+    with pytest.raises(KeyboardInterrupt):
+        worker.run_fast_track_progress_sweeper_loop()
+    assert record["max_supply"] == pytest.approx(17_600_000.0) and record["mint_slots"] == 220
+    assert saved and record in saved[0], "the healed record is saved"
+    assert "Cap Repair" in capsys.readouterr().out

@@ -76,9 +76,12 @@ changes.
 Both heal old records by themselves; there is no script to run.
 
 - **Mint caps.** Fair-mint dispensers used to be stored with a cap of about 2e-16 (a count of mint slots scaled as a token
-  amount), so they looked sold out and the sweeper had stopped tracking them. The sweeper now reads the corrected cap and
-  rewrites the stored value on its first pass over each such token (a few minutes). Tokens whose `tokens_per_mint` is not
-  known yet keep their slot count in `mint_slots` and get a cap once the tokens-per-mint loop reads it. Nothing to configure.
+  amount), so they looked sold out and the sweeper had stopped tracking them. At the start of every sweeper cycle the worker now
+  rewrites each such stored cap at once (no chain reads: slots x tokens-per-mint is arithmetic), so the wrong "sold out" is gone
+  within the first cycle and the next 10-minute write carries it to the database. Look for
+  `[🔧 Cap Repair] N records stored a mint-slot count as their cap: rewritten` in the log. Their minted totals then catch up in the
+  sweeper's normal rotation (hours for the slowest lane). Tokens whose `tokens_per_mint` is not known yet keep their slot count in
+  `mint_slots` and get a cap once the tokens-per-mint loop reads it. Nothing to configure.
 - **Risk re-score** (`RISK_RESCORE` in `.env.worker`):
   - `dry-run` (the default): re-checks the records the old Serial Dev / Fund Drain rules flagged, 8 every 30 seconds, and
     **only logs** what would change. Watch it with
