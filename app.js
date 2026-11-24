@@ -1019,13 +1019,42 @@ function interestTier(score) {
 }
 
 // One badge for every table render path (renderTable and appendNextTableBatch): the real score, one threshold set
+// The safety chip, one for both table render paths: a coloured dot and a word. Red and amber are the colours of risk and mean
+// nothing else; a filled chip is a verdict (honeypot, serial dev, drained funds), a plain dot-and-word is a grade.
+function safetyChipHtml(item, isReady) {
+  const rLvl = String(item.risk_level || 'SAFE').toUpperCase();
+  const rBdg = String(item.risk_badge || '').toUpperCase();
+  const chip = (kind, label) => `<span class="risk-chip risk-${kind}"><i class="risk-dot"></i>${label}</span>`;
+  const sec = item.security || {};
+  // name the actual finding: a RUG level used to read "Honeypot" whatever its reason, which is wrong for a serial deployer
+  if (rBdg.includes('HONEYPOT') || sec.is_honeypot || sec.cannot_sell_all) return chip('verdict', 'Honeypot');
+  if (rBdg.includes('SERIAL') || sec.is_serial_dev) return chip('verdict', 'Serial dev');
+  if (rBdg.includes('DRAIN') || sec.is_fund_drain) return chip('verdict', 'Drained');
+  if (rLvl === 'RUG') return chip('verdict', 'Rug risk');
+  if (rBdg.includes('HIGH') || rLvl === 'HIGH') return chip('high', 'High risk');
+  if (rBdg.includes('MED') || rLvl === 'MED') return chip('caution', 'Med risk');
+  if (isReady) return chip('ready', 'Ready');
+  return chip('safe', 'Clean');
+}
+
+// Traction escalates ice -> charge -> gold (the --heat-* colours); red is kept for risk, so "Surging" is gold, not red.
 function interestBadgeHtml(score) {
   const sc = numOrZero(score);
   switch (interestTier(sc)) {
-    case 'SURGING': return `<span style="color: var(--color-red); font-weight:700;">🔥 Surging (${sc})</span>`;
-    case 'HIGH': return `<span style="color: var(--color-magenta); font-weight:700;">🚀 High (${sc})</span>`;
-    case 'MODERATE': return `<span style="color: var(--color-yellow); font-weight:600;">⚡ Moderate (${sc})</span>`;
+    case 'SURGING': return `<span style="color: var(--heat-hot); font-weight:700;">🔥 Surging (${sc})</span>`;
+    case 'HIGH': return `<span style="color: var(--heat-warm); font-weight:700;">🚀 High (${sc})</span>`;
+    case 'MODERATE': return `<span style="color: var(--heat-cool); font-weight:600;">⚡ Moderate (${sc})</span>`;
     default: return `<span style="color: var(--text-dim);">🌱 Early (${sc})</span>`;
+  }
+}
+
+// The row's heat spine (style.css tbody tr.heat-*): the same tier as the interest badge, readable down a column.
+function rowHeatClass(item) {
+  switch (interestTier(item && item.score)) {
+    case 'SURGING': return 'heat-surging';
+    case 'HIGH': return 'heat-high';
+    case 'MODERATE': return 'heat-moderate';
+    default: return '';
   }
 }
 
@@ -2040,7 +2069,7 @@ function renderSmartLeaderboardRows() {
   if (list.length > smartDisplayLimit) {
     rowsHtml += `
       <tr>
-        <td colspan="7" style="text-align: center; padding: 14px; background: rgba(0, 240, 255, 0.02);">
+        <td colspan="7" style="text-align: center; padding: 14px; background: rgba(76, 201, 255, 0.02);">
           <button class="btn-load-more-hunters" onclick="loadMoreHunters()">
             ⬇️ Load More Hunters (Showing ${slice.length} of ${list.length.toLocaleString()})
           </button>
@@ -2627,8 +2656,8 @@ function updateDigitalAiCounter(count) {
   if (hdrCount) {
     hdrCount.textContent = formatted;
     if (count > prevCount && hdrCount.style) {
-      hdrCount.style.color = '#00ff88';
-      hdrCount.style.textShadow = '0 0 12px rgba(0, 255, 136, 0.85)';
+      hdrCount.style.color = '#2ef2b0';
+      hdrCount.style.textShadow = '0 0 12px rgba(46, 242, 176, 0.85)';
       setTimeout(() => {
         hdrCount.style.color = '#ffd600';
         hdrCount.style.textShadow = '0 0 6px rgba(255, 214, 0, 0.5)';
@@ -4077,7 +4106,8 @@ function renderPulseNftMintRow(n, idx) {
   const fill = n.fill_pct;
   const hasFill = fill !== null && fill !== undefined;
   const badgeText = hasFill ? (fill >= 100 ? 'Sold out' : `${Number(fill).toFixed(fill >= 10 ? 0 : 1)}% filled`) : `${formatCount(minted)} mints`;
-  const badgeClass = hasFill && fill >= 100 ? 'badge-yellow' : 'badge-magenta';
+  // fill is traction: ice -> charge -> gold as it fills, and a sold-out mint is done (calm), same as the table's progress bar
+  const badgeClass = !hasFill ? 'badge-cyan' : fill >= 100 ? 'badge-dim' : fill >= 80 ? 'badge-yellow' : fill >= 50 ? 'badge-green' : 'badge-cyan';
   const smart = Number(n.smart_count || 0);
   const smartStr = smart > 0 ? ` · 🧠 ${smart}` : '';
   const elementUrl = safeUrl(n.market_url) || ('https://element.market/collections/' + (n.contract || ''));
@@ -6333,6 +6363,8 @@ function renderTable(keepLimit = false) {
   visible.forEach((item, index) => {
     const tr = document.createElement('tr');
     if (item._isNew) tr.classList.add('row-new');
+    const heatClass = rowHeatClass(item);
+    if (heatClass) tr.classList.add(heatClass);
     tr.setAttribute('title', `Click row to inspect ${escapeHtml(item.name || item.symbol || 'token')}`);
     tr.addEventListener('click', (e) => {
       if (e && e.target && (e.target.closest('a') || e.target.closest('button'))) return;
@@ -6370,7 +6402,7 @@ function renderTable(keepLimit = false) {
     if (item.is_nft_surge) {
       stdBadge = `<span class="badge badge-magenta" style="box-shadow: 0 0 8px rgba(217, 70, 239, 0.4); font-weight:700;">🦋 SURGE (${item.secondary_sales_count || 0})</span>`;
     } else if (item.is_proxy_clone) {
-      stdBadge = `<span class="badge badge-cyan" style="color: #00f0ff !important; background: rgba(0, 240, 255, 0.18) !important; border: 1px solid rgba(0, 240, 255, 0.5) !important; box-shadow: 0 0 10px rgba(0, 240, 255, 0.3); font-weight:800;" title="${escapeHtml(item.proxy_type || 'Proxy')} Master: ${escapeHtml(item.master_implementation || '')}">🧩 PROXY</span>`;
+      stdBadge = `<span class="badge badge-cyan" style="color: #4cc9ff !important; background: rgba(76, 201, 255, 0.18) !important; border: 1px solid rgba(76, 201, 255, 0.5) !important; box-shadow: 0 0 10px rgba(76, 201, 255, 0.3); font-weight:800;" title="${escapeHtml(item.proxy_type || 'Proxy')} Master: ${escapeHtml(item.master_implementation || '')}">🧩 PROXY</span>`;
     } else if (std.includes('BEP-20')) {
       stdBadge = `<span style="color: var(--color-cyan); font-weight:600;">BEP-20</span>`;
     } else if (std.includes('Fair-Mint')) {
@@ -6378,22 +6410,7 @@ function renderTable(keepLimit = false) {
     }
 
     // Safety badge
-    const rLvl = String(item.risk_level || 'SAFE').toUpperCase();
-    const rBdg = String(item.risk_badge || '').toUpperCase();
-    let safeBadge = `<span style="color: var(--color-green); font-weight:600;">🟢 Clean</span>`;
-    if (rBdg.includes('HONEYPOT') || rLvl === 'RUG') {
-      safeBadge = `<span class="badge badge-red">🚨 Honeypot</span>`;
-    } else if (rBdg.includes('SERIAL') || (item.security && item.security.is_serial_dev)) {
-      safeBadge = `<span class="badge badge-red">🚨 SerialDev</span>`;
-    } else if (rBdg.includes('DRAIN') || (item.security && item.security.is_fund_drain)) {
-      safeBadge = `<span class="badge badge-red">🚨 Drained</span>`;
-    } else if (rBdg.includes('HIGH') || rLvl === 'HIGH') {
-      safeBadge = `<span class="badge badge-yellow">🔴 HighRisk</span>`;
-    } else if (rBdg.includes('MED') || rLvl === 'MED') {
-      safeBadge = `<span style="color: var(--color-yellow); font-weight:600;">🟡 Med Risk</span>`;
-    } else if (isReady) {
-      safeBadge = `<span class="badge badge-green" style="box-shadow: 0 0 8px rgba(74, 222, 128, 0.4); font-weight: 700;">🎯 READY</span>`;
-    }
+    const safeBadge = safetyChipHtml(item, isReady);
 
     // Interest badge
     const intBadge = interestBadgeHtml(item.score);
@@ -6442,20 +6459,20 @@ function renderTable(keepLimit = false) {
     } else if (ms > 0) {
       let pct = (tm / ms) * 100;
       pct = Math.min(100, Math.max(0, pct));
+      // the fill heats up as the mint fills: ice -> charge -> gold. Sold out is done, so it goes quiet (no colour, no red).
       let progTag = 'MINT';
-      let progColor = 'var(--color-cyan)';
+      let progColor = 'var(--heat-cool)';
       if (tm >= ms) {
         progTag = 'SOLD';
-        progColor = 'var(--color-magenta)';
+        progColor = 'var(--text-dim)';
       } else if (pct >= 80) {
         progTag = 'HIGH';
-        progColor = 'var(--color-red)';
+        progColor = 'var(--heat-hot)';
       } else if (pct >= 50) {
         progTag = 'WARM';
-        progColor = 'var(--color-yellow)';
+        progColor = 'var(--heat-warm)';
       } else if (std.includes('BEP-20')) {
         progTag = 'TOKEN';
-        progColor = 'var(--color-green)';
       }
       progBar = `
         <div class="progress-cell">
@@ -6614,7 +6631,7 @@ function renderTable(keepLimit = false) {
       }
 
       const dexUrl = dexScreenerUrl || `https://pancakeswap.finance/swap?outputCurrency=${item.contract}`;
-      actBtn = `<button class="inspect-btn trade-dex-btn dex-screener-btn" onclick="event.stopPropagation(); window.open(${jsAttr(dexUrl)}, '_blank')" style="border-color: var(--color-cyan); color: var(--color-cyan); font-weight: 700; background: rgba(0, 240, 255, 0.08);" title="View Live Chart & Order Book on DexScreener"><span class="desktop-only">📈 DexScreener ↗</span><span class="mobile-only">📈 Chart ↗</span></button>`;
+      actBtn = `<button class="inspect-btn trade-dex-btn dex-screener-btn" onclick="event.stopPropagation(); window.open(${jsAttr(dexUrl)}, '_blank')" style="border-color: var(--color-cyan); color: var(--color-cyan); font-weight: 700; background: rgba(76, 201, 255, 0.08);" title="View Live Chart & Order Book on DexScreener"><span class="desktop-only">📈 DexScreener ↗</span><span class="mobile-only">📈 Chart ↗</span></button>`;
     } else if (isPort) {
       if (item.contract === '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee') {
         cellHolders = `<span style="color: var(--color-green); font-weight:700;">Gas: ${Number(item.user_balance || 0).toFixed(4)} BNB</span>`;
@@ -6727,6 +6744,8 @@ function appendNextTableBatch() {
     const index = tableRenderLimit + idx;
     const tr = document.createElement('tr');
     if (item._isNew) tr.classList.add('row-new');
+    const heatClass = rowHeatClass(item);
+    if (heatClass) tr.classList.add(heatClass);
     tr.setAttribute('title', `Click row to inspect ${escapeHtml(item.name || item.symbol || 'token')}`);
     tr.addEventListener('click', (e) => {
       if (e && e.target && (e.target.closest('a') || e.target.closest('button'))) return;
@@ -6764,7 +6783,7 @@ function appendNextTableBatch() {
     if (item.is_nft_surge) {
       stdBadge = `<span class="badge badge-magenta" style="box-shadow: 0 0 8px rgba(217, 70, 239, 0.4); font-weight:700;">🦋 SURGE (${item.secondary_sales_count || 0})</span>`;
     } else if (item.is_proxy_clone) {
-      stdBadge = `<span class="badge badge-cyan" style="color: #00f0ff !important; background: rgba(0, 240, 255, 0.18) !important; border: 1px solid rgba(0, 240, 255, 0.5) !important; box-shadow: 0 0 10px rgba(0, 240, 255, 0.3); font-weight:800;" title="${escapeHtml(item.proxy_type || 'Proxy')} Master: ${escapeHtml(item.master_implementation || '')}">🧩 PROXY</span>`;
+      stdBadge = `<span class="badge badge-cyan" style="color: #4cc9ff !important; background: rgba(76, 201, 255, 0.18) !important; border: 1px solid rgba(76, 201, 255, 0.5) !important; box-shadow: 0 0 10px rgba(76, 201, 255, 0.3); font-weight:800;" title="${escapeHtml(item.proxy_type || 'Proxy')} Master: ${escapeHtml(item.master_implementation || '')}">🧩 PROXY</span>`;
     } else if (std.includes('BEP-20')) {
       stdBadge = `<span style="color: var(--color-cyan); font-weight:600;">BEP-20</span>`;
     } else if (std.includes('Fair-Mint')) {
@@ -6772,22 +6791,7 @@ function appendNextTableBatch() {
     }
 
     // Safety badge
-    const rLvl = String(item.risk_level || 'SAFE').toUpperCase();
-    const rBdg = String(item.risk_badge || '').toUpperCase();
-    let safeBadge = `<span style="color: var(--color-green); font-weight:600;">🟢 Clean</span>`;
-    if (rBdg.includes('HONEYPOT') || rLvl === 'RUG') {
-      safeBadge = `<span class="badge badge-red">🚨 Honeypot</span>`;
-    } else if (rBdg.includes('SERIAL') || (item.security && item.security.is_serial_dev)) {
-      safeBadge = `<span class="badge badge-red">🚨 SerialDev</span>`;
-    } else if (rBdg.includes('DRAIN') || (item.security && item.security.is_fund_drain)) {
-      safeBadge = `<span class="badge badge-red">🚨 Drained</span>`;
-    } else if (rBdg.includes('HIGH') || rLvl === 'HIGH') {
-      safeBadge = `<span class="badge badge-yellow">🔴 HighRisk</span>`;
-    } else if (rBdg.includes('MED') || rLvl === 'MED') {
-      safeBadge = `<span style="color: var(--color-yellow); font-weight:600;">🟡 Med Risk</span>`;
-    } else if (isReady) {
-      safeBadge = `<span class="badge badge-green" style="box-shadow: 0 0 8px rgba(74, 222, 128, 0.4); font-weight: 700;">🎯 READY</span>`;
-    }
+    const safeBadge = safetyChipHtml(item, isReady);
 
     // Interest Badge
     const intBadge = interestBadgeHtml(item.score);
@@ -6820,7 +6824,7 @@ function appendNextTableBatch() {
       progLabel = 'SOLD 100%';
       progPct = 100;
     }
-    const progColor = uncapped ? 'var(--color-cyan)' : progPct >= 99 ? 'var(--color-magenta)' : (progPct >= 50 ? 'var(--color-green)' : 'var(--color-cyan)');
+    const progColor = uncapped ? 'var(--heat-cool)' : progPct >= 99 ? 'var(--text-dim)' : (progPct >= 80 ? 'var(--heat-hot)' : (progPct >= 50 ? 'var(--heat-warm)' : 'var(--heat-cool)'));
     const progBar = `
       <div style="font-size: 10px; color: ${progColor}; font-weight: 700; margin-bottom: 2px;">${progLabel}</div>
       <div class="progress-bar-wrap"${uncapped ? ` title="${UNCAPPED_MINT_TITLE}"` : ''}>
@@ -6981,7 +6985,7 @@ function appendNextTableBatch() {
       }
 
       const dexUrl = dexScreenerUrl || `https://pancakeswap.finance/swap?outputCurrency=${item.contract}`;
-      actBtn = `<button class="inspect-btn trade-dex-btn dex-screener-btn" onclick="event.stopPropagation(); window.open(${jsAttr(dexUrl)}, '_blank')" style="border-color: var(--color-cyan); color: var(--color-cyan); font-weight: 700; background: rgba(0, 240, 255, 0.08);" title="View Live Chart & Order Book on DexScreener"><span class="desktop-only">📈 DexScreener ↗</span><span class="mobile-only">📈 Chart ↗</span></button>`;
+      actBtn = `<button class="inspect-btn trade-dex-btn dex-screener-btn" onclick="event.stopPropagation(); window.open(${jsAttr(dexUrl)}, '_blank')" style="border-color: var(--color-cyan); color: var(--color-cyan); font-weight: 700; background: rgba(76, 201, 255, 0.08);" title="View Live Chart & Order Book on DexScreener"><span class="desktop-only">📈 DexScreener ↗</span><span class="mobile-only">📈 Chart ↗</span></button>`;
     } else if (isPort && item.user_balance > 0) {
       if (item.is_native_gas) {
         cellHolders = `<span style="color: var(--color-green); font-weight:700;">Gas: ${Number(item.user_balance || 0).toFixed(4)} BNB</span>`;
@@ -8081,7 +8085,7 @@ function openHallOfFameModal(filterMode = 'ALL') {
         : `<span style="color: ${nowProfit >= 0 ? 'var(--color-green)' : 'var(--color-red)'}; font-weight:600;" title="${escapeHtml(profitTitle(nowPrice, nowPool))}">${formatCryptoPrice(nowProfit, true)}</span>`;
 
       const statusBadge = g.isSold
-        ? `<span class="badge badge-magenta" style="font-size: 10px;">Sold Out</span>`
+        ? `<span class="badge badge-dim" style="font-size: 10px;">Sold Out</span>`
         : `<span class="badge badge-cyan" style="font-size: 10px;">Active</span>`;
 
       // Marketplace / DEX links
@@ -8810,7 +8814,7 @@ async function executeWeb3Mint(contractAddress, rawCalldata, valueWei, name = 'D
 
     // 7. Success State
     playMarketAlertSound();
-    console.log(`%c[🎉 WEB3 MINT SUCCESS]`, 'color: #00ff88; font-weight: bold;', { name, contract: contractAddress, txHash });
+    console.log(`%c[🎉 WEB3 MINT SUCCESS]`, 'color: #2ef2b0; font-weight: bold;', { name, contract: contractAddress, txHash });
 
     if (btn) {
       btn.classList.remove('confirming');
@@ -9502,7 +9506,7 @@ function openWalletModal() {
                 ℹ️ <strong>Standard Wallet:</strong> This address does not hold a Space ID <code>.ai</code> Agent ID NFT. You can track portfolios and trade on DEXs, but <em>Agent ID Exclusive</em> bonding curve drops require an <code>.ai</code> domain.
               </div>
             ` : `
-              <div style="margin-top: 12px; font-size: 11px; line-height: 1.5; color: var(--color-green); background: rgba(0, 255, 136, 0.08); border: 1px solid rgba(0, 255, 136, 0.25); border-radius: 6px; padding: 8px 12px; text-align: left;">
+              <div style="margin-top: 12px; font-size: 11px; line-height: 1.5; color: var(--color-green); background: rgba(46, 242, 176, 0.08); border: 1px solid rgba(46, 242, 176, 0.25); border-radius: 6px; padding: 8px 12px; text-align: left;">
                 🤖 <strong>Agent ID Verified:</strong> On-chain verification confirms this wallet owns an active <code>.ai</code> Agent ID NFT. Authorized for 1-Click Exclusive Bonding Curve Mints!
               </div>
             `}
@@ -9646,7 +9650,7 @@ function openBinanceQrModal() {
         </div>
 
         <!-- Method 3: Desktop Import via Rabby -->
-        <div style="background: rgba(0, 240, 255, 0.05); border: 1px solid rgba(0, 240, 255, 0.2); border-radius: 8px; padding: 12px 14px; margin-bottom: 14px; text-align: left;">
+        <div style="background: rgba(76, 201, 255, 0.05); border: 1px solid rgba(76, 201, 255, 0.2); border-radius: 8px; padding: 12px 14px; margin-bottom: 14px; text-align: left;">
           <div style="font-weight: 700; color: var(--color-cyan); font-size: 12px; margin-bottom: 6px;">
             💻 Prefer Desktop? Use in Rabby directly:
           </div>
@@ -9710,7 +9714,7 @@ function openSyncModal() {
         <button class="copy-btn" onclick="navigator.clipboard.writeText(${jsAttr(syncUrl)}); this.textContent='Copied!'; setTimeout(()=>this.textContent='Copy', 1500)">Copy</button>
       </div>
 
-      <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 14px; font-size: 11px; padding: 8px 12px; background: rgba(0, 255, 136, 0.06); border: 1px solid rgba(0, 255, 136, 0.2); border-radius: 4px;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 14px; font-size: 11px; padding: 8px 12px; background: rgba(46, 242, 176, 0.06); border: 1px solid rgba(46, 242, 176, 0.2); border-radius: 4px;">
         <span>Cloud Sync Status:</span>
         <strong style="color: var(--color-green);">🟢 Synced (Cloud Engine)</strong>
       </div>
@@ -9954,7 +9958,7 @@ async function pollDeltaFeed() {
       });
 
       if (newlyFound.length > 0) {
-        console.log(`%c[🚨 REAL-TIME DELTA DETECTED]`, 'color: #00ff88; font-weight: bold;', newlyFound);
+        console.log(`%c[🚨 REAL-TIME DELTA DETECTED]`, 'color: #2ef2b0; font-weight: bold;', newlyFound);
         // Prepend new drops to the front of allDrops
         allDrops.unshift(...newlyFound);
 
@@ -10291,7 +10295,7 @@ async function fetchDrops() {
     });
 
     if (alertsEnabled && newlyFound.length > 0) {
-      console.log(`%c[🚨 NEW MARKET DETECTED]`, 'color: #00ff88; font-weight: bold;', newlyFound);
+      console.log(`%c[🚨 NEW MARKET DETECTED]`, 'color: #2ef2b0; font-weight: bold;', newlyFound);
       playMarketAlertSound();
       newlyFound.slice(0, 3).forEach(drop => showNewMarketToast(drop));
       queueDropAlerts(newlyFound);
@@ -10313,7 +10317,7 @@ async function fetchDrops() {
     });
 
     if (alertsEnabled && newlySniperReady.length > 0) {
-      console.log(`%c[🎯 NEW SNIPER READY DETECTED]`, 'color: #00ff88; font-weight: bold;', newlySniperReady);
+      console.log(`%c[🎯 NEW SNIPER READY DETECTED]`, 'color: #2ef2b0; font-weight: bold;', newlySniperReady);
       playMarketAlertSound();
       newlySniperReady.slice(0, 2).forEach(drop => {
         const ms = Number(drop.max_supply || 0);
@@ -10368,7 +10372,7 @@ async function fetchDrops() {
 
     console.log(
       `%c[☁️ Cloud Sync: ${source}]`,
-      'color: #00ff88; font-weight: bold;',
+      'color: #2ef2b0; font-weight: bold;',
       `Loaded ${allDrops.length} drops from ${source} at ${timeStr}`
     );
 
@@ -11540,6 +11544,8 @@ if (typeof module !== 'undefined' && module.exports) {
     modalFeature = loadFeatureIntoAppScope('modal');
   }
   module.exports = {
+    rowHeatClass,
+    safetyChipHtml,
     escapeHtml,
     jsAttr,
     safeUrl,

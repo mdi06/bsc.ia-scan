@@ -542,6 +542,13 @@ def _slots_pending(item: dict) -> bool:
     return not _cap_of(item) and bool(filters.mint_slot_count(item))
 
 
+def _mint_is_live_signal(item: dict, old_minted: float, minted: float) -> bool:
+    """True when a higher minted total means "somebody just minted". Not on the catch-up pass of a record that still has a slot-count
+    cap: its stored total was frozen (the sweeper had dropped it), so the rise may be days old and stamping last_mint_at = now would
+    make hundreds of old drops look like they are minting right now (the stats bar's "active" counts)."""
+    return minted > old_minted and not filters.is_mint_count_cap(item)
+
+
 def _mint_slots_field(det: dict) -> dict:
     """`mint_slots` for a new record, only when analyze_contract found a slot-count cap (no empty key on other records)."""
     return {"mint_slots": det["mint_slots"]} if det.get("mint_slots") else {}
@@ -810,7 +817,7 @@ def run_fast_track_progress_sweeper_loop():
                             old_prog = (old_minted / old_sup * 100.0) if old_sup > 0 else 0.0
 
                             if minted is not None:
-                                if minted > old_minted:
+                                if _mint_is_live_signal(it, old_minted, minted):
                                     # When minting last moved: the stats bar's "momentum" / "active near cap"
                                     # count only drops that are still being minted, not ones stalled at 60%.
                                     it["last_mint_at"] = int(time.time())

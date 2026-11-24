@@ -153,3 +153,20 @@ def test_the_api_serves_a_cap_for_a_record_in_the_new_shape():
     waiting = stored(max_supply=None, mint_slots=220)
     waiting.pop("tokens_per_mint")
     assert api.with_server_metrics(waiting)["max_supply"] is None
+
+
+def test_the_catch_up_pass_of_a_frozen_record_does_not_look_like_a_mint_just_now():
+    """The first sweep after the repair saw a total far above the frozen stored one and stamped last_mint_at = now on ~400 tokens:
+    the stats bar's "momentum active" went from 4 to 145 although nobody had minted."""
+    frozen = stored(minted_tokens=250_000.0)                       # still has the slot-count cap
+    assert worker._mint_is_live_signal(frozen, 250_000.0, 1_420_000.0) is False
+    worker.repair_mint_count_cap(frozen)                           # after the repair the record is tracked normally
+    assert worker._mint_is_live_signal(frozen, 1_420_000.0, 1_500_000.0) is True
+    assert worker._mint_is_live_signal(frozen, 1_500_000.0, 1_500_000.0) is False, "no rise, no signal"
+    plain = {"contract": C, "standard": "ERC-721 (NFT Collection)", "max_supply": 1000.0}
+    assert worker._mint_is_live_signal(plain, 10, 11) is True
+    waiting = stored()
+    waiting.pop("tokens_per_mint")
+    worker.repair_mint_count_cap(waiting)                          # slots known, cap in tokens not yet: already tracked
+    assert worker._mint_is_live_signal(waiting, 100.0, 200.0) is True
+
