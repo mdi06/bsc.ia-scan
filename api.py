@@ -112,11 +112,14 @@ _rate_counts: Dict[str, int] = {}
 
 
 # Which address is "the client" depends on what stands in front of the API, and a header the client can set itself
-# must never decide it. On Railway the edge proxy APPENDS the address it saw to X-Forwarded-For, so the last entry is
-# trustworthy and every earlier one is whatever the client (or a client-side proxy) wrote. RATE_LIMIT_PROXY_HOPS is
-# how many trusted proxies append to the header (1 for Railway's edge alone). CF-Connecting-IP is only believed when
-# Cloudflare really is in front (set RATE_LIMIT_TRUST_CF=1): behind Railway any client can send that header itself.
-RATE_LIMIT_PROXY_HOPS = int(os.environ.get("RATE_LIMIT_PROXY_HOPS", "1"))
+# must never decide it. Proxies APPEND to X-Forwarded-For, so everything the client wrote is on the LEFT and the entries a
+# trusted proxy added are on the RIGHT. RATE_LIMIT_PROXY_HOPS is how many entries the trusted proxies add: the client is
+# the one that many places from the right. Measured on Railway (2026-11-24): there are TWO, the client's address and then
+# one that varies between a few edge nodes. With 1 the limiter keyed on those few nodes, so every visitor shared about
+# 3 buckets of 120 requests a minute; with 2 each visitor has their own, whatever they put in the header.
+# CF-Connecting-IP is only believed when Cloudflare really is in front (set RATE_LIMIT_TRUST_CF=1): behind Railway any
+# client can send that header itself.
+RATE_LIMIT_PROXY_HOPS = int(os.environ.get("RATE_LIMIT_PROXY_HOPS", "2"))
 RATE_LIMIT_TRUST_CF = os.environ.get("RATE_LIMIT_TRUST_CF", "0").strip().lower() in ("1", "true", "yes", "on")
 
 

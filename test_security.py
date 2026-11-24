@@ -94,29 +94,49 @@ def test_startup_does_not_purge(monkeypatch):
     assert called == []
 
 
+def behind_railway(client_ip, edge_node="10.250.0.1"):
+    """The X-Forwarded-For Railway sends (measured 2026-11-24): the client's address, then an address that varies between
+    a few edge nodes. Anything the client wrote itself comes before both."""
+    return f"{client_ip}, {edge_node}"
+
+
 def test_rate_limit_returns_429_with_retry_after(monkeypatch):
     monkeypatch.setattr(api, "RATE_LIMIT_MAX", 3)
     api._rate_counts.clear()
-    h = {"X-Forwarded-For": "203.0.113.9"}      # what Railway's edge sends: the address it saw
+    h = {"X-Forwarded-For": behind_railway("203.0.113.9")}
     for _ in range(3):
         assert client.get("/api/favorites?wallet=bad", headers=h).status_code == 400
     r = client.get("/api/favorites?wallet=bad", headers=h)
     assert r.status_code == 429
     assert int(r.headers["Retry-After"]) >= 1
     # other clients and exempt health routes are unaffected
-    assert client.get("/api/favorites?wallet=bad", headers={"X-Forwarded-For": "203.0.113.10"}).status_code == 400
+    assert client.get("/api/favorites?wallet=bad", headers={"X-Forwarded-For": behind_railway("203.0.113.10")}).status_code == 400
     assert client.get("/healthz", headers=h).status_code == 200
     api._rate_counts.clear()
 
 
+def test_one_client_is_one_bucket_whichever_edge_node_it_reaches(monkeypatch):
+    """With the last entry as the key (hops=1) a visitor was counted under whichever edge node they reached, and all
+    visitors shared a few buckets."""
+    monkeypatch.setattr(api, "RATE_LIMIT_MAX", 3)
+    api._rate_counts.clear()
+    for i in range(3):
+        h = {"X-Forwarded-For": behind_railway("203.0.113.9", edge_node=f"10.250.0.{i + 1}")}
+        assert client.get("/api/favorites?wallet=bad", headers=h).status_code == 400
+    assert client.get("/api/favorites?wallet=bad", headers={"X-Forwarded-For": behind_railway("203.0.113.9", "10.250.0.9")}).status_code == 429
+    # a different visitor through the SAME edge node is not blocked by it
+    assert client.get("/api/favorites?wallet=bad", headers={"X-Forwarded-For": behind_railway("203.0.113.77", "10.250.0.1")}).status_code == 400
+    api._rate_counts.clear()
+
+
 def test_rate_limit_ignores_client_written_forwarded_entries(monkeypatch):
-    """The edge appends the real address LAST; a client can only write the entries before it."""
+    """Whatever the client writes goes to the LEFT of the entries Railway adds."""
     monkeypatch.setattr(api, "RATE_LIMIT_MAX", 2)
     api._rate_counts.clear()
     for i in range(2):
-        h = {"X-Forwarded-For": f"198.51.100.{i}, 203.0.113.50"}      # a fresh fake address on every request
+        h = {"X-Forwarded-For": f"198.51.100.{i}, " + behind_railway("203.0.113.50")}      # a fresh fake address each time
         assert client.get("/api/favorites?wallet=bad", headers=h).status_code == 400
-    h = {"X-Forwarded-For": "198.51.100.99, 203.0.113.50"}
+    h = {"X-Forwarded-For": "198.51.100.99, " + behind_railway("203.0.113.50")}
     assert client.get("/api/favorites?wallet=bad", headers=h).status_code == 429
     api._rate_counts.clear()
 
@@ -125,14 +145,14 @@ def test_rate_limit_ignores_cf_connecting_ip_unless_cloudflare_is_in_front(monke
     monkeypatch.setattr(api, "RATE_LIMIT_MAX", 2)
     api._rate_counts.clear()
     for i in range(2):                 # a different forged CF header each time must not buy a fresh allowance
-        h = {"CF-Connecting-IP": f"198.51.100.{i}", "X-Forwarded-For": "203.0.113.60"}
+        h = {"CF-Connecting-IP": f"198.51.100.{i}", "X-Forwarded-For": behind_railway("203.0.113.60")}
         assert client.get("/api/favorites?wallet=bad", headers=h).status_code == 400
-    h = {"CF-Connecting-IP": "198.51.100.77", "X-Forwarded-For": "203.0.113.60"}
+    h = {"CF-Connecting-IP": "198.51.100.77", "X-Forwarded-For": behind_railway("203.0.113.60")}
     assert client.get("/api/favorites?wallet=bad", headers=h).status_code == 429
     api._rate_counts.clear()
     monkeypatch.setattr(api, "RATE_LIMIT_TRUST_CF", True)
     for i in range(2):
-        h = {"CF-Connecting-IP": "198.51.100.5", "X-Forwarded-For": f"203.0.113.{i}"}
+        h = {"CF-Connecting-IP": "198.51.100.5", "X-Forwarded-For": behind_railway(f"203.0.113.{i}")}
         assert client.get("/api/favorites?wallet=bad", headers=h).status_code == 400
     assert client.get("/api/favorites?wallet=bad", headers={"CF-Connecting-IP": "198.51.100.5"}).status_code == 429
     api._rate_counts.clear()
@@ -143,13 +163,17 @@ def test_client_ip_falls_back_to_the_socket_address(monkeypatch):
         def __init__(self, headers, host="10.0.0.7"):
             self.headers = headers
             self.client = type("C", (), {"host": host})() if host else None
+    assert api.RATE_LIMIT_PROXY_HOPS == 2                                     # the Railway default
     assert api._client_ip(Req({})) == "10.0.0.7"                              # no header: the socket peer
     assert api._client_ip(Req({"x-forwarded-for": " , "})) == "10.0.0.7"      # empty entries
-    assert api._client_ip(Req({"x-forwarded-for": "1.1.1.1, 2.2.2.2"})) == "2.2.2.2"
+    assert api._client_ip(Req({"x-forwarded-for": "1.1.1.1"})) == "10.0.0.7"  # fewer entries than trusted hops
+    assert api._client_ip(Req({"x-forwarded-for": "1.1.1.1, 2.2.2.2"})) == "1.1.1.1"
+    assert api._client_ip(Req({"x-forwarded-for": "9.9.9.9, 1.1.1.1, 2.2.2.2"})) == "1.1.1.1"
     assert api._client_ip(Req({}, host=None)) == "unknown"
-    monkeypatch.setattr(api, "RATE_LIMIT_PROXY_HOPS", 2)
-    assert api._client_ip(Req({"x-forwarded-for": "1.1.1.1, 2.2.2.2, 3.3.3.3"})) == "2.2.2.2"
-    assert api._client_ip(Req({"x-forwarded-for": "3.3.3.3"})) == "10.0.0.7"  # fewer entries than trusted hops
+    monkeypatch.setattr(api, "RATE_LIMIT_PROXY_HOPS", 1)                      # a deployment with a single proxy
+    assert api._client_ip(Req({"x-forwarded-for": "1.1.1.1, 2.2.2.2"})) == "2.2.2.2"
+    monkeypatch.setattr(api, "RATE_LIMIT_PROXY_HOPS", 0)                      # trust no header at all
+    assert api._client_ip(Req({"x-forwarded-for": "1.1.1.1, 2.2.2.2"})) == "10.0.0.7"
 
 
 def test_clean_chain_text_strips_markup_and_control_chars():
