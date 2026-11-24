@@ -255,3 +255,26 @@ def clean_chain_text(text: str, max_len: int = 80) -> str:
     name(), so markup characters (< > `) and control characters are dropped and the length is capped. The page
     escapes these too; this keeps them out of the database and every client in the first place."""
     return _UNSAFE_TEXT_RE.sub("", text or "").strip()[:max_len]
+
+
+# Default BSC RPC Endpoints (with fallback)
+PUBLIC_RPC_ENDPOINTS = [
+    "https://bsc-rpc.publicnode.com",
+    "https://bsc-dataseed.bnbchain.org",
+    "https://bsc-dataseed1.defibit.io",
+    "https://bsc-dataseed1.ninicoin.io",
+    "https://bsc.publicnode.com"
+]
+
+
+# eth_getLogs for the agent-ID mint counter: publicnode serves wide block ranges.
+PUBLIC_LOG_RPC_ENDPOINTS = [
+    "https://bsc-rpc.publicnode.com",
+    "https://bsc.publicnode.com"
+]
+
+
+RPC_ENDPOINTS = build_rpc_endpoints(PUBLIC_RPC_ENDPOINTS)
+
+
+LOG_RPC_ENDPOINTS = build_rpc_endpoints(PUBLIC_LOG_RPC_ENDPOINTS)

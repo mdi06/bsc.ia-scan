@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 
 import api
 import monitor
+from market import bnb_price   # fetch_bnb_price_usd is read where refresh_bnb_price lives
 import worker
 
 WBNB = monitor.WBNB_ADDRESS.lower()
@@ -331,13 +332,13 @@ def price_state():
 
 
 def test_price_is_live_only_while_last_success_is_recent(monkeypatch, price_state):
-    monkeypatch.setattr(monitor, "fetch_bnb_price_usd", lambda rpc: 650.0)
+    monkeypatch.setattr(bnb_price, "fetch_bnb_price_usd", lambda rpc: 650.0)
     monitor.refresh_bnb_price(object())
     assert monitor.bnb_price_is_live() is True
     assert monitor.bnb_price_as_of() == price_state["ok_at"]
 
     # RPC outage: every later lookup fails, the old price is kept but ages out of "live"
-    monkeypatch.setattr(monitor, "fetch_bnb_price_usd", lambda rpc: None)
+    monkeypatch.setattr(bnb_price, "fetch_bnb_price_usd", lambda rpc: None)
     ttl = monitor.BNB_PRICE_TTL_SEC
     price_state.update(ok_at=time.time() - 2 * ttl, fetched_at=0.0)
     assert monitor.refresh_bnb_price(object()) == 650.0
@@ -349,17 +350,17 @@ def test_price_is_live_only_while_last_success_is_recent(monkeypatch, price_stat
 
 
 def test_failed_fetch_never_renews_ok_at(monkeypatch, price_state):
-    monkeypatch.setattr(monitor, "fetch_bnb_price_usd", lambda rpc: None)
+    monkeypatch.setattr(bnb_price, "fetch_bnb_price_usd", lambda rpc: None)
     monitor.refresh_bnb_price(object())
     assert monitor.bnb_price_is_live() is False and monitor.bnb_price_as_of() is None
 
 
 def test_bnb_price_endpoint_reports_live_and_as_of(monkeypatch, price_state):
-    monkeypatch.setattr(monitor, "fetch_bnb_price_usd", lambda rpc: 688.0)
+    monkeypatch.setattr(bnb_price, "fetch_bnb_price_usd", lambda rpc: 688.0)
     body = TestClient(api.app).get("/api/bnb-price").json()
     assert body["live"] is True and body["bnb_price_usd"] == 688.0 and body["as_of"] == price_state["ok_at"]
 
-    monkeypatch.setattr(monitor, "fetch_bnb_price_usd", lambda rpc: None)
+    monkeypatch.setattr(bnb_price, "fetch_bnb_price_usd", lambda rpc: None)
     price_state.update(ok_at=time.time() - 10 * monitor.BNB_PRICE_TTL_SEC, fetched_at=0.0)
     body = TestClient(api.app).get("/api/bnb-price").json()
     assert body["live"] is False and body["bnb_price_usd"] == 688.0
