@@ -19,6 +19,7 @@ import concurrent.futures
 import urllib.error
 import urllib.request
 
+import filters
 import monitor
 from common.runtime import run_memory_guard_loop
 from db import db
@@ -179,6 +180,7 @@ def _process_smart_money_candidate(rpc, rcv, snd, aid, tx_h, b, tx_val, inp, wal
             "mint_price_bnb": bnb_val,
             "mint_value_wei": val_str,
             "max_supply": det.get("max_supply"),
+            **_mint_slots_field(det),
             "total_minted": det.get("total_minted", 0),
             "score": 10,
             "rating": "🌱 EARLY",
@@ -279,6 +281,7 @@ def _process_registry_candidate(rpc, tx_h, b, snd, tx_val, inp, wallet, known_in
             "mint_price_bnb": bnb_val,
             "mint_value_wei": val_str,
             "max_supply": det.get("max_supply"),
+            **_mint_slots_field(det),
             "total_minted": det.get("total_minted", 0),
             "score": 10,
             "rating": "🌱 EARLY",
@@ -527,6 +530,44 @@ def _token_decimals(item: dict) -> Optional[int]:
     return int(m.group(1)) if m else None
 
 
+def _cap_of(item: dict) -> Optional[float]:
+    """The mint cap in the units total_minted is in, or None when unknown. A fair-mint dispenser's cap getter answers with a
+    COUNT of mint slots (220), which read_supply used to scale as a token amount (2.2e-16): every such token then looked
+    sold out and the sweeper dropped it. filters.corrected_max_supply converts it (slots x tokens_per_mint)."""
+    return filters.corrected_max_supply(item) or None
+
+
+def _slots_pending(item: dict) -> bool:
+    """Mint slots are on record but the cap in tokens is not known yet (it waits for tokens_per_mint)."""
+    return not _cap_of(item) and bool(filters.mint_slot_count(item))
+
+
+def _mint_slots_field(det: dict) -> dict:
+    """`mint_slots` for a new record, only when analyze_contract found a slot-count cap (no empty key on other records)."""
+    return {"mint_slots": det["mint_slots"]} if det.get("mint_slots") else {}
+
+
+def repair_mint_count_cap(item: dict) -> bool:
+    """Puts a dispenser record into the stored shape the rest of the code expects: the slot count in `mint_slots`, and in
+    `max_supply` the cap in tokens, or None while that is unknown (never the slot count scaled as tokens). True if it
+    changed anything. Safe on any record: one without slots is left alone."""
+    slots = filters.mint_slot_count(item)
+    if not slots:
+        return False
+    changed = False
+    if item.get("mint_slots") != slots:
+        item["mint_slots"] = slots
+        changed = True
+    cap = filters.corrected_max_supply(item)
+    if filters.is_mint_count_cap(item):
+        item["max_supply"] = cap if cap > 0 else None
+        changed = True
+    elif cap > 0 and not item.get("max_supply"):
+        item["max_supply"] = cap
+        changed = True
+    return changed
+
+
 # contract -> time of the last supply-cap probe, so NFTs without a cap getter aren't re-probed every sweep
 _supply_probe_at: Dict[str, float] = {}
 SUPPLY_PROBE_INTERVAL_SEC = 3600.0
@@ -562,19 +603,20 @@ def fast_sweep_contract(rpc: monitor.BscRpcClient, item: dict) -> tuple:
 
     try:
         cur_minted = item.get("total_minted", 0)
-        cur_supply = item.get("max_supply")
+        cur_supply = _cap_of(item)
         has_cap = bool(cur_supply)
+        slots_known = _slots_pending(item)
 
         decimals = None
         if kind == "token":
             decimals = _token_decimals(item)
             if decimals is None:
                 return c, None, None, None, False  # can't scale without decimals
-        if kind != "nft" and not has_cap:
+        if kind != "nft" and not has_cap and not slots_known:
             return c, None, None, None, False
 
         probe_cap = False
-        if not has_cap:
+        if not has_cap and not slots_known:
             now = time.time()
             if now - _supply_probe_at.get(c, 0.0) >= SUPPLY_PROBE_INTERVAL_SEC:
                 _supply_probe_at[c] = now
@@ -586,8 +628,10 @@ def fast_sweep_contract(rpc: monitor.BscRpcClient, item: dict) -> tuple:
         changed = False
         if minted is not None and minted != cur_minted:
             changed = True
-        if supply is not None and supply != cur_supply:
+        if supply is not None and supply != item.get("max_supply"):
             changed = True
+        if filters.is_mint_count_cap(item):
+            changed = True      # the stored cap is a slot count: the apply step rewrites it (repair_mint_count_cap)
 
         # An NFT collection's holder count is only an estimate here (about 85% of the minted items). It is
         # returned for holders_estimate; it is never written to `holders`, which is a measured number.
@@ -617,7 +661,7 @@ def fast_sweep_batch(rpc: monitor.BscRpcClient, items: list) -> list:
         if not c or not c.startswith("0x") or len(c) != 42 or kind is None:
             results.append((c, None, None, None, False))
             continue
-        if not item.get("max_supply") or (c in _core_addr_cache and _core_addr_cache[c]) or c not in _core_addr_cache:
+        if not _cap_of(item) or (c in _core_addr_cache and _core_addr_cache[c]) or c not in _core_addr_cache:
             singles.append(item)        # no cap yet (probe path), a companion to ask, or core() not looked up yet
             continue
         decimals = None
@@ -649,11 +693,12 @@ def fast_sweep_batch(rpc: monitor.BscRpcClient, items: list) -> list:
                 retry.append(item)          # not answered from the memo: the one-by-one path reads and relearns it
                 continue
             cur_minted = item.get("total_minted", 0)
-            cur_supply = item.get("max_supply")
+            cur_supply = _cap_of(item)
             holders_estimate = None
             if kind == "nft" and minted > 0:
                 holders_estimate = min(minted, int(minted * 0.85) + 1)
-            results.append((item["contract"], minted, cur_supply, holders_estimate, minted != cur_minted))
+            results.append((item["contract"], minted, cur_supply, holders_estimate,
+                            minted != cur_minted or filters.is_mint_count_cap(item)))
 
     single_futs += [fast_sweep_pool.submit(fast_sweep_contract, rpc, it) for it in retry]
     for fut in single_futs:
@@ -714,11 +759,8 @@ def run_fast_track_progress_sweeper_loop():
             active_contracts = [
                 x for x in history
                 if not monitor.is_system_infra(x)
-                and (_sweep_kind(x) == "nft" or x.get("max_supply"))  # tokens/fair-mint need a known cap
-                and (
-                    not x.get("max_supply")
-                    or (x.get("total_minted") or 0) < (x.get("max_supply") or 0)
-                )
+                and (_sweep_kind(x) == "nft" or _cap_of(x) or _slots_pending(x))  # tokens/fair-mint need a known cap
+                and (not _cap_of(x) or (x.get("total_minted") or 0) < _cap_of(x))
             ]
 
             if not active_contracts:
@@ -730,7 +772,7 @@ def run_fast_track_progress_sweeper_loop():
 
             for item in active_contracts:
                 tot = item.get("total_minted", 0) or 0
-                sup = item.get("max_supply") or 0
+                sup = _cap_of(item) or 0
                 holders = max(item.get("holders") or 0, item.get("holders_estimate") or 0)
                 pct = (tot / sup * 100.0) if sup > 0 else 0.0
 
@@ -764,7 +806,7 @@ def run_fast_track_progress_sweeper_loop():
                             if it.get("contract", "").lower() != c_addr.lower():
                                 continue
                             old_minted = it.get("total_minted", 0) or 0
-                            old_sup = it.get("max_supply") or 0
+                            old_sup = _cap_of(it) or 0
                             old_prog = (old_minted / old_sup * 100.0) if old_sup > 0 else 0.0
 
                             if minted is not None:
@@ -775,10 +817,11 @@ def run_fast_track_progress_sweeper_loop():
                                 it["total_minted"] = minted
                             if supply is not None:
                                 it["max_supply"] = supply
+                            repair_mint_count_cap(it)       # a stored slot-count cap becomes the cap in tokens (or None)
                             if holders is not None:
                                 it["holders_estimate"] = max(it.get("holders_estimate") or 0, holders)
 
-                            new_sup = it.get("max_supply") or 0
+                            new_sup = _cap_of(it) or 0
                             new_minted = it.get("total_minted", 0) or 0
                             new_prog = (new_minted / new_sup * 100.0) if new_sup > 0 else 0.0
 
@@ -1564,6 +1607,7 @@ def run_proxy_factory_watcher_loop():
                                         "mint_price_bnb": det.get("mint_price_bnb", 0.0),
                                         "mint_value_wei": det.get("mint_value_wei", "0"),
                                         "max_supply": det.get("max_supply"),
+                                        **_mint_slots_field(det),
                                         "total_minted": det.get("total_minted", 0),
                                         "score": 10,
                                         "rating": "🌱 EARLY",
@@ -1747,7 +1791,7 @@ def run_mint_terms_backfill_loop():
                 c = item["contract"]
                 _mint_terms_tried[c.lower()] = now
                 prev = item.get("mint_terms") if isinstance(item.get("mint_terms"), dict) else {}
-                cap_status = "capped" if item.get("max_supply") else prev.get("cap")
+                cap_status = "capped" if (item.get("max_supply") or item.get("mint_slots")) else prev.get("cap")
                 if cap_status is None:
                     meta: Dict[str, Any] = {}
                     monitor.read_supply(rpc, _supply_targets(rpc, c), None, meta=meta)
@@ -1826,6 +1870,7 @@ def run_tokens_per_mint_loop():
                             if tokens:
                                 it["tokens_per_mint"] = float(f"{tokens:.10g}")
                                 it["tokens_per_mint_src"] = src
+                                repair_mint_count_cap(it)       # slots on record + tokens per mint = the cap in tokens
                                 _refresh_profit_fields(it)
                                 found += 1
                             monitor.save_history(history, delta=it)
@@ -1835,6 +1880,141 @@ def run_tokens_per_mint_loop():
         except Exception as exc:
             print(f"[⚠️ Tokens per Mint] cycle failed: {exc}", flush=True)
         time.sleep(TOKENS_PER_MINT_INTERVAL_SEC)
+
+
+# --- Risk re-score. The Serial Dev / Fund Drain rules were wrong (see test_risk_rules.py): 22% of records were RUG, and a
+# record's risk is only computed once, at discovery, so the stored flags stay wrong for good. This loop re-checks the records
+# those rules flagged, a few at a time, through the worker's OWN copy of the list (a separate script would be overwritten by the
+# worker, which rewrites a record from its own memory on every save). It touches risk fields and the sniper flags only, never
+# prices or liquidity.
+#   RISK_RESCORE=dry-run (default)  checks and LOGS old -> new, writes nothing
+#   RISK_RESCORE=apply              writes the new verdict and stamps risk_rules_v
+#   RISK_RESCORE=off                the loop does not run
+RISK_RULES_VERSION = 1
+RISK_RESCORE_MODE = os.environ.get("RISK_RESCORE", "dry-run").strip().lower()
+RISK_RESCORE_INTERVAL_SEC = float(os.environ.get("RISK_RESCORE_INTERVAL_SEC", "30"))
+RISK_RESCORE_BATCH = int(os.environ.get("RISK_RESCORE_BATCH", "8"))
+RISK_RESCORE_RETRY_SEC = 6 * 3600           # a record that could not be re-checked (no GoPlus answer, an error) waits this long
+_risk_rescore_tried: Dict[str, float] = {}
+RISK_RESCORE_STATS: Dict[str, int] = {}     # "RUG->SAFE": 12, "skipped: GoPlus unavailable": 3, ...
+_RULE_BADGES = ("🚨 Serial Dev", "🚨 Fund Drain")
+
+
+def _flagged_by_the_old_rules(item: dict) -> bool:
+    sec = item.get("security") if isinstance(item.get("security"), dict) else {}
+    return (item.get("risk_badge") in _RULE_BADGES or bool(sec.get("is_serial_dev")) or bool(sec.get("is_fund_drain")))
+
+
+def _risk_rescore_candidates(history: list, now: float, batch: int = RISK_RESCORE_BATCH) -> list:
+    """Records the old rules flagged and no re-check has covered yet, newest first (the rows people see)."""
+    out = []
+    for it in history:
+        c = (it.get("contract") or "").lower()
+        if not c or monitor.is_system_infra(it) or not _flagged_by_the_old_rules(it):
+            continue
+        if int(it.get("risk_rules_v") or 0) >= RISK_RULES_VERSION:
+            continue
+        if now - _risk_rescore_tried.get(c, 0.0) < RISK_RESCORE_RETRY_SEC:
+            continue
+        out.append(it)
+    return sorted(out, key=lambda x: int(x.get("block") or 0), reverse=True)[:batch]
+
+
+def rescore_record(rpc, item: dict, history: list, apply: bool) -> str:
+    """Re-checks one record with the current rules. Returns what happened ("RUG->SAFE", "unchanged", "skipped: ...").
+    With apply=False nothing is written. Prices, liquidity and volume are never touched."""
+    c = item["contract"]
+    proxy_like = bool(item.get("is_proxy_clone") or item.get("is_factory"))
+    deployer = None if proxy_like else (item.get("deployer") or None)      # a proxy's stored deployer is its first CALLER
+    det = monitor.analyze_contract(rpc, c, monitor.DEFAULT_WALLET)
+    mkt = monitor.analyze_market_interest(rpc, c, deployer, det, history=history)
+    old_sec = item.get("security") if isinstance(item.get("security"), dict) else {}
+    new_sec = mkt.get("security") if isinstance(mkt.get("security"), dict) else {}
+    if old_sec.get("audited") and not new_sec.get("audited"):
+        return "skipped: GoPlus unavailable"       # never lower a risk because a lookup failed
+    old, new = item.get("risk_level") or "SAFE", mkt.get("risk_level") or "SAFE"
+    old_badge, new_badge = item.get("risk_badge"), mkt.get("risk_badge")
+    if old != new:
+        verdict = f"{old}->{new} ({new_badge})"
+    elif old_badge != new_badge:
+        verdict = f"{old} stays, badge {old_badge} -> {new_badge}"      # e.g. a real serial deployer: Fund Drain -> Serial Dev
+    else:
+        verdict = "unchanged"
+    if not apply:
+        return verdict
+    item["security"] = new_sec                     # replaced as a whole: a flag the new rules dropped must not linger in the old dict
+    item["risk_level"] = mkt.get("risk_level", "SAFE")
+    item["risk_badge"] = mkt.get("risk_badge", "🟢 Clean")
+    item["risk_flags"] = mkt.get("risk_flags", [])
+    for k in ("dev_root", "cluster_devs", "cluster_n"):
+        if mkt.get(k):
+            item[k] = mkt[k]
+    if proxy_like:
+        item["deployer"] = ""                      # not the creator: stop it counting as a deployer anywhere
+    item["risk_rules_v"] = RISK_RULES_VERSION
+    eva = monitor.evaluate_sniper_readiness(item)  # RUG blocks "sniper ready": recompute with the new verdict
+    item["sniper_ready"] = eva.get("sniper_ready", False)
+    item["sniper_status"] = eva.get("sniper_status", "TRACKING")
+    item["sniper_badge"] = eva.get("sniper_badge", "⏳ Tracking")
+    item["sniper_checklist"] = eva.get("sniper_checklist", [])
+    return verdict
+
+
+def run_risk_rescore_loop():
+    if RISK_RESCORE_MODE not in ("dry-run", "apply"):
+        print(f"[🔎 Risk Rescore] off (RISK_RESCORE={RISK_RESCORE_MODE!r})", flush=True)
+        return
+    apply = RISK_RESCORE_MODE == "apply"
+    print(f"[🔎 Risk Rescore] {'APPLYING' if apply else 'dry run: logging only, nothing is written'} "
+          f"({RISK_RESCORE_BATCH} records every {RISK_RESCORE_INTERVAL_SEC:.0f}s)", flush=True)
+    time.sleep(45)
+    rpc = monitor.BscRpcClient(monitor.RPC_ENDPOINTS)
+    while True:
+        try:
+            now = time.time()
+            with history_lock:
+                history = get_shared_history()
+                todo = [dict(x) for x in _risk_rescore_candidates(history, now)]
+                snapshot = list(history)
+            if todo:
+                batch_counts: Dict[str, int] = {}
+                for item in todo:
+                    c = item["contract"]
+                    _risk_rescore_tried[c.lower()] = now
+                    try:
+                        if apply:
+                            with history_lock:
+                                live = next((x for x in get_shared_history() if (x.get("contract") or "").lower() == c.lower()), None)
+                            if live is None:
+                                continue
+                            # analysis runs outside the lock (it is slow); the write happens inside it
+                            work = dict(live)
+                            verdict = rescore_record(rpc, work, snapshot, apply=True)
+                            if not verdict.startswith("skipped"):
+                                with history_lock:
+                                    history2 = get_shared_history()
+                                    for it in history2:
+                                        if (it.get("contract") or "").lower() == c.lower():
+                                            for k in ("security", "risk_level", "risk_badge", "risk_flags", "dev_root", "cluster_devs",
+                                                      "cluster_n", "deployer", "risk_rules_v", "sniper_ready", "sniper_status",
+                                                      "sniper_badge", "sniper_checklist"):
+                                                if k in work:
+                                                    it[k] = work[k]
+                                            monitor.save_history(history2, delta=it)
+                                            break
+                        else:
+                            verdict = rescore_record(rpc, dict(item), snapshot, apply=False)
+                    except Exception as exc:
+                        verdict = "skipped: error"
+                        print(f"[⚠️ Risk Rescore] {c}: {exc}", flush=True)
+                    batch_counts[verdict] = batch_counts.get(verdict, 0) + 1
+                    RISK_RESCORE_STATS[verdict] = RISK_RESCORE_STATS.get(verdict, 0) + 1
+                    if verdict not in ("unchanged",) and not verdict.startswith("skipped"):
+                        print(f"[🔎 Risk Rescore{'' if apply else ' dry-run'}] {item.get('name')} ({c}): was {item.get('risk_level')} {item.get('risk_badge')}: {verdict}", flush=True)
+                print(f"[🔎 Risk Rescore{'' if apply else ' dry-run'}] {len(todo)} checked {batch_counts} | total so far {RISK_RESCORE_STATS}", flush=True)
+        except Exception as exc:
+            print(f"[⚠️ Risk Rescore] cycle failed: {exc}", flush=True)
+        time.sleep(RISK_RESCORE_INTERVAL_SEC)
 
 
 def start_worker():
@@ -1851,6 +2031,11 @@ def start_worker():
         (run_tokens_per_mint_loop, "TokensPerMint"),
         (run_memory_guard_loop, "MemoryGuard")
     ]
+    if RISK_RESCORE_MODE in ("dry-run", "apply"):
+        # only registered when it will run: the supervisor below restarts any thread that returns
+        task_specs.insert(-1, (run_risk_rescore_loop, "RiskRescore"))
+    else:
+        print(f"[🔎 Risk Rescore] off (RISK_RESCORE={RISK_RESCORE_MODE!r})", flush=True)
     threads = []
     for fn, name in task_specs:
         t = threading.Thread(target=fn, name=name, daemon=True)

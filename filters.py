@@ -208,6 +208,20 @@ def is_mint_count_cap(d) -> bool:
     return ms == ms and 0 < ms < 1
 
 
+def mint_slot_count(d) -> int:
+    """How many mint slots the contract has, or 0 when unknown: the stored `mint_slots` (new records), else the slot count
+    hidden in a stored sub-1 max_supply (records written before `mint_slots` existed)."""
+    if not d:
+        return 0
+    slots = _js_number(d.get("mint_slots"))
+    if slots == slots and slots >= 1:
+        return int(slots)
+    if is_mint_count_cap(d):
+        m = _DECIMALS_IN_STANDARD_RE.search(str(d.get("standard") or ""))
+        return int(round(_js_number(d.get("max_supply")) * 10 ** (int(m.group(1)) if m else 18)))
+    return 0
+
+
 def corrected_max_supply(d) -> float:
     """The cap in the units total_minted is in (whole tokens / items), or 0.0 when there is none or it is unknown.
 
@@ -218,13 +232,12 @@ def corrected_max_supply(d) -> float:
     A cap under one whole token is such a count: rescale it (slots x tokens_per_mint) when tokens_per_mint is known,
     else the cap is unknown (0.0), never a made-up "full"."""
     ms = _js_number(d.get("max_supply")) if d else 0.0
-    if not (ms == ms and 0 < ms < 1e20):
-        return 0.0
-    if ms >= 1:
-        return ms
-    m = _DECIMALS_IN_STANDARD_RE.search(str(d.get("standard") or ""))
-    slots = round(ms * 10 ** (int(m.group(1)) if m else 18))
-    per_mint = _js_number(d.get("tokens_per_mint"))
+    if ms == ms and ms >= 1:
+        return ms if ms < 1e20 else 0.0
+    # no real cap stored: a slot count (stored as `mint_slots`, or as a sub-1 max_supply by older records) times what one
+    # mint gives, when that is known
+    slots = mint_slot_count(d)
+    per_mint = _js_number(d.get("tokens_per_mint")) if d else 0.0
     if slots >= 1 and per_mint == per_mint and per_mint > 0:
         return float(slots) * per_mint
     return 0.0
