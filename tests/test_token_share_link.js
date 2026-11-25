@@ -92,6 +92,20 @@ assert.strictEqual(buildTokenShareUrl(''), '');
 assert.strictEqual(buildTokenShareUrl('   '), '');
 assert.strictEqual(buildTokenShareUrl(undefined), '');
 
+// 4b. With a contract address the link is the server-rendered /t/<contract> page (it carries the preview card),
+//     lower-cased, with the same utm tags; without a valid contract, or on a local dev server, it stays the #token= link
+const ADDR = '0x26040E441A7369CCC7BD8BFE96F596DF4DB87777';
+assert.strictEqual(
+  buildTokenShareUrl('SWJ', ADDR),
+  SITE + '/t/' + ADDR.toLowerCase() + '?utm_source=share&utm_medium=modal&utm_campaign=SWJ'
+);
+assert.strictEqual(buildTokenShareUrl('SWJ', 'not-an-address'), buildTokenShareUrl('SWJ'));
+assert.strictEqual(buildTokenShareUrl('SWJ', ''), buildTokenShareUrl('SWJ'));
+assert.strictEqual(buildTokenShareUrl('', ADDR), '');
+window.location.hostname = 'localhost';
+assert.strictEqual(buildTokenShareUrl('SWJ', ADDR), buildTokenShareUrl('SWJ'), 'a local dev server has no /t/ route');
+delete window.location.hostname;
+
 // 5. The modal renders the button with the symbol in a data attribute (escaped, so quotes cannot break out)
 const item = {
   name: 'Alpha "Coin"', symbol: 'AL"PHA', contract: '0x' + '1'.repeat(40), standard: 'ERC-20',
@@ -101,6 +115,7 @@ openModal(item);
 const html = getEl('modalContent').innerHTML;
 assert.ok(html.includes('id="modalShareBtn"'), 'share button is rendered in the modal header');
 assert.ok(html.includes('data-share-symbol="AL&quot;PHA"'), 'symbol is attribute-escaped');
+assert.ok(html.includes('data-share-contract="0x' + '1'.repeat(40) + '"'), 'contract rides along for the /t/ link');
 assert.ok(html.includes('onclick="copyTokenShareLink(this)"'), 'button calls the copy helper');
 
 // 6. Clipboard API success: the share URL is copied and the label confirms it
@@ -112,6 +127,15 @@ assert.ok(html.includes('onclick="copyTokenShareLink(this)"'), 'button calls the
   await tick();
   assert.deepStrictEqual(copied, [buildTokenShareUrl('ALPHA')]);
   assert.strictEqual(btn.textContent, '✓ Link copied');
+
+  // the button's data-share-contract is used for the copied link
+  copied.length = 0;
+  copyTokenShareLink({ dataset: { shareSymbol: 'SWJ', shareContract: ADDR }, textContent: 'label' });
+  await tick();
+  assert.deepStrictEqual(copied, [buildTokenShareUrl('SWJ', ADDR)]);
+  assert.ok(copied[0].includes('/t/' + ADDR.toLowerCase()));
+  copied.length = 0;
+  copied.push(buildTokenShareUrl('ALPHA')); // restore what the checks below expect
   assert.strictEqual(execCalls.length, 0, 'no fallback when the clipboard API works');
 
   // 7. Clipboard API rejects: falls back to a hidden textarea and execCommand('copy')
