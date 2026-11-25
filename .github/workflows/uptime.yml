@@ -1,0 +1,25 @@
+# Hourly uptime check of the API. Railway does not put a service to sleep (the old keep-warm job pinged every 10 minutes to stop
+# a Render free instance spinning down), so there is nothing to keep warm: this only tells you when the API is down. A failed run
+# makes GitHub email the repository owner. /healthz is a tiny response and does not touch the database.
+#
+# GitHub runs scheduled workflows only on the default branch, may delay them under load, and disables them after 60 days
+# without repository activity (any push re-enables them).
+name: uptime
+
+on:
+  schedule:
+    - cron: "17 * * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: /healthz answers ok
+        run: |
+          body=$(curl --silent --show-error --fail --max-time 60 --retry 2 --retry-delay 10 https://agent-id-backend-production.up.railway.app/healthz)
+          echo "$body"
+          echo "$body" | grep -q '"status":"ok"'

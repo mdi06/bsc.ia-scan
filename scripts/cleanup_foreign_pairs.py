@@ -1,0 +1,48 @@
+#!/usr/bin/env python3
+"""One-off clean-up for H2: clear market data on records bound to another token's DexScreener pair
+(e.g. MARSID NFT showing the MarsCoin/SPCXB pair's $1.02M liquidity).
+
+    python3 scripts/cleanup_foreign_pairs.py            # dry run: only lists the records it would clear
+    python3 scripts/cleanup_foreign_pairs.py --apply    # clears them and saves through db.py
+
+WARNING: with Supabase credentials in the environment, --apply writes to the PRODUCTION database.
+Run the dry run first and read the list. Never run this from the worker or on a schedule.
+"""
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))   # the repo root: monitor, worker, db
+
+import monitor
+import worker
+
+
+def main(argv=None) -> int:
+    apply = "--apply" in (argv if argv is not None else sys.argv[1:])
+    # Read EVERY row or stop: a read that fails or stops short (Supabase answers at most 1000 rows per request) must
+    # not turn into "0 records need cleaning".
+    from db import db
+    try:
+        rows = db.load_all_strict()
+    except RuntimeError as exc:
+        print(f"ABORT: {exc}. Nothing was changed.")
+        return 2
+    print(f"read {len(rows)} projects ({db.mode} mode)")
+    history = monitor.load_history()
+    bad = worker.find_foreign_pair_records(history)
+    for item in bad:
+        print(f"{item.get('contract')}  {item.get('name') or item.get('token_symbol')}  pair_url={item.get('pair_url')}  "
+              f"lp_usd={item.get('lp_usd')}  market_cap={item.get('market_cap')}")
+    print(f"{len(bad)} record(s) bound to another token's pair")
+    if apply and bad:
+        for item in bad:
+            worker.clear_foreign_pair_market(item)
+        monitor.save_history(history, delta=bad)
+        print("cleared and saved")
+    elif bad:
+        print("dry run - nothing changed (pass --apply to clear them)")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

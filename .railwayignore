@@ -13,14 +13,11 @@ tests/
 scripts/
 .github/
 deploy/
-render.yaml
 .vercelignore
 vercel.json
 start_local.sh
 supabase_migrations/
 supabase_schema.sql
-cleanup_*.py
-migrate_supabase.py
 
 # the frontend (Vercel builds and serves it)
 index.html
@@ -54,3 +51,6 @@ scratch/
 .claude/
 .vercel/
 .env*
+requirements-dev.txt
+pytest.ini
+conftest.py

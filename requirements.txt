@@ -1,4 +1,5 @@
-pycryptodome>=3.18.0
-fastapi>=0.100.0
-uvicorn>=0.22.0
-httpx>=0.24.0
+# Pinned to the versions the test suite runs against (Python 3.10). Bump them on purpose, run the tests, then deploy.
+pycryptodome==3.20.0
+fastapi==0.111.0
+uvicorn==0.30.3
+httpx==0.27.0

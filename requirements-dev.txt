@@ -1,0 +1,3 @@
+# Everything the tests need: the app's requirements plus pytest. `pip install -r requirements-dev.txt`
+-r requirements.txt
+pytest==8.3.2

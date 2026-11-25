@@ -15,6 +15,9 @@ on:
     branches: [main]
     paths:
       - "**/*.py"
+      - "!tests/**"        # tests, tooling and CI never reach the API, so changing them must not restart it
+      - "!scripts/**"
+      - "!conftest.py"
       - "requirements.txt"
       - ".github/workflows/deploy-api.yml"
   workflow_dispatch:
