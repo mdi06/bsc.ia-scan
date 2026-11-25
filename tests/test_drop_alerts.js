@@ -141,7 +141,7 @@ function uninstallNotification() {
   delete global.Notification;
 }
 
-const app = require('./app.js');
+const app = require('../app.js');
 const {
   readDropAlertPref, writeDropAlertPref, getDropAlertPermission, isDropAlertActive,
   onDropAlertToggleClick, showNewMarketToast, dropMatchesToolbarFilter, alertMatchType,

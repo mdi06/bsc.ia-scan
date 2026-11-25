@@ -11,7 +11,7 @@ global.document = {
   addEventListener() {},
 };
 
-const app = require('./app.js');
+const app = require('../app.js');
 
 let n = 0;
 function nft(name, { mintUsd, athPrice, isFree = false, isSold = false, priceStr = '0.001 BNB' }) {

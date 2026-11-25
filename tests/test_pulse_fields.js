@@ -42,7 +42,7 @@ global.window = {
 };
 Object.defineProperty(global, 'navigator', { configurable: true, writable: true, value: { clipboard: { writeText: () => Promise.resolve() } } });
 
-const app = require('./app.js');
+const app = require('../app.js');
 const { compute24hPulseMetrics, comparePulseLaunches, pulseLaunchRow, isBackedVolume } = app;
 
 const live = (n, over) => ({

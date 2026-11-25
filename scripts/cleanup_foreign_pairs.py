@@ -2,13 +2,16 @@
 """One-off clean-up for H2: clear market data on records bound to another token's DexScreener pair
 (e.g. MARSID NFT showing the MarsCoin/SPCXB pair's $1.02M liquidity).
 
-    python3 cleanup_foreign_pairs.py            # dry run: only lists the records it would clear
-    python3 cleanup_foreign_pairs.py --apply    # clears them and saves through db.py
+    python3 scripts/cleanup_foreign_pairs.py            # dry run: only lists the records it would clear
+    python3 scripts/cleanup_foreign_pairs.py --apply    # clears them and saves through db.py
 
 WARNING: with Supabase credentials in the environment, --apply writes to the PRODUCTION database.
 Run the dry run first and read the list. Never run this from the worker or on a schedule.
 """
+import os
 import sys
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))   # the repo root: monitor, worker, db
 
 import monitor
 import worker

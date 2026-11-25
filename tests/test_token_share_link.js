@@ -65,7 +65,7 @@ Object.defineProperty(global, 'navigator', {
   },
 });
 
-const app = require('./app.js');
+const app = require('../app.js');
 const { buildTokenShareUrl, copyTokenShareLink, openModal } = app;
 
 // 1. A plain symbol: the site's origin and path, the UTM tags, then the modal's own #token= hash

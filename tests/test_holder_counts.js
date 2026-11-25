@@ -1,6 +1,6 @@
 // Real NFT holder counts: what the table shows before / after a count, and the card's request (/api/holders).
 const assert = require('assert');
-const app = require('./app.js');
+const app = require('../app.js');
 
 const nft = (extra = {}) => ({ contract: '0x' + 'a1'.repeat(20), standard: 'ERC-721 (NFT Collection)', holders: 1, total_minted: 1551, ...extra });
 

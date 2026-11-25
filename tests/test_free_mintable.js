@@ -1,5 +1,5 @@
 const assert = require('assert');
-const app = require('./app.js');
+const app = require('../app.js');
 
 const free = (extra = {}) => ({ contract: '0x' + Math.random().toString(16).slice(2), has_free_mint: true, mint_price_str: '⭐ FREE', risk_level: 'SAFE', ...extra });
 

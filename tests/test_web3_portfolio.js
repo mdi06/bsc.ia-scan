@@ -9,7 +9,7 @@ const {
   handleBinanceWalletClick,
   PANCAKE_ROUTER_V2,
   WBNB_ADDRESS
-} = require('./app.js');
+} = require('../app.js');
 
 console.log('Testing Web3 Portfolio Calldata & Take-Profit Recommendations...');
 
@@ -91,7 +91,7 @@ const {
   MULTICALL3_ADDRESS,
   encodeMulticall3Aggregate3,
   decodeMulticall3Aggregate3
-} = require('./app.js');
+} = require('../app.js');
 
 assert.strictEqual(getFavoritesStorageKey(), 'agent_id_favorites', 'Default key should be guest favorites');
 setWatchOnlyWallet('0xa15bb4aedc1b3426159c3cacf8548cf09506a20a');
@@ -205,7 +205,7 @@ assert(mockContent.innerHTML.includes('wallet-back-btn'), 'Must have back button
 console.log('✔ handleBinanceWalletClick Native In-Modal QR Fallback: PASS');
 
 // Test Live Smart Stream Ticker Engine
-const { renderSmartStreamTicker, openInspectModalByContract } = require('./app');
+const { renderSmartStreamTicker, openInspectModalByContract } = require('../app');
 
 const mockTickerTrack = { innerHTML: '' };
 let inspectedContract = null;
@@ -273,7 +273,7 @@ openInspectModalByContract('0x2222222222222222222222222222222222222222');
 assert(mockInspectContent.innerHTML.includes('0x2222222222222222222222222222222222222222'), 'Must populate modal content for matching contract');
 
 // Test 24H Pulse Item Inspection (Item NOT in allDrops)
-const { renderPulseLaunchRow, pulseItemsMap } = require('./app');
+const { renderPulseLaunchRow, pulseItemsMap } = require('../app');
 const athMockItem = {
   name: 'Semicon Bull',
   symbol: 'SOXLB',
@@ -302,7 +302,7 @@ console.log('✔ openInspectModalByContract Target Resolution (allDrops + PulseI
 // ==========================================
 // Test Persistent Top Gainers Separate Memory
 // ==========================================
-const app = require('./app.js');
+const app = require('../app.js');
 const { updateSavedTopMarkets, getSavedTopGainers, setSavedTopGainers, computeStats, loadSavedTopGainers } = app;
 
 // 1. A fresh client starts with an EMPTY leaderboard: there is no hard-coded list of invented winners any more.
@@ -449,7 +449,7 @@ console.log('✔ toggleDexChart (Lazy Embed Loading & Cleanup): PASS');
 
 // Test 4: 2,116 Smart Hunters Scaling & Activity Navigation
 const fs = require('fs');
-const seedData = JSON.parse(fs.readFileSync('seeded_smart_hunters.json', 'utf8'));
+const seedData = JSON.parse(fs.readFileSync(require('path').join(__dirname, '..', 'seeded_smart_hunters.json'), 'utf8'));
 assert.strictEqual(seedData.length, 2116, 'seeded_smart_hunters.json must contain all 2,116 hunters');
 
 const { setSmartHuntersCache, viewWalletActivity, mergeDropsIntoAllDrops, getFilteredDrops } = app;
@@ -476,7 +476,7 @@ assert.strictEqual(mockSearchInput.value, 'adadcarry.ai', 'Search input must be 
 console.log('✔ viewWalletActivity (Search and Filter Redirection): PASS');
 
 // Test 6: Smart Drops Merge & Followed / Search Activity Resolution
-const smartDropsRaw = JSON.parse(fs.readFileSync('seeded_smart_drops.json', 'utf8'));
+const smartDropsRaw = JSON.parse(fs.readFileSync(require('path').join(__dirname, '..', 'seeded_smart_drops.json'), 'utf8'));
 assert(smartDropsRaw.length >= 1900, 'seeded_smart_drops.json must contain ~1,900 smart drops');
 const addedDrops = mergeDropsIntoAllDrops(smartDropsRaw);
 assert(addedDrops > 1800, 'Must merge new smart drops into allDrops');
@@ -1480,7 +1480,7 @@ global.document.getElementById = savedGetElemPulse;
 console.log('✔ 24H Daily Pulse DOM population & interactive toggle: PASS');
 
 // Test 24H Pulse Mobile Carousel Logic & Dot Synchronization
-const { setupPulseCarousel, scrollPulseCarousel, updateActivePulseDot } = require('./app');
+const { setupPulseCarousel, scrollPulseCarousel, updateActivePulseDot } = require('../app');
 
 const mockCarouselDots = [0, 1, 2, 3].map(i => ({
   index: i,
@@ -1603,7 +1603,7 @@ const {
   getCurrentAgentWalletsCount,
   setAgentWalletsAnchorBlock,
   getAgentWalletsAnchorBlock
-} = require('./app.js');
+} = require('../app.js');
 const mockHdrCount = { textContent: '', style: {} };
 const mockTicker = { textContent: '' };
 const mockScreen = { innerHTML: '', appendChild: () => {} };
@@ -1645,7 +1645,7 @@ console.log('✔ Live Agentic Wallets Counter Sync: PASS');
 
 // Testing Mobile Notification Alert Suppression
 console.log('Testing Mobile Notification Alert Suppression...');
-const { isMobileClient } = require('./app.js');
+const { isMobileClient } = require('../app.js');
 
 global.window.innerWidth = 390;
 assert.strictEqual(isMobileClient(), true, 'isMobileClient must be true for 390px width');
@@ -1677,7 +1677,7 @@ const {
   applyOverviewStatsFallback,
   getGlobalStats,
   setGlobalStats
-} = require('./app.js');
+} = require('../app.js');
 
 // 1. Test applyOverviewStats with server payload
 const mockRadarEl = { textContent: '' };
@@ -1761,7 +1761,7 @@ global.fetch = async (url) => {
     getInspectNavContext,
     getCurrentInspectItem,
     setAllDrops
-  } = require('./app.js');
+  } = require('../app.js');
 
   const itemA = { contract: '0x1111111111111111111111111111111111111111', name: 'Alpha Agent', symbol: 'ALPHA' };
   const itemB = { contract: '0x2222222222222222222222222222222222222222', name: 'Beta Agent', symbol: 'BETA' };
@@ -1847,7 +1847,7 @@ global.fetch = async (url) => {
     handleHashChange,
     handleTokenClick,
     resolveTokenAndInspect
-  } = require('./app.js');
+  } = require('../app.js');
 
   // 1. parseTokenFromHash tests
   assert.strictEqual(parseTokenFromHash('#token=PTAH'), 'PTAH', 'Must parse simple token symbol');
@@ -1934,7 +1934,7 @@ global.fetch = async (url) => {
   assert.strictEqual(ctrlPrevented, false, 'Ctrl+Click must NOT preventDefault so browser opens in new tab');
 
   // 7. Table Permalinks DOM Rendering
-  const { setActiveTab, setActiveFilter } = require('./app.js');
+  const { setActiveTab, setActiveFilter } = require('../app.js');
   setActiveTab('RADAR');
   setActiveFilter('ALL');
 
@@ -1973,7 +1973,7 @@ global.fetch = async (url) => {
   // Testing Cache-First Overview Stats (0ms Instant Local Hydration)
   // ==========================================================================
   console.log('Testing Cache-First Overview Stats...');
-  const appModule = require('./app.js');
+  const appModule = require('../app.js');
   const {
     hydrateCachedOverviewStats,
     OVERVIEW_STATS_CACHE_KEY,
@@ -2021,7 +2021,7 @@ global.fetch = async (url) => {
     getRecentInspectedTokens,
     setRecentInspectedTokens,
     RECENT_INSPECTED_STORAGE_KEY
-  } = require('./app.js');
+  } = require('../app.js');
 
   clearRecentChips();
   assert.strictEqual(getRecentInspectedTokens().length, 0, 'clearRecentChips must reset list to 0');

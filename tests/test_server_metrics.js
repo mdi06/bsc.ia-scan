@@ -1,7 +1,7 @@
 // Task 5 step one: the four metric helpers in app.js return the server's answer (record.server_metrics, added by
 // api.with_server_metrics) when the record carries it, and calculate by themselves when it does not.
 const assert = require('assert');
-const app = require('./app.js');
+const app = require('../app.js');
 
 const BNB = 705;
 const A = '0x' + 'a'.repeat(40);

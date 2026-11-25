@@ -15,7 +15,7 @@ import pytest
 import filters
 import monitor
 
-REPO = os.path.dirname(os.path.abspath(__file__))
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 BNB = 705.0
 
 

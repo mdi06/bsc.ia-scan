@@ -36,7 +36,7 @@ global.document = {
   body: new El('body'),
   documentElement: new El('html'),
 };
-const app = require('./app.js');
+const app = require('../app.js');
 const { openModal } = app;
 
 const C = '0x' + 'a'.repeat(40);

@@ -10,7 +10,7 @@ import api
 import db as db_module
 import monitor
 
-HERE = os.path.dirname(os.path.abspath(__file__))
+HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 @pytest.fixture
@@ -234,6 +234,6 @@ def test_content_version_counts_changes_and_deletes(client):
 def test_hall_of_fame_display_tests_in_node():
     """test_hall_of_fame.js: ranked by peak profit per mint, unknown mint cost left out, counts = table rows."""
     import subprocess
-    res = subprocess.run(["node", "test_hall_of_fame.js"], capture_output=True, text=True,
-                         cwd=os.path.dirname(os.path.abspath(__file__)))
+    res = subprocess.run(["node", os.path.join("tests", "test_hall_of_fame.js")], capture_output=True, text=True,
+                         cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     assert res.returncode == 0, res.stdout + res.stderr

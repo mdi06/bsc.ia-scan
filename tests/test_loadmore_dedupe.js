@@ -1,5 +1,5 @@
 const assert = require('assert');
-const app = require('./app.js');
+const app = require('../app.js');
 
 const mk = (c, block = 1) => ({ contract: c, block });
 

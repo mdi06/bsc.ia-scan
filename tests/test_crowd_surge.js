@@ -7,7 +7,7 @@ global.document = { getElementById: (id) => new El(id), querySelector: () => nul
   createDocumentFragment: () => ({ appendChild() {} }), addEventListener() {}, body: new El('body'), documentElement: new El('html') };
 global.window = { location: { origin: 'https://x', pathname: '/', search: '', hash: '' }, addEventListener() {}, removeEventListener() {} };
 Object.defineProperty(global, 'navigator', { configurable: true, writable: true, value: { clipboard: { writeText: () => Promise.resolve() } } });
-const { crowdSurgeMints } = require('./app.js');
+const { crowdSurgeMints } = require('../app.js');
 
 const NOW = 1_800_000_000;
 const d = (o) => ({ standard: 'BEP-20 Token (18 decimals)', max_supply: null, total_minted: 5e6, tokens_per_mint: 1e4,

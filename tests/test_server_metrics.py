@@ -18,7 +18,7 @@ import filters
 import monitor
 from test_parity_python_js import CASES, BNB
 
-REPO = os.path.dirname(os.path.abspath(__file__))
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PROFIT_KEYS = ("sec_usd", "mint_usd", "profit", "ath_price_usd", "ath_profit_usd", "ath_multiplier",
                "current_multiplier", "is_sold", "is_free")
 

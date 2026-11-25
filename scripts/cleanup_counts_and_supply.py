@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """One-off clean-up for H3 / H5 on existing records.
 
-    python3 cleanup_counts_and_supply.py            # dry run: lists what it would change
-    python3 cleanup_counts_and_supply.py --apply    # applies it and saves through db.py
+    python3 scripts/cleanup_counts_and_supply.py            # dry run: lists what it would change
+    python3 scripts/cleanup_counts_and_supply.py --apply    # applies it and saves through db.py
 
 H3: buys_24h / holders that an old fallback filled with total_minted -> None; fractional holders -> None.
 H5: 0-decimal BEP-20 supplies that were stored divided by 1e18 -> multiplied back.
@@ -10,7 +10,10 @@ H5: 0-decimal BEP-20 supplies that were stored divided by 1e18 -> multiplied bac
 WARNING: with Supabase credentials in the environment, --apply writes to the PRODUCTION database.
 Read the dry run first. Never run this from the worker or on a schedule.
 """
+import os
 import sys
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))   # the repo root: monitor, worker, db
 
 import monitor
 import worker

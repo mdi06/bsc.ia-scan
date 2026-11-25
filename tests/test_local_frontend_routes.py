@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient
 
 import api
 
-HERE = os.path.dirname(os.path.abspath(__file__))
+HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 def test_root_serves_the_frontend_assets_locally():

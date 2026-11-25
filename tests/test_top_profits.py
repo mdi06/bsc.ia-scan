@@ -188,7 +188,7 @@ class TestTopProfits(unittest.TestCase):
 
     def test_06_html_and_css_elements(self):
         """Verifies that index.html contains topGainerBanner, hallOfFameModal, and PROFIT sort option."""
-        with open("index.html") as f:
+        with open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "index.html")) as f:
             html = f.read()
 
         self.assertIn('id="topGainerBanner"', html)
@@ -197,7 +197,7 @@ class TestTopProfits(unittest.TestCase):
         self.assertIn('value="PROFIT"', html)
         self.assertIn('stat-hof-badge', html)
 
-        with open("style.css") as f:
+        with open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "style.css")) as f:
             css = f.read()
 
         self.assertIn(".stat-card.gainer-card:hover", css)

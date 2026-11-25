@@ -4,13 +4,13 @@ Supabase Zero-Data-Loss Migration Tool for Agent ID Monitor.
 
 Usage:
   1. Full export from Old Supabase (optional, history.json is already a complete local backup):
-     python3 migrate_supabase.py export --url "https://old.supabase.co" --key "old_key"
+     python3 scripts/migrate_supabase.py export --url "https://old.supabase.co" --key "old_key"
 
   2. Seed / Import into New Supabase:
-     python3 migrate_supabase.py import --url "https://new.supabase.co" --key "new_key"
+     python3 scripts/migrate_supabase.py import --url "https://new.supabase.co" --key "new_key"
 
   3. Direct 1-step migration between Old and New Supabase:
-     python3 migrate_supabase.py migrate --old-url "..." --old-key "..." --new-url "..." --new-key "..."
+     python3 scripts/migrate_supabase.py migrate --old-url "..." --old-key "..." --new-url "..." --new-key "..."
 """
 
 import os

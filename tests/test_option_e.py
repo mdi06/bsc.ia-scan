@@ -130,7 +130,7 @@ class TestOptionE(unittest.TestCase):
         self.assertTrue(hasattr(worker, "run_proxy_factory_watcher_loop"))
 
         # Check index.html has pillProxy button
-        with open("index.html", "r", encoding="utf-8") as f:
+        with open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "index.html"), "r", encoding="utf-8") as f:
             html = f.read()
         self.assertIn('id="pillProxy"', html)
         self.assertIn('id="proxyCount"', html)

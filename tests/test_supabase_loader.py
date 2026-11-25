@@ -225,6 +225,8 @@ def test_cleanup_scripts_abort_instead_of_reporting_zero_records(script, monkeyp
             raise RuntimeError("incomplete read: got 1004 projects but the table has 8233 rows")
 
     monkeypatch.setattr(db_module, "db", Broken())
+    import os
+    monkeypatch.syspath_prepend(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "scripts"))
     mod = __import__(script)
     assert mod.main([]) == 2
     out = capsys.readouterr().out

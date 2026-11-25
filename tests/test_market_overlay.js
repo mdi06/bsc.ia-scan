@@ -1,5 +1,5 @@
 const assert = require('assert');
-const app = require('./app.js');
+const app = require('../app.js');
 
 const FIST = '0xC9882DEF23BC42D53895B8361D0B1EDC7570BC6A';
 const seeded = [

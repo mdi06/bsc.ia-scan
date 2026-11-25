@@ -46,7 +46,7 @@ global.window = {
 };
 Object.defineProperty(global, 'navigator', { configurable: true, writable: true, value: { clipboard: { writeText: () => Promise.resolve() } } });
 
-const app = require('./app.js');
+const app = require('../app.js');
 const { escapeHtml, jsAttr, safeUrl, isDexScreenerUrl, getDexScreenerUrl, openModal } = app;
 
 // The browser decodes HTML entities in an attribute before it runs an inline handler. Do the same, then check the
@@ -105,11 +105,11 @@ for (const h of withSym) {
 console.log('✔ token modal renders a hostile token inert: PASS');
 
 // 5. Source guards for the table rows (renderTable needs a full DOM): name / symbol are escaped where they are rendered
-const src = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
+const src = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
 assert.ok(!src.includes("<strong>${item.name || 'Unknown'}</strong>"), 'table row name is escaped');
 assert.ok(!src.includes("(${item.symbol || ''})</span>"), 'table row symbol is escaped');
 for (const file of ['app.js', 'features/modal.js']) {
-  const code = fs.readFileSync(path.join(__dirname, file), 'utf8');
+  const code = fs.readFileSync(path.join(__dirname, '..', file), 'utf8');
   assert.ok(!/on[a-z]+="[^"]*'\$\{escapeHtml\(/.test(code), `${file}: no '\${escapeHtml(...)}' inside an inline handler (use jsAttr)`);
 }
 console.log('✔ table rows and inline handlers use the safe helpers: PASS');

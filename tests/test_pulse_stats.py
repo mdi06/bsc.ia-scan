@@ -1,3 +1,4 @@
+import os
 """H10: the 24h Pulse aggregates are computed by the server over the full dataset, by timestamp."""
 import subprocess
 import time
@@ -144,7 +145,8 @@ def test_stats_endpoint_serves_pulse_and_its_etag_follows_it(monkeypatch):
 
 def test_display_tests_in_node():
     """test_display_prompt5.js: formatters, BNB price, modal mint rules, table prices, stale markers, seeds."""
-    res = subprocess.run(["node", "test_display_prompt5.js"], capture_output=True, text=True)
+    res = subprocess.run(["node", os.path.join("tests", "test_display_prompt5.js")], capture_output=True, text=True,
+                         cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     assert res.returncode == 0, res.stdout[-1500:] + res.stderr[-1500:]
     assert "Prompt 5 display tests passed" in res.stdout
 

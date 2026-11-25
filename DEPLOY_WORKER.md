@@ -26,10 +26,9 @@ Anything that runs Python 3.10+ around the clock, with:
 
 Never run two workers at once: both would scan and write the same records.
 
-1. **Render: turn the worker off.** In the Render dashboard, service `agent-id-backend` → Environment, add
-   `RUN_WORKER` = `0` and save (this redeploys). `render.yaml` sets the same value if the service is managed by a
-   Blueprint. The logs should now show the API starting without "Starting all … autonomous discovery & sweeper
-   loops".
+1. **API host (Railway): turn the worker off.** In the Railway dashboard, the API service → Variables, add
+   `RUN_WORKER` = `0` and save (this redeploys). The logs should now show the API starting without "Starting all …
+   autonomous discovery & sweeper loops".
 2. **Set up the host** (Linux example, as root):
    ```bash
    useradd -r -m -d /opt/agent-id-monitor agentid

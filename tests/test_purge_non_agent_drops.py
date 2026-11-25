@@ -1,6 +1,6 @@
 import importlib.util, os
 
-spec = importlib.util.spec_from_file_location("purge", os.path.join(os.path.dirname(__file__), "scripts", "purge_non_agent_drops.py"))
+spec = importlib.util.spec_from_file_location("purge", os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "scripts", "purge_non_agent_drops.py"))
 purge = importlib.util.module_from_spec(spec); spec.loader.exec_module(purge)
 
 

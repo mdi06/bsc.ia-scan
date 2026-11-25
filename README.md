@@ -113,9 +113,13 @@ npm run build && npm run check:minified
 ---
 
 ## Testing
+Tests live in `tests/` (Python `test_*.py`, JavaScript `test_*.js`). Install the pinned dependencies first, then run both suites; GitHub runs the same steps on every pull request (`.github/workflows/test.yml`).
 ```bash
+python3 -m pip install -r requirements-dev.txt && npm ci
 python3 -m pytest
+for t in tests/test_*.js; do node $t > /dev/null 2>&1 || echo "FAIL $t"; done
 ```
+Run them without Supabase keys in the environment, so `db.py` uses local SQLite. One-off maintenance scripts (cleanups, the Supabase migration, the refactor parity check) live in `scripts/`.
 
 ---
 

@@ -60,7 +60,7 @@ const MOBILE_UA = 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 C
 const DESKTOP_UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_5) AppleWebKit/537.36 Chrome/126.0 Safari/537.36';
 setNavigator({ userAgent: DESKTOP_UA });
 
-const app = require('./app.js');
+const app = require('../app.js');
 const { openModal, copyModalSniperCli, trackCliCopy, executeWeb3Mint, openMintWalletGate, onWalletModalClosed,
   openBinanceQrModal, walletModalBack, openWalletModal, closeWalletDialog, getWalletSession, setConnectedWalletForTest,
   mintClickProps } = app;

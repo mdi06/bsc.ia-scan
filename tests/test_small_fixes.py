@@ -219,7 +219,7 @@ MODAL_ONLY = {"openModal", "computeHolderDistribution"}
 def test_nothing_outside_the_modal_reads_a_field_the_list_view_drops():
     """If a table row, filter or Pulse card ever starts reading one of these, a slim record would silently lack it:
     this fails first. (They are read only by the token modal; the page loads the full record when it opens.)"""
-    here = os.path.dirname(os.path.abspath(__file__))
+    here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     files = [os.path.join(here, "app.js")] + sorted(glob.glob(os.path.join(here, "features", "**", "*.js"), recursive=True))
     src = "\n".join(open(f, encoding="utf-8").read() for f in files)
     lines = top_level_owner_lines(src)

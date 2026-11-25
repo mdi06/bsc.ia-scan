@@ -37,7 +37,7 @@ global.document = {
   documentElement: new El('html'),
 };
 
-const app = require('./app.js');
+const app = require('../app.js');
 const {
   formatCount, formatCryptoPrice, formatBnb, openModal, renderTable, setAllDrops, setActiveTab,
   setBnbPriceState, getBnbPriceState, bnbToUsd, formatBnbAsUsd, mcapLabel, marketFreshnessHtml, formatMarketAge,

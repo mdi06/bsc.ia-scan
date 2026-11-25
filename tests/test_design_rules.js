@@ -42,7 +42,7 @@ global.window = {
 };
 Object.defineProperty(global, 'navigator', { configurable: true, writable: true, value: { clipboard: { writeText: () => Promise.resolve() } } });
 
-const app = require('./app.js');
+const app = require('../app.js');
 const { interestBadgeHtml, rowHeatClass, safetyChipHtml } = app;
 
 // 1. Traction never uses red (red is risk's colour); it escalates ice -> charge -> gold

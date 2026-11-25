@@ -8,7 +8,7 @@ const {
   fetchRegistryMintLogs,
   BSC_RPC_CONFIG,
   rpcReadTestHooks: hooks
-} = require('./app.js');
+} = require('../app.js');
 
 const BNB = 'https://bsc-dataseed.bnbchain.org';
 const DEFIBIT = 'https://bsc-dataseed1.defibit.io';

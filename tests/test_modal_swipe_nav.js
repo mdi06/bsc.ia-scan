@@ -2,7 +2,7 @@
 // The browser behaviour (thresholds, vertical scroll, CLI box, reduced motion) is checked in the preview; this file
 // pins the parts that must hold on the stand-in DOM objects the other node tests use.
 const assert = require('assert');
-const app = require('./app.js');
+const app = require('../app.js');
 
 // 1. Stand-in DOM with no addEventListener / dataset / getElementById must not throw.
 global.document = { getElementById: () => null };

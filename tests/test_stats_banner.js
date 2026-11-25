@@ -35,7 +35,7 @@ global.document = {
   addEventListener() {},
 };
 
-const app = require('./app.js');
+const app = require('../app.js');
 const txt = (id) => els.get(id).textContent;
 const FAKE = /Hallowed|SOLVED|Hash21|Ptah|PTAH|\$0\.0148|\$0\.0017/;
 const allBannerText = () => BANNER_IDS.map(txt).join(' | ');
@@ -49,7 +49,7 @@ const mk = (n, extra) => ({
 
 // ------------------------------------------------------------------------------------------ 1. the HTML placeholders
 {
-  const html = fs.readFileSync(require('path').join(__dirname, 'index.html'), 'utf8');
+  const html = fs.readFileSync(require('path').join(__dirname, '..', 'index.html'), 'utf8');
   const inner = (id) => {
     const m = html.match(new RegExp(`id="${id}"[^>]*>([^<]*)<`));
     assert(m, `index.html still has #${id}`);

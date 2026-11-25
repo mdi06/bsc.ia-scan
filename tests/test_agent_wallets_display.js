@@ -45,7 +45,7 @@ Object.defineProperty(global, 'navigator', { configurable: true, writable: true,
 let fetchCalls = 0;
 global.fetch = () => { fetchCalls += 1; return Promise.resolve({ ok: false, json: () => Promise.resolve({}) }); };
 
-const app = require('./app.js');
+const app = require('../app.js');
 const { updateDigitalAiCounter, applyAgentWalletsState, syncLiveAgentWalletsOnChain, isAgentWalletsKnown,
   getCurrentAgentWalletsCount, isStaleAgentStats, fetchOverviewStats, hydrateCachedOverviewStats } = app;
 
