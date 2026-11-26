@@ -143,7 +143,7 @@ const ok = (body) => async () => ({ ok: true, status: 200, json: async () => bod
   };
   let r = await handle({ c: '<x>' }, async () => { throw new Error('must not be called'); });
   assert.strictEqual(r.statusCode, 302);
-  assert.ok(r.headers.Location.endsWith('/og-preview.png?v=4'));
+  assert.ok(r.headers.Location.endsWith('/og-preview.png?v=6'));
   r = await handle({ c: 'nothing' }, ok({ projects: [] }));
   assert.strictEqual(r.statusCode, 302);
   global.fetch = async (url) => (String(url).includes('railway') ? { ok: true, status: 200, json: async () => ({ projects: [rec()] }) } : (() => { throw new Error('offline'); })());

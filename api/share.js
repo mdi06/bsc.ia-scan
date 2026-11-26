@@ -66,7 +66,7 @@ module.exports = async function handler(req, res) {
     res.end(page({
       title: 'BNB AGENT RADAR | Live BNB Chain Agent ID monitor',
       description: 'Autonomous on-chain radar for Binance agentic wallets, stealth Block 0 fair-mints and smart-wallet inflows.',
-      image: `${SITE}/og-preview.png?v=4`,
+      image: `${SITE}/og-preview.png?v=6`,
       url: SITE,
       dest: destination(query, ''),
     }));

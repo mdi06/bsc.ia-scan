@@ -125,7 +125,7 @@ async function renderPng(d) {
 
 module.exports = async function handler(req, res) {
   const id = String((req.query && req.query.c) || '').trim();
-  const fallback = () => { res.statusCode = 302; res.setHeader('Location', `${SITE}/og-preview.png?v=4`); res.setHeader('Cache-Control', 'public, s-maxage=60'); res.end(); };
+  const fallback = () => { res.statusCode = 302; res.setHeader('Location', `${SITE}/og-preview.png?v=6`); res.setHeader('Cache-Control', 'public, s-maxage=60'); res.end(); };
   if (!isValidId(id)) return fallback();
   try {
     const rec = await fetchToken(id);
