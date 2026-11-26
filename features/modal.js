@@ -279,7 +279,7 @@ export function openModal(item, source = 'direct') {
       </div>
       <div class="modal-header-actions" style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
         <button class="${favBtnClass}" id="modalFavBtn" onclick="toggleModalFav('${cAddr}')">${favBtnText}</button>
-        <button type="button" class="modal-share-btn" id="modalShareBtn" data-share-symbol="${escapeHtml(item.symbol || item.name || item.contract || '')}" onclick="copyTokenShareLink(this)" title="Copy a link to this token; visits from it are tagged utm_source=share, utm_medium=modal">${TOKEN_SHARE_LABEL}</button>
+        <button type="button" class="modal-share-btn" id="modalShareBtn" data-share-symbol="${escapeHtml(item.symbol || item.name || item.contract || '')}" data-share-contract="${escapeHtml(item.contract || '')}" onclick="copyTokenShareLink(this)" title="Copy a link to this token; visits from it are tagged utm_source=share, utm_medium=modal">${TOKEN_SHARE_LABEL}</button>
         <button class="modal-close-btn" onclick="document.getElementById('inspectModal').close()" title="Close dialog [ESC]">✕ Close [ESC]</button>
       </div>
     </div>

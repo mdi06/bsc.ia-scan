@@ -9,6 +9,10 @@
     {
       "source": "/(google[0-9a-fA-F]+\\.html)",
       "destination": "/$1"
+    },
+    {
+      "source": "/t/:id",
+      "destination": "/api/share?c=:id"
     }
   ],
   "headers": [
@@ -54,5 +58,8 @@
         { "key": "Cache-Control", "value": "public, max-age=86400, stale-while-revalidate=604800" }
       ]
     }
-  ]
+  ],
+  "functions": {
+    "api/card.js": { "includeFiles": "api/_lib/fonts/**" }
+  }
 }

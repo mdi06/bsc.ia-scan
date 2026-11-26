@@ -7710,19 +7710,29 @@ function clearModalHash() {
 // keeps the hash, so the modal still opens from the link.
 const TOKEN_SHARE_LABEL = '🔗 Copy share link';
 
-function buildTokenShareUrl(symbol) {
+// With a contract address the link is /t/<contract> instead: a server-side page (api/share.js) that shows the token's
+// preview card when the link is pasted into X, Telegram or Discord, then opens the app with this token's modal. The
+// #token= link cannot show a card because a URL fragment never reaches a server. Without a contract, or on a local
+// dev server that has no /t/ route, it falls back to the #token= link.
+function buildTokenShareUrl(symbol, contract) {
   const sym = String(symbol || '').trim();
   if (!sym || typeof window === 'undefined' || !window.location) return '';
   const loc = window.location;
   const origin = loc.origin && loc.origin !== 'null' ? loc.origin : '';
   const path = loc.pathname || '/';
   const enc = encodeURIComponent(sym);
+  const addr = String(contract || '').trim();
+  const isLocalHost = /^(localhost|127\.0\.0\.1|\[::1\])$/.test(loc.hostname || '');
+  if (origin && !isLocalHost && /^0x[0-9a-fA-F]{40}$/.test(addr)) {
+    return origin + '/t/' + addr.toLowerCase() + '?utm_source=share&utm_medium=modal&utm_campaign=' + enc;
+  }
   return origin + path + '?utm_source=share&utm_medium=modal&utm_campaign=' + enc + '#token=' + enc;
 }
 
 function copyTokenShareLink(btn) {
   const sym = btn && btn.dataset ? btn.dataset.shareSymbol : '';
-  const url = buildTokenShareUrl(sym);
+  const contract = btn && btn.dataset ? btn.dataset.shareContract : '';
+  const url = buildTokenShareUrl(sym, contract);
   if (!url) return;
 
   const flash = (text) => {
